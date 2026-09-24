@@ -98,6 +98,9 @@ const store = kt("ScreenStore.kt");
       edit.includes(".align(Alignment.TopEnd)") &&
       edit.includes(".padding(top = 52.dp, end = 8.dp),") &&
       edit.includes("verticalArrangement = Arrangement.spacedBy(8.dp),") &&
+      // r71-16: the rail's ink is adaptive (chromeInk) — the seats themselves
+      // and their order are unchanged.
+      edit.includes('Text("Aa", color = chromeInk, fontSize = 15.sp') &&
       // v169: rail order is pen / sticker / crop / text / rotate / effects /
       // save, every seat live, no trash.
       edit.includes("StageHistory(true, { haptics.tap(); rotateTap() })") &&
@@ -126,9 +129,10 @@ const store = kt("ScreenStore.kt");
         edit.indexOf("StageHistory(true, { haptics.tap(); rotateTap() })") &&
       edit.indexOf("StageHistory(true, { haptics.tap(); rotateTap() })") <
         edit.indexOf("Icons.Filled.AutoAwesome") &&
-      edit.includes('Icon(Icons.Filled.EmojiEmotions, "Stickers", tint = Color.White') &&
+      // r71-16: the rail's glyphs ride the adaptive ink (chromeInk).
+      edit.includes('Icon(Icons.Filled.EmojiEmotions, "Stickers", tint = chromeInk') &&
       edit.includes(
-        'Text("Aa", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)',
+        'Text("Aa", color = chromeInk, fontSize = 15.sp, fontWeight = FontWeight.Bold)',
       ) &&
       edit.includes(
         "if (!avatarMode) {\n                        StageHistory(true, { haptics.tap(); saveCurrent() }) {",

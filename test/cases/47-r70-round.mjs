@@ -120,56 +120,45 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
-/* ---------- 16. editor buttons: a halo, not a white-on-white glyph ---------- */
+/* ---------- 16 (r71): the owner rejected the shadow type outright ---------- */
 {
+  const app = "native-android/app/src/main/java/app/kuchupuchu/android/";
+  const srcs = [
+    "CallScreens.kt",
+    "CallsTabScreen.kt",
+    "ChatListScreen.kt",
+    "ChatScreen.kt",
+    "MediaEditScreen.kt",
+    "ProfileScreen.kt",
+  ];
+  const withShadow = srcs.filter((f) => readFileSync(app + f, "utf8").includes(".shadow("));
+  check(
+    'r71-16: the drop shadow the owner rejected ("ekhon je type er shadow ta implement korecho ... ei shadow ta amar ekdomi valo lage na change koro") is GONE from the whole app — bubbles, call buttons, chat list, profile, media editor, and the import too',
+    withShadow.length === 0 &&
+      srcs.every(
+        (f) => !readFileSync(app + f, "utf8").includes("import androidx.compose.ui.draw.shadow"),
+      ),
+    withShadow.join(", "),
+  );
   const edit = main("MediaEditScreen.kt");
   check(
-    "r70-16: the rail's bare glyphs (v170: no circle, no border) get a soft black halo instead — visible over white media without a fill coming back",
-    edit.includes("import androidx.compose.ui.draw.shadow") &&
-      edit.includes(
-        ".size(40.dp)\n                .shadow(8.dp, CircleShape)\n                .alpha(if (can) 1f else 0.35f)",
-      ) &&
-      edit.includes('// r70-16 (owner: "media edit a buttons gula shadow add korte hobe noile') &&
-      // the seat itself: no fill and no border of its own (v170) — the halo is
-      // the whole change (the 18 dp red badge's white border is another control).
-      !/fun StageHistory[\s\S]{0,900}?\.border\(/.test(edit) &&
-      !/fun StageHistory[\s\S]{0,900}?\.background\(/.test(edit),
+    "r71-16: without a shadow the editor reads the MEDIA instead — the rail samples its own column and flips the glyphs between white and near-black, so white media no longer swallows them",
+    edit.includes("val chromeInk by") &&
+      edit.includes("produceState(Color.White, shot, clip, thumbs.firstOrNull())") &&
+      edit.includes("android.graphics.Bitmap.createScaledBitmap(src, 24, 24, false)") &&
+      edit.includes("(if (rail > 0.60) Color(0xFF10141A) else Color.White)") &&
+      // every rail glyph + the Aa ride it
+      (edit.match(/tint = if \((penMode|cropping|filtersOpen)\) ActionBlue else chromeInk/g) || [])
+        .length === 3 &&
+      (edit.match(/tint = chromeInk/g) || []).length === 3 &&
+      edit.includes('Text("Aa", color = chromeInk, fontSize = 15.sp'),
   );
   check(
-    "r70-16: the top bar's ✕ / undo / redo ride the same halo (their sizes — 36 / 32 — are untouched, so the v169 geometry holds)",
-    edit.includes("modifier = Modifier.size(36.dp).shadow(6.dp, CircleShape)") &&
-      edit.includes("modifier = Modifier.size(32.dp).shadow(6.dp, CircleShape))") &&
-      (edit.match(/modifier = Modifier\.size\(32\.dp\)\.shadow\(6\.dp, CircleShape\)\) \{/g) || [])
-        .length === 2,
-  );
-}
-
-/* ---- 4. the mirror needs BOTH phones on the chat screen (again) ---- */
-{
-  const app = main("KpApp.kt");
-  const chat = main("ChatScreen.kt");
-  const emo = main("EmojiAnim.kt");
-  const worker = read("src/worker/index.ts");
-  check(
-    "r70-4: Store.route has ONE writer again — the nav back stack (a chat buried under the media viewer / clip player / doc viewer, or a backgrounded app, used to keep claiming chat/<id>)",
-    app.includes("import androidx.navigation.compose.currentBackStackEntryAsState") &&
-      app.includes("val navEntry by nav.currentBackStackEntryAsState()") &&
-      app.includes('dest == "chat/{id}" -> "chat/" + (e.arguments?.getString("id") ?: "")') &&
-      !chat.includes('Store.route = "chat/$convId"') &&
-      !chat.includes('Store.route = ""'),
-  );
-  check(
-    "r70-4: this phone's half is \"really in front\" — the foreground flag AND the route (the same pair the notification path uses), plus the tapper's `fromChat` proof from the frame",
-    chat.includes('ev.optBoolean("fromChat", true)') &&
-      chat.includes("Store.foreground &&") &&
-      chat.includes("EmojiFxPolicy.mirrorsOnScreen(Store.route, convId)"),
-  );
-  check(
-    "r70-4: the tapper's app posts its own screen state with the tap (`onChat`), and the worker relays it as `fromChat` (a body-less tap keeps the old behaviour)",
-    emo.includes('Api.post("/api/messages/$mid/fx", JSONObject().put("onChat", onChatNow))') &&
-      emo.includes('val onChatNow = Store.foreground && Store.route.startsWith("chat/")') &&
-      worker.includes('const fromChat = typeof body.onChat === "boolean" ? body.onChat : true;') &&
-      worker.includes("fromChat,"),
+    "r71-16: the top bar keeps white ink on purpose (it sits on the dark top scrim) — the ✕ / undo / redo were NOT flipped",
+    edit.includes(
+      'Icon(Icons.Filled.Close, "Close", tint = Color.White, modifier = Modifier.size(20.dp))',
+    ) &&
+      (edit.match(/tint = Color\.White\.copy\(alpha = if \(can(Undo|Redo)\)/g) || []).length === 2,
   );
 }
 

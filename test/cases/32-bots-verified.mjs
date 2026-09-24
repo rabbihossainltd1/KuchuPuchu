@@ -745,8 +745,10 @@ const convBetween = (db, a, b) =>
       ).includes("KpSounds.inApp(this)"),
   );
   check(
-    "bubbles + mic/send circles got the 3D treatment",
-    chat.includes(".shadow(2.dp, bubbleShape)") && chat.includes(".shadow(4.dp, CircleShape)"),
+    // r71-16 (owner: "ei shadow ta amar ekdomi valo lage na change koro"): the
+    // 3D drop shadows are gone app-wide — the pin now states the ABSENCE.
+    "no drop shadows anywhere in the app sources (owner order, r71-16) — the bubbles' lift was removed with the rest",
+    !chat.includes(".shadow(") && !chat.includes("import androidx.compose.ui.draw.shadow"),
   );
   check(
     "OTP test UI hidden (kept for later)",
@@ -5155,8 +5157,8 @@ const convBetween = (db, a, b) =>
   // minimum); the stamp sits in the band under the glyph in the wallpaper's
   // ink, and the ticks follow that ink so they never vanish on a light theme.
   check(
-    "r32-8 + N3a + N3r: emoji-only TEXT (+ STICKER now) → transparent bubble (no shadow, transparent fill, min width 0), glyph row keeps the 2dp side room for the stamp/ticks, stamp + ticks use the wallpaper ink",
-    chat1516.includes(".then(if (noBubble) Modifier else Modifier.shadow(2.dp, bubbleShape))") &&
+    "r32-8 + N3a + N3r: emoji-only TEXT (+ STICKER now) → transparent bubble (r71-16: and since then NO bubble carries a shadow at all), glyph row keeps the 2dp side room for the stamp/ticks, stamp + ticks use the wallpaper ink",
+    chat1516.includes(".then(if (noBubble) Modifier else Modifier.requiredWidthIn") &&
       chat1516.includes(
         "noBubble -> Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))",
       ) &&
@@ -6875,7 +6877,8 @@ const convBetween = (db, a, b) =>
         edit.includes('Text("HD", color = if (hd) Color.Black else Color.White') &&
         edit.includes("Icons.Filled.RotateRight") &&
         edit.includes("Icons.Filled.EmojiEmotions") &&
-        edit.includes('Text("Aa", color = Color.White') &&
+        // r71-16: the rail's ink is adaptive now (white on dark media, near-black on light).
+        edit.includes('Text("Aa", color = chromeInk') &&
         edit.includes("Icons.Filled.Edit") &&
         edit.includes("CenteredOnceIcon(28.dp") &&
         // v169: the swipe-up hint is gone; the rail owns the filter strip.
@@ -8410,6 +8413,8 @@ const convBetween = (db, a, b) =>
         // the paused-only play glyph is a 32 dp icon in a 56 dp seat; the 26
         // dp pair (attach checkbox + pen chips) and the one 36 dp close
         // survive.
+        // r71-16: the undo / redo IconButtons lost their inline `.shadow(...)`,
+        // so the 32 dp chain is unchanged but each one still exists.
         (edit.match(/\.size\(32\.dp\)/g) || []).length === 4 &&
         (edit.match(/\.size\(36\.dp\)/g) || []).length === 1 &&
         (edit.match(/\.size\(26\.dp\)/g) || []).length === 2 &&
@@ -8421,7 +8426,8 @@ const convBetween = (db, a, b) =>
         ) &&
         edit.includes(".background(ActionBlue)") &&
         !edit.includes(".border(1.dp, if (once) ActionBlue") &&
-        edit.includes('Text("Aa", color = Color.White, fontSize = 15.sp') &&
+        // r71-16: the rail's "Aa" rides the adaptive ink now.
+        edit.includes('Text("Aa", color = chromeInk, fontSize = 15.sp') &&
         !edit.includes("size(52.dp)") &&
         !edit.includes("Box(Modifier.fillMaxWidth().weight(1f)"),
     );
@@ -9549,11 +9555,13 @@ const convBetween = (db, a, b) =>
     {
       const cs = kt("CallScreens.kt");
       check(
-        "N1r: inactive call buttons are truly bare — no translucent disc behind CallAction / StripAction (danger + active keep their fills)",
+        "N1r: inactive call buttons are truly bare — no translucent disc behind CallAction / StripAction (danger + active keep their fills; r71-16: their drop shadows are gone too)",
         !cs.includes("0x42FFFFFF") &&
           !cs.includes("0x3DFFFFFF") &&
-          cs.includes("if (danger || active) Modifier.shadow(6.dp, CircleShape) else Modifier") &&
-          cs.includes("if (danger || active) Modifier.shadow(5.dp, CircleShape) else Modifier"),
+          !cs.includes(".shadow(") &&
+          // the two bare-button branches (CallAction + StripAction) survive;
+          // only their shadow step is gone.
+          (cs.match(/if \(danger \|\| active\) \{/g) || []).length === 2,
       );
     }
     {
@@ -9609,9 +9617,9 @@ const convBetween = (db, a, b) =>
       );
     }
     check(
-      "N3a: sticker-emoji messages float on the wallpaper like text emoji-only — no min width, no lift, no fill, wallpaper-ink ticks, both sides",
+      "N3a: sticker-emoji messages float on the wallpaper like text emoji-only — no min width, no lift (r71-16: no bubble carries one now), no fill, wallpaper-ink ticks, both sides",
       chat.includes('val noBubble = emojiOnly > 0 || kind == "STICKER"') &&
-        chat.includes("if (noBubble) Modifier else Modifier.shadow(2.dp, bubbleShape)") &&
+        !chat.includes(".shadow(") &&
         chat.includes(
           "noBubble -> Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))",
         ) &&

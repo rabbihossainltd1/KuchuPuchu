@@ -90,7 +90,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -457,7 +456,6 @@ fun ChatListScreen(nav: NavController) {
                     .navigationBarsPadding()
                     .padding(20.dp)
                     .size(52.dp)
-                    .shadow(8.dp, CircleShape),
             ) {
                 Icon(
                     Icons.Filled.DriveFileRenameOutline,
@@ -1202,7 +1200,6 @@ private fun SwipeConvRow(
             Modifier
                 .offset { IntOffset(-offset.roundToInt(), 0) }
                 .fillMaxSize()
-                .shadow(2.dp, RoundedCornerShape(16.dp))
                 .clip(RoundedCornerShape(16.dp))
                 .background(Card)
                 .pointerInput(conv.optString("id")) {
@@ -1872,7 +1869,6 @@ private fun PeekAction(icon: ImageVector, label: String, onClick: () -> Unit) {
         Modifier
             .padding(horizontal = 10.dp)
             .size(50.dp)
-            .shadow(5.dp, CircleShape)
             .clip(CircleShape)
             .background(circleButtonFill())
             .border(1.dp, CircleButtonEdge, CircleShape)

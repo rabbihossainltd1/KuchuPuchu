@@ -74,7 +74,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.zIndex
@@ -416,7 +415,6 @@ fun SwipeCallCircle(
                     androidx.compose.ui.unit.IntOffset(0, (-(settle) + idleBob).toInt())
                 }
                 .size(70.dp)
-                .shadow(7.dp, CircleShape)
                 .clip(CircleShape)
                 .background(
                     Brush.verticalGradient(
@@ -702,7 +700,6 @@ private fun CallAction(
                 // N1r: an inactive button is truly bare — no fill, no
                 // shadow, no ring. (N1 only dropped the 1dp border, but the
                 // translucent disc underneath still read as a faint circle.)
-                .then(if (danger || active) Modifier.shadow(6.dp, CircleShape) else Modifier)
                 .clip(CircleShape)
                 .then(
                     if (danger || active) {
@@ -1374,7 +1371,6 @@ private fun CallCircle(
     Box(
         Modifier
             .size(size)
-            .shadow(7.dp, CircleShape)
             .clip(CircleShape)
             .background(
                 Brush.verticalGradient(
@@ -1412,7 +1408,6 @@ private fun StripAction(
         Modifier
             .size(46.dp)
             // N1r: inactive strip buttons are bare icons too (same faint disc).
-            .then(if (danger || active) Modifier.shadow(5.dp, CircleShape) else Modifier)
             .clip(CircleShape)
             .then(
                 if (danger || active) {

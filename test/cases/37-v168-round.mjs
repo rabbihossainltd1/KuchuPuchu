@@ -59,8 +59,10 @@ check(
     edit.indexOf('Icon(Icons.Filled.EmojiEmotions, "Stickers"') <
       edit.indexOf("if (cropping) exitCrop() else enterCrop()") &&
     edit.indexOf("if (cropping) exitCrop() else enterCrop()") <
-      edit.indexOf('Text("Aa", color = Color.White, fontSize = 15.sp') &&
-    edit.indexOf('Text("Aa", color = Color.White, fontSize = 15.sp') <
+      // r71-16: the rail glyphs take the adaptive ink (chromeInk) now; the
+      // ORDER this pin guards is unchanged.
+      edit.indexOf('Text("Aa", color = chromeInk, fontSize = 15.sp') &&
+    edit.indexOf('Text("Aa", color = chromeInk, fontSize = 15.sp') <
       edit.indexOf("StageHistory(true, { haptics.tap(); rotateTap() })") &&
     edit.indexOf("StageHistory(true, { haptics.tap(); rotateTap() })") <
       edit.indexOf("Icons.Filled.AutoAwesome") &&

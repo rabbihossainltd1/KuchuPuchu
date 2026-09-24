@@ -60,13 +60,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -1387,7 +1387,6 @@ private fun MediaEditItemScreen(
         Box(
             Modifier
                 .size(40.dp)
-                .shadow(8.dp, CircleShape)
                 .alpha(if (can) 1f else 0.35f)
                 .clickable(enabled = can) { onClick() },
             contentAlignment = Alignment.Center,
@@ -1579,6 +1578,47 @@ private fun MediaEditItemScreen(
             (strokes + listOfNotNull(live)).forEach { st -> drawPen(st, ww, hh) }
         }
     }
+
+    // r71-16 (owner: "media edit a buttons gula shadow add korte hobe noile white
+    // meda edit er somo buttons gula dekha jabe na", then, on the shadow itself:
+    // "ei shadow ta amar ekdomi valo lage na change koro"): the chrome reads the
+    // MEDIA instead of wearing a shadow. The rail and the top bar sample the
+    // frame under them (right column + top strip) and the glyphs flip between
+    // white and near-black — so a white photo gets dark icons and a dark one
+    // keeps white, with no plate and no shadow anywhere.
+    val chromeInk by
+        produceState(Color.White, shot, clip, thumbs.firstOrNull()) {
+            value =
+                withContext(Dispatchers.Default) {
+                    runCatching {
+                        val src = shot?.asAndroidBitmap() ?: thumbs.firstOrNull()?.asAndroidBitmap() ?: return@runCatching null
+                        // The rail's own column (x >= 19 of a 24x24 downscale):
+                        // average luminance, a few microseconds on the worker.
+                        val small = android.graphics.Bitmap.createScaledBitmap(src, 24, 24, false)
+                        var right = 0.0
+                        var rn = 0
+                        for (y in 0 until 24) {
+                            for (x in 0 until 24) {
+                                val c = small.getPixel(x, y)
+                                val l =
+                                    (android.graphics.Color.red(c) * 0.299 +
+                                        android.graphics.Color.green(c) * 0.587 +
+                                        android.graphics.Color.blue(c) * 0.114) / 255.0
+                                if (x >= 19) {
+                                    right += l
+                                    rn++
+                                }
+                            }
+                        }
+                        val rail = if (rn > 0) right / rn else 1.0
+                        // NOTE: only the rail flips. The top bar (✕, undo, redo)
+                        // keeps white ink in the caller, because it sits on the
+                        // dark top scrim — the rail is the scrim-less surface
+                        // where a white photo really did swallow the glyphs.
+                        (if (rail > 0.60) Color(0xFF10141A) else Color.White)
+                    }.getOrNull() ?: Color.White
+                }
+        }
 
     // Owner round 35 (item 8): soft scrims so the floating chrome reads over any photo.
     val topScrim = Brush.verticalGradient(listOf(Color(0x99000000), Color.Transparent))
@@ -1857,7 +1897,7 @@ private fun MediaEditItemScreen(
                     .padding(horizontal = 4.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { if (cropping) exitCrop() else nav.popBackStack() }, modifier = Modifier.size(36.dp).shadow(6.dp, CircleShape)) {
+                IconButton(onClick = { if (cropping) exitCrop() else nav.popBackStack() }, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Filled.Close, "Close", tint = Color.White, modifier = Modifier.size(20.dp))
                 }
                 // v170 (owner: "done button left side a thakbe"): Done rides
@@ -1894,7 +1934,7 @@ private fun MediaEditItemScreen(
                 // side by side, plain glyphs - no circle, no border.
                 Spacer(Modifier.weight(1f))
                 if (shot != null || clip != null) {
-                    IconButton(onClick = { haptics.tap(); undoEdit() }, enabled = canUndo, modifier = Modifier.size(32.dp).shadow(6.dp, CircleShape)) {
+                    IconButton(onClick = { haptics.tap(); undoEdit() }, enabled = canUndo, modifier = Modifier.size(32.dp)) {
                         Icon(
                             Icons.AutoMirrored.Filled.Undo,
                             "Undo",
@@ -1902,7 +1942,7 @@ private fun MediaEditItemScreen(
                             modifier = Modifier.size(20.dp),
                         )
                     }
-                    IconButton(onClick = { haptics.tap(); redoEdit() }, enabled = canRedo, modifier = Modifier.size(32.dp).shadow(6.dp, CircleShape)) {
+                    IconButton(onClick = { haptics.tap(); redoEdit() }, enabled = canRedo, modifier = Modifier.size(32.dp)) {
                         Icon(
                             Icons.AutoMirrored.Filled.Redo,
                             "Redo",
@@ -1993,7 +2033,7 @@ private fun MediaEditItemScreen(
                             filtersOpen = false
                         }
                     }) {
-                        Icon(Icons.Filled.Edit, "Draw", tint = if (penMode) ActionBlue else Color.White, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Filled.Edit, "Draw", tint = if (penMode) ActionBlue else chromeInk, modifier = Modifier.size(20.dp))
                     }
                     StageHistory(true, {
                         haptics.tap()
@@ -2003,7 +2043,7 @@ private fun MediaEditItemScreen(
                         showTextSheet = false
                         filtersOpen = false
                     }) {
-                        Icon(Icons.Filled.EmojiEmotions, "Stickers", tint = Color.White, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Filled.EmojiEmotions, "Stickers", tint = chromeInk, modifier = Modifier.size(20.dp))
                     }
                     StageHistory(true, {
                         haptics.tap()
@@ -2015,7 +2055,7 @@ private fun MediaEditItemScreen(
                             filtersOpen = false
                         }
                     }) {
-                        Icon(Icons.Filled.Crop, "Crop", tint = if (cropping) ActionBlue else Color.White, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Filled.Crop, "Crop", tint = if (cropping) ActionBlue else chromeInk, modifier = Modifier.size(20.dp))
                     }
                     StageHistory(true, {
                         haptics.tap()
@@ -2025,10 +2065,10 @@ private fun MediaEditItemScreen(
                         showStickerSheet = false
                         filtersOpen = false
                     }) {
-                        Text("Aa", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text("Aa", color = chromeInk, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     }
                     StageHistory(true, { haptics.tap(); rotateTap() }) {
-                        Icon(Icons.Filled.RotateRight, "Rotate", tint = Color.White, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Filled.RotateRight, "Rotate", tint = chromeInk, modifier = Modifier.size(20.dp))
                     }
                     StageHistory(true, {
                         haptics.tap()
@@ -2039,13 +2079,13 @@ private fun MediaEditItemScreen(
                             showStickerSheet = false
                         }
                     }) {
-                        Icon(Icons.Filled.AutoAwesome, "Effects", tint = if (filtersOpen) ActionBlue else Color.White, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Filled.AutoAwesome, "Effects", tint = if (filtersOpen) ActionBlue else chromeInk, modifier = Modifier.size(20.dp))
                     }
                     // v165 (owner: "profile picture a edit a save button
                     // remove koro"): the profile flow has no save-to-gallery.
                     if (!avatarMode) {
                         StageHistory(true, { haptics.tap(); saveCurrent() }) {
-                            Icon(Icons.Filled.Download, "Save to gallery", tint = Color.White, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Filled.Download, "Save to gallery", tint = chromeInk, modifier = Modifier.size(20.dp))
                         }
                     }
                 }
