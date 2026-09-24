@@ -168,16 +168,16 @@ object KpSounds {
 
     /**
      * r67 (owner: "massage send sent in chat receive sounds gular volume 50%
-     * kom hobe"): the four MESSAGE tones are mixed at half of what they were.
-     * The reaction / call / status tones keep their own levels — the owner
-     * named exactly these four. One constant, so a future level change is one
-     * edit instead of four scattered numbers:
-     *   send    0.60 -> 0.30
-     *   sent    0.70 -> 0.35
-     *   inApp   0.70 -> 0.35
-     *   receive 0.55 -> 0.275
+     * kom hobe") put the four MESSAGE tones at half; r68-6 (owner: "50% 40%
+     * kore daw") took them to 40% — the original mix times this constant, so
+     * one edit moves all four and nothing else. The reaction / call / status
+     * tones keep their own levels (the owner named exactly these four):
+     *   send    0.60 -> 0.24
+     *   sent    0.70 -> 0.28
+     *   inApp   0.70 -> 0.28
+     *   receive 0.55 -> 0.22
      */
-    private const val MSG_VOLUME_TRIM = 0.5f
+    private const val MSG_VOLUME_TRIM = 0.4f
 
     /** The tap/send sound (owner round 11: BOTH sounds live — this on the
      *  tap, [sent] when the server actually accepts the message). */

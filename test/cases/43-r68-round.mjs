@@ -112,6 +112,23 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ------------------ 6. the four message tones at 40% ------------------ */
+{
+  const feel = main("Feel.kt");
+  check(
+    "r68-6: the trim constant is 0.4 (was 0.5 for r67's half)",
+    feel.includes("private const val MSG_VOLUME_TRIM = 0.4f") &&
+      !feel.includes("MSG_VOLUME_TRIM = 0.5f"),
+  );
+  const trimmed = feel.match(/0\.(?:6|7|55)f \* MSG_VOLUME_TRIM/g) || [];
+  check("r68-6: all four message tones read it", trimmed.length === 4, JSON.stringify(trimmed));
+  check(
+    "r68-6: the reaction / call / status tones are untouched",
+    feel.includes("fun reaction(ctx: Context) = play(ctx, reactionId, 0.7f)") &&
+      feel.includes("fun lineBusy(ctx: Context) = play(ctx, lineBusyId, 0.9f)"),
+  );
+}
+
 console.log(lines.join("\n"));
 console.log(
   `r68 round: ${lines.filter((l) => l.includes("OK")).length} ok / ${lines.filter((l) => l.includes("BROKEN")).length} broken`,
