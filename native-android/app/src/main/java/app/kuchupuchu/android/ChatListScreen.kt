@@ -1280,7 +1280,9 @@ internal fun friendlyPreview(raw: String): String {
     val docExts = listOf(".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".zip", ".rar", ".txt", ".csv")
     if (t == "Photo" || t == "📷 Photo") return "Photo"
     // Owner round 32 (item 17): the worker's view-once preview passes through.
+    // r71-19b: a view-once VOICE note passes through the same way.
     if (t == "Photo · View once" || t == "Video · View once") return t
+    if (t == "Voice message · View once") return t
     if (EmojiRepo.isCustomId(t)) return "Sticker"
     // A link or a sentence is text even when it ends like a file name.
     val fileLike = !t.contains("://") && !t.contains('\n')

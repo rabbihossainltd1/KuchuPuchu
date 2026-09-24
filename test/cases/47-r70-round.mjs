@@ -259,6 +259,58 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ------------- 19b. the once-view voice note (r71) ------------- */
+{
+  const chat = main("ChatScreen.kt");
+  const list = main("ChatListScreen.kt");
+  check(
+    "r71-19b: the locked seat's SECOND tap is the view-once send — combinedClickable's own double-tap window holds the plain tap, so one tap still sends a normal note and two send it once",
+    chat.includes("onSendVoiceOnce: () -> Unit = {},") &&
+      chat.includes(
+        "onDoubleClick = if (locked && input.isBlank() && selectCount == 0) onSendVoiceOnce else null,",
+      ) &&
+      chat.includes("onSendVoiceOnce = { finishRecording(cancelled = false, once = true) },") &&
+      chat.includes("fun finishRecording(cancelled: Boolean, once: Boolean = false) {") &&
+      chat.includes("sendVoice(take.file, take.seconds, name, take.waveform, once)"),
+  );
+  check(
+    "r71-19b: `once` rides the whole send — the meta, the optimistic echo and the queued payload all carry viewOnce, so the sender's own bubble is a once-view card from the first frame",
+    chat.includes(
+      "fun sendVoice(file: File, seconds: Int, name: String, waveform: List<Int> = emptyList(), once: Boolean = false) {",
+    ) &&
+      // meta builder + optimistic echo + queued payload
+      (chat.match(/\.also \{ if \(once\) it\.put\("viewOnce", true\) \}/g) || []).length === 3 &&
+      chat.includes("// r71-19b: a locked note sent with a double tap on Send goes") &&
+      chat.includes('.also { if (once) it.put("viewOnce", true) }'),
+  );
+  check(
+    "r71-19b: a view-once VOICE renders as its own card — ViewOnceRow takes the voice player, routes a voice row to VoiceOnceTile instead of the blurred photo tile, and sizes it wide and short",
+    chat.includes("player: VoicePlayer,") &&
+      chat.includes("val voice = !sentAsDocument(m) && fileLooksVoice(m)") &&
+      chat.includes(
+        'VoiceOnceTile(m = m, mine = mine, pendingEcho = pendingEcho, player = player, playing = player.playingId == m.optString("id"), onSpent = { if (!mine) ViewOnce.spend(m.optString("id")) })',
+      ) &&
+      chat.includes(".widthIn(max = if (voice) 196.dp else 138.dp)") &&
+      chat.includes("Modifier.height(74.dp)") &&
+      chat.includes(
+        "ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme, onDoubleTapHeart)",
+      ),
+  );
+  check(
+    "r71-19b: playing it once IS the opening — the RECIPIENT's play fetches the message's own media route (that fetch spends + deletes for both sides, the photo's H3 rule) while the sender's preview reads the file key and spends nothing; the card keeps the wave, the duration and the 1 mark",
+    chat.includes('val source = if (mine) fileKey else "/api/messages/$id/media"') &&
+      chat.includes("player.toggle(ctx, id, source) { onSpent() }") &&
+      chat.includes("VoiceWave(") &&
+      chat.includes("CenteredOnceIcon(30.dp)") &&
+      // no seek on a once-only note
+      chat.includes("onSeek = {},"),
+  );
+  check(
+    "r71-19b: the chat list passes the worker's 'Voice message · View once' through instead of folding it into a plain voice bubble",
+    list.includes('if (t == "Voice message · View once") return t'),
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`r70-round: ${lines.length - broken} ok / ${broken} broken`);

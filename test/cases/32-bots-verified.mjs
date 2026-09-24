@@ -2289,6 +2289,69 @@ const convBetween = (db, a, b) =>
   await call("DELETE", `/api/messages/${m1.json.message.id}`, undefined, a.token);
   check("r27-gc: unsending a file message deletes its R2 object", !(await inBucket(k1)));
 
+  /* r71-19b: a voice note sent as VIEW ONCE — one play, then gone for both.
+       The owner's voice lock ends in this: a double tap on Send while a note
+       is locked. The worker side must admit the flag on an audio FILE (it used
+       to refuse every voice note), say so in the chat list, publish the file
+       key to the recipient — and spend the single opening when the bytes are
+       fetched, exactly like a view-once photo. */
+  {
+    const kb = await upload("voice_1.m4a", "audio/mp4");
+    const onceMsg = await call(
+      "POST",
+      `/api/conversations/${cab}/messages`,
+      {
+        kind: "FILE",
+        fileKey: kb,
+        fileName: "voice_1.m4a",
+        fileType: "audio/mp4",
+        meta: { voice: true, seconds: 3, viewOnce: true, waveform: [10, 40, 80] },
+      },
+      a.token,
+    );
+    const mid = onceMsg.json.message.id;
+    const meta = JSON.parse(
+      db._db.prepare("SELECT meta_json FROM messages WHERE id = ?").get(mid).meta_json,
+    );
+    check(
+      "r71-19b: worker — a VOICE note is admitted as view once (meta.viewOnce + meta.voice stored, no album on the row)",
+      onceMsg.status < 300 &&
+        meta.viewOnce === true &&
+        meta.voice === true &&
+        meta.album === undefined,
+      JSON.stringify(meta),
+    );
+    // the list route answers { items, marker } (marker-gated)
+    const listB = await call("GET", "/api/conversations", undefined, b.token);
+    const convB = (listB.json.items || []).find((c) => c.id === cab);
+    check(
+      "r71-19b: worker — the chat list says 'Voice message · View once' (the sound never reaches the list)",
+      convB?.lastMessage === "Voice message · View once",
+      String(convB?.lastMessage),
+    );
+    const before = await call("GET", `/api/conversations/${cab}/messages`, undefined, b.token);
+    const rowB = (before.json.items || []).find((m) => m.id === mid);
+    check(
+      "r71-19b: worker — the recipient can reach the note before the opening (fileKey + viewOnce published)",
+      rowB?.viewOnce === true && !!rowB?.fileKey,
+      JSON.stringify({ v: rowB?.viewOnce, f: rowB?.fileKey }),
+    );
+    const played = await call("GET", `/api/messages/${mid}/media`, undefined, b.token);
+    const afterB = await call("GET", `/api/conversations/${cab}/messages`, undefined, b.token);
+    const afterA = await call("GET", `/api/conversations/${cab}/messages`, undefined, a.token);
+    const goneB = (afterB.json.items || []).some((m) => m.id === mid);
+    const goneA = (afterA.json.items || []).some((m) => m.id === mid);
+    check(
+      "r71-19b: worker — one play only: the fetch spends the opening and the row is gone on BOTH sides",
+      played.status === 200 && !goneB && !goneA,
+      `status=${played.status} b=${goneB} a=${goneA}`,
+    );
+    check(
+      "r71-19b: worker — a second fetch cannot replay it (the bytes are gone, the row too)",
+      (await call("GET", `/api/messages/${mid}/media`, undefined, b.token)).status !== 200,
+    );
+  }
+
   // 2. a key still referenced elsewhere (same upload sent to two chats) SURVIVES the first unsend
   const k2 = await upload("two.jpg", "image/jpeg");
   const m2a = await call(
@@ -3936,13 +3999,14 @@ const convBetween = (db, a, b) =>
           // r33-1: the time line also follows a scrub on the bars.
           chat.includes("(active || scrubAt != null) && secs > 0 -> {") &&
           !chat.includes('Text("Voice message", fontSize = 14.sp, color = Ink)') &&
+          // r71-19b: `once` rides the same signature and the same meta.
           chat.includes(
-            "fun sendVoice(file: File, seconds: Int, name: String, waveform: List<Int> = emptyList()) {",
+            "fun sendVoice(file: File, seconds: Int, name: String, waveform: List<Int> = emptyList(), once: Boolean = false) {",
           ) &&
           chat.includes(
             '.also { if (waveform.isNotEmpty()) it.put("waveform", JSONArray(waveform)) }',
           ) &&
-          chat.includes("sendVoice(take.file, take.seconds, name, take.waveform)") &&
+          chat.includes("sendVoice(take.file, take.seconds, name, take.waveform, once)") &&
           chat.includes("voiceWaveOf(p),") &&
           chat.includes(
             '.also { mm -> vm.optJSONArray("waveform")?.let { mm.put("waveform", it) } },',
@@ -6271,10 +6335,14 @@ const convBetween = (db, a, b) =>
       src.indexOf("  const statusMatch = path.match("),
     );
     check(
-      "r32-17: worker — viewOnceFlag admits the flag only on an IMAGE / image-or-video FILE that is not a document or voice note; a view-once row stores no album but DOES store dims (E3f — no 1 s fake ratio); the preview reads 'Photo · View once' / 'Video · View once'; the push carries no kp_media for it; the gallery skips it; msgFrom hides fileKey / mediaUrl / hasImage once spent and publishes viewOnce / viewedAt / viewedBy; the page marker folds viewedAt in",
+      "r32-17 (+ r71-19b): worker — viewOnceFlag admits the flag on an IMAGE / image-or-video FILE / a VOICE note (audio FILE) that is not a document; a view-once row stores no album but DOES store dims (E3f — no 1 s fake ratio); the preview reads 'Photo · View once' / 'Video · View once' / 'Voice message · View once'; the push carries no kp_media for it; the gallery skips it; msgFrom hides fileKey / mediaUrl / hasImage once spent and publishes viewOnce / viewedAt / viewedBy; the page marker folds viewedAt in",
       src.includes("function viewOnceFlag(") &&
         src.includes("if (meta.viewOnce !== true || !hasMedia) return false;") &&
-        src.includes("if (meta.document === true || meta.voice === true) return false;") &&
+        src.includes("if (meta.document === true) return false;") &&
+        // r71-19b: the voice arm — one play, then gone for everyone.
+        src.includes(
+          'if (meta.voice === true) return kind === "FILE" && fileType.startsWith("audio/");',
+        ) &&
         src.includes(
           '(kind === "FILE" && (fileType.startsWith("image/") || fileType.startsWith("video/")))',
         ) &&
@@ -6352,7 +6420,7 @@ const convBetween = (db, a, b) =>
     check(
       "r34-16a: app — a view-once message renders ViewOnceRow: the photo at its original ratio (ImageRatios-cached) blurred past recognition via ViewOnceBlur, the ViewOnceOneIcon mark in the middle, a dark tile for video / uploads; the recipient opens it (sender's tap does nothing), reply-drag + long-press intact, no 'Opened' state anywhere; the album fold, resend and the media grid never take it",
       chat.includes(
-        "if (isViewOnce(m)) {\n        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine)) {\n            ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme, onDoubleTapHeart)",
+        "if (isViewOnce(m)) {\n        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine)) {\n            ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme, onDoubleTapHeart)",
       ) &&
         chat.indexOf("if (isViewOnce(m)) {") <
           chat.indexOf(
@@ -6511,8 +6579,15 @@ const convBetween = (db, a, b) =>
         chat.includes(
           "onScheduleSend = { requestAttachExit { haptics.tap(); showSchedule = true } },",
         ) &&
+        // r71-19b: the seat gained a double tap (a locked note goes once-view).
         chat.includes(
-          ".combinedClickable(\n                        interactionSource = sendInteraction,\n                        indication = null,\n                        onLongClick = if (input.isNotBlank()) onScheduleSend else null,\n                    ) {",
+          ".combinedClickable(\n                        interactionSource = sendInteraction,\n                        indication = null,",
+        ) &&
+        chat.includes(
+          "onDoubleClick = if (locked && input.isBlank() && selectCount == 0) onSendVoiceOnce else null,",
+        ) &&
+        chat.includes(
+          "onLongClick = if (input.isNotBlank()) onScheduleSend else null,\n                    ) {",
         ) &&
         chat.includes(
           "@OptIn(ExperimentalFoundationApi::class)\n@Composable\nprivate fun Composer(",
@@ -7606,7 +7681,8 @@ const convBetween = (db, a, b) =>
       "r33-12: worker — a document previews as 'Document' (never meta.name); media files as Photo / Video / Voice message; the AI photo row says 'Photo' without an emoji",
       previewOf.includes('return "Document";') &&
         !previewOf.includes("meta.name") &&
-        previewOf.includes('if (meta.voice) return "Voice message";') &&
+        // r71-19b: the voice preview carries the view-once suffix too.
+        previewOf.includes("if (meta.voice) return `Voice message${once}`;") &&
         !src.includes('"📷 Photo"'),
     );
     check(

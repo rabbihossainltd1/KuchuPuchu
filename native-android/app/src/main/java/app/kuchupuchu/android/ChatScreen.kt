@@ -2066,7 +2066,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    fun sendVoice(file: File, seconds: Int, name: String, waveform: List<Int> = emptyList()) {
+    fun sendVoice(file: File, seconds: Int, name: String, waveform: List<Int> = emptyList(), once: Boolean = false) {
         // v163 (owner's rules): voice caps at 100 MB like an image.
         if (file.length() > Api.VOICE_MAX) {
             error = "That voice note is over ${Api.humanLimit(Api.VOICE_MAX)}."
@@ -2085,6 +2085,9 @@ fun ChatScreen(nav: NavController, convId: String) {
         fun voiceMeta() =
             JSONObject().put("voice", true).put("seconds", seconds).put("clientId", clientId)
                 .also { if (waveform.isNotEmpty()) it.put("waveform", JSONArray(waveform)) }
+                // r71-19b: a locked note sent with a double tap on Send goes
+                // out as view-once — one play, then gone for everyone.
+                .also { if (once) it.put("viewOnce", true) }
         bornKeys.add(clientId)
         LiveArrivals.markLive(clientId)
         pending.add(
@@ -2101,6 +2104,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // is only deleted once the send succeeds).
                 .put("voicePath", file.absolutePath)
                 .put("meta", voiceMeta())
+                .also { if (once) it.put("viewOnce", true) }
                 .also { if (replyId != null) it.put("replyTo", replyId) }
                 .put("createdAt", java.time.Instant.now().toString()),
         )
@@ -2122,6 +2126,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     .put("fileSize", file.length())
                     .put("clientId", clientId)
                     .put("meta", voiceMeta())
+                    .also { if (once) it.put("viewOnce", true) }
                     .also { if (replyId != null) it.put("replyTo", replyId) }
             Uploads.sendFile(convId, clientId, name, "audio/mp4", file, null, payload) { outcome ->
                 outcome.onSuccess { runCatching { KpSounds.sent(ctx) } }
@@ -2404,7 +2409,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    fun finishRecording(cancelled: Boolean) {
+    fun finishRecording(cancelled: Boolean, once: Boolean = false) {
         if (!recording) return
         recording = false
         // r71-19: a locked note was ended by an explicit Send, so the old
@@ -2440,7 +2445,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         val take = VoiceNote.stop()
         if (take != null) {
             val name = "voice_${System.currentTimeMillis()}.m4a"
-            sendVoice(take.file, take.seconds, name, take.waveform)
+            sendVoice(take.file, take.seconds, name, take.waveform, once)
         }
     }
 
@@ -4548,6 +4553,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             locked = voiceLocked,
             onLockRecord = { lockRecording() },
             onSendVoice = { finishRecording(cancelled = false) },
+            // r71-19b: while a note is locked, a DOUBLE tap on Send sends it
+            // as view-once (one play, then gone everywhere).
+            onSendVoiceOnce = { finishRecording(cancelled = false, once = true) },
             onCancelVoice = { finishRecording(cancelled = true) },
         )
         }
@@ -4911,6 +4919,8 @@ private fun Composer(
     locked: Boolean = false,
     onLockRecord: () -> Unit = {},
     onSendVoice: () -> Unit = {},
+    // r71-19b: the locked seat's second tap — the note goes as view-once.
+    onSendVoiceOnce: () -> Unit = {},
     onCancelVoice: () -> Unit = {},
     // Owner round 33 (item 11b): counts up on every cancelled recording —
     // the strip plays the bin drop for that many ms before the pill returns.
@@ -5127,6 +5137,12 @@ private fun Composer(
                     .combinedClickable(
                         interactionSource = sendInteraction,
                         indication = null,
+                        // r71-19b: with a note locked, the second tap of a
+                        // double tap is the view-once send. combinedClickable
+                        // already holds onClick for the double-tap window, so
+                        // a plain tap still sends immediately-ish and the
+                        // second tap upgrades it.
+                        onDoubleClick = if (locked && input.isBlank() && selectCount == 0) onSendVoiceOnce else null,
                         onLongClick = if (input.isNotBlank()) onScheduleSend else null,
                     ) {
                         when {
@@ -6519,7 +6535,7 @@ private fun MessageRow(
     // for everyone, so there is no opened state left to render.
     if (isViewOnce(m)) {
         Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine)) {
-            ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme, onDoubleTapHeart)
+            ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme, onDoubleTapHeart)
         }
         return
     }
@@ -7558,6 +7574,98 @@ private fun VideoMessageRow(
 }
 
 /**
+ * r71-19b (owner: "lock hoye gele ... double tap korle voice ta view once hisebe
+ * jabe ... ekbar play hobe"): a view-once VOICE note. The card is the voice
+ * bubble's own furniture — play/pause, the recorded wave, the duration — with
+ * the one mark where a photo would have the blurred pixels. Playing it IS the
+ * single opening: when the clip ends the row is spent (POST /api/messages/:id/
+ * view) and it vanishes for BOTH sides, exactly like a view-once photo.
+ *
+ * The sender may preview their own note (r60/r62 ruled that view-once media
+ * stays previewable for the sender) — and that preview never spends the
+ * recipient's one opening.
+ */
+@Composable
+private fun VoiceOnceTile(
+    m: JSONObject,
+    mine: Boolean,
+    pendingEcho: Boolean,
+    player: VoicePlayer,
+    playing: Boolean,
+    onSpent: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    val haptics = rememberHaptics()
+    val id = m.optString("id")
+    val loading = player.loadingId == id
+    val paused = player.pausedId == id
+    val fileKey =
+        m.optText("fileKey").takeIf { it.isNotBlank() }
+            ?: m.optText("mediaUrl").takeIf { it.startsWith("/") || it.startsWith("http") } ?: ""
+    // r71-19b: the RECIPIENT's play goes through the message's own media route
+    // — that fetch IS the opening (H3: the row is deleted for both sides, and a
+    // modified client cannot pull the bytes twice). The sender's own preview
+    // (r60/r62) reads the file key directly and spends nothing.
+    val source = if (mine) fileKey else "/api/messages/$id/media"
+    val ready = (mine && fileKey.isNotBlank() || !mine) && !pendingEcho
+    val bars = remember(id) { voiceWaveOf(m).ifEmpty { VoiceWaveform.pseudo(m.optString("clientId").ifBlank { id }) } }
+    val progress = if (playing || paused) player.progress else 0f
+    val secs = m.optJSONObject("meta")?.optInt("seconds") ?: 0
+    val upFrac = UploadProgress.fracs[m.optString("clientId")]
+    Row(
+        Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(Color(0x33FFFFFF))
+                .clickable(enabled = ready) {
+                    haptics.tap()
+                    // r71-19b: playing it once IS the opening.
+                    player.toggle(ctx, id, source) { onSpent() }
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                loading || pendingEcho -> CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+                playing -> Icon(Icons.Filled.Pause, "Pause", tint = Color.White, modifier = Modifier.size(18.dp))
+                else -> Icon(Icons.Filled.PlayArrow, "Play once", tint = Color.White, modifier = Modifier.size(18.dp))
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+            VoiceWave(
+                bars = bars,
+                progress = progress,
+                played = Color.White,
+                rest = Color(0x66FFFFFF),
+                grow = false,
+                // no seeking on a once-only note: it is heard once, from the top
+                onSeek = {},
+                onScrub = {},
+                modifier = Modifier.fillMaxWidth().height(20.dp),
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                when {
+                    secs > 0 -> "%d:%02d".format(secs / 60, secs % 60)
+                    upFrac != null -> "Sending"
+                    else -> "0:00"
+                },
+                fontSize = 10.sp,
+                lineHeight = 12.sp,
+                color = Color(0x99FFFFFF),
+                maxLines = 1,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) { CenteredOnceIcon(30.dp) }
+    }
+}
+
+/**
  * Owner round 34 (item 16a): the view-once bubble — the photo at its original
  * ratio, fully blurred, with the 1 mark in the middle (tap opens the single
  * viewing); a video gets the same mark on a dark tile. The opening deletes
@@ -7573,6 +7681,8 @@ private fun ViewOnceRow(
     mine: Boolean,
     pendingEcho: Boolean,
     otherReadAt: String?,
+    // r71-19b: a view-once VOICE note plays through the shared voice player.
+    player: VoicePlayer,
     selectedIds: List<String>,
     onToggleSelect: (JSONObject) -> Unit,
     onOpenImage: (JSONObject) -> Unit,
@@ -7586,6 +7696,9 @@ private fun ViewOnceRow(
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
     val video = fileLooksVideo(m)
+    // r71-19b: the voice flavour — a view-once voice note is a card, not a
+    // blurred photo: play, listen once, gone.
+    val voice = !sentAsDocument(m) && fileLooksVoice(m)
     // The recipient can open it; the sender never can.
     val openable = !mine && !pendingEcho
     // r60 (owner: "keo njje view once send korle nije jeno view korte pare"):
@@ -7686,9 +7799,13 @@ private fun ViewOnceRow(
                     // r60 (owner: "view once media er size kom koro"):
                     // v165: .widthIn(max = 168.dp) .widthIn(min = 132.dp)
                     // Modifier.heightIn(max = 220.dp).aspectRatio(boxRatio)
-                    .widthIn(max = 138.dp)
+                    // r71-19b: a voice card is wide and short (play + wave +
+                    // the mark); the photo / video tile keeps its own box.
+                    .widthIn(max = if (voice) 196.dp else 138.dp)
                     .then(
-                        if (boxRatio > 0f) {
+                        if (voice) {
+                            Modifier.height(74.dp)
+                        } else if (boxRatio > 0f) {
                             // v165: .heightIn(max = 220.dp)
                             Modifier.heightIn(max = 175.dp).aspectRatio(boxRatio)
                         } else {
@@ -7734,6 +7851,10 @@ private fun ViewOnceRow(
                             when {
                                 pendingEcho -> {}
                                 selectedIds.isNotEmpty() -> onToggleSelect(m)
+                                // r71-19b: the voice card owns its own play
+                                // target (and its own spend), so a tap on the
+                                // card body only selects / replies.
+                                voice -> {}
                                 canOpen -> if (video) onOpenVideo(m) else onOpenImage(m) // openable -> if (video) onOpenVideo(m) else onOpenImage(m)
                                 else -> {}
                             }
@@ -7747,6 +7868,9 @@ private fun ViewOnceRow(
                     ),
                 contentAlignment = Alignment.Center,
             ) {
+                if (voice) {
+                    VoiceOnceTile(m = m, mine = mine, pendingEcho = pendingEcho, player = player, playing = player.playingId == m.optString("id"), onSpent = { if (!mine) ViewOnce.spend(m.optString("id")) })
+                } else {
                 if (photoUrl != null) {
                     val imageRequest = remember(photoUrl) {
                         coil.request.ImageRequest.Builder(ctx)
@@ -7878,6 +8002,7 @@ private fun ViewOnceRow(
                     }
                 }
                 if (rowSelected) Box(Modifier.matchParentSize().background(ActionBlue.copy(alpha = 0.35f)))
+                }
             }
             MessageReactions(m)
         }

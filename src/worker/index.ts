@@ -10708,7 +10708,12 @@ function viewOnceFlag(
   meta: Record<string, unknown>,
 ): boolean {
   if (meta.viewOnce !== true || !hasMedia) return false;
-  if (meta.document === true || meta.voice === true) return false;
+  if (meta.document === true) return false;
+  // r71-19b (owner: "lock hoye gele ... double tap korle voice ta view once
+  // hisebe jabe ... ekbar play hobe"): a VOICE note may be view-once too — it
+  // plays exactly once and is then gone for everyone, the same one-opening
+  // rule the photo and the video already follow. A document never is.
+  if (meta.voice === true) return kind === "FILE" && fileType.startsWith("audio/");
   return (
     kind === "IMAGE" ||
     (kind === "FILE" && (fileType.startsWith("image/") || fileType.startsWith("video/")))
@@ -11504,14 +11509,16 @@ function previewOf(row: MsgRow): string {
       return e2ee ? "Video" : row.body || "Video";
     case "FILE": {
       if (row.body && !once && !e2ee) return row.body;
-      if (meta.voice) return "Voice message";
+      // r71-19b: a view-once voice note says so, exactly like the photo /
+      // video previews — the chat list and the push never leak its content.
+      if (meta.voice) return `Voice message${once}`;
       // Owner round 32 (item 35): media picked as media reads as what it is;
       // only a Document keeps its file name (the bubble draws it as a file row).
       const type = String(meta.type || "");
       if (meta.document !== true) {
         if (type.startsWith("image/")) return `Photo${once}`;
         if (type.startsWith("video/")) return `Video${once}`;
-        if (type.startsWith("audio/")) return "Voice message";
+        if (type.startsWith("audio/")) return `Voice message${once}`;
       }
       // Owner round 33 (item 12): a document reads "Document" in the chat
       // list and in the push — never its file name (the bubble shows that).
