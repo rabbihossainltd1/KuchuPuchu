@@ -284,12 +284,17 @@ const main = (f) => read(`${ANDROID}/${f}`);
       !chat.includes("import androidx.compose.material.icons.filled.KeyboardArrowUp"),
   );
   check(
-    'r74-5 (owner: "voice button a click kore hold korle normal voice record hobe but upore swipe korle voice lock hobe ar voice button ta send button a hoye jabe screenshot a jemon ta ache"): a LOCKED take offers a real Send — Telegram\'s white glass circle (0xE6FFFFFF) with a near-black chevron at 22 dp — while text and media Send keep the accent fill and the 19 dp paper plane',
-    comp.includes(".background(if (locked) Color(0xE6FFFFFF) else accent)") &&
-      comp.includes("if (locked) Icons.Filled.DoubleArrow else Icons.AutoMirrored.Filled.Send,") &&
-      comp.includes("tint = if (locked) Color(0xFF10141A) else AmberInk,") &&
-      comp.includes(".size(if (locked) 22.dp else 19.dp)") &&
-      chat.includes("import androidx.compose.material.icons.filled.DoubleArrow"),
+    'r75-2 (owner: "colour system ta amar app onujai hobe"): the recorder wears the APP\'S palette — the locked Send is the same accent circle + AmberInk paper plane as every other send (19 dp — no white glass, no chevron), the utility controls (lock capsule, Pause pill) sit on the theme\'s DarkCard with white icons, delete stays Red, the mic keeps its accent ring, and the MD\'s content descriptions name the actions ("Send voice message", "Pause recording" / "Resume recording")',
+    comp.includes(".background(accent)") &&
+      comp.includes("Icons.AutoMirrored.Filled.Send,") &&
+      comp.includes("tint = AmberInk,") &&
+      comp.includes(".size(19.dp)") &&
+      !comp.includes("Color(0xE6FFFFFF)") &&
+      !comp.includes("if (locked) 22.dp") &&
+      (comp.match(/\.background\(DarkCard\)/g) || []).length === 2 &&
+      chat.includes('if (locked && input.isBlank()) "Send voice message" else "Send",') &&
+      chat.includes('if (paused) "Resume recording" else "Pause recording",') &&
+      !chat.includes("import androidx.compose.material.icons.filled.DoubleArrow"),
   );
   check(
     "r75-1: the tap-to-lock machine is gone with the system it served — no queued lock, no recStarting window, no tap shortcut anywhere on the recorder's path, and a failed start still says why",

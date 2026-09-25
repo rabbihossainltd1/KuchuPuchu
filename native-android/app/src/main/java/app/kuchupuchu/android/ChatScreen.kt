@@ -66,7 +66,6 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DoubleArrow
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Image
@@ -5277,14 +5276,16 @@ private fun Composer(
                     Row(
                         Modifier
                             .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0xE614181F))
+                            // r75-2: the app's own charcoal (DarkCard) — not a
+                            // hardcoded black that ignores the theme.
+                            .background(DarkCard)
                             .clickable { onTogglePause() }
                             .padding(horizontal = 12.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(
                             if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
-                            if (paused) "Resume" else "Pause",
+                            if (paused) "Resume recording" else "Pause recording",
                             tint = Color.White,
                             modifier = Modifier.size(15.dp),
                         )
@@ -5340,11 +5341,10 @@ private fun Composer(
                         // lift as the header call buttons now. r73-16 (owner,
                         // again): no shadow anywhere — the fill carries it.
                         .clip(CircleShape)
-                        // r74-19 (the owner's screenshot): a LOCKED note's Send
-                        // is the small white glass circle Telegram shows — its
-                        // glyph is near-black, so white glass reads on both
-                        // themes. The text / media Send keeps the accent fill.
-                        .background(if (locked) Color(0xE6FFFFFF) else accent)
+                        // r75-2 (owner: "colour system ta amar app onujai
+                        // hobe"): the locked Send is the SAME accent circle as
+                        // every other send in the app — no white glass.
+                        .background(accent)
                         // Owner round 32 (item 18): tap = send, hold = "send
                         // later" (text only — media goes with its own flow, item 19).
                         .combinedClickable(
@@ -5375,14 +5375,12 @@ private fun Composer(
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        // r74-19: Telegram's locked row shows a chevron, not a
-                        // paper plane — the glyph follows the fill.
-                        if (locked) Icons.Filled.DoubleArrow else Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Send",
-                        tint = if (locked) Color(0xFF10141A) else AmberInk,
+                        Icons.AutoMirrored.Filled.Send,
+                        contentDescription = if (locked && input.isBlank()) "Send voice message" else "Send",
+                        tint = AmberInk,
                         modifier =
                             Modifier
-                                .size(if (locked) 22.dp else 19.dp)
+                                .size(19.dp)
                                 .scale(if (sendPressed) 0.9f else 1f),
                     )
                 }
@@ -5427,7 +5425,7 @@ private fun LockBadgePill(
             .alpha(alpha)
             .scale(pulse)
             .clip(RoundedCornerShape(percent = 50))
-            .background(Color(0xE614181F))
+            .background(DarkCard)
             .border(1.5.dp, if (armed) accent else Color(0x33FFFFFF), RoundedCornerShape(percent = 50)),
         contentAlignment = Alignment.Center,
     ) {
