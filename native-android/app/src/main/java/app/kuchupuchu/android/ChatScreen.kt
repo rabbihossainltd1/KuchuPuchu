@@ -7986,7 +7986,13 @@ private fun OnceTextRow(
             !mine && theme == "night" -> Color(0xFFA9B4CC)
             else -> Muted
         }
-    val veil = !mine && !revealed
+    // r74-2 (owner, r74: "kichui na icon o na kono text level o na just blur
+    // thakbe", and "ami send korbo amar kache + je receive korbe tar kacheo
+    // blur"): the bubble is the blur and nothing else — the 1 mark and the
+    // tap-to-view hint are both gone — and it veils BOTH copies, mine as well as
+    // the far side's. My own tap does nothing, exactly like the once-photo
+    // tile: the words are the receiver's, not mine to re-read.
+    val veil = !revealed
     Row(
         Modifier.fillMaxWidth().padding(vertical = 3.dp),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
@@ -8064,24 +8070,6 @@ private fun OnceTextRow(
                                     Modifier
                                 },
                         )
-                        if (veil) {
-                            // r73-20 (owner: "view once text bubble thik ache but
-                            // 1 icon ta middle a nai"): the mark is CENTRED in the
-                            // bubble on its own now — it rode the hint as one Row
-                            // before, so the words pushed it off the middle.
-                            Box(Modifier.matchParentSize(), contentAlignment = Alignment.Center) {
-                                CenteredOnceIcon(28.dp)
-                            }
-                            Box(Modifier.matchParentSize(), contentAlignment = Alignment.BottomCenter) {
-                                Text(
-                                    "Tap to view",
-                                    color = Ink,
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.padding(bottom = 1.dp),
-                                )
-                            }
-                        }
                     }
                 }
                 if (rowSelected) Box(Modifier.matchParentSize().background(ActionBlue.copy(alpha = 0.35f)))

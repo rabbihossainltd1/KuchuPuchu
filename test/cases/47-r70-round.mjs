@@ -444,22 +444,19 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes("if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)"),
   );
   check(
-    "r71-20: the veil is real on every device — a Compose blur where the platform has one (API 31+), the same shape in placeholder marks where it does not — and the far side's tap starts the visible five seconds",
+    "r71-20 + r74-2: the veil is real on every device — a Compose blur where the platform has one (API 31+), the same shape in placeholder marks where it does not — it covers BOTH copies now (mine too), and the far side's tap starts the visible five seconds",
     chat.includes("internal const val ONCE_TEXT_REVEAL_MS = 5_000L") &&
       chat.includes("internal fun veiledText(body: String): String =") &&
       chat.includes(
         "if (veil && android.os.Build.VERSION.SDK_INT < 31) veiledText(body) else body",
       ) &&
       chat.includes("Modifier.blur(7.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)") &&
-      chat.includes("val veil = !mine && !revealed") &&
+      chat.includes("val veil = !revealed") &&
       chat.includes("!mine && !revealed -> {") &&
-      chat.includes(
-        '"Tap to view",\n                                    color = Ink,\n                                    fontSize = 11.5.sp,\n                                    fontWeight = FontWeight.Medium,',
-      ) &&
       chat.includes('Text("${((leftMs + 999) / 1000)}s", color = Red, fontSize = 10.sp)'),
   );
   check(
-    "r71-20: the fifth second spends the opening (ViewOnce.spend → the row is deleted for BOTH sides), and my own copy is never veiled from me",
+    "r71-20 + r74-2: the fifth second spends the opening (ViewOnce.spend → the row is deleted for BOTH sides), and the veil is the SAME on my copy — `veil` no longer asks whose message it is",
     chat.includes("delay(ONCE_TEXT_REVEAL_MS)") === false &&
       chat.includes("ViewOnce.spend(id)") &&
       /while \(true\) \{[\s\S]{0,200}?leftMs = left\.coerceAtLeast\(0L\)[\s\S]{0,120}?delay\(200\)/.test(
@@ -497,11 +494,14 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes("Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {"),
   );
   check(
-    'r73-20 (owner: "view once text bubble thik ache but 1 icon ta middle a nai"): the 1 mark is centred in the bubble on its OWN layer now — it rode the hint as one Row before, so the words pushed it off the middle — and the hint sits at the bubble\'s bottom edge',
-    chat.includes("CenteredOnceIcon(28.dp)") &&
-      /contentAlignment = Alignment.Center\) \{\n\s+CenteredOnceIcon\(28\.dp\)/.test(chat) &&
-      /contentAlignment = Alignment.BottomCenter\) \{\n\s+Text\(\n\s+"Tap to view",/.test(chat) &&
-      !chat.includes("CenteredOnceIcon(26.dp)"),
+    'r74-2 (owner, r74: "kichui na icon o na kono text level o na just blur thakbe" and "ami send korbo amar kache + je receive korbe tar kacheo blur"): the once-text bubble is ONLY the blur — the 1 mark (r73-20, then 28 dp) and the "Tap to view" hint are both gone — and the veil covers both sides, with the below-API-31 placeholder marks as the platform-legal stand-in',
+    chat.includes("val veil = !revealed") &&
+      !chat.includes("CenteredOnceIcon(28.dp)") &&
+      !chat.includes('"Tap to view"') &&
+      chat.includes(
+        "if (veil && android.os.Build.VERSION.SDK_INT < 31) veiledText(body) else body",
+      ) &&
+      chat.includes("Modifier.blur(7.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)"),
   );
   check(
     "r72-20: the notification can never show the once-view text — the worker sends no envelope and no e2ee marker for such a row (only kp_once and its masked label), and the phone refuses to open or print one: the label beats any plaintext, for the card AND for the list row it feeds",
