@@ -5512,6 +5512,7 @@ private fun RecorderHoldBar(
  * animation), the wide Pause/Resume pill, and the app's own Send circle right
  * beside it — single tap sends, double tap sends once.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun RecorderLockedPanel(
     recMs: Int,
