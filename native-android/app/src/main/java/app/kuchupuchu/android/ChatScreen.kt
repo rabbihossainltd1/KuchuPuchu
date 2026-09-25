@@ -63,6 +63,7 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -5343,14 +5344,17 @@ private fun Composer(
                 }
             }
         } else {
-            /* live HOLD strip (r75-3, WhatsApp's frames): the clock on the left
-               and the cancel hint beside it — nothing else. The wave and the
-               dot belong to the locked panel; the bar stays bare while the
-               finger is down. */
+            /* live HOLD strip (r75-3, WhatsApp's frames) — r75-4 (the owner's
+               screenshot): ONE dark rounded bar, the clock on its left and the
+               cancel hint centred in what is left. The wave and the dot belong
+               to the locked panel; the bar stays bare while the finger is
+               down. */
             Row(
                 Modifier
                     .weight(1f)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(DarkCard)
+                    .padding(horizontal = 14.dp, vertical = 13.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -5359,8 +5363,10 @@ private fun Composer(
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                 )
-                Spacer(Modifier.width(12.dp))
-                Text("‹ Slide to cancel", color = Muted, fontSize = 12.5.sp, maxLines = 1)
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Text("‹ Slide to cancel", color = Muted, fontSize = 12.5.sp, maxLines = 1)
+                }
+                Spacer(Modifier.width(4.dp))
             }
         }
         Spacer(Modifier.width(6.dp))
@@ -5376,9 +5382,9 @@ private fun Composer(
                 modifier =
                     Modifier
                         .align(Alignment.CenterVertically)
-                        // r75-3 (the frames): the capsule hangs just above the mic and rises
-                        // 1:1 WITH the finger — no lag, no partial factor.
-                        .offset { IntOffset(0, (-48.dp.toPx() + lockDragY).roundToInt()) },
+                        // r75-3 + r75-4: the column's bottom tucks behind the mic and it
+                        // rises 1:1 WITH the finger — no lag, no partial factor.
+                        .offset { IntOffset(0, (-50.dp.toPx() + lockDragY).roundToInt()) },
             )
         }
 
@@ -5458,11 +5464,13 @@ private fun Composer(
 }
 
 /**
- * r75-1 (the owner's MD): the lock affordance — a dark rounded vertical
- * capsule with a white lock icon, floating directly above the mic. When the
- * finger reaches it the border lights the accent and the capsule pulses (the
- * MD's 1.0 -> 1.08 -> 1.0, no bounce). Drawn by the COMPOSER (not inside the
- * mic's own Box, which clips its children) so it can slide up with the finger.
+ * r75-4 (owner's screenshot of the hold state: "screenshot ta dekh hold kore
+ * rakhle kemon hoi"): WhatsApp's TALL dark column — it rises from the mic's
+ * back upward, the white lock at the top and a small chevron under it, the
+ * bottom end tucked behind the mic circle. When the finger reaches it the
+ * border lights the accent (the pulse stays subtle). Drawn by the COMPOSER
+ * (not inside the mic's own Box, which clips its children) so it can slide up
+ * with the finger.
  */
 @Composable
 private fun LockBadgePill(
@@ -5474,20 +5482,32 @@ private fun LockBadgePill(
     val pulse by animateFloatAsState(if (armed) 1.08f else 1f, tween(90), label = "lockpulse")
     Box(
         modifier
-            .size(width = 40.dp, height = 56.dp)
+            .size(width = 36.dp, height = 100.dp)
             .alpha(alpha)
             .scale(pulse)
-            .clip(RoundedCornerShape(percent = 50))
+            .clip(RoundedCornerShape(18.dp))
             .background(DarkCard)
-            .border(1.5.dp, if (armed) accent else Color(0x33FFFFFF), RoundedCornerShape(percent = 50)),
-        contentAlignment = Alignment.Center,
+            .border(1.dp, if (armed) accent else Color.Transparent, RoundedCornerShape(18.dp)),
+        contentAlignment = Alignment.TopCenter,
     ) {
-        Icon(
-            Icons.Filled.Lock,
-            "Lock recording",
-            tint = if (armed) accent else Color.White,
-            modifier = Modifier.size(18.dp),
-        )
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(top = 10.dp),
+        ) {
+            Icon(
+                Icons.Filled.Lock,
+                "Lock recording",
+                tint = Color.White,
+                modifier = Modifier.size(17.dp),
+            )
+            Spacer(Modifier.height(10.dp))
+            Icon(
+                Icons.Filled.KeyboardArrowUp,
+                null,
+                tint = Color.White.copy(alpha = 0.6f),
+                modifier = Modifier.size(18.dp),
+            )
+        }
     }
 }
 

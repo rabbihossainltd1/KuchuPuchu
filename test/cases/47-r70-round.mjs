@@ -270,22 +270,27 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes("onCancelVoice = { finishRecording(cancelled = true) },"),
   );
   check(
-    "r75-1 + the MD: the lock goal is a dark rounded VERTICAL CAPSULE with a white lock icon just above the mic — it pulses (1.0 -> 1.08, no bounce) with the accent border when the finger reaches it, slides up with the finger while the hold is live, and is GONE once locked (the MD's toolbar has no badge)",
+    'r75-4 (owner: "screenshot ta dekh hold kore rakhle kemon hoi" — his WhatsApp screenshot): the lock goal is the TALL dark column rising from the mic\'s back — 36x100 dp, 18 dp corners, the white lock at the TOP with a 60% chevron under it, an accent border only when the finger reaches it (the pulse stays 1.0 -> 1.08), its bottom tucked 50 dp under the row centre and rising 1:1 with the finger while the hold is live, and GONE once locked',
     comp.includes("private fun LockBadgePill(") &&
-      comp.includes(".size(width = 40.dp, height = 56.dp)") &&
-      comp.includes("RoundedCornerShape(percent = 50)") &&
+      comp.includes(".size(width = 36.dp, height = 100.dp)") &&
+      comp.includes(".clip(RoundedCornerShape(18.dp))") &&
+      comp.includes(
+        ".border(1.dp, if (armed) accent else Color.Transparent, RoundedCornerShape(18.dp))",
+      ) &&
       comp.includes('"Lock recording",') &&
       comp.includes(
         'animateFloatAsState(if (armed) 1.08f else 1f, tween(90), label = "lockpulse")',
       ) &&
-      comp.includes(".scale(pulse)") &&
+      comp.includes("tint = Color.White.copy(alpha = 0.6f),") &&
+      comp.includes("Icons.Filled.KeyboardArrowUp,") &&
+      comp.includes(".padding(top = 10.dp),") &&
       comp.includes("if (recording && !locked && lockAlpha > 0.01f) {") &&
-      comp.includes(".offset { IntOffset(0, (-48.dp.toPx() + lockDragY).roundToInt()) }") &&
+      comp.includes(".offset { IntOffset(0, (-50.dp.toPx() + lockDragY).roundToInt()) }") &&
       !comp.includes(".offset(y = (-54).dp)") &&
       mic.includes("val lockShowing = recording || dragY <= -12f") &&
       mic.includes("SideEffect { onLockVisual(lockAlpha, lockArmed, dragY) }") &&
       chat.includes("import androidx.compose.material.icons.filled.Lock") &&
-      !chat.includes("import androidx.compose.material.icons.filled.KeyboardArrowUp"),
+      chat.includes("import androidx.compose.material.icons.filled.KeyboardArrowUp"),
   );
   check(
     'r75-2 (owner: "colour system ta amar app onujai hobe"): the recorder wears the APP\'S palette — the locked Send is the same accent circle + AmberInk paper plane as every other send (19 dp — no white glass, no chevron), the utility controls (lock capsule, Pause pill) sit on the theme\'s DarkCard with white icons, delete stays Red, the mic keeps its accent ring, and the MD\'s content descriptions name the actions ("Send voice message", "Pause recording" / "Resume recording")',
@@ -295,7 +300,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       comp.includes(".size(19.dp)") &&
       !comp.includes("Color(0xE6FFFFFF)") &&
       !comp.includes("if (locked) 22.dp") &&
-      (comp.match(/\.background\(DarkCard\)/g) || []).length === 2 &&
+      (comp.match(/\.background\(DarkCard\)/g) || []).length === 3 &&
       (comp.match(/Color\.White\.copy\(alpha = 0\.08f\)/g) || []).length === 3 &&
       comp.includes('"Send voice message",') &&
       chat.includes('if (paused) "Resume recording" else "Pause recording",') &&
