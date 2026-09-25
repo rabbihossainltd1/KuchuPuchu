@@ -166,17 +166,17 @@ class VoiceTake(val file: File, val seconds: Int, val waveform: List<Int>)
 /**
  * r75-1 (owner: "current voice lock system hold swipe up system shob remove koro
  * ami ekta md file diyechi dekho ei vabe hobe shob") — the hold's rules as pure
- * maths, so the JVM test can prove every branch a thumb can take. The MD's state
- * machine: a hold records, a drag UP into the lock zone LOCKS (the composer
- * fires it mid-drag — a release never locks), a slide LEFT past the cancel
- * distance throws the take away, and a plain hold-and-release sends it. The old
- * tap-to-lock and release-on-any-up-swipe shortcuts are gone with the system
- * they belonged to.
+ * maths, so the JVM test can prove every branch a thumb can take. r75-9 (the
+ * approved preview) keeps the three outcomes and changes WHEN they fire: a hold
+ * records, NOTHING fires while the finger is down, and the RELEASE decides —
+ * released above the lock-at-half = LOCKED, released left past the cancel
+ * distance = CANCEL, released where it started = SEND. The old mid-drag cross
+ * never landed on the owner's phone; the release does.
  */
 object VoiceHoldGesture {
     /** What one completed hold decided. */
     enum class Result {
-        /** released with the finger inside the lock zone (the mid-drag cross already locked) */
+        /** released with the rise past the lock-at half (the shackle closed) */
         LOCK,
 
         /** released after travelling left past cancel → throw the take away */
@@ -189,8 +189,8 @@ object VoiceHoldGesture {
     /**
      * Decide what a completed hold did. [dx] is leftward travel (0 … -n), [dy] is
      * upward travel (0 … -n). [cancelDist] / [lockDist] come from the density at
-     * the call site. LOCK here is a formality — the composer locked the take the
-     * moment the zone was crossed; a release that lands here just confirms it.
+     * the call site — [lockDist] is the lock-AT distance (the half of the
+     * column climb, r75-9): a release that lands past it locks the take.
      */
     fun decide(
         dx: Float,

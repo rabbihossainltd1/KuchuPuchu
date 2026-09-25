@@ -217,26 +217,24 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
   const vnotes = main("VoiceNote.kt");
   check(
-    'r75-1 (owner: "current voice lock system hold swipe up system shob remove koro ami ekta md file diyechi dekho ei vabe hobe shob"): the hold is the MD\'s state machine — press records at once, the capsule is the ONLY lock target and the take locks MID-DRAG the instant the finger crosses 72 dp (a release never locks), slide-left past 88 dp cancels, a plain hold-and-release SENDS, the mic never leaves its seat (only the capsule climbs), and the release is decided by the pure rules in VoiceHoldGesture (LOCK / CANCEL / SEND)',
+    'r75-1 (owner: "current voice lock system hold swipe up system shob remove koro ami ekta md file diyechi dekho ei vabe hobe shob"): the hold is the release-decides machine (r75-9, owner: hold kore rakha porjonto kono action Hobe na) — press records at once, NOTHING fires while the finger is down, the first dominant direction owns the drag, and the RELEASE decides above the lock-at half (46 dp; the mid-drag 72 dp never landed on his phone), left-past-cancel, or send (LOCK / CANCEL / SEND)',
     mic.includes("val cancelDist = with(density) { 88.dp.toPx() }") &&
-      mic.includes("val lockDist = with(density) { 72.dp.toPx() }") &&
-      mic.includes("if (!locked && dragY <= -lockDist) {") &&
+      mic.includes("val lockAtDist = with(density) { 46.dp.toPx() }") &&
       mic.includes("change.positionChangeIgnoreConsumed()") &&
-      mic.includes("locked = true") &&
-      mic.includes("onLockRecord()") &&
-      mic.includes("if (!locked) {") &&
+      mic.includes("if (dx < -slop && -dx > -dy * 1.15f) axis = 2") &&
+      mic.includes("else if (dy < -slop && -dy > -dx * 1.15f) axis = 1") &&
       mic.includes("VoiceHoldGesture.decide(") &&
       mic.includes("VoiceHoldGesture.Result.CANCEL -> onFinishRecord(true)") &&
       mic.includes("VoiceHoldGesture.Result.LOCK -> onLockRecord()") &&
       mic.includes("VoiceHoldGesture.Result.SEND -> onFinishRecord(false)") &&
-      mic.includes("IntOffset(animX.roundToInt(), 0)") &&
+      mic.includes("IntOffset(micX.roundToInt(), micY.roundToInt())") &&
       vnotes.includes("fun decide(") &&
       vnotes.includes("if (dy <= -lockDist) return Result.LOCK") &&
       vnotes.includes("if (dx <= -cancelDist) return Result.CANCEL") &&
       vnotes.includes("return Result.SEND"),
   );
   check(
-    'r75-5 (owner, with the locked panel\'s screenshot: "eita lock kore thakle emon vabe record hobe shob buttons wave delete send shob kichu valo kore notice kore dekho"): the panel is noted control by control — 28 dp corners on DarkCard; top row: the 17 sp clock, the WIDE grey wave (weight-1, 26 dp) and the view-once "1" circle (36 dp, 8% white, CenteredOnceIcon, accent ring when armed, onToggleVoiceOnce); bottom row: the bin on its dark-red seat (44 dp, Red 15%), the wide Pause pill (23 dp corners, 17 dp glyph + 15 sp label) and the big 48 dp accent Send with the DARK DOUBLE CHEVRON (DoubleArrow, 0xFF10141A); no lock glyph anywhere; the SEND is the voice button\'s OWN seat (r75-8: \\"ar voice button send button hoye jabe\\"), the panel carries none; the HOLD keeps its live wave (accent, weight-1) with \'‹ Slide to cancel\' in Muted',
+    'r75-5 (owner, with the locked panel\'s screenshot: "eita lock kore thakle emon vabe record hobe shob buttons wave delete send shob kichu valo kore notice kore dekho"): the panel is noted control by control — 28 dp corners on DarkCard; top row: the 17 sp clock, the WIDE grey wave (weight-1, 26 dp) and the view-once "1" circle (36 dp, 8% white, CenteredOnceIcon, accent ring when armed, onToggleVoiceOnce); bottom row: the bin on its dark-red seat (44 dp, Red 15%), the wide Pause pill (23 dp corners, 17 dp glyph + 15 sp label) and the big 48 dp accent Send with the DARK DOUBLE CHEVRON (DoubleArrow, 0xFF10141A); no lock glyph anywhere; the Send now sits INSIDE the panel beside the Pause pill (r75-9, owner: quoted below), the panel carries none; the HOLD keeps its live wave (accent, weight-1) with \'‹ Slide to cancel\' in Muted',
     comp.includes(".background(DarkCard)") &&
       comp.includes(".clip(RoundedCornerShape(28.dp))") &&
       comp.includes("LiveVoiceWave(color = Muted, modifier = Modifier.weight(1f).height(26.dp))") &&
@@ -267,7 +265,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
   const app = "native-android/app/src/main/java/app/kuchupuchu/android/";
   const ui = readFileSync(app + "Ui.kt", "utf8");
   check(
-    "r75-1: the chat owns the locked state — set ONLY by lockRecording (the mid-drag threshold, with its confirm buzz), a new take is always born a HOLD, cleared the moment the take ends, and a locked note the user then SENDS is never swallowed by the sub-second slip rule in silence",
+    "r75-1: the chat owns the locked state — set ONLY by lockRecording (since r75-9 fired on the RELEASE past the lock-at half, with its confirm buzz), a new take is always born a HOLD, cleared the moment the take ends, and a locked note the user then SENDS is never swallowed by the sub-second slip rule in silence",
     chat.includes("var voiceLocked by remember { mutableStateOf(false) }") &&
       chat.includes("fun lockRecording() {") &&
       chat.includes("voiceLocked = true") &&
@@ -280,25 +278,22 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes("onCancelVoice = { finishRecording(cancelled = true) },"),
   );
   check(
-    'r75-4 (owner: "screenshot ta dekh hold kore rakhle kemon hoi" — his WhatsApp screenshot): the lock goal is the TALL dark column rising from the mic\'s back — 36x100 dp, 18 dp corners, the white lock at the TOP with a 60% chevron under it, an accent border only when the finger reaches it (the pulse stays 1.0 -> 1.08), its bottom tucked 50 dp under the row centre and rising 1:1 with the finger while the hold is live, and GONE once locked',
+    'r75-4 (owner: "screenshot ta dekh hold kore rakhle kemon hoi" — his WhatsApp screenshot): the lock goal is the FIXED slim column (r75-9) — the mic seat width itself (50 dp), 22 dp corners both ends, 172 dp tall, bottom at the mic bottom, NEVER riding the finger (only the voice button climbs); the hand-drawn Material lock on top UNLOCKED, its shackle closing at the half (PadlockGlyph, accent when armed); the chevron above the middle bobbing in an infinite Reverse loop; accent border only when armed; and GONE once locked',
     comp.includes("private fun LockBadgePill(") &&
-      comp.includes(".size(width = 36.dp, height = 100.dp)") &&
-      comp.includes(".clip(RoundedCornerShape(18.dp))") &&
+      comp.includes(".size(width = 50.dp, height = 172.dp)") &&
+      comp.includes(".clip(RoundedCornerShape(22.dp))") &&
       comp.includes(
-        ".border(1.dp, if (armed) accent else Color.Transparent, RoundedCornerShape(18.dp))",
+        ".border(1.dp, if (armed) accent else Color.Transparent, RoundedCornerShape(22.dp))",
       ) &&
-      comp.includes('"Lock recording",') &&
-      comp.includes(
-        'animateFloatAsState(if (armed) 1.08f else 1f, tween(90), label = "lockpulse")',
-      ) &&
-      comp.includes("tint = Color.White.copy(alpha = 0.6f),") &&
+      comp.includes("PadlockGlyph(locked = armed, tint = if (armed) accent else Color.White)") &&
       comp.includes("Icons.Filled.KeyboardArrowUp,") &&
+      comp.includes("RepeatMode.Reverse") &&
       comp.includes(".padding(top = 10.dp),") &&
       comp.includes("if (recording && !locked && lockAlpha > 0.01f) {") &&
-      comp.includes("IntOffset(45.dp.roundToPx(), (-50.dp.toPx() + lockDragY).roundToInt())") &&
+      comp.includes("IntOffset(52.dp.roundToPx(), -65.dp.roundToPx())") &&
       !comp.includes(".offset(y = (-54).dp)") &&
       mic.includes("val lockShowing = recording || dragY <= -12f") &&
-      mic.includes("SideEffect { onLockVisual(lockAlpha, lockArmed, dragY) }") &&
+      mic.includes("SideEffect { onLockVisual(lockAlpha, lockArmed, cancelArmed, micX) }") &&
       chat.includes("import androidx.compose.material.icons.filled.Lock") &&
       chat.includes("import androidx.compose.material.icons.filled.KeyboardArrowUp"),
   );
@@ -310,7 +305,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       comp.includes(".size(19.dp)") &&
       !comp.includes("Color(0xE6FFFFFF)") &&
       !comp.includes("if (locked) 22.dp") &&
-      (comp.match(/\.background\(DarkCard\)/g) || []).length === 3 &&
+      (comp.match(/\.background\(DarkCard\)/g) || []).length === 4 &&
       (comp.match(/Color\.White\.copy\(alpha = 0\.08f\)/g) || []).length === 2 &&
       comp.includes('"Send voice message",') &&
       chat.includes('if (paused) "Resume recording" else "Pause recording",') &&
