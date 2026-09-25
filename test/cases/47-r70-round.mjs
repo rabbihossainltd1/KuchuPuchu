@@ -278,6 +278,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
       comp.includes("Icons.Filled.KeyboardArrowUp,") &&
       comp.includes('if (armed) "Release to lock" else "Slide up to lock"') &&
       comp.includes("SideEffect { onLockVisual(lockAlpha, lockArmed, dragY) }") &&
+      // .. and the runtime import that effect needs is at the top of the FILE
+      // (the harness cannot compile Kotlin, so an unresolved name would only
+      // show up as a red apk job three minutes in)
+      chat.includes("import androidx.compose.runtime.SideEffect") &&
       // the live badge rises with the drag ..
       comp.includes(".offset { IntOffset(0, (-18.dp.toPx() + lockDragY * 0.6f).roundToInt()) }") &&
       // .. and the locked one parks over the row
