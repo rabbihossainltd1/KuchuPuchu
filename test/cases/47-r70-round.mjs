@@ -216,14 +216,24 @@ const main = (f) => read(`${ANDROID}/${f}`);
     chat.indexOf("private val VIDEO_NAME_EXT"),
   );
   const vnotes = main("VoiceNote.kt");
+  const app = "native-android/app/src/main/java/app/kuchupuchu/android/";
+  const ui = readFileSync(app + "Ui.kt", "utf8");
   check(
-    'r75-1 (owner: "current voice lock system hold swipe up system shob remove koro ami ekta md file diyechi dekho ei vabe hobe shob"): the hold is the release-decides machine (r75-9, owner: hold kore rakha porjonto kono action Hobe na) — press records at once, NOTHING fires while the finger is down, the first dominant direction owns the drag, and the RELEASE decides above the lock-at half (46 dp; the mid-drag 72 dp never landed on his phone), left-past-cancel, or send (LOCK / CANCEL / SEND)',
-    mic.includes("val cancelDist = with(density) { 88.dp.toPx() }") &&
-      mic.includes("val lockAtDist = with(density) { 46.dp.toPx() }") &&
+    'r76-1 (owner: "kono bug na just eita implement korte hobe ... screenshot ta dekh ki korche ager session ar html a dekh koto sundor kore gochano"): the recorder is REBUILT state by state from the approved preview v5.8 — the hold stays the release-decides machine, now with the preview\'s thresholds (cancel arms past 120 dp with an 84 dp unarm hysteresis, lock-at 62 dp, rise cap 138 dp, slide cap 150 dp) and the axis-lock with the low-left escape; NOTHING fires while the finger is down',
+    mic.includes("val cancelDist = with(density) { 120.dp.toPx() }") &&
+      mic.includes("val cancelUnarm = with(density) { 84.dp.toPx() }") &&
+      mic.includes("val lockAtDist = with(density) { 62.dp.toPx() }") &&
+      mic.includes("val riseMax = with(density) { 138.dp.toPx() }") &&
+      mic.includes("val slideCap = with(density) { 150.dp.toPx() }") &&
       mic.includes("change.positionChangeIgnoreConsumed()") &&
       mic.includes("if (dx < -slop && -dx > -dy * 1.15f) axis = 2") &&
       mic.includes("else if (dy < -slop && -dy > -dx * 1.15f) axis = 1") &&
+      mic.includes(
+        "if (axis == 1 && -dragY < escRise && -dx > escDx && -dx > -dy * 1.8f) axis = 2",
+      ) &&
+      mic.includes("cancelHold = true") &&
       mic.includes("VoiceHoldGesture.decide(") &&
+      mic.includes("cancelDist = if (wasCancel) cancelUnarm else cancelDist,") &&
       mic.includes("VoiceHoldGesture.Result.CANCEL -> onFinishRecord(true)") &&
       mic.includes("VoiceHoldGesture.Result.LOCK -> onLockRecord()") &&
       mic.includes("VoiceHoldGesture.Result.SEND -> onFinishRecord(false)") &&
@@ -234,82 +244,65 @@ const main = (f) => read(`${ANDROID}/${f}`);
       vnotes.includes("return Result.SEND"),
   );
   check(
-    'r75-5 (owner, with the locked panel\'s screenshot: "eita lock kore thakle emon vabe record hobe shob buttons wave delete send shob kichu valo kore notice kore dekho"): the panel is noted control by control — 28 dp corners on DarkCard; top row: the 17 sp clock, the WIDE grey wave (weight-1, 26 dp) and the view-once "1" circle (36 dp, 8% white, CenteredOnceIcon, accent ring when armed, onToggleVoiceOnce); bottom row: the bin on its dark-red seat (44 dp, Red 15%), the wide Pause pill (23 dp corners, 17 dp glyph + 15 sp label) and the big 48 dp accent Send with the DARK DOUBLE CHEVRON (DoubleArrow, 0xFF10141A); no lock glyph anywhere; the Send now sits INSIDE the panel beside the Pause pill (r75-9, owner: quoted below), the panel carries none; the HOLD keeps its live wave (accent, weight-1) with \'‹ Slide to cancel\' in Muted',
-    comp.includes(".background(DarkCard)") &&
-      comp.includes(".clip(RoundedCornerShape(28.dp))") &&
-      comp.includes("LiveVoiceWave(color = Muted, modifier = Modifier.weight(1f).height(26.dp))") &&
+    "r76-1: the HOLD bar and the LOCKED panel are the preview's geometry, control for control — 25 dp cards, 14/11 padding; hold row: 15 sp clock (min 42 dp), 28 dp accent wave, 12 sp muted hint; the cancel arm sinks the clock 26 dp (180 ms) and raises the small dustbin 100 ms late (never overlapping); locked rows: grey 28 dp wave + the app's own view-once icon in a 40 dp circle (1.5 dp accent ring armed), then the 48 dp red bin (DIRECT cancel), the 48 dp Pause pill (16 dp glyph + 14.5 sp label) and the 48 dp accent Send with the APP's own send glyph in the preview's dark ink",
+    comp.includes("private fun RecorderLockedPanel(") &&
+      comp.includes("private fun RecorderHoldBar(") &&
+      (comp.match(/\.clip\(RoundedCornerShape\(25\.dp\)\)/g) || []).length >= 2 &&
+      comp.includes("LiveVoiceWave(color = Muted, modifier = Modifier.weight(1f).height(28.dp))") &&
+      comp.includes(
+        "LiveVoiceWave(color = accent, modifier = Modifier.weight(1f).height(28.dp))",
+      ) &&
       comp.includes(
         "CenteredOnceIcon(20.dp, tint = if (voiceOnce) accent else Color.White, fillBounds = true)",
       ) &&
       comp.includes(".clickable { onToggleVoiceOnce() }") &&
-      comp.includes(".background(Red.copy(alpha = 0.15f))") &&
+      comp.includes(".background(Red.copy(alpha = 0.16f))") &&
       comp.includes('"Delete recording",') &&
       comp.includes(".clickable { onTogglePause() }") &&
       comp.includes('if (paused) "Resume" else "Pause",') &&
-      comp.includes("Icons.Filled.DoubleArrow,") &&
-      comp.includes("tint = Color(0xFF10141A),") &&
+      comp.includes("tint = Color(0xFF0D1524),") &&
       comp.includes('"Send voice message",') &&
       comp.includes("onDoubleClick = if (selectCount == 0) onSendVoiceOnce else null,") &&
-      !comp.includes('"Recording locked",') &&
-      comp.includes("locked -> {") &&
-      comp.includes(
-        "LiveVoiceWave(color = accent, modifier = Modifier.weight(1f).height(22.dp))",
-      ) &&
-      comp.includes('Text("‹ Slide to cancel", color = Muted, fontSize = 12.5.sp, maxLines = 1)') &&
+      comp.includes('Text("‹ Slide to cancel", color = Muted, fontSize = 12.sp, maxLines = 1)') &&
+      comp.includes("Modifier.offset(y = 26.dp * sink).alpha(1f - sink)") &&
+      comp.includes("tween(200, delayMillis = 100)") &&
       !comp.includes("PulsingDot()") &&
       chat.includes("var voiceOnce by remember { mutableStateOf(false) }") &&
       chat.includes("voiceOnce = voiceOnce,") &&
       chat.includes("onSendVoice = { finishRecording(cancelled = false, once = voiceOnce) },"),
   );
-  /* ---- the r72 seat window: the composer's Send runs on its own clock ---- */ /* ---- the r72 seat window: the composer's Send runs on its own clock ---- */
-  const app = "native-android/app/src/main/java/app/kuchupuchu/android/";
-  const ui = readFileSync(app + "Ui.kt", "utf8");
   check(
-    "r75-1: the chat owns the locked state — set ONLY by lockRecording (since r75-9 fired on the RELEASE past the lock-at half, with its confirm buzz), a new take is always born a HOLD, cleared the moment the take ends, and a locked note the user then SENDS is never swallowed by the sub-second slip rule in silence",
-    chat.includes("var voiceLocked by remember { mutableStateOf(false) }") &&
-      chat.includes("fun lockRecording() {") &&
-      chat.includes("voiceLocked = true") &&
-      (chat.match(/voiceLocked = false/g) || []).length === 2 &&
-      chat.includes("val wasLocked = voiceLocked") &&
-      chat.includes('if (wasLocked) error = "That voice note is too short."') &&
-      chat.includes("locked = voiceLocked,") &&
-      chat.includes("onLockRecord = { lockRecording() },") &&
-      chat.includes("onSendVoice = { finishRecording(cancelled = false, once = voiceOnce) },") &&
-      chat.includes("onCancelVoice = { finishRecording(cancelled = true) },"),
-  );
-  check(
-    'r75-4 (owner: "screenshot ta dekh hold kore rakhle kemon hoi" — his WhatsApp screenshot): the lock goal is the FIXED slim column (r75-9) — the mic seat width itself (50 dp), 22 dp corners both ends, 172 dp tall, bottom at the mic bottom, NEVER riding the finger (only the voice button climbs); the hand-drawn Material lock on top UNLOCKED, its shackle closing at the half (PadlockGlyph, accent when armed); the chevron above the middle bobbing in an infinite Reverse loop; accent border only when armed; and GONE once locked',
-    comp.includes("private fun LockBadgePill(") &&
+    "r76-1: the seat wrap is the preview's #seatWrap — the FIXED 50x172 lock column (22 dp corners both ends, 2 dp accent border only when armed, dimmed to 30% while the cancel arm holds) sits BEHIND the 46 dp mic (2 dp ring over the screen's own background so the column never shows through) flushed to its bottom right; only the mic rides the finger, and the column is gone once locked",
+    comp.includes("private fun LockColumn(") &&
       comp.includes(".size(width = 50.dp, height = 172.dp)") &&
-      comp.includes(".clip(RoundedCornerShape(22.dp))") &&
       comp.includes(
-        ".border(1.dp, if (armed) accent else Color.Transparent, RoundedCornerShape(22.dp))",
+        ".border(2.dp, if (armed) accent else Color.Transparent, RoundedCornerShape(22.dp))",
       ) &&
+      comp.includes(".alpha(alpha * if (dimmed) 0.3f else 1f)") &&
       comp.includes("PadlockGlyph(locked = armed, tint = if (armed) accent else Color.White)") &&
       comp.includes("Icons.Filled.KeyboardArrowUp,") &&
       comp.includes("RepeatMode.Reverse") &&
       comp.includes(".padding(top = 10.dp),") &&
-      comp.includes("if (recording && !locked && lockAlpha > 0.01f) {") &&
-      comp.includes("IntOffset(52.dp.roundToPx(), -65.dp.roundToPx())") &&
-      !comp.includes(".offset(y = (-54).dp)") &&
-      mic.includes("val lockShowing = recording || dragY <= -12f") &&
-      mic.includes("SideEffect { onLockVisual(lockAlpha, lockArmed, cancelArmed, micX) }") &&
-      chat.includes("import androidx.compose.material.icons.filled.Lock") &&
+      comp.includes("Modifier.offset(y = (chev - 12f).dp).size(20.dp)") &&
+      comp.includes("Box(Modifier.width(50.dp).height(46.dp).fxMicAnchor()) {") &&
+      comp.includes("Modifier.align(Alignment.BottomEnd),") &&
+      comp.includes(".background(Cream)") &&
+      comp.includes(
+        ".border(2.dp, if (cancelArmed) Red else if (enabled) accent else Muted, CircleShape)",
+      ) &&
+      mic.includes("SideEffect { onLockVisual(lockAlpha, lockArmed, cancelArmed, micX, micY) }") &&
       chat.includes("import androidx.compose.material.icons.filled.KeyboardArrowUp"),
   );
   check(
-    'r75-2 (owner: "colour system ta amar app onujai hobe"): the recorder wears the APP\'S palette — the locked Send is the same accent circle + AmberInk paper plane as every other send (19 dp — no white glass, no chevron), the utility controls (lock capsule, Pause pill) sit on the theme\'s DarkCard with white icons, delete stays Red, the mic keeps its accent ring, and the MD\'s content descriptions name the actions ("Send voice message", "Pause recording" / "Resume recording")',
+    "r76-1: the recorder wears the APP'S palette on the preview's geometry — accent circles, DarkCard bar/panel/column, 8% white once circle + Pause pill, Red bin; the old DoubleArrow chevron send is gone with the rebuild (import included)",
     comp.includes(".background(accent)") &&
       comp.includes("Icons.AutoMirrored.Filled.Send,") &&
-      comp.includes("tint = AmberInk,") &&
-      comp.includes(".size(19.dp)") &&
-      !comp.includes("Color(0xE6FFFFFF)") &&
-      !comp.includes("if (locked) 22.dp") &&
-      (comp.match(/\.background\(DarkCard\)/g) || []).length === 4 &&
+      (comp.match(/\.background\(DarkCard\)/g) || []).length === 3 &&
       (comp.match(/Color\.White\.copy\(alpha = 0\.08f\)/g) || []).length === 2 &&
       comp.includes('"Send voice message",') &&
-      chat.includes('if (paused) "Resume recording" else "Pause recording",') &&
-      chat.includes("import androidx.compose.material.icons.filled.DoubleArrow"),
+      !comp.includes("Icons.Filled.DoubleArrow,") &&
+      !chat.includes("import androidx.compose.material.icons.filled.DoubleArrow") &&
+      chat.includes('if (paused) "Resume recording" else "Pause recording",'),
   );
   check(
     "r75-1: the tap-to-lock machine is gone with the system it served — no queued lock, no recStarting window, no tap shortcut anywhere on the recorder's path, and a failed start still says why",
@@ -359,7 +352,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       ui.includes("override val doubleTapTimeoutMillis: Long get() = ms") &&
       ui.includes("fun KpDoubleTapSeat(content: @Composable () -> Unit)") &&
       chat.includes("KpDoubleTapSeat {") &&
-      chat.includes("KpDoubleTapSeat {\n                    Box("),
+      (chat.match(/KpDoubleTapSeat \{/g) || []).length === 2,
   );
 }
 

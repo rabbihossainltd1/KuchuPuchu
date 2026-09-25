@@ -12,13 +12,13 @@ import org.junit.Test
  * zone is NOT a lock (the old release-to-lock shortcut is gone with the system
  * it served).
  *
- * Distances are pixels at xxhdpi-ish density (cancel 88 dp ≈ 264 px, the
- * lock-AT half 46 dp ≈ 138 px since r75-9), the same numbers the composer
+ * Distances are pixels at xxhdpi-ish density (cancel 120 dp ≈ 360 px, the
+ * lock-AT half 62 dp ≈ 186 px since r76-1), the same numbers the composer
  * passes in.
  */
 class VoiceHoldGestureTest {
-    private val cancel = 264f
-    private val lock = 138f
+    private val cancel = 360f
+    private val lock = 186f
 
     @Test
     fun `releasing inside the lock zone is a lock`() {

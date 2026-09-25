@@ -998,9 +998,10 @@ const convBetween = (db, a, b) =>
       !chat.includes("at least 1 second to record"),
   );
   check(
-    "mic button: fully transparent (round 15: shadow removed too), ring stays",
+    "mic button: r76-1 rebuild — the preview's seat: NO shadow, the screen's own background under a 2 dp ring (armed = red), never the old gold/white fill",
     !chat.includes("shadow(2.dp, CircleShape") &&
-      chat.includes("1.5.dp, if (cancelArmed) Red else accent") &&
+      chat.includes("2.dp, if (cancelArmed) Red else if (enabled) accent else Muted") &&
+      chat.includes(".background(Cream)") &&
       !chat.includes(".background(if (cancelArmed) Color.White else Gold)"),
   );
   check(
@@ -1129,7 +1130,7 @@ const convBetween = (db, a, b) =>
         "heightIn(min = 38.dp)\n                    // Owner round 18: the pill is BACK",
       ) ||
       chat.includes("v204 WhatsApp-style: outer bar transparent, inner pill Card")) &&
-      chat.includes("live HOLD strip (r75-8"),
+      chat.includes("r76-1 (the rebuild): the HOLD bar, point for point"),
   );
   check(
     "r17-11: reply-quote sender names are full ink (white on own bubbles), not gold-on-gold",
@@ -1606,7 +1607,7 @@ const convBetween = (db, a, b) =>
   );
   check(
     "14: mic button keeps a visible rounded ring (armed = red)",
-    chat.includes("1.5.dp, if (cancelArmed) Red else accent"),
+    chat.includes("2.dp, if (cancelArmed) Red else if (enabled) accent else Muted"),
   );
   check(
     "14: call backdrop decodes data: avatars inline (the real missing-photo bug)",
@@ -5742,11 +5743,9 @@ const convBetween = (db, a, b) =>
           "Canvas(modifier) { drawVoiceBars(VoiceNote.livePeaks, 1f, color, color, newest = true) }",
         ) &&
         chat.includes(
-          "LiveVoiceWave(color = Muted, modifier = Modifier.weight(1f).height(26.dp))",
+          "LiveVoiceWave(color = Muted, modifier = Modifier.weight(1f).height(28.dp))",
         ) &&
-        chat.includes(
-          'Text("‹ Slide to cancel", color = Muted, fontSize = 12.5.sp, maxLines = 1)',
-        ) &&
+        chat.includes('Text("‹ Slide to cancel", color = Muted, fontSize = 12.sp, maxLines = 1)') &&
         (chat.match(/\.size\(28\.dp\)\n\s+\.pressScale\(interaction\)/g) || []).length === 1 &&
         vn.includes("var livePeaks: List<Int> by mutableStateOf(emptyList())") &&
         vn.includes("livePeaks = VoiceWaveform.live(amps)") &&
@@ -8990,7 +8989,7 @@ const convBetween = (db, a, b) =>
         !vid.includes("fillMaxWidth(0.62f)") &&
         (vid.match(/\.size\(38\.dp\)/g) || []).length === 2 &&
         (vid.match(/modifier = Modifier\.size\(32\.dp\),/g) || []).length === 2 &&
-        !chat.includes(".size(46.dp)") &&
+        (chat.match(/\.size\(46\.dp\)/g) || []).length === 1 &&
         chat.includes("val albumWidth = 208.dp") &&
         !chat.includes("264.dp"),
     );

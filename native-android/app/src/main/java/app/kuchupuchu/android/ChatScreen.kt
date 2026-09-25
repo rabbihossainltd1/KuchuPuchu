@@ -69,7 +69,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
-import androidx.compose.material.icons.filled.DoubleArrow
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.MusicNote
@@ -5141,6 +5140,7 @@ private fun Composer(
     var lockArmed by remember { mutableStateOf(false) }
     var holdCancelArmed by remember { mutableStateOf(false) }
     var holdMicX by remember { mutableStateOf(0f) }
+    var holdMicY by remember { mutableStateOf(0f) }
     var binPlaying by remember { mutableStateOf(false) }
     var binRow by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     val swallowT = remember { Animatable(0f) }
@@ -5165,22 +5165,17 @@ private fun Composer(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (binPlaying && !recording) {
-            // r75-9: the bar STAYS — the clock spot sits empty (the overlay's
-            // dustbin is already there), the wave and the hint keep playing.
-            Row(
-                Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(DarkCard)
-                    .padding(horizontal = 14.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Spacer(Modifier.width(40.dp))
-                Spacer(Modifier.width(10.dp))
-                LiveVoiceWave(color = accent, modifier = Modifier.weight(1f).height(22.dp))
-                Spacer(Modifier.width(10.dp))
-                Text("‹ Slide to cancel", color = Muted, fontSize = 12.5.sp, maxLines = 1)
-            }
+            // r76-1 (the rebuild): the swallow scene keeps the HOLD bar alive —
+            // the clock's spot is the small dustbin's (its lid rides the
+            // swallow), the wave and the hint keep playing beside it until the
+            // pill returns.
+            RecorderHoldBar(
+                recMs = recMs,
+                accent = accent,
+                cancelVisual = true,
+                lidOpen = swallowLidOf(swallowT.value),
+                modifier = Modifier.weight(1f),
+            )
         } else if (!recording) {
             Column(
                 Modifier
@@ -5265,193 +5260,50 @@ private fun Composer(
                 }
             }
         } else if (locked) {
-            /* r75-5 (owner's screenshot of the locked panel: "eita lock kore
-               thakle emon vabe record hobe shob buttons wave delete send shob
-               kichu valo kore notice kore dekho") — the panel, noted control
-               by control: top row the clock, the wide GREY wave, and the
-               view-once circle; bottom row the red bin on its dark-red seat,
-               the wide Pause pill, and the big accent Send with the dark
-               double chevron. No lock glyph anywhere (the screenshot has
-               none). */
-            Column(
-                Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(28.dp))
-                    // r75-2: the app's own charcoal (DarkCard) — the panel, not
-                    // a strip of loose parts.
-                    .background(DarkCard)
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "%d:%02d".format(recMs / 1000 / 60, recMs / 1000 % 60),
-                        color = if (paused) Muted else Ink,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    // the wave runs the whole middle, grey like the screenshot
-                    LiveVoiceWave(color = Muted, modifier = Modifier.weight(1f).height(26.dp))
-                    Spacer(Modifier.width(10.dp))
-                    // the view-once toggle (the screenshot's "1" circle) —
-                    // armed, the note goes out once-view; the double-tap still
-                    // forces it either way (r71-19b).
-                    Box(
-                        Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.08f))
-                            .border(1.dp, if (voiceOnce) accent else Color.Transparent, CircleShape)
-                            .clickable { onToggleVoiceOnce() },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CenteredOnceIcon(20.dp, tint = if (voiceOnce) accent else Color.White, fillBounds = true)
-                    }
-                }
-                Spacer(Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(Red.copy(alpha = 0.15f))
-                            .clickable { onCancelVoice() },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Icons.Filled.Delete,
-                            "Delete recording",
-                            tint = Red,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                    Spacer(Modifier.width(10.dp))
-                    Row(
-                        Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(23.dp))
-                            .background(Color.White.copy(alpha = 0.08f))
-                            .clickable { onTogglePause() }
-                            .padding(horizontal = 12.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
-                            if (paused) "Resume recording" else "Pause recording",
-                            tint = Color.White,
-                            modifier = Modifier.size(17.dp),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            if (paused) "Resume" else "Pause",
-                            color = Color.White,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                        )
-                    }
-                    Spacer(Modifier.width(10.dp))
-                    // r75-9 (owner: "just send. button ta pause er pashei
-                    // thakbe" + "app er original ta use korbi"): the app's own
-                    // voice-send seat moved INSIDE the panel, beside the Pause
-                    // pill — the mic seat renders nothing while locked.
-                    KpDoubleTapSeat {
-                        Box(
-                            Modifier
-                                .size(42.dp)
-                                .clip(CircleShape)
-                                .background(accent)
-                                .combinedClickable(
-                                    onClick = onSendVoice,
-                                    onDoubleClick = if (selectCount == 0) onSendVoiceOnce else null,
-                                ),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                Icons.Filled.DoubleArrow,
-                                "Send voice message",
-                                tint = Color(0xFF10141A),
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
-                    }
-                }
-            }
-        } else {
-            /* live HOLD strip (r75-8, the owner's word: "tap hold korle
-               normaly wave soho voice record hobe voice button tar upore lock
-               icon thakbe slide left to delete ager animation ei thakbe
-               dustbin animation"): ONE dark rounded bar — the clock, the live
-               wave, the hint — the lock column above the mic, the mic turns
-               into the red bin on the left slide, the release sends. */
-            Row(
-                Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(DarkCard)
-                    .padding(horizontal = 14.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // r75-9 (the approved preview): the cancel arm DROPS the clock
-                // out of the strip and raises the small dustbin into its place —
-                // no overlap: the bin enters only as the clock leaves.
-                Box(Modifier.width(40.dp), contentAlignment = Alignment.CenterStart) {
-                    val sink by animateFloatAsState(if (holdCancelArmed) 1f else 0f, tween(180), label = "clocksink")
-                    Text(
-                        "%d:%02d".format(recMs / 1000 / 60, recMs / 1000 % 60),
-                        color = Ink,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.offset(y = 26.dp * sink).alpha(1f - sink),
-                    )
-                    if (sink > 0.02f) {
-                        SmallDustbin(lidOpen = 0f, modifier = Modifier.alpha(sink).offset(y = 14.dp * (1f - sink)))
-                    }
-                }
-                Spacer(Modifier.width(10.dp))
-                // r75-8 (owner: "tap hold korle normaly wave soho voice record
-                // hobe"): the live wave rides the hold again, between the
-                // clock and the hint.
-                LiveVoiceWave(color = accent, modifier = Modifier.weight(1f).height(22.dp))
-                Spacer(Modifier.width(10.dp))
-                Text("‹ Slide to cancel", color = Muted, fontSize = 12.5.sp, maxLines = 1)
-            }
-        }
-        Spacer(Modifier.width(6.dp))
-        // r75-1 (the MD): the capsule is the HOLD's target only — it slides up
-        // with the finger and vanishes the moment the toolbar takes over.
-        // The locked state has NO badge (the MD's toolbar has none).
-        if (recording && !locked && lockAlpha > 0.01f) {
-            LockBadgePill(
-                alpha = lockAlpha,
-                armed = lockArmed,
+            // r76-1 (the rebuild): the LOCKED panel from the approved preview —
+            // top row the clock, the wide GREY wave, the app's view-once circle;
+            // bottom row the red bin (direct cancel), the wide Pause pill and
+            // the app's own Send right beside it.
+            RecorderLockedPanel(
+                recMs = recMs,
+                paused = paused,
+                voiceOnce = voiceOnce,
                 accent = accent,
-                modifier =
-                    Modifier
-                        .align(Alignment.CenterVertically)
-                        // r75-9 (the approved preview): the column is FIXED —
-                        // centred over the mic (+52 dp right: mic half 21 + row
-                        // spacer 6 + column half 25), its bottom edge at the
-                        // mic's bottom. It never rides the finger — only the
-                        // voice button climbs it.
-                        .offset { IntOffset(52.dp.roundToPx(), -65.dp.roundToPx()) },
+                onToggleVoiceOnce = onToggleVoiceOnce,
+                onCancelVoice = onCancelVoice,
+                onTogglePause = onTogglePause,
+                selectCount = selectCount,
+                onSendVoice = onSendVoice,
+                onSendVoiceOnce = onSendVoiceOnce,
+                modifier = Modifier.weight(1f),
+            )
+        } else {
+            // r76-1 (the rebuild): the HOLD bar, point for point from the
+            // approved preview — the clock, the live accent wave, the muted
+            // hint; the cancel arm sinks the clock and raises the small
+            // dustbin into its spot (never overlapping).
+            RecorderHoldBar(
+                recMs = recMs,
+                accent = accent,
+                cancelVisual = holdCancelArmed,
+                lidOpen = 0f,
+                modifier = Modifier.weight(1f),
             )
         }
-
+        Spacer(Modifier.width(6.dp))
         /* mic/send circle. Text typed OR chat media selected (forward) ->
            it's SEND; otherwise a HOLD button: press = record, slide = cancel.
            Owner round 32 (item 19): a gallery pick no longer takes this slot
            — the attach panel has its own Send under the mic.
-           r75-3 (WhatsApp's frames): a LOCKED recording renders NOTHING here —
-           the panel's own Send circle is the only send on screen. */
+           r76-1: a LOCKED take renders NOTHING here — the panel's own Send
+           circle is the only send on screen. */
         when {
             !input.isBlank() || selectCount > 0 -> {
                 val sendInteraction = remember { MutableInteractionSource() }
                 val sendPressed by sendInteraction.collectIsPressedAsState()
                 // r72-19: this seat's double tap is the once-send, and the owner
-                // picked a 0.45 s window for it (the platform's is ~0.3 s) — the
-                // seat runs inside a ViewConfiguration of its own.
+                // picked a 0.45 s window for it (the platform's is ~0.3 s) —
+                // the seat runs inside a ViewConfiguration of its own.
                 KpDoubleTapSeat {
                     Box(
                         Modifier
@@ -5493,16 +5345,23 @@ private fun Composer(
                     }
                 }
             }
-            // r75-9 (owner: "ar voice lock er somoy abar extra voice button
-            // add korechis keno? extra kichui korbi na just ja bolbo tai"): a
-            // LOCKED take renders NOTHING in the seat — the bar goes full width
-            // and the panel's own Send (beside the Pause pill) is the only
-            // send on screen.
             locked -> {
             }
             else -> {
-                Box(Modifier.fxMicAnchor()) {
-                    // r75-9: while the swallow plays the mic stays gone — its
+                // r76-1: the preview's #seatWrap — 50x46; the FIXED lock column
+                // sits behind the mic, both flushed to its bottom right. Only
+                // the mic rides the finger; the column never moves.
+                Box(Modifier.width(50.dp).height(46.dp).fxMicAnchor()) {
+                    if (recording && !locked && lockAlpha > 0.01f) {
+                        LockColumn(
+                            alpha = lockAlpha,
+                            armed = lockArmed,
+                            dimmed = holdCancelArmed,
+                            accent = accent,
+                            modifier = Modifier.align(Alignment.BottomEnd),
+                        )
+                    }
+                    // r76-1: while the swallow plays the mic stays gone — its
                     // glyph is already flying into the dustbin.
                     if (!binPlaying) {
                         HoldMicButton(
@@ -5511,23 +5370,26 @@ private fun Composer(
                             accent = accent,
                             onStartRecord = onStartRecord,
                             onFinishRecord = onFinishRecord,
-                            onLockVisual = { a, armed, cArmed, mx ->
+                            onLockVisual = { a, armed, cArmed, mx, my ->
                                 lockAlpha = a
                                 lockArmed = armed
                                 holdCancelArmed = cArmed
                                 holdMicX = mx
+                                holdMicY = my
                             },
+                            modifier = Modifier.align(Alignment.BottomEnd),
                         )
                     }
                 }
             }
         }
-        // r75-9: the swallow's anchor — a zero-width slot at the row's end; the
-        // dustbin + the flying mic glyph ride it unclipped.
+        // r76-1: the swallow's anchor — a zero-width slot at the row's end;
+        // the flying mic glyph rides it unclipped, seat to the dustbin's mouth.
         if (binPlaying && !recording) {
             ComposerBinSwallow(
                 rowWidthPx = binRow.width.toFloat(),
                 micXpx = holdMicX,
+                micYpx = holdMicY,
                 swallowV = swallowT.value,
                 modifier = Modifier.width(0.dp),
             )
@@ -5536,18 +5398,19 @@ private fun Composer(
 }
 
 /**
- * r75-9 (the approved preview; the owner's word: "bar ta still thakbe just
- * voice button ta upore uthbe"): the FIXED slim lock column — the mic seat's
- * own width, rounded at BOTH ends, its bottom edge at the mic's bottom. The
- * Material lock sits on top, UNLOCKED at rest; the voice button's rise past
- * the half closes the shackle (and lights the accent). The chevron hangs a
- * little ABOVE the middle and bobs up-and-down, up-and-down. The column never
- * moves with the finger — only the voice button climbs it.
+ * r76-1 (the rebuild, from the approved preview v5.8): the FIXED lock column —
+ * the mic seat's own width (50 dp), 172 dp tall, rounded at both ends, its
+ * bottom edge at the mic's bottom; it NEVER rides the finger. The hand-drawn
+ * Material padlock hangs OPEN at rest and its shackle closes when the voice
+ * button rises past the lock-at half (preview only — the release decides);
+ * the chevron sits a little ABOVE the middle and bobs on a 1.1 s loop. The
+ * cancel arm dims the whole column to 30%.
  */
 @Composable
-private fun LockBadgePill(
+private fun LockColumn(
     alpha: Float,
     armed: Boolean,
+    dimmed: Boolean,
     accent: Color,
     modifier: Modifier = Modifier,
 ) {
@@ -5560,28 +5423,205 @@ private fun LockBadgePill(
     Box(
         modifier
             .size(width = 50.dp, height = 172.dp)
-            .alpha(alpha)
+            .alpha(alpha * if (dimmed) 0.3f else 1f)
             .clip(RoundedCornerShape(22.dp))
             .background(DarkCard)
-            .border(1.dp, if (armed) accent else Color.Transparent, RoundedCornerShape(22.dp)),
+            .border(2.dp, if (armed) accent else Color.Transparent, RoundedCornerShape(22.dp)),
         contentAlignment = Alignment.TopCenter,
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(top = 10.dp),
+            modifier = Modifier.fillMaxSize().padding(top = 10.dp),
         ) {
             PadlockGlyph(locked = armed, tint = if (armed) accent else Color.White)
-            Spacer(Modifier.height(26.dp))
-            Icon(
-                Icons.Filled.KeyboardArrowUp,
-                null,
-                tint = Color.White.copy(alpha = 0.55f),
-                modifier = Modifier.offset(y = chev.dp).size(20.dp),
+            Spacer(Modifier.height(8.dp))
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Filled.KeyboardArrowUp,
+                    null,
+                    tint = Color.White.copy(alpha = 0.55f),
+                    modifier = Modifier.offset(y = (chev - 12f).dp).size(20.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * r76-1 (the rebuild): the HOLD bar, point for point from the approved
+ * preview — 25 dp corners on the theme's card, 14/11 padding, one row: the
+ * 15 sp clock (min 42 dp), the live wave (28 dp), the muted '‹ Slide to
+ * cancel'. The cancel arm sinks the clock 26 dp out (180 ms) and raises the
+ * small dustbin into its spot (200 ms, 100 ms late — one leaves as the other
+ * enters, never overlapping); the swallow's lid rides [lidOpen].
+ */
+@Composable
+private fun RecorderHoldBar(
+    recMs: Int,
+    accent: Color,
+    cancelVisual: Boolean,
+    lidOpen: Float,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier
+            .clip(RoundedCornerShape(25.dp))
+            .background(DarkCard)
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.widthIn(min = 42.dp), contentAlignment = Alignment.CenterStart) {
+                val sink by animateFloatAsState(if (cancelVisual) 1f else 0f, tween(180), label = "clocksink")
+                Text(
+                    "%d:%02d".format(recMs / 1000 / 60, recMs / 1000 % 60),
+                    color = Ink,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    modifier = Modifier.offset(y = 26.dp * sink).alpha(1f - sink),
+                )
+            }
+            Spacer(Modifier.width(9.dp))
+            LiveVoiceWave(color = accent, modifier = Modifier.weight(1f).height(28.dp))
+            Spacer(Modifier.width(9.dp))
+            Text("‹ Slide to cancel", color = Muted, fontSize = 12.sp, maxLines = 1)
+        }
+        val rise by animateFloatAsState(
+            if (cancelVisual) 1f else 0f,
+            tween(200, delayMillis = 100),
+            label = "binrise",
+        )
+        if (rise > 0.02f || lidOpen > 0.02f) {
+            SmallDustbin(
+                lidOpen = lidOpen,
+                modifier =
+                    Modifier
+                        .align(Alignment.CenterStart)
+                        .offset(x = (-2).dp, y = 14.dp * (1f - rise))
+                        .alpha(rise),
             )
         }
     }
 }
 
+/**
+ * r76-1 (the rebuild): the LOCKED panel from the approved preview — one dark
+ * card, 25 dp corners, 14/11 padding. Top row: the clock (grey while paused),
+ * the wide GREY wave, the app's own view-once icon in the 40 dp circle (armed
+ * = accent ring + tint). Bottom row: the red bin (DIRECT cancel, no
+ * animation), the wide Pause/Resume pill, and the app's own Send circle right
+ * beside it — single tap sends, double tap sends once.
+ */
+@Composable
+private fun RecorderLockedPanel(
+    recMs: Int,
+    paused: Boolean,
+    voiceOnce: Boolean,
+    accent: Color,
+    onToggleVoiceOnce: () -> Unit,
+    onCancelVoice: () -> Unit,
+    onTogglePause: () -> Unit,
+    selectCount: Int,
+    onSendVoice: () -> Unit,
+    onSendVoiceOnce: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(25.dp))
+            .background(DarkCard)
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "%d:%02d".format(recMs / 1000 / 60, recMs / 1000 % 60),
+                color = if (paused) Muted else Ink,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.widthIn(min = 42.dp),
+            )
+            Spacer(Modifier.width(9.dp))
+            LiveVoiceWave(color = Muted, modifier = Modifier.weight(1f).height(28.dp))
+            Spacer(Modifier.width(9.dp))
+            Box(
+                Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.08f))
+                    .border(1.5.dp, if (voiceOnce) accent else Color.Transparent, CircleShape)
+                    .clickable { onToggleVoiceOnce() },
+                contentAlignment = Alignment.Center,
+            ) {
+                CenteredOnceIcon(20.dp, tint = if (voiceOnce) accent else Color.White, fillBounds = true)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(Red.copy(alpha = 0.16f))
+                    .clickable { onCancelVoice() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Delete,
+                    "Delete recording",
+                    tint = Red,
+                    modifier = Modifier.size(19.dp),
+                )
+            }
+            Spacer(Modifier.width(9.dp))
+            Row(
+                Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Color.White.copy(alpha = 0.08f))
+                    .clickable { onTogglePause() },
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
+                    if (paused) "Resume recording" else "Pause recording",
+                    tint = Color.White,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (paused) "Resume" else "Pause",
+                    color = Color.White,
+                    fontSize = 14.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+            }
+            Spacer(Modifier.width(9.dp))
+            KpDoubleTapSeat {
+                Box(
+                    Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(accent)
+                        .combinedClickable(
+                            onClick = onSendVoice,
+                            onDoubleClick = if (selectCount == 0) onSendVoiceOnce else null,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Send,
+                        "Send voice message",
+                        tint = Color(0xFF0D1524),
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+        }
+    }
+}
 /**
  * r75-9: the first-round Material lock, drawn by hand so ONE glyph can be both
  * states — the shackle hangs open on its right hinge (lifted, a gap showing)
@@ -5594,7 +5634,7 @@ private fun PadlockGlyph(
     modifier: Modifier = Modifier,
 ) {
     val open by animateFloatAsState(if (locked) 0f else 1f, tween(160), label = "shackle")
-    Canvas(modifier.size(24.dp)) {
+    Canvas(modifier.size(22.dp)) {
         val d = 1.dp.toPx()
         drawRoundRect(
             color = tint,
@@ -5604,7 +5644,7 @@ private fun PadlockGlyph(
         )
         withTransform({
             rotate(20f * open, pivot = Offset(17 * d, 10 * d))
-            translate(top = -3f * d * open)
+            translate(top = -2f * d * open)
         }) {
             // the shackle: two legs + the top arc, stroked round
             drawLine(tint, Offset(7 * d, 10 * d), Offset(7 * d, 7 * d), strokeWidth = 2.6f * d, cap = StrokeCap.Round)
@@ -5623,14 +5663,14 @@ private fun PadlockGlyph(
 }
 
 /**
- * The hold-to-record mic, r75-9 (the approved preview): press = the recording
- * starts at once and NOTHING happens while the finger stays down — the first
- * dominant direction owns the drag (UP the fixed column, or LEFT toward the
- * dustbin, never both), the button rides it 1:1, and the RELEASE decides:
- * released above the half = LOCKED (the column's shackle closes at the half,
- * so the finger sees it coming), released left-past-the-distance = the dustbin
- * swallow, released where it started = send. Going up past the half and back
- * down again changes nothing — a release never locks an unrisen button.
+ * The hold-to-record mic, r76-1 (the rebuild, from the approved preview v5.8):
+ * press = the recording starts at once and NOTHING fires while the finger
+ * stays down — the first dominant direction owns the drag (UP the fixed
+ * column, or LEFT toward the dustbin, never both; a low clearly-leftward pull
+ * can still escape an early up-lock), the 46 dp button rides it 1:1, and the
+ * RELEASE decides: risen past the lock-at half = LOCK, left past the cancel
+ * distance (with its 70% unarm hysteresis) = the dustbin swallow, stayed put =
+ * SEND. The cancel arm turns the ring + glyph red and fires one heavy buzz.
  */
 @Composable
 private fun HoldMicButton(
@@ -5639,57 +5679,62 @@ private fun HoldMicButton(
     accent: Color = Gold,
     onStartRecord: () -> Unit,
     onFinishRecord: (cancelled: Boolean) -> Unit,
-    // r75-9: fired on RELEASE, once the rise is past the half (the device fix:
-    // the old 72 dp mid-drag cross never landed on the owner's phone).
+    // r76-1: fired on RELEASE, once the rise is past the lock-at half (the
+    // preview's LOCK_AT — a preview-only arm, the release is what locks).
     onLockRecord: () -> Unit = {},
-    // r75-9: the composer draws the column + the swallow, so the mic publishes
-    // its state: column alpha, lock-armed, cancel-armed, the visual x offset.
-    onLockVisual: (alpha: Float, lockArmed: Boolean, cancelArmed: Boolean, micX: Float) -> Unit = { _, _, _, _ -> },
+    // r76-1: the composer draws the column + the swallow, so the mic publishes
+    // its state: column alpha, lock-armed, cancel-armed, the visual offsets.
+    onLockVisual: (alpha: Float, lockArmed: Boolean, cancelArmed: Boolean, micX: Float, micY: Float) -> Unit = { _, _, _, _, _ -> },
+    modifier: Modifier = Modifier,
 ) {
     val haptics = rememberHaptics()
     val density = LocalDensity.current
-    val cancelDist = with(density) { 88.dp.toPx() }
-    // r75-9: the RELEASE lock distance — the half of the column climb (the old
-    // mid-drag 72 dp never landed on the owner's phone; the half does, and the
-    // shackle closes exactly there so the finger sees it coming).
-    val lockAtDist = with(density) { 46.dp.toPx() }
-    val riseMax = with(density) { 88.dp.toPx() }
-    val slideCap = with(density) { 120.dp.toPx() }
+    // r76-1: the preview's thresholds, dp for px — cancel arms past 120 and
+    // unarms under 84 (70%); the lock preview + release-lock at 62 (the half
+    // of the climb); the rise caps at 138 and the left slide at 150.
+    val cancelDist = with(density) { 120.dp.toPx() }
+    val cancelUnarm = with(density) { 84.dp.toPx() }
+    val lockAtDist = with(density) { 62.dp.toPx() }
+    val riseMax = with(density) { 138.dp.toPx() }
+    val slideCap = with(density) { 150.dp.toPx() }
     val slop = with(density) { 18.dp.toPx() }
+    val escRise = with(density) { 26.dp.toPx() }
+    val escDx = with(density) { 44.dp.toPx() }
     var dragX by remember { mutableStateOf(0f) }
     var dragY by remember { mutableStateOf(0f) }
-    // r75-9: the first dominant direction owns the whole drag — 0 undecided,
+    // r76-1: the cancel arm latches with hysteresis (arm at 120, unarm at 84)
+    // so a trembling finger never flickers the red state.
+    var cancelHold by remember { mutableStateOf(false) }
+    // r76-1: the first dominant direction owns the whole drag — 0 undecided,
     // 1 = up the column, 2 = left to the dustbin. No free diagonal move.
     var axis by remember { mutableStateOf(0) }
-    val cancelArmed = axis == 2 && dragX <= -cancelDist
+    val cancelArmed = cancelHold
     val lockArmed = axis == 1 && dragY <= -lockAtDist
     // the column is up from the moment the recording starts — it is what the
-    // finger is aiming at (the MD's "lock control appears above").
+    // finger is aiming at.
     val lockShowing = recording || dragY <= -12f
     val lockAlpha by animateFloatAsState(if (lockShowing) 1f else 0f, tween(120), label = "lockalpha")
-    // r75-9: the button ITSELF rides the finger now — up the column or left
+    // r76-1: the button ITSELF rides the finger — up the column or left
     // toward the dustbin, 1:1 on the chosen axis.
     val micX by animateFloatAsState(if (recording) dragX else 0f, spring(stiffness = 1200f), label = "micdrag")
     val micY by animateFloatAsState(if (recording) dragY else 0f, spring(stiffness = 1200f), label = "micrise")
 
     Box(
-        Modifier
-            .size(42.dp)
+        modifier
+            .size(46.dp)
             .offset { IntOffset(micX.roundToInt(), micY.roundToInt()) }
-            // r71-16 (owner: "ei shadow ta amar ekdomi valo lage na"): the
-            // 3D-lift drop shadow stays gone. The ring + fill carry the button.
             .clip(CircleShape)
             .alpha(if (enabled) 1f else 0.4f)
-            // Owner round 14: the ring was transparent unless cancel was
-            // armed — the owner read the bare icon as "no rounded border".
-            .border(1.5.dp, if (cancelArmed) Red else accent, CircleShape)
+            // r76-1: the preview's seat — the screen's own background under a
+            // 2 dp accent ring, so the column never shows through the circle.
+            .background(Cream)
+            .border(2.dp, if (cancelArmed) Red else if (enabled) accent else Muted, CircleShape)
             .pointerInput(enabled) {
                 awaitEachGesture {
                     // Owner round 31 (item 17): the disabled branch used to
                     // return BEFORE awaiting a pointer — awaitEachGesture then
                     // re-entered instantly with nothing to suspend on, spinning
-                    // the main thread until the app froze (the "AI voice
-                    // button crash"). Always consume the down first.
+                    // the main thread until the app froze. Always consume down.
                     val down = awaitFirstDown(requireUnconsumed = false)
                     if (!enabled) {
                         down.consume()
@@ -5698,7 +5743,7 @@ private fun HoldMicButton(
                     dragX = 0f
                     dragY = 0f
                     axis = 0
-                    var armed = false
+                    cancelHold = false
                     onStartRecord()
                     while (true) {
                         val event = awaitPointerEvent()
@@ -5708,36 +5753,45 @@ private fun HoldMicButton(
                         // pass used to eat the change first, so dragY stayed 0.
                         val dx = change.positionChangeIgnoreConsumed().x
                         val dy = change.positionChangeIgnoreConsumed().y
-                        // r75-9: the FIRST dominant direction owns the drag.
+                        // r76-1: the FIRST dominant direction owns the drag.
                         if (axis == 0) {
                             if (dx < -slop && -dx > -dy * 1.15f) axis = 2
                             else if (dy < -slop && -dy > -dx * 1.15f) axis = 1
                         }
                         // a low, clearly-leftward pull escapes an early y-lock
-                        if (axis == 1 && dragY > -riseMax * 0.3f && dx < 0f && -dx > slop * 2f && -dx > -dy * 1.8f) axis = 2
+                        if (axis == 1 && -dragY < escRise && -dx > escDx && -dx > -dy * 1.8f) axis = 2
                         when (axis) {
                             2 -> dragX = (dragX + dx).coerceIn(-slideCap, 0f)
                             1 -> dragY = (dragY + dy).coerceIn(-riseMax, 0f)
                         }
-                        val nowArmed = axis == 2 && dragX <= -cancelDist
-                        if (nowArmed && !armed) haptics.heavy()
-                        armed = nowArmed
+                        if (axis == 2) {
+                            if (!cancelHold && -dragX > cancelDist) {
+                                cancelHold = true
+                                haptics.heavy()
+                            } else if (cancelHold && -dragX < cancelUnarm) {
+                                cancelHold = false
+                            }
+                        } else if (cancelHold) {
+                            cancelHold = false
+                        }
                         event.changes.forEach { it.consume() }
                         if (event.changes.all { !it.pressed }) break
                     }
                     val endX = dragX
                     val endY = dragY
+                    val wasCancel = cancelHold
                     dragX = 0f
                     dragY = 0f
                     axis = 0
-                    // r75-9: the release decides EVERYTHING — nothing fired
-                    // while the finger was down. Above the half = lock, left
-                    // past the distance = the dustbin, else send.
+                    cancelHold = false
+                    // r76-1: the release decides EVERYTHING — nothing fired
+                    // while the finger was down. An armed cancel stays a cancel
+                    // down to the unarm line; above the half = lock, else send.
                     val how =
                         VoiceHoldGesture.decide(
                             dx = endX,
                             dy = endY,
-                            cancelDist = cancelDist,
+                            cancelDist = if (wasCancel) cancelUnarm else cancelDist,
                             lockDist = lockAtDist,
                         )
                     when (how) {
@@ -5749,8 +5803,6 @@ private fun HoldMicButton(
             },
         contentAlignment = Alignment.Center,
     ) {
-        // r75-9: the glyph stays the MIC all through — the arm only turns the
-        // ring + tint red (the button itself is what drops into the dustbin).
         Icon(
             Icons.Filled.Mic,
             contentDescription = "Record voice message",
@@ -5758,11 +5810,10 @@ private fun HoldMicButton(
             modifier = Modifier.size(20.dp),
         )
     }
-    // r75-9: the column + the swallow belong to the composer (they clear the
+    // r76-1: the column + the swallow belong to the composer (they clear the
     // mic's clip) — this is only their state, published as it changes.
-    SideEffect { onLockVisual(lockAlpha, lockArmed, cancelArmed, micX) }
+    SideEffect { onLockVisual(lockAlpha, lockArmed, cancelArmed, micX, micY) }
 }
-
 private val VIDEO_NAME_EXT = listOf(".mp4", ".mov", ".mkv", ".webm", ".3gp", ".m4v", ".avi")
 
 /**
@@ -5805,53 +5856,53 @@ internal fun SmallDustbin(
 }
 
 /**
- * r75-9 (the approved preview): the swallow. A zero-width anchor at the row's
- * end — from it the small dustbin sits exactly where the strip's clock was,
- * and the mic GLYPH (no ring, no fill) flies from the seat, stops at the open
- * mouth, drops straight in shrinking, and the lid shuts behind it. 900 ms.
+ * r76-1 (the rebuild): the swallow's lid curve — the cap opens first (by
+ * ~60 ms), stays open while the mic glyph flies and drops, and shuts at
+ * ~530-640 ms. The bar's dustbin rides it; the glyph flies beside it.
+ */
+internal fun swallowLidOf(v: Float): Float =
+    when {
+        v <= 0f -> 0f
+        v < 0.07f -> v / 0.07f
+        v < 0.59f -> 1f
+        v < 0.71f -> 1f - (v - 0.59f) / 0.12f
+        else -> 0f
+    }
+
+/**
+ * r76-1 (the rebuild): the swallow's FLYER — the mic GLYPH alone (no ring, no
+ * fill) flies from the seat to a stop just above the dustbin's mouth (300 ms),
+ * then drops straight in, shrinking and fading (200 ms). The dustbin itself
+ * lives in the bar's clock spot; this zero-width anchor at the row's end only
+ * carries the glyph unclipped.
  */
 @Composable
 internal fun ComposerBinSwallow(
     rowWidthPx: Float,
     micXpx: Float,
+    micYpx: Float,
     swallowV: Float,
     modifier: Modifier = Modifier,
 ) {
     val v = swallowV
-    val lid =
-        when {
-            v < 0.12f -> v / 0.12f
-            v > 0.8f -> 1f - (v - 0.8f) / 0.12f
-            else -> 1f
-        }
-    // the flight (seat -> the open mouth) and the straight drop into the can
-    val fly = (v / 0.5f).coerceIn(0f, 1f)
-    val drop = ((v - 0.5f) / 0.25f).coerceIn(0f, 1f)
+    val fly = ((v - 0.03f) / 0.34f).coerceIn(0f, 1f)
+    val drop = ((v - 0.34f) / 0.23f).coerceIn(0f, 1f)
     val ease = fly * fly * (3f - 2f * fly)
     val density = LocalDensity.current
     val pts =
         with(density) {
-            val micX = -21.dp.toPx() + micXpx
-            val binX = 40.dp.toPx() - rowWidthPx
-            val x = micX + (binX - micX) * ease
-            val mouthY = -6.dp.toPx()
-            val restY = 4.dp.toPx()
-            val y = if (drop <= 0f) mouthY * ease else mouthY + (restY - mouthY) * drop
-            Triple(x, y, 1f - 0.65f * drop)
+            val startX = -23.dp.toPx() + micXpx
+            val startY = micYpx
+            val mouthX = 30.dp.toPx() - rowWidthPx
+            val hoverY = -22.dp.toPx()
+            val inY = -4.dp.toPx()
+            val x = startX + (mouthX - startX) * ease
+            val y = if (drop <= 0f) startY + (hoverY - startY) * ease else hoverY + (inY - hoverY) * drop
+            Triple(x, y, 1f - 0.7f * drop)
         }
-    val glyphA = if (drop > 0.7f) 1f - (drop - 0.7f) / 0.3f else 1f
+    val glyphA = if (drop > 0.4f) 1f - (drop - 0.4f) / 0.3f else 1f
     Box(modifier) {
-        // the dustbin, exactly on the old clock spot (the strip's wave and
-        // hint keep the bar alive beside it)
-        Box(
-            Modifier.offset {
-                IntOffset((40.dp.toPx() - rowWidthPx).roundToInt(), -11.dp.roundToPx())
-            },
-        ) {
-            SmallDustbin(lidOpen = lid)
-        }
-        // the flying mic glyph
-        if (v > 0.005f && drop < 1f) {
+        if (v > 0.005f && drop < 1f && glyphA > 0f) {
             Icon(
                 Icons.Filled.Mic,
                 null,
@@ -5874,7 +5925,6 @@ internal fun ComposerBinSwallow(
         }
     }
 }
-
 /**
  * Small raised 3D circle for the header call icons: top-lit gradient and a
  * hairline bevel (no drop shadow — r73-16).
