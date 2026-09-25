@@ -5554,8 +5554,9 @@ private fun HoldMicButton(
     val haptics = rememberHaptics()
     val density = LocalDensity.current
     val cancelDist = with(density) { 88.dp.toPx() }
-    // the MD's lock distance: 80-120 dp of upward travel
-    val lockDist = with(density) { 96.dp.toPx() }
+    // the MD's lock distance, tuned DOWN to 72 dp (r75-6: 96 dp read too far
+    // on the owner's phone — the swipe gave up before the zone)
+    val lockDist = with(density) { 72.dp.toPx() }
     var dragX by remember { mutableStateOf(0f) }
     var dragY by remember { mutableStateOf(0f) }
     val cancelArmed = dragX <= -cancelDist
@@ -5603,8 +5604,13 @@ private fun HoldMicButton(
                     while (true) {
                         val event = awaitPointerEvent()
                         val change = event.changes.firstOrNull() ?: break
-                        val dx = change.positionChange().x
-                        val dy = change.positionChange().y
+                        // r75-6 (the owner's swipe never locked): read the
+                        // deltas IGNORE-CONSUMED — a parent that wins an earlier
+                        // pass used to eat the change first, so dragY stayed 0,
+                        // the threshold never crossed and the take just SENT on
+                        // release instead of locking.
+                        val dx = change.positionChangeIgnoreConsumed().x
+                        val dy = change.positionChangeIgnoreConsumed().y
                         if (dx != 0f) dragX = (dragX + dx).coerceIn(-cancelDist * 1.5f, 0f)
                         // r75-1: up is the lock's own axis, and the zone is the
                         // ONLY lock — the finger must travel the whole distance.

@@ -13,11 +13,11 @@ import org.junit.Test
  * it served).
  *
  * Distances are pixels at xxhdpi-ish density (cancel 88 dp ≈ 264 px, lock
- * 96 dp ≈ 288 px), the same numbers the composer passes in.
+ * 72 dp ≈ 216 px since r75-6), the same numbers the composer passes in.
  */
 class VoiceHoldGestureTest {
     private val cancel = 264f
-    private val lock = 288f
+    private val lock = 216f
 
     @Test
     fun `releasing inside the lock zone is a lock`() {

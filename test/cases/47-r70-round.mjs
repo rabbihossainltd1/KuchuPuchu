@@ -217,10 +217,11 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
   const vnotes = main("VoiceNote.kt");
   check(
-    'r75-1 (owner: "current voice lock system hold swipe up system shob remove koro ami ekta md file diyechi dekho ei vabe hobe shob"): the hold is the MD\'s state machine — press records at once, the capsule is the ONLY lock target and the take locks MID-DRAG the instant the finger crosses 96 dp (a release never locks), slide-left past 88 dp cancels, a plain hold-and-release SENDS, the mic never leaves its seat (only the capsule climbs), and the release is decided by the pure rules in VoiceHoldGesture (LOCK / CANCEL / SEND)',
+    'r75-1 (owner: "current voice lock system hold swipe up system shob remove koro ami ekta md file diyechi dekho ei vabe hobe shob"): the hold is the MD\'s state machine — press records at once, the capsule is the ONLY lock target and the take locks MID-DRAG the instant the finger crosses 72 dp (a release never locks), slide-left past 88 dp cancels, a plain hold-and-release SENDS, the mic never leaves its seat (only the capsule climbs), and the release is decided by the pure rules in VoiceHoldGesture (LOCK / CANCEL / SEND)',
     mic.includes("val cancelDist = with(density) { 88.dp.toPx() }") &&
-      mic.includes("val lockDist = with(density) { 96.dp.toPx() }") &&
+      mic.includes("val lockDist = with(density) { 72.dp.toPx() }") &&
       mic.includes("if (!locked && dragY <= -lockDist) {") &&
+      mic.includes("change.positionChangeIgnoreConsumed()") &&
       mic.includes("locked = true") &&
       mic.includes("onLockRecord()") &&
       mic.includes("if (!locked) {") &&
