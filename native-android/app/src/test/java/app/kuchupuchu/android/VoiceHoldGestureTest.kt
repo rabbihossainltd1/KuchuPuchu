@@ -46,7 +46,7 @@ class VoiceHoldGestureTest {
     fun `the left slide cancels, even while climbing`() {
         assertEquals(
             VoiceHoldGesture.Result.CANCEL,
-            VoiceHoldGesture.decide(dx = -300f, dy = -300f, cancelDist = cancel, lockDist = lock),
+            VoiceHoldGesture.decide(dx = -400f, dy = -300f, cancelDist = cancel, lockDist = lock),
         )
     }
 
