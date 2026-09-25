@@ -5135,7 +5135,6 @@ private fun Composer(
     // FIXED (only the voice button rises), the cancel arm drops the strip's
     // clock and raises the small dustbin, and the release plays the swallow —
     // the mic glyph flies into the dustbin's open mouth, straight down in.
-    var lockAlpha by remember { mutableStateOf(0f) }
     var lockArmed by remember { mutableStateOf(false) }
     var holdCancelArmed by remember { mutableStateOf(false) }
     var holdMicX by remember { mutableStateOf(0f) }
@@ -5351,9 +5350,12 @@ private fun Composer(
                 // sits behind the mic, both flushed to its bottom right. Only
                 // the mic rides the finger; the column never moves.
                 Box(Modifier.width(50.dp).height(46.dp).fxMicAnchor()) {
-                    if (recording && !locked && lockAlpha > 0.01f) {
+                    // r76-3 (owner: "lock icon kothai thakbe ... bar bar ta
+                    // koi"): the HTML shows the column the instant the hold
+                    // starts — no fade, no alpha gate. Any gate is a shortcut
+                    // the reference does not take.
+                    if (recording && !locked) {
                         LockColumn(
-                            alpha = lockAlpha,
                             armed = lockArmed,
                             dimmed = holdCancelArmed,
                             accent = accent,
@@ -5369,8 +5371,7 @@ private fun Composer(
                             accent = accent,
                             onStartRecord = onStartRecord,
                             onFinishRecord = onFinishRecord,
-                            onLockVisual = { a, armed, cArmed, mx, my ->
-                                lockAlpha = a
+                            onLockVisual = { armed, cArmed, mx, my ->
                                 lockArmed = armed
                                 holdCancelArmed = cArmed
                                 holdMicX = mx
@@ -5407,7 +5408,6 @@ private fun Composer(
  */
 @Composable
 private fun LockColumn(
-    alpha: Float,
     armed: Boolean,
     dimmed: Boolean,
     accent: Color,
@@ -5422,7 +5422,7 @@ private fun LockColumn(
     Box(
         modifier
             .size(width = 50.dp, height = 172.dp)
-            .alpha(alpha * if (dimmed) 0.3f else 1f)
+            .alpha(if (dimmed) 0.3f else 1f)
             .clip(RoundedCornerShape(22.dp))
             .background(DarkCard)
             .border(2.dp, if (armed) accent else Color.Transparent, RoundedCornerShape(22.dp)),
@@ -5684,7 +5684,7 @@ private fun HoldMicButton(
     onLockRecord: () -> Unit = {},
     // r76-1: the composer draws the column + the swallow, so the mic publishes
     // its state: column alpha, lock-armed, cancel-armed, the visual offsets.
-    onLockVisual: (alpha: Float, lockArmed: Boolean, cancelArmed: Boolean, micX: Float, micY: Float) -> Unit = { _, _, _, _, _ -> },
+    onLockVisual: (lockArmed: Boolean, cancelArmed: Boolean, micX: Float, micY: Float) -> Unit = { _, _, _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     val haptics = rememberHaptics()
@@ -5716,10 +5716,6 @@ private fun HoldMicButton(
     var axis by remember { mutableStateOf(0) }
     val cancelArmed = cancelHold
     val lockArmed = axis == 1 && dragY <= -lockAtDist
-    // the column is up from the moment the recording starts — it is what the
-    // finger is aiming at.
-    val lockShowing = recording || dragY <= -12f
-    val lockAlpha by animateFloatAsState(if (lockShowing) 1f else 0f, tween(120), label = "lockalpha")
     // r76-1: the button ITSELF rides the finger — up the column or left
     // toward the dustbin, 1:1 on the chosen axis.
     val micX by animateFloatAsState(if (recording) dragX else 0f, spring(stiffness = 1200f), label = "micdrag")
@@ -5823,12 +5819,10 @@ private fun HoldMicButton(
             modifier = Modifier.size(20.dp),
         )
     }
-    // r76-2 (owner: the swipe-up bar never showed): SideEffect's lambda reads
-    // state UNTRACKED, so the 120 ms fade never advanced a frame on the phone —
-    // the column sat at alpha 0. A LaunchedEffect keyed on the values re-runs
-    // on every frame of the fade / every drag tick and really publishes.
-    LaunchedEffect(lockAlpha, lockArmed, cancelArmed, micX, micY) {
-        onLockVisual(lockAlpha, lockArmed, cancelArmed, micX, micY)
+    // r76-2: a LaunchedEffect keyed on the values reads them TRACKED, so the
+    // composer really sees every change (SideEffect's lambda is untracked).
+    LaunchedEffect(lockArmed, cancelArmed, micX, micY) {
+        onLockVisual(lockArmed, cancelArmed, micX, micY)
     }
 }
 private val VIDEO_NAME_EXT = listOf(".mp4", ".mov", ".mkv", ".webm", ".3gp", ".m4v", ".avi")

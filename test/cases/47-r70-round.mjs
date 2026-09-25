@@ -278,7 +278,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       comp.includes(
         ".border(2.dp, if (armed) accent else Color.Transparent, RoundedCornerShape(22.dp))",
       ) &&
-      comp.includes(".alpha(alpha * if (dimmed) 0.3f else 1f)") &&
+      comp.includes(".alpha(if (dimmed) 0.3f else 1f)") &&
       comp.includes("PadlockGlyph(locked = armed, tint = if (armed) accent else Color.White)") &&
       comp.includes("Icons.Filled.KeyboardArrowUp,") &&
       comp.includes("RepeatMode.Reverse") &&
@@ -290,7 +290,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       comp.includes(
         ".border(2.dp, if (cancelArmed) Red else if (enabled) accent else Muted, CircleShape)",
       ) &&
-      mic.includes("LaunchedEffect(lockAlpha, lockArmed, cancelArmed, micX, micY) {") &&
+      mic.includes("LaunchedEffect(lockArmed, cancelArmed, micX, micY) {") &&
       chat.includes("import androidx.compose.material.icons.filled.KeyboardArrowUp"),
   );
   check(
