@@ -67,6 +67,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DoubleArrow
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Image
@@ -5369,7 +5370,11 @@ private fun Composer(
                         // lift as the header call buttons now. r73-16 (owner,
                         // again): no shadow anywhere — the fill carries it.
                         .clip(CircleShape)
-                        .background(accent)
+                        // r74-19 (the owner's screenshot): a LOCKED note's Send
+                        // is the small white glass circle Telegram shows — its
+                        // glyph is near-black, so white glass reads on both
+                        // themes. The text / media Send keeps the accent fill.
+                        .background(if (locked) Color(0xE6FFFFFF) else accent)
                         // Owner round 32 (item 18): tap = send, hold = "send
                         // later" (text only — media goes with its own flow, item 19).
                         .combinedClickable(
@@ -5400,10 +5405,15 @@ private fun Composer(
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        Icons.AutoMirrored.Filled.Send,
+                        // r74-19: Telegram's locked row shows a chevron, not a
+                        // paper plane — the glyph follows the fill.
+                        if (locked) Icons.Filled.DoubleArrow else Icons.AutoMirrored.Filled.Send,
                         contentDescription = "Send",
-                        tint = AmberInk,
-                        modifier = Modifier.size(19.dp).scale(if (sendPressed) 0.9f else 1f),
+                        tint = if (locked) Color(0xFF10141A) else AmberInk,
+                        modifier =
+                            Modifier
+                                .size(if (locked) 22.dp else 19.dp)
+                                .scale(if (sendPressed) 0.9f else 1f),
                     )
                 }
             }

@@ -285,6 +285,14 @@ const main = (f) => read(`${ANDROID}/${f}`);
       mic.includes("val lockShowing = recording || dragY <= -12f"),
   );
   check(
+    'r74-5 (owner: "voice button a click kore hold korle normal voice record hobe but upore swipe korle voice lock hobe ar voice button ta send button a hoye jabe screenshot a jemon ta ache"): a LOCKED take offers a real Send — Telegram\'s white glass circle (0xE6FFFFFF) with a near-black chevron at 22 dp — while text and media Send keep the accent fill and the 19 dp paper plane',
+    comp.includes(".background(if (locked) Color(0xE6FFFFFF) else accent)") &&
+      comp.includes("if (locked) Icons.Filled.DoubleArrow else Icons.AutoMirrored.Filled.Send,") &&
+      comp.includes("tint = if (locked) Color(0xFF10141A) else AmberInk,") &&
+      comp.includes(".size(if (locked) 22.dp else 19.dp)") &&
+      chat.includes("import androidx.compose.material.icons.filled.DoubleArrow"),
+  );
+  check(
     'r72-19: a tap that lands before the recorder exists is not lost — while the start is in flight the lock is QUEUED and the take comes up LOCKED, so the mic seat is the Send circle from its first frame (owner: "voice a tap lock korle send button hoye jabe tokhono voice button na")',
     chat.includes("var lockPending by remember { mutableStateOf(false) }") &&
       chat.includes("var recStarting by remember { mutableStateOf(false) }") &&
