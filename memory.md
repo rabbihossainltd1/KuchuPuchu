@@ -342,3 +342,19 @@
 - Owner (furious, and right): "amar html a to shob system deoa ache lock icon kothai thakbe locked thakle kemon hobe taw keno vul hocche bar bar? ... html ta full read na korei implement korcho? ekdom shortcut use korla?" — the port had invented an alpha gate the reference never asked for (the HTML's toHold() un-hides the column instantly). r76-3 removes the fade/gate: LockColumn composes whenever recording && !locked, dimmed 30% only while the cancel arm holds; the publish stays a tracked LaunchedEffect. versionCode 220 / 3.9.143 — the phone build says its own name so verdicts are unambiguous (r75-7 precedent).
 - CI 36195133214 success on 98b84e9. Worker untouched. Release hold stands.
 - LESSON (write it on the wall): port the reference STRUCTURE, not an interpretation of it — every added gate/shortcut is a bug the owner will hold in his hand. When a round's phone verdict says "X nei", first diff the code against the reference line by line for X, before inventing a device theory.
+
+## r76-4 (2026-09-26): recorder column + flyer moved to a WINDOW-LEVEL overlay
+- Owner's third verdict (screenshot 4:22 AM, ≈3.9.143): bar+mic render, but lock column,
+  swallow flyer and locked panel still absent — "40% match". Device truth: only real
+  in-bounds Row children paint; overflow from the nested 50x46 seat Box and from the
+  zero-width swallow anchor never draws on his phone. DO NOT retry overflow placement.
+- Fix: `RecorderAnchors` (SendFlight.kt, snapshot state) + `RecorderFloatOverlay` composed
+  as last child of ChatScreen's root Box, positioned from `FlightAnchors.micBounds` and
+  `RecorderAnchors.barBounds` minus `chatRootOrigin[0]`. Column: right edge on mic's right,
+  bottom on mic's bottom. Flyer: mic glyph -> bar's dustbin mouth -> hover -> drop, preview
+  timeline. HoldMicButton captures flyDx/flyDy on cancel release; bar publishes bounds.
+- CI lesson: this Compose pin has NO `Rect.centerX/centerY` extensions (unresolved even on
+  import) — use `(left+right)/2f` member arithmetic, like the old r76-1 flyer did.
+- Two red CI runs burned on compile errors before green: centerX imports, then the import
+  itself. Kotlin is only provable in CI — keep patches to member APIs when unsure.
+- Version 221/3.9.144; green run 36198509068 @ e8ac6dd (fix chain 2e14200 -> b7901fc -> e8ac6dd).
