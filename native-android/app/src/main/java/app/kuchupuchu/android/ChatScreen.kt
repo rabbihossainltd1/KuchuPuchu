@@ -131,8 +131,6 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.centerX
-import androidx.compose.ui.geometry.centerY
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -5469,8 +5467,10 @@ private fun RecorderFloatOverlay(accent: Color, rootOrigin: Offset) {
         val ease = fly * fly * (3f - 2f * fly)
         val pts =
             with(density) {
-                val startX = mic.centerX + RecorderAnchors.flyDx
-                val startY = mic.centerY + RecorderAnchors.flyDy
+                // member arithmetic — centerX/centerY extensions don't
+                // resolve in this Compose version.
+                val startX = (mic.left + mic.right) / 2f + RecorderAnchors.flyDx
+                val startY = (mic.top + mic.bottom) / 2f + RecorderAnchors.flyDy
                 val mouthX = bar.left + 22.dp.toPx()
                 val mouthY = bar.top + bar.height / 2f
                 val hoverY = mouthY - 22.dp.toPx()
