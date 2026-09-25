@@ -235,23 +235,29 @@ const main = (f) => read(`${ANDROID}/${f}`);
       vnotes.includes("return Result.SEND"),
   );
   check(
-    "r75-3 (owner, frame-by-frame over the WhatsApp recording: \"eita WhatsApp er voice system ar tui jeta banaichia puray faltu kono alignment nai\"): the locked state is WhatsApp's TWO-ROW PANEL — one dark rounded panel (DarkCard, 24 dp corners) with the clock + the 96 dp live wave + a lock circle on top and the bin circle + the full-width Pause pill + the accent Send circle below; the composer's right slot renders NOTHING while locked, the hold strip is bare (clock + hint, no dot, no wave), and '‹ Slide to cancel' reads Muted",
+    'r75-5 (owner, with the locked panel\'s screenshot: "eita lock kore thakle emon vabe record hobe shob buttons wave delete send shob kichu valo kore notice kore dekho"): the panel is noted control by control — 28 dp corners on DarkCard; top row: the 17 sp clock, the WIDE grey wave (weight-1, 26 dp) and the view-once "1" circle (36 dp, 8% white, CenteredOnceIcon, accent ring when armed, onToggleVoiceOnce); bottom row: the bin on its dark-red seat (44 dp, Red 15%), the wide Pause pill (23 dp corners, 17 dp glyph + 15 sp label) and the big 48 dp accent Send with the DARK DOUBLE CHEVRON (DoubleArrow, 0xFF10141A); no lock glyph anywhere; the right slot stays empty while locked and \'‹ Slide to cancel\' reads Muted',
     comp.includes(".background(DarkCard)") &&
-      comp.includes("RoundedCornerShape(24.dp)") &&
+      comp.includes(".clip(RoundedCornerShape(28.dp))") &&
+      comp.includes("LiveVoiceWave(color = Muted, modifier = Modifier.weight(1f).height(26.dp))") &&
       comp.includes(
-        "LiveVoiceWave(color = accent, modifier = Modifier.width(96.dp).height(22.dp))",
+        "CenteredOnceIcon(20.dp, tint = if (voiceOnce) accent else Color.White, fillBounds = true)",
       ) &&
-      comp.includes('"Recording locked",') &&
+      comp.includes(".clickable { onToggleVoiceOnce() }") &&
+      comp.includes(".background(Red.copy(alpha = 0.15f))") &&
       comp.includes('"Delete recording",') &&
-      comp.includes("if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,") &&
       comp.includes(".clickable { onTogglePause() }") &&
-      comp.includes("onDoubleClick = if (selectCount == 0) onSendVoiceOnce else null,") &&
+      comp.includes('if (paused) "Resume" else "Pause",') &&
+      comp.includes("Icons.Filled.DoubleArrow,") &&
+      comp.includes("tint = Color(0xFF10141A),") &&
       comp.includes('"Send voice message",') &&
+      comp.includes("onDoubleClick = if (selectCount == 0) onSendVoiceOnce else null,") &&
+      !comp.includes('"Recording locked",') &&
       comp.includes("locked -> Unit") &&
       comp.includes('Text("‹ Slide to cancel", color = Muted, fontSize = 12.5.sp, maxLines = 1)') &&
       !comp.includes("PulsingDot()") &&
-      comp.includes("locked: Boolean = false,") &&
-      comp.includes("onLockRecord: () -> Unit = {},"),
+      chat.includes("var voiceOnce by remember { mutableStateOf(false) }") &&
+      chat.includes("voiceOnce = voiceOnce,") &&
+      chat.includes("onSendVoice = { finishRecording(cancelled = false, once = voiceOnce) },"),
   );
   /* ---- the r72 seat window: the composer's Send runs on its own clock ---- */ /* ---- the r72 seat window: the composer's Send runs on its own clock ---- */
   const app = "native-android/app/src/main/java/app/kuchupuchu/android/";
@@ -266,7 +272,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes('if (wasLocked) error = "That voice note is too short."') &&
       chat.includes("locked = voiceLocked,") &&
       chat.includes("onLockRecord = { lockRecording() },") &&
-      chat.includes("onSendVoice = { finishRecording(cancelled = false) },") &&
+      chat.includes("onSendVoice = { finishRecording(cancelled = false, once = voiceOnce) },") &&
       chat.includes("onCancelVoice = { finishRecording(cancelled = true) },"),
   );
   check(
@@ -301,10 +307,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
       !comp.includes("Color(0xE6FFFFFF)") &&
       !comp.includes("if (locked) 22.dp") &&
       (comp.match(/\.background\(DarkCard\)/g) || []).length === 3 &&
-      (comp.match(/Color\.White\.copy\(alpha = 0\.08f\)/g) || []).length === 3 &&
+      (comp.match(/Color\.White\.copy\(alpha = 0\.08f\)/g) || []).length === 2 &&
       comp.includes('"Send voice message",') &&
       chat.includes('if (paused) "Resume recording" else "Pause recording",') &&
-      !chat.includes("import androidx.compose.material.icons.filled.DoubleArrow"),
+      chat.includes("import androidx.compose.material.icons.filled.DoubleArrow"),
   );
   check(
     "r75-1: the tap-to-lock machine is gone with the system it served — no queued lock, no recStarting window, no tap shortcut anywhere on the recorder's path, and a failed start still says why",

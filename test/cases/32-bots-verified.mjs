@@ -5727,7 +5727,7 @@ const convBetween = (db, a, b) =>
     const vn = kt("VoiceNote.kt");
     const chat = kt("ChatScreen.kt");
     check(
-      "r32-45: voice bubble is compact — a 28dp play circle (v168, was 32/36), a 16dp wave (was 18/22), duration right under it, the bubble keeps a 3dp bottom for voice notes instead of the blank 15dp band (voiceNote); VoiceNote.livePeaks paint the wave (newest 4 s, sqrt curve, LIVE_BARS wide) in the locked panel's top row; both draw through DrawScope.drawVoiceBars",
+      "r32-45: voice bubble is compact — a 28dp play circle (v168, was 32/36), a 16dp wave (was 18/22), duration right under it, the bubble keeps a 3dp bottom for voice notes instead of the blank 15dp band (voiceNote); VoiceNote.livePeaks paint the wave (newest 6 s since r75-5, sqrt curve, LIVE_BARS wide) in the locked panel's top row; both draw through DrawScope.drawVoiceBars",
       chat.includes("internal fun fileLooksVoice(m: JSONObject): Boolean {") &&
         chat.includes('val fileRow = kind == "FILE"') &&
         chat.includes("val isVoice = !asDocument && fileLooksVoice(m)") &&
@@ -5742,7 +5742,7 @@ const convBetween = (db, a, b) =>
           "Canvas(modifier) { drawVoiceBars(VoiceNote.livePeaks, 1f, color, color, newest = true) }",
         ) &&
         chat.includes(
-          "LiveVoiceWave(color = accent, modifier = Modifier.width(96.dp).height(22.dp))",
+          "LiveVoiceWave(color = Muted, modifier = Modifier.weight(1f).height(26.dp))",
         ) &&
         chat.includes(
           'Text("‹ Slide to cancel", color = Muted, fontSize = 12.5.sp, maxLines = 1)',
@@ -5751,7 +5751,7 @@ const convBetween = (db, a, b) =>
         vn.includes("var livePeaks: List<Int> by mutableStateOf(emptyList())") &&
         vn.includes("livePeaks = VoiceWaveform.live(amps)") &&
         (vn.match(/livePeaks = emptyList\(\)/g) || []).length === 3 &&
-        vn.includes("const val LIVE_BARS = 40") &&
+        vn.includes("const val LIVE_BARS = 64") &&
         vn.includes("fun live(samples: List<Int>, bars: Int = LIVE_BARS): List<Int> {") &&
         readFileSync(
           "native-android/app/src/test/java/app/kuchupuchu/android/VoiceWaveformTest.kt",

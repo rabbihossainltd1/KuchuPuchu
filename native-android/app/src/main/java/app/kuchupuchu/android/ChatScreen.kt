@@ -69,6 +69,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.DoubleArrow
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.MusicNote
@@ -284,6 +285,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     var voiceLocked by remember { mutableStateOf(false) }
     // r73-19: the locked strip's Pause / Resume (VoiceNote keeps the clock).
     var recPaused by remember { mutableStateOf(false) }
+    // r75-5: the locked panel's view-once toggle (the screenshot's "1"
+    // circle) — armed here, spent by the send.
+    var voiceOnce by remember { mutableStateOf(false) }
     var recMs by remember { mutableStateOf(0) }
     var voiceBinNonce by remember { mutableStateOf(0) }
     // Owner round 33 (item 11b): rows that appeared AFTER the chat opened
@@ -2488,6 +2492,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         val wasLocked = voiceLocked
         voiceLocked = false
         recPaused = false
+        voiceOnce = false
         // r56 item 2: clear voice indicator immediately when recording finishes or cancels
         scope.launch {
             runCatching {
@@ -4673,8 +4678,15 @@ fun ChatScreen(nav: NavController, convId: String) {
             locked = voiceLocked,
             paused = recPaused,
             onTogglePause = { toggleRecPause() },
+            // r75-5: the panel's "1" circle — armed, the note goes out
+            // once-view; the reset lives in finishRecording.
+            voiceOnce = voiceOnce,
+            onToggleVoiceOnce = {
+                haptics.tap()
+                voiceOnce = !voiceOnce
+            },
             onLockRecord = { lockRecording() },
-            onSendVoice = { finishRecording(cancelled = false) },
+            onSendVoice = { finishRecording(cancelled = false, once = voiceOnce) },
             // r71-19b: while a note is locked, a DOUBLE tap on Send sends it
             // as view-once (one play, then gone everywhere).
             onSendVoiceOnce = { finishRecording(cancelled = false, once = true) },
@@ -5075,6 +5087,9 @@ private fun Composer(
     // r73-19: the locked toolbar's Pause / Resume.
     paused: Boolean = false,
     onTogglePause: () -> Unit = {},
+    // r75-5: the panel's view-once toggle and its state.
+    voiceOnce: Boolean = false,
+    onToggleVoiceOnce: () -> Unit = {},
     // r75-1: fired MID-DRAG, the moment the finger crosses into the capsule.
     onLockRecord: () -> Unit = {},
     onSendVoice: () -> Unit = {},
@@ -5234,53 +5249,56 @@ private fun Composer(
                 }
             }
         } else if (locked) {
-            /* r75-3 (owner, frame-by-frame over the WhatsApp recording: "eita
-               WhatsApp er voice system ar tui jeta banaichia puray faltu kono
-               alignment nai"): the locked state is WhatsApp's TWO-ROW PANEL —
-               one dark rounded panel with the clock, the live wave and the
-               lock circle on top, the bin circle, the full-width Pause pill
-               and the Send circle below. Every control sits on its own seat. */
+            /* r75-5 (owner's screenshot of the locked panel: "eita lock kore
+               thakle emon vabe record hobe shob buttons wave delete send shob
+               kichu valo kore notice kore dekho") — the panel, noted control
+               by control: top row the clock, the wide GREY wave, and the
+               view-once circle; bottom row the red bin on its dark-red seat,
+               the wide Pause pill, and the big accent Send with the dark
+               double chevron. No lock glyph anywhere (the screenshot has
+               none). */
             Column(
                 Modifier
                     .weight(1f)
-                    .clip(RoundedCornerShape(24.dp))
+                    .clip(RoundedCornerShape(28.dp))
                     // r75-2: the app's own charcoal (DarkCard) — the panel, not
                     // a strip of loose parts.
                     .background(DarkCard)
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         "%d:%02d".format(recMs / 1000 / 60, recMs / 1000 % 60),
                         color = if (paused) Muted else Ink,
-                        fontSize = 13.sp,
+                        fontSize = 17.sp,
                         fontWeight = FontWeight.Medium,
                     )
-                    Spacer(Modifier.weight(1f))
-                    LiveVoiceWave(color = accent, modifier = Modifier.width(96.dp).height(22.dp))
                     Spacer(Modifier.width(10.dp))
-                    Box(
-                        Modifier
-                            .size(28.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.08f)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Icons.Filled.Lock,
-                            "Recording locked",
-                            tint = accent,
-                            modifier = Modifier.size(14.dp),
-                        )
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // the wave runs the whole middle, grey like the screenshot
+                    LiveVoiceWave(color = Muted, modifier = Modifier.weight(1f).height(26.dp))
+                    Spacer(Modifier.width(10.dp))
+                    // the view-once toggle (the screenshot's "1" circle) —
+                    // armed, the note goes out once-view; the double-tap still
+                    // forces it either way (r71-19b).
                     Box(
                         Modifier
                             .size(36.dp)
                             .clip(CircleShape)
                             .background(Color.White.copy(alpha = 0.08f))
+                            .border(1.dp, if (voiceOnce) accent else Color.Transparent, CircleShape)
+                            .clickable { onToggleVoiceOnce() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CenteredOnceIcon(20.dp, tint = if (voiceOnce) accent else Color.White, fillBounds = true)
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(Red.copy(alpha = 0.15f))
                             .clickable { onCancelVoice() },
                         contentAlignment = Alignment.Center,
                     ) {
@@ -5288,17 +5306,17 @@ private fun Composer(
                             Icons.Filled.Delete,
                             "Delete recording",
                             tint = Red,
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                     Spacer(Modifier.width(10.dp))
                     Row(
                         Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(17.dp))
+                            .clip(RoundedCornerShape(23.dp))
                             .background(Color.White.copy(alpha = 0.08f))
                             .clickable { onTogglePause() }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .padding(horizontal = 12.dp, vertical = 12.dp),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -5306,24 +5324,25 @@ private fun Composer(
                             if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
                             if (paused) "Resume recording" else "Pause recording",
                             tint = Color.White,
-                            modifier = Modifier.size(15.dp),
+                            modifier = Modifier.size(17.dp),
                         )
-                        Spacer(Modifier.width(6.dp))
+                        Spacer(Modifier.width(8.dp))
                         Text(
                             if (paused) "Resume" else "Pause",
                             color = Color.White,
-                            fontSize = 13.sp,
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
                         )
                     }
                     Spacer(Modifier.width(10.dp))
-                    // r71-19b keeps its seat on the panel's Send: one tap sends,
-                    // a double tap sends the note view-once.
+                    // r71-19b keeps its seat on the panel's Send: one tap sends
+                    // (once-view when the circle above is armed), a double tap
+                    // always sends it once.
                     KpDoubleTapSeat {
                         Box(
                             Modifier
-                                .size(44.dp)
+                                .size(48.dp)
                                 .fxMicAnchor()
                                 .clip(CircleShape)
                                 .background(accent)
@@ -5334,9 +5353,10 @@ private fun Composer(
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
-                                Icons.AutoMirrored.Filled.Send,
+                                // the screenshot's dark double chevron on the accent circle
+                                Icons.Filled.DoubleArrow,
                                 "Send voice message",
-                                tint = AmberInk,
+                                tint = Color(0xFF10141A),
                                 modifier = Modifier.size(20.dp),
                             )
                         }

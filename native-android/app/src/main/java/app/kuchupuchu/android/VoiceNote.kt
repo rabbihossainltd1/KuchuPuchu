@@ -222,10 +222,11 @@ object VoiceWaveform {
     const val MAX_BARS = 64
 
     /** Owner round 32 (item 45): the composer's live strip — this many 100 ms
-     *  peaks (4 s) on the same sqrt curve, scaled against a speaking-voice
-     *  ceiling because the take's own peak is unknown while it is still being
-     *  spoken. */
-    const val LIVE_BARS = 40
+     *  peaks (6 s since r75-5: the locked panel's wave runs the whole middle,
+     *  the screenshot's dense bars) on the same sqrt curve, scaled against a
+     *  speaking-voice ceiling because the take's own peak is unknown while it
+     *  is still being spoken. */
+    const val LIVE_BARS = 64
     const val LIVE_CEIL = 20_000f
 
     fun squash(samples: List<Int>, bars: Int = BARS): List<Int> {
