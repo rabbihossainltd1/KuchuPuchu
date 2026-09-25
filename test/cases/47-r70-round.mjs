@@ -292,7 +292,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       comp.includes("Icons.Filled.KeyboardArrowUp,") &&
       comp.includes(".padding(top = 10.dp),") &&
       comp.includes("if (recording && !locked && lockAlpha > 0.01f) {") &&
-      comp.includes(".offset { IntOffset(0, (-50.dp.toPx() + lockDragY).roundToInt()) }") &&
+      comp.includes("IntOffset(45.dp.roundToPx(), (-50.dp.toPx() + lockDragY).roundToInt())") &&
       !comp.includes(".offset(y = (-54).dp)") &&
       mic.includes("val lockShowing = recording || dragY <= -12f") &&
       mic.includes("SideEffect { onLockVisual(lockAlpha, lockArmed, dragY) }") &&

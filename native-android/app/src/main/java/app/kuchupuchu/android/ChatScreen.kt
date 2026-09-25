@@ -5404,7 +5404,12 @@ private fun Composer(
                         .align(Alignment.CenterVertically)
                         // r75-3 + r75-4: the column's bottom tucks behind the mic and it
                         // rises 1:1 WITH the finger — no lag, no partial factor.
-                        .offset { IntOffset(0, (-50.dp.toPx() + lockDragY).roundToInt()) },
+                        // r75-7: it is CENTRED over the mic — +45 dp right (the
+                        // mic's half 21 + the row spacer 6 + the pill's half 18);
+                        // the owner measured it halka left.
+                        .offset {
+                            IntOffset(45.dp.roundToPx(), (-50.dp.toPx() + lockDragY).roundToInt())
+                        },
             )
         }
 
