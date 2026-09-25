@@ -5020,6 +5020,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                 },
             )
         }
+        // r76-4: the lock column + the swallow flyer paint at window level —
+        // three phone verdicts proved the composer row never draws overflow.
+        RecorderFloatOverlay(accent = chatAccent(chatTheme), rootOrigin = chatRootOrigin[0])
         if (forwarding) {
             ForwardDialog(
                 onClose = { forwarding = false },
@@ -5137,10 +5140,7 @@ private fun Composer(
     // the mic glyph flies into the dustbin's open mouth, straight down in.
     var lockArmed by remember { mutableStateOf(false) }
     var holdCancelArmed by remember { mutableStateOf(false) }
-    var holdMicX by remember { mutableStateOf(0f) }
-    var holdMicY by remember { mutableStateOf(0f) }
     var binPlaying by remember { mutableStateOf(false) }
-    var binRow by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     val swallowT = remember { Animatable(0f) }
     LaunchedEffect(voiceBinNonce) {
         if (voiceBinNonce > 0) {
@@ -5150,10 +5150,20 @@ private fun Composer(
             binPlaying = false
         }
     }
+    // r76-4: the window-level overlay reads these — snapshot state, tracked
+    // writes, so the column/flyer really recompose on every change.
+    LaunchedEffect(recording, locked, lockArmed, holdCancelArmed) {
+        RecorderAnchors.columnOn = recording && !locked
+        RecorderAnchors.columnArmed = lockArmed
+        RecorderAnchors.columnDim = holdCancelArmed
+    }
+    LaunchedEffect(binPlaying && !recording) {
+        RecorderAnchors.swallowOn = binPlaying && !recording
+    }
+    LaunchedEffect(swallowT.value) { RecorderAnchors.swallowV = swallowT.value }
     Row(
         Modifier
             .fillMaxWidth()
-            .onSizeChanged { binRow = it } // r75-9: the swallow's flight plan
             // Owner round 15: the bar itself is TRANSPARENT — only the pill
             // has a fill. Mic keeps its ring.
             // v203: explicit Transparent background so wallpaper shows through like WhatsApp
@@ -5346,22 +5356,11 @@ private fun Composer(
             locked -> {
             }
             else -> {
-                // r76-1: the preview's #seatWrap — 50x46; the FIXED lock column
-                // sits behind the mic, both flushed to its bottom right. Only
-                // the mic rides the finger; the column never moves.
+                // r76-4: the preview's #seatWrap — 50x46, only the mic lives
+                // here now; the FIXED lock column and the swallow flyer paint
+                // at window level (RecorderFloatOverlay) because the phone
+                // never drew them as row overflow.
                 Box(Modifier.width(50.dp).height(46.dp).fxMicAnchor()) {
-                    // r76-3 (owner: "lock icon kothai thakbe ... bar bar ta
-                    // koi"): the HTML shows the column the instant the hold
-                    // starts — no fade, no alpha gate. Any gate is a shortcut
-                    // the reference does not take.
-                    if (recording && !locked) {
-                        LockColumn(
-                            armed = lockArmed,
-                            dimmed = holdCancelArmed,
-                            accent = accent,
-                            modifier = Modifier.align(Alignment.BottomEnd),
-                        )
-                    }
                     // r76-1: while the swallow plays the mic stays gone — its
                     // glyph is already flying into the dustbin.
                     if (!binPlaying) {
@@ -5371,28 +5370,15 @@ private fun Composer(
                             accent = accent,
                             onStartRecord = onStartRecord,
                             onFinishRecord = onFinishRecord,
-                            onLockVisual = { armed, cArmed, mx, my ->
+                            onLockVisual = { armed, cArmed ->
                                 lockArmed = armed
                                 holdCancelArmed = cArmed
-                                holdMicX = mx
-                                holdMicY = my
                             },
                             modifier = Modifier.align(Alignment.BottomEnd),
                         )
                     }
                 }
             }
-        }
-        // r76-1: the swallow's anchor — a zero-width slot at the row's end;
-        // the flying mic glyph rides it unclipped, seat to the dustbin's mouth.
-        if (binPlaying && !recording) {
-            ComposerBinSwallow(
-                rowWidthPx = binRow.width.toFloat(),
-                micXpx = holdMicX,
-                micYpx = holdMicY,
-                swallowV = swallowT.value,
-                modifier = Modifier.width(0.dp),
-            )
         }
     }
 }
@@ -5447,6 +5433,76 @@ private fun LockColumn(
 }
 
 /**
+ * r76-4 (owner's phone, three rounds running): the lock column and the
+ * swallow flyer paint at the TOP of the chat's root Box, positioned from
+ * boundsInWindow anchors — the device never drew them as composer-row
+ * overflow, but window-level drawing is the same proven path the call gate
+ * and the flights use. Column: right edge on the mic's right edge, bottom on
+ * the mic's bottom (the preview's geometry). Flyer: mic glyph, seat to the
+ * bar's dustbin mouth, hover, drop, shrink — the preview's timeline.
+ */
+@Composable
+private fun RecorderFloatOverlay(accent: Color, rootOrigin: Offset) {
+    val mic = FlightAnchors.micBounds
+    val bar = RecorderAnchors.barBounds
+    val density = LocalDensity.current
+    if (RecorderAnchors.columnOn && mic != null) {
+        LockColumn(
+            armed = RecorderAnchors.columnArmed,
+            dimmed = RecorderAnchors.columnDim,
+            accent = accent,
+            modifier =
+                Modifier.offset {
+                    IntOffset(
+                        (mic.right - 50.dp.toPx() - rootOrigin.x).roundToInt(),
+                        (mic.bottom - 172.dp.toPx() - rootOrigin.y).roundToInt(),
+                    )
+                },
+        )
+    }
+    val v = RecorderAnchors.swallowV
+    if (RecorderAnchors.swallowOn && mic != null && bar != null && v in 0.001f..0.999f) {
+        val fly = ((v - 0.03f) / 0.34f).coerceIn(0f, 1f)
+        val drop = ((v - 0.34f) / 0.23f).coerceIn(0f, 1f)
+        val ease = fly * fly * (3f - 2f * fly)
+        val pts =
+            with(density) {
+                val startX = mic.centerX + RecorderAnchors.flyDx
+                val startY = mic.centerY + RecorderAnchors.flyDy
+                val mouthX = bar.left + 22.dp.toPx()
+                val mouthY = bar.top + bar.height / 2f
+                val hoverY = mouthY - 22.dp.toPx()
+                val x = startX + (mouthX - startX) * ease
+                val y =
+                    if (drop <= 0f) startY + (hoverY - startY) * ease else hoverY + (mouthY - hoverY) * drop
+                Triple(x, y, 1f - 0.7f * drop)
+            }
+        val glyphA = if (drop > 0.4f) 1f - (drop - 0.4f) / 0.3f else 1f
+        if (glyphA > 0f) {
+            Icon(
+                Icons.Filled.Mic,
+                null,
+                tint = Red,
+                modifier =
+                    Modifier
+                        .size(20.dp)
+                        .offset {
+                            IntOffset(
+                                (pts.first - 10.dp.toPx() - rootOrigin.x).roundToInt(),
+                                (pts.second - 10.dp.toPx() - rootOrigin.y).roundToInt(),
+                            )
+                        }
+                        .graphicsLayer {
+                            scaleX = pts.third
+                            scaleY = pts.third
+                            alpha = glyphA
+                        },
+            )
+        }
+    }
+}
+
+/**
  * r76-1 (the rebuild): the HOLD bar, point for point from the approved
  * preview — 25 dp corners on the theme's card, 14/11 padding, one row: the
  * 15 sp clock (min 42 dp), the live wave (28 dp), the muted '‹ Slide to
@@ -5464,6 +5520,7 @@ private fun RecorderHoldBar(
 ) {
     Box(
         modifier
+            .onGloballyPositioned { RecorderAnchors.barBounds = it.boundsInWindow() }
             .clip(RoundedCornerShape(25.dp))
             .background(DarkCard)
             .padding(horizontal = 14.dp, vertical = 11.dp),
@@ -5684,7 +5741,7 @@ private fun HoldMicButton(
     onLockRecord: () -> Unit = {},
     // r76-1: the composer draws the column + the swallow, so the mic publishes
     // its state: column alpha, lock-armed, cancel-armed, the visual offsets.
-    onLockVisual: (lockArmed: Boolean, cancelArmed: Boolean, micX: Float, micY: Float) -> Unit = { _, _, _, _ -> },
+    onLockVisual: (lockArmed: Boolean, cancelArmed: Boolean) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     val haptics = rememberHaptics()
@@ -5787,6 +5844,12 @@ private fun HoldMicButton(
                     val endX = dragX
                     val endY = dragY
                     val wasCancel = cancelHold
+                    // r76-4: the window-level flyer starts where the finger
+                    // let the button go.
+                    if (wasCancel) {
+                        RecorderAnchors.flyDx = endX
+                        RecorderAnchors.flyDy = endY
+                    }
                     dragX = 0f
                     dragY = 0f
                     totX = 0f
@@ -5821,9 +5884,7 @@ private fun HoldMicButton(
     }
     // r76-2: a LaunchedEffect keyed on the values reads them TRACKED, so the
     // composer really sees every change (SideEffect's lambda is untracked).
-    LaunchedEffect(lockArmed, cancelArmed, micX, micY) {
-        onLockVisual(lockArmed, cancelArmed, micX, micY)
-    }
+    LaunchedEffect(lockArmed, cancelArmed) { onLockVisual(lockArmed, cancelArmed) }
 }
 private val VIDEO_NAME_EXT = listOf(".mp4", ".mov", ".mkv", ".webm", ".3gp", ".m4v", ".avi")
 
@@ -5881,65 +5942,6 @@ internal fun swallowLidOf(v: Float): Float =
         else -> 0f
     }
 
-/**
- * r76-1 (the rebuild): the swallow's FLYER — the mic GLYPH alone (no ring, no
- * fill) flies from the seat to a stop just above the dustbin's mouth (300 ms),
- * then drops straight in, shrinking and fading (200 ms). The dustbin itself
- * lives in the bar's clock spot; this zero-width anchor at the row's end only
- * carries the glyph unclipped.
- */
-@Composable
-internal fun ComposerBinSwallow(
-    rowWidthPx: Float,
-    micXpx: Float,
-    micYpx: Float,
-    swallowV: Float,
-    modifier: Modifier = Modifier,
-) {
-    val v = swallowV
-    val fly = ((v - 0.03f) / 0.34f).coerceIn(0f, 1f)
-    val drop = ((v - 0.34f) / 0.23f).coerceIn(0f, 1f)
-    val ease = fly * fly * (3f - 2f * fly)
-    val density = LocalDensity.current
-    val pts =
-        with(density) {
-            val startX = -23.dp.toPx() + micXpx
-            val startY = micYpx
-            // r76-2: the bin's centre is 38 dp from the row's left (8 pad +
-            // 12 slidebin left + half the 20 dp bin) — the old 30 dp put the
-            // flyer beside the mouth, so the mic never visibly went in.
-            val mouthX = 38.dp.toPx() - rowWidthPx
-            val hoverY = -22.dp.toPx()
-            val inY = 0f
-            val x = startX + (mouthX - startX) * ease
-            val y = if (drop <= 0f) startY + (hoverY - startY) * ease else hoverY + (inY - hoverY) * drop
-            Triple(x, y, 1f - 0.7f * drop)
-        }
-    val glyphA = if (drop > 0.4f) 1f - (drop - 0.4f) / 0.3f else 1f
-    Box(modifier) {
-        if (v > 0.005f && drop < 1f && glyphA > 0f) {
-            Icon(
-                Icons.Filled.Mic,
-                null,
-                tint = Red,
-                modifier =
-                    Modifier
-                        .size(20.dp)
-                        .offset {
-                            IntOffset(
-                                (pts.first - 10.dp.toPx()).roundToInt(),
-                                (pts.second - 10.dp.toPx()).roundToInt(),
-                            )
-                        }
-                        .graphicsLayer {
-                            scaleX = pts.third
-                            scaleY = pts.third
-                            alpha = glyphA
-                        },
-            )
-        }
-    }
-}
 /**
  * Small raised 3D circle for the header call icons: top-lit gradient and a
  * hairline bevel (no drop shadow — r73-16).

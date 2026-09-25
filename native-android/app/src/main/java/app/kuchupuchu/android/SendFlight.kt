@@ -32,6 +32,24 @@ object FlightAnchors {
     @Volatile var attachBounds: Rect? = null
 }
 
+/**
+ * r76-4 (owner's phone, three rounds running): the lock column and the
+ * swallow flyer never painted when they overflowed the composer row — the
+ * device only draws them at WINDOW level, positioned from boundsInWindow
+ * anchors (the same trick the flights use). Snapshot state so the top-level
+ * overlay recomposes on every change.
+ */
+object RecorderAnchors {
+    var columnOn by mutableStateOf(false)
+    var columnArmed by mutableStateOf(false)
+    var columnDim by mutableStateOf(false)
+    var barBounds: Rect? by mutableStateOf(null)
+    var swallowOn by mutableStateOf(false)
+    var swallowV by mutableStateOf(-1f)
+    var flyDx by mutableStateOf(0f)
+    var flyDy by mutableStateOf(0f)
+}
+
 /** Put this on the composer pill (the rounded input bar that holds the typed text). */
 fun Modifier.fxComposerAnchor(): Modifier =
     onGloballyPositioned { FlightAnchors.composerBounds = it.boundsInWindow() }

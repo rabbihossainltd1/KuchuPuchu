@@ -290,8 +290,14 @@ const main = (f) => read(`${ANDROID}/${f}`);
       comp.includes(
         ".border(2.dp, if (cancelArmed) Red else if (enabled) accent else Muted, CircleShape)",
       ) &&
-      mic.includes("LaunchedEffect(lockArmed, cancelArmed, micX, micY) {") &&
-      chat.includes("import androidx.compose.material.icons.filled.KeyboardArrowUp"),
+      mic.includes(
+        "LaunchedEffect(lockArmed, cancelArmed) { onLockVisual(lockArmed, cancelArmed) }",
+      ) &&
+      chat.includes("import androidx.compose.material.icons.filled.KeyboardArrowUp") &&
+      chat.includes(
+        "RecorderFloatOverlay(accent = chatAccent(chatTheme), rootOrigin = chatRootOrigin[0])",
+      ) &&
+      chat.includes("FlightAnchors.micBounds"),
   );
   check(
     "r76-1: the recorder wears the APP'S palette on the preview's geometry — accent circles, DarkCard bar/panel/column, 8% white once circle + Pause pill, Red bin; the old DoubleArrow chevron send is gone with the rebuild (import included)",

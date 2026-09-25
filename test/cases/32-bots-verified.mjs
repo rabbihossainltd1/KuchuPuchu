@@ -9856,7 +9856,7 @@ const convBetween = (db, a, b) =>
         ) &&
         chat.includes("        if (binPlaying && !recording) {") &&
         chat.includes("internal fun SmallDustbin(") &&
-        chat.includes("internal fun ComposerBinSwallow(") &&
+        chat.includes("private fun RecorderFloatOverlay(") &&
         chat.includes("withTransform({ rotate(-42f * lidOpen, hinge) }) {") &&
         chat.includes("import androidx.compose.ui.graphics.drawscope.withTransform") &&
         chat.includes("import androidx.compose.animation.core.Animatable"),
