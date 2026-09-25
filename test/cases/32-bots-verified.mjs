@@ -9853,7 +9853,7 @@ const convBetween = (db, a, b) =>
         chat.includes("voiceBinNonce = voiceBinNonce,") &&
         chat.includes("    voiceBinNonce: Int = 0,") &&
         chat.includes(
-          "            binPlaying = true\n            swallowT.snapTo(0f)\n            swallowV = 0f\n            swallowT.animateTo(1f, tween(900, easing = LinearEasing)) { v, _ -> swallowV = v }\n            binPlaying = false",
+          "            binPlaying = true\n            swallowT.snapTo(0f)\n            swallowT.animateTo(1f, tween(900, easing = LinearEasing))\n            binPlaying = false",
         ) &&
         chat.includes("        if (binPlaying && !recording) {") &&
         chat.includes("internal fun SmallDustbin(") &&

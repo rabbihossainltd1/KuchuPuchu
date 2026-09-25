@@ -5143,14 +5143,12 @@ private fun Composer(
     var holdMicX by remember { mutableStateOf(0f) }
     var binPlaying by remember { mutableStateOf(false) }
     var binRow by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
-    var swallowV by remember { mutableStateOf(0f) }
     val swallowT = remember { Animatable(0f) }
     LaunchedEffect(voiceBinNonce) {
         if (voiceBinNonce > 0) {
             binPlaying = true
             swallowT.snapTo(0f)
-            swallowV = 0f
-            swallowT.animateTo(1f, tween(900, easing = LinearEasing)) { v, _ -> swallowV = v }
+            swallowT.animateTo(1f, tween(900, easing = LinearEasing))
             binPlaying = false
         }
     }
@@ -5408,7 +5406,7 @@ private fun Composer(
                         modifier = Modifier.offset(y = 26.dp * sink).alpha(1f - sink),
                     )
                     if (sink > 0.02f) {
-                        SmallDustbin(lidOpen = 0f, modifier = Modifier.alpha(sink).offset(y = (1f - sink) * 14.dp))
+                        SmallDustbin(lidOpen = 0f, modifier = Modifier.alpha(sink).offset(y = 14.dp * (1f - sink)))
                     }
                 }
                 Spacer(Modifier.width(10.dp))
@@ -5530,7 +5528,7 @@ private fun Composer(
             ComposerBinSwallow(
                 rowWidthPx = binRow.width.toFloat(),
                 micXpx = holdMicX,
-                swallowV = swallowV,
+                swallowV = swallowT.value,
                 modifier = Modifier.width(0.dp),
             )
         }
@@ -5613,8 +5611,8 @@ private fun PadlockGlyph(
             drawLine(tint, Offset(17 * d, 10 * d), Offset(17 * d, 7 * d), strokeWidth = 2.6f * d, cap = StrokeCap.Round)
             drawArc(
                 color = tint,
-                startAngleDegrees = 180f,
-                sweepDegrees = 180f,
+                startAngle = 180f,
+                sweepAngle = 180f,
                 useCenter = false,
                 topLeft = Offset(7 * d, 2 * d),
                 size = androidx.compose.ui.geometry.Size(10 * d, 10 * d),
@@ -5847,7 +5845,7 @@ internal fun ComposerBinSwallow(
         // hint keep the bar alive beside it)
         Box(
             Modifier.offset {
-                IntOffset((40.dp.toPx() - rowWidthPx).roundToInt(), (-11.dp).roundToInt())
+                IntOffset((40.dp.toPx() - rowWidthPx).roundToInt(), -11.dp.roundToPx())
             },
         ) {
             SmallDustbin(lidOpen = lid)
