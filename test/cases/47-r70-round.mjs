@@ -236,7 +236,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       vnotes.includes("return Result.SEND"),
   );
   check(
-    'r75-5 (owner, with the locked panel\'s screenshot: "eita lock kore thakle emon vabe record hobe shob buttons wave delete send shob kichu valo kore notice kore dekho"): the panel is noted control by control — 28 dp corners on DarkCard; top row: the 17 sp clock, the WIDE grey wave (weight-1, 26 dp) and the view-once "1" circle (36 dp, 8% white, CenteredOnceIcon, accent ring when armed, onToggleVoiceOnce); bottom row: the bin on its dark-red seat (44 dp, Red 15%), the wide Pause pill (23 dp corners, 17 dp glyph + 15 sp label) and the big 48 dp accent Send with the DARK DOUBLE CHEVRON (DoubleArrow, 0xFF10141A); no lock glyph anywhere; the right slot stays empty while locked and \'‹ Slide to cancel\' reads Muted',
+    'r75-5 (owner, with the locked panel\'s screenshot: "eita lock kore thakle emon vabe record hobe shob buttons wave delete send shob kichu valo kore notice kore dekho"): the panel is noted control by control — 28 dp corners on DarkCard; top row: the 17 sp clock, the WIDE grey wave (weight-1, 26 dp) and the view-once "1" circle (36 dp, 8% white, CenteredOnceIcon, accent ring when armed, onToggleVoiceOnce); bottom row: the bin on its dark-red seat (44 dp, Red 15%), the wide Pause pill (23 dp corners, 17 dp glyph + 15 sp label) and the big 48 dp accent Send with the DARK DOUBLE CHEVRON (DoubleArrow, 0xFF10141A); no lock glyph anywhere; the SEND is the voice button\'s OWN seat (r75-8: \\"ar voice button send button hoye jabe\\"), the panel carries none; the HOLD keeps its live wave (accent, weight-1) with \'‹ Slide to cancel\' in Muted',
     comp.includes(".background(DarkCard)") &&
       comp.includes(".clip(RoundedCornerShape(28.dp))") &&
       comp.includes("LiveVoiceWave(color = Muted, modifier = Modifier.weight(1f).height(26.dp))") &&
@@ -253,7 +253,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
       comp.includes('"Send voice message",') &&
       comp.includes("onDoubleClick = if (selectCount == 0) onSendVoiceOnce else null,") &&
       !comp.includes('"Recording locked",') &&
-      comp.includes("locked -> Unit") &&
+      comp.includes("locked -> {") &&
+      comp.includes(
+        "LiveVoiceWave(color = accent, modifier = Modifier.weight(1f).height(22.dp))",
+      ) &&
       comp.includes('Text("‹ Slide to cancel", color = Muted, fontSize = 12.5.sp, maxLines = 1)') &&
       !comp.includes("PulsingDot()") &&
       chat.includes("var voiceOnce by remember { mutableStateOf(false) }") &&

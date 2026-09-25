@@ -5335,46 +5335,21 @@ private fun Composer(
                             maxLines = 1,
                         )
                     }
-                    Spacer(Modifier.width(10.dp))
-                    // r71-19b keeps its seat on the panel's Send: one tap sends
-                    // (once-view when the circle above is armed), a double tap
-                    // always sends it once.
-                    KpDoubleTapSeat {
-                        Box(
-                            Modifier
-                                .size(48.dp)
-                                .fxMicAnchor()
-                                .clip(CircleShape)
-                                .background(accent)
-                                .combinedClickable(
-                                    onClick = onSendVoice,
-                                    onDoubleClick = if (selectCount == 0) onSendVoiceOnce else null,
-                                ),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                // the screenshot's dark double chevron on the accent circle
-                                Icons.Filled.DoubleArrow,
-                                "Send voice message",
-                                tint = Color(0xFF10141A),
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
-                    }
                 }
             }
         } else {
-            /* live HOLD strip (r75-3, WhatsApp's frames) — r75-4 (the owner's
-               screenshot): ONE dark rounded bar, the clock on its left and the
-               cancel hint centred in what is left. The wave and the dot belong
-               to the locked panel; the bar stays bare while the finger is
-               down. */
+            /* live HOLD strip (r75-8, the owner's word: "tap hold korle
+               normaly wave soho voice record hobe voice button tar upore lock
+               icon thakbe slide left to delete ager animation ei thakbe
+               dustbin animation"): ONE dark rounded bar — the clock, the live
+               wave, the hint — the lock column above the mic, the mic turns
+               into the red bin on the left slide, the release sends. */
             Row(
                 Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(22.dp))
                     .background(DarkCard)
-                    .padding(horizontal = 14.dp, vertical = 13.dp),
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -5383,14 +5358,16 @@ private fun Composer(
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                 )
-                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    Text("‹ Slide to cancel", color = Muted, fontSize = 12.5.sp, maxLines = 1)
-                }
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(10.dp))
+                // r75-8 (owner: "tap hold korle normaly wave soho voice record
+                // hobe"): the live wave rides the hold again, between the
+                // clock and the hint.
+                LiveVoiceWave(color = accent, modifier = Modifier.weight(1f).height(22.dp))
+                Spacer(Modifier.width(10.dp))
+                Text("‹ Slide to cancel", color = Muted, fontSize = 12.5.sp, maxLines = 1)
             }
         }
         Spacer(Modifier.width(6.dp))
-        // r75-1 (the MD): the capsule is the HOLD's target only        Spacer(Modifier.width(6.dp))
         // r75-1 (the MD): the capsule is the HOLD's target only — it slides up
         // with the finger and vanishes the moment the toolbar takes over.
         // The locked state has NO badge (the MD's toolbar has none).
@@ -5420,7 +5397,6 @@ private fun Composer(
            r75-3 (WhatsApp's frames): a LOCKED recording renders NOTHING here —
            the panel's own Send circle is the only send on screen. */
         when {
-            locked -> Unit
             !input.isBlank() || selectCount > 0 -> {
                 val sendInteraction = remember { MutableInteractionSource() }
                 val sendPressed by sendInteraction.collectIsPressedAsState()
@@ -5464,6 +5440,33 @@ private fun Composer(
                                 Modifier
                                     .size(19.dp)
                                     .scale(if (sendPressed) 0.9f else 1f),
+                        )
+                    }
+                }
+            }
+            // r75-8 (owner: "ar voice button send button hoye jabe"): a LOCKED
+            // take turns the voice button's OWN seat into Send — the panel
+            // carries no send of its own. One tap sends (once-view when the
+            // panel's "1" is armed), a double tap always sends it once.
+            locked -> {
+                KpDoubleTapSeat {
+                    Box(
+                        Modifier
+                            .size(42.dp)
+                            .fxMicAnchor()
+                            .clip(CircleShape)
+                            .background(accent)
+                            .combinedClickable(
+                                onClick = onSendVoice,
+                                onDoubleClick = if (selectCount == 0) onSendVoiceOnce else null,
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.DoubleArrow,
+                            "Send voice message",
+                            tint = Color(0xFF10141A),
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                 }

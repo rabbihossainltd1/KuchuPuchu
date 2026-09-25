@@ -1129,7 +1129,7 @@ const convBetween = (db, a, b) =>
         "heightIn(min = 38.dp)\n                    // Owner round 18: the pill is BACK",
       ) ||
       chat.includes("v204 WhatsApp-style: outer bar transparent, inner pill Card")) &&
-      chat.includes("live HOLD strip (r75-3, WhatsApp's frames)"),
+      chat.includes("live HOLD strip (r75-8"),
   );
   check(
     "r17-11: reply-quote sender names are full ink (white on own bubbles), not gold-on-gold",
@@ -6934,7 +6934,7 @@ const convBetween = (db, a, b) =>
         // r75-3: the slot is a `when` — a LOCKED take renders NOTHING there
         // (the locked panel's own Send is the only send), and the text /
         // selection seat is a plain if/else.
-        chat.includes("locked -> Unit") &&
+        chat.includes("locked -> {") &&
         chat.includes("!input.isBlank() || selectCount > 0 -> {") &&
         chat.includes("if (input.isNotBlank()) onSend() else onSendSelection()"),
     );
