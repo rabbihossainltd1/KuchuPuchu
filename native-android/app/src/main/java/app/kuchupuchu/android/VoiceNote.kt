@@ -164,54 +164,48 @@ object VoiceNote {
 class VoiceTake(val file: File, val seconds: Int, val waveform: List<Int>)
 
 /**
- * r74-19 (owner, after r72/r73 both missed: "ami bolechi voice button a click
- * kore hold korle normal voice record hobe but upore swipe korle voice lock hobe
- * ar voice button ta send button a hoye jabe screenshot a jemon ta ache") — the
- * hold's rules as pure maths, so the JVM test can prove every branch a thumb can
- * take. The UI only reads the answer.
+ * r75-1 (owner: "current voice lock system hold swipe up system shob remove koro
+ * ami ekta md file diyechi dekho ei vabe hobe shob") — the hold's rules as pure
+ * maths, so the JVM test can prove every branch a thumb can take. The MD's state
+ * machine: a hold records, a drag UP into the lock zone LOCKS (the composer
+ * fires it mid-drag — a release never locks), a slide LEFT past the cancel
+ * distance throws the take away, and a plain hold-and-release sends it. The old
+ * tap-to-lock and release-on-any-up-swipe shortcuts are gone with the system
+ * they belonged to.
  */
 object VoiceHoldGesture {
     /** What one completed hold decided. */
     enum class Result {
-        /** released with no direction chosen → the take rolls on, LOCKED */
-        TAP_LOCK,
-
-        /** released after travelling UP → the take rolls on, LOCKED */
-        SWIPE_LOCK,
+        /** released with the finger inside the lock zone (the mid-drag cross already locked) */
+        LOCK,
 
         /** released after travelling left past cancel → throw the take away */
         CANCEL,
 
-        /** released with a real drag but no direction chosen → send it */
+        /** released with no direction chosen → send it */
         SEND,
     }
 
-    const val TAP_MS = 300L
-    const val TAP_SLOP = 12f
-
     /**
      * Decide what a completed hold did. [dx] is leftward travel (0 … -n), [dy] is
-     * upward travel (0 … -n), [ms] the hold's length. [cancelDist] / [lockDist]
-     * come from the density at the call site, [slop] is [TAP_SLOP] in pixels.
+     * upward travel (0 … -n). [cancelDist] / [lockDist] come from the density at
+     * the call site. LOCK here is a formality — the composer locked the take the
+     * moment the zone was crossed; a release that lands here just confirms it.
      */
     fun decide(
         dx: Float,
         dy: Float,
-        ms: Long,
         cancelDist: Float,
         lockDist: Float,
-        slop: Float,
     ): Result {
         // Cancelling wins: the finger went left on purpose.
         if (dx <= -cancelDist) return Result.CANCEL
-        // A quick touch that never really moved is Telegram's "slide up to lock"
-        // shortcut — the take rolls on and the mic seat becomes Send.
-        if (ms < TAP_MS && dx > -slop && dy > -slop) return Result.TAP_LOCK
-        // A drag UP is the lock's own gesture, and it works before the badge is
-        // reached too (a short flick up already means "lock it" — the owner's
-        // "upore swipe korle voice lock hobe"). Anything else was someone who
-        // held and let go without choosing a direction: that is a normal send.
-        return if (dy < -slop) Result.SWIPE_LOCK else Result.SEND
+        // Inside the zone the take is already locked (mid-drag); the MD's
+        // release-after-lock changes nothing.
+        if (dy <= -lockDist) return Result.LOCK
+        // Anything else was a plain hold: the finger let go without choosing a
+        // direction, so the note goes out.
+        return Result.SEND
     }
 }
 

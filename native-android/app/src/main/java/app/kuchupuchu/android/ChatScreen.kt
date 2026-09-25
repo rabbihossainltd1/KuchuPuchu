@@ -63,7 +63,6 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -277,19 +276,12 @@ fun ChatScreen(nav: NavController, convId: String) {
     var showScheduleMedia by remember { mutableStateOf(false) }
     val scheduledRows = remember { mutableStateListOf<JSONObject>() }
     var recording by remember { mutableStateOf(false) }
-    // r71-19 (owner: "voice message a lock system add korte hobe video player
-    // er moto ... mic ta hold kore rekhe upore swipe korle lock icon asbe ...
-    // lock hoye gele hold korte hobe na ... mic a ekbar click korleo lock hoye
-    // jabe"): a LOCKED recording keeps running with the finger off the mic —
-    // the strip stays up and the mic seat becomes Send.
+    // r75-1 (owner: "current voice lock system hold swipe up system shob remove
+    // koro ami ekta md file diyechi dekho ei vabe hobe shob"): the MD's LOCKED —
+    // the finger drags UP into the lock capsule and the take locks MID-DRAG;
+    // from there the finger is off the mic, the toolbar is up, and only
+    // Delete / Pause / Send end the note. No tap shortcut, nothing queued.
     var voiceLocked by remember { mutableStateOf(false) }
-    // r72-19 (owner: "voice a tap lock korle send button hoye jabe tokhono voice
-    // button na"): the mic's first tap can land BEFORE the take exists — on
-    // first use the permission sheet is up and the start itself is async — so a
-    // lock asked for in that window is remembered here and applied the moment
-    // the recorder really starts.
-    var lockPending by remember { mutableStateOf(false) }
-    var recStarting by remember { mutableStateOf(false) }
     // r73-19: the locked strip's Pause / Resume (VoiceNote keeps the clock).
     var recPaused by remember { mutableStateOf(false) }
     var recMs by remember { mutableStateOf(0) }
@@ -2462,20 +2454,15 @@ fun ChatScreen(nav: NavController, convId: String) {
        slide left while holding = cancel ---- */
     fun startRecording() {
         if (VoiceNote.isRecording) return
-        // r72-19: from here until the recorder is live a tap means "lock me",
-        // not "you missed" (see lockRecording).
-        recStarting = true
         // Mic is asked HERE — at the feature — not at app launch (owner rule).
         gateMicCamera(video = false) {
-            recStarting = false
             if (!VoiceNote.isRecording) {
                 if (VoiceNote.start(ctx)) {
                     recMs = 0
                     recording = true
-                    // r72-19: the tap that landed while the sheet was up wins —
-                    // the mic seat is the Send circle from the first frame.
-                    voiceLocked = lockPending
-                    lockPending = false
+                    // r75-1: a take is always born a HOLD — the lock is earned
+                    // by the drag into the capsule, never queued or assumed.
+                    voiceLocked = false
                     recPaused = false
                     // r56 item 2: ping voice immediately on recording start
                     scope.launch {
@@ -2486,7 +2473,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                         }
                     }
                 } else {
-                    lockPending = false
                     error = "Mic is not available. Check the mic permission."
                 }
             }
@@ -2501,7 +2487,6 @@ fun ChatScreen(nav: NavController, convId: String) {
         // without a word — it says why instead.
         val wasLocked = voiceLocked
         voiceLocked = false
-        lockPending = false
         recPaused = false
         // r56 item 2: clear voice indicator immediately when recording finishes or cancels
         scope.launch {
@@ -2576,18 +2561,13 @@ fun ChatScreen(nav: NavController, convId: String) {
     }
 
     /**
-     * r71-19: the recording is locked — the finger is off the mic (a swipe up
-     * onto the lock, or a plain tap on the mic) and the note keeps rolling
-     * until Send. The mic seat is a Send circle from here on.
+     * r75-1: the MD's lock threshold — the finger dragged into the capsule and
+     * the take locks MID-DRAG (HoldMicButton fires this the instant the zone is
+     * crossed). From here the finger no longer controls the take: the toolbar
+     * is up and only Delete / Pause / Send end it. No tap shortcut.
      */
     fun lockRecording() {
-        if (!recording) {
-            // r72-19: the tap landed before the take exists (the permission
-            // sheet is still up on first use) — queue the lock, the start
-            // applies it, so the mic seat becomes Send instead of staying a mic.
-            if (recStarting) lockPending = true
-            return
-        }
+        if (!recording) return
         voiceLocked = true
         runCatching { haptics.confirm() }
     }
@@ -4688,8 +4668,8 @@ fun ChatScreen(nav: NavController, convId: String) {
             onSendSelection = {
                 sendSelectedMedia()
             },
-            // r71-19: the lock — a swipe up (or a plain tap) leaves the finger
-            // free while the note keeps recording; Send closes it.
+            // r75-1: the MD's lock — dragging into the capsule frees the finger
+            // mid-drag and the note keeps recording; the toolbar's Send ends it.
             locked = voiceLocked,
             paused = recPaused,
             onTogglePause = { toggleRecPause() },
@@ -5089,12 +5069,13 @@ private fun Composer(
     micEnabled: Boolean = true,
     onStartRecord: () -> Unit,
     onFinishRecord: (cancelled: Boolean) -> Unit,
-    // r71-19: the locked recording — the finger is off the mic, the strip
-    // stays, the mic seat is Send, and ✕ in the strip drops the note.
+    // r75-1: the MD's locked recording — the finger is off the mic, the
+    // toolbar replaced the hold strip, and the seat is Send.
     locked: Boolean = false,
-    // r73-19: the locked strip's Pause / Resume.
+    // r73-19: the locked toolbar's Pause / Resume.
     paused: Boolean = false,
     onTogglePause: () -> Unit = {},
+    // r75-1: fired MID-DRAG, the moment the finger crosses into the capsule.
     onLockRecord: () -> Unit = {},
     onSendVoice: () -> Unit = {},
     // r71-19b: the locked seat's second tap — the note goes as view-once.
@@ -5286,13 +5267,11 @@ private fun Composer(
                     fontWeight = FontWeight.Medium,
                 )
                 Spacer(Modifier.width(10.dp))
-                // Owner round 32 (item 45): the last 4 s of mic peaks paint a
-                // live wave that grows in from the mic's side; the cancel hint
-                // moves next to the mic it refers to. The strip used to be
-                // timer + hint with the whole middle blank.
-                LiveVoiceWave(color = accent, modifier = Modifier.weight(1f).height(22.dp))
-                Spacer(Modifier.width(10.dp))
                 if (locked) {
+                    // r75-1 (the MD): the locked toolbar owns the live wave —
+                    // the HOLD keeps just the clock and the hint.
+                    LiveVoiceWave(color = accent, modifier = Modifier.weight(1f).height(22.dp))
+                    Spacer(Modifier.width(10.dp))
                     // r73-19: the transport's other half — a paused note says so
                     // and the clock holds still (VoiceNote stops with it).
                     Row(
@@ -5324,20 +5303,10 @@ private fun Composer(
             }
         }
         Spacer(Modifier.width(6.dp))
-        // r74-19: the badge parks above the whole row once the note is locked —
-        // the owner's screenshot has it over the mic/send seat, and it overlaps
-        // the strip on purpose (zIndex), like Telegram's does.
-        if (locked) {
-            LockBadgePill(
-                alpha = 1f,
-                armed = true,
-                accent = accent,
-                modifier = Modifier.align(Alignment.CenterVertically).offset(y = (-54).dp).zIndex(3f),
-            )
-        } else if (lockAlpha > 0.01f) {
-            // the live target: it slides up WITH the finger (Telegram moves it on
-            // drag) — from just above the mic to the resting spot the locked
-            // state parks it in, so releasing on it is where the eye expects.
+        // r75-1 (the MD): the capsule is the HOLD's target only — it slides up
+        // with the finger and vanishes the moment the toolbar takes over.
+        // The locked state has NO badge (the MD's toolbar has none).
+        if (recording && !locked && lockAlpha > 0.01f) {
             LockBadgePill(
                 alpha = lockAlpha,
                 armed = lockArmed,
@@ -5438,10 +5407,11 @@ private fun Composer(
 }
 
 /**
- * r74-19 (the owner's Telegram screenshot): the lock badge — a dark pill with
- * the lock over an up-arrow, the height of a row button. Drawn by the COMPOSER
- * (not inside the mic's own Box, which clips its children) so the hold can slide
- * it up with the finger and the locked state can park it above the mic.
+ * r75-1 (the owner's MD): the lock affordance — a dark rounded vertical
+ * capsule with a white lock icon, floating directly above the mic. When the
+ * finger reaches it the border lights the accent and the capsule pulses (the
+ * MD's 1.0 -> 1.08 -> 1.0, no bounce). Drawn by the COMPOSER (not inside the
+ * mic's own Box, which clips its children) so it can slide up with the finger.
  */
 @Composable
 private fun LockBadgePill(
@@ -5450,36 +5420,32 @@ private fun LockBadgePill(
     accent: Color,
     modifier: Modifier = Modifier,
 ) {
+    val pulse by animateFloatAsState(if (armed) 1.08f else 1f, tween(90), label = "lockpulse")
     Box(
         modifier
-            .size(width = 42.dp, height = 48.dp)
+            .size(width = 40.dp, height = 56.dp)
             .alpha(alpha)
-            .clip(RoundedCornerShape(14.dp))
+            .scale(pulse)
+            .clip(RoundedCornerShape(percent = 50))
             .background(Color(0xE614181F))
-            .border(1.5.dp, if (armed) accent else Color(0x33FFFFFF), RoundedCornerShape(14.dp)),
+            .border(1.5.dp, if (armed) accent else Color(0x33FFFFFF), RoundedCornerShape(percent = 50)),
         contentAlignment = Alignment.Center,
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                Icons.Filled.Lock,
-                if (armed) "Release to lock" else "Slide up to lock",
-                tint = if (armed) accent else Color.White,
-                modifier = Modifier.size(16.dp),
-            )
-            Icon(
-                Icons.Filled.KeyboardArrowUp,
-                null,
-                tint = if (armed) accent else Color(0x99FFFFFF),
-                modifier = Modifier.size(16.dp),
-            )
-        }
+        Icon(
+            Icons.Filled.Lock,
+            "Lock recording",
+            tint = if (armed) accent else Color.White,
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 
 /**
- * The hold-to-record mic: press to start recording, keep holding and slide
- * left past the threshold to cancel (turns into a red trash), release to
- * send. The button physically follows the finger while sliding.
+ * The hold-to-record mic (r75-1, the owner's MD): press = the recording starts
+ * at once, drag UP into the capsule = LOCKED mid-drag (the finger can then
+ * leave — the release is none of this gesture's business), slide LEFT past the
+ * threshold = cancel (the mic turns into a red trash), a plain
+ * hold-and-release = send. The button follows the finger on both axes.
  */
 @Composable
 private fun HoldMicButton(
@@ -5488,33 +5454,32 @@ private fun HoldMicButton(
     accent: Color = Gold,
     onStartRecord: () -> Unit,
     onFinishRecord: (cancelled: Boolean) -> Unit,
-    // r71-19: up past [lockDist] arms the lock — the finger can let go and the
-    // note keeps recording; a plain TAP on the mic does the same (owner: "mic a
-    // ekbar click korleo lock hoye jabe").
+    // r75-1: fired MID-DRAG, the instant the finger crosses into the capsule —
+    // the MD's lock threshold. No tap shortcut any more.
     onLockRecord: () -> Unit = {},
-    // r74-19: the composer draws the badge, so the mic publishes its state.
+    // r75-1: the composer draws the capsule, so the mic publishes its state.
     onLockVisual: (alpha: Float, armed: Boolean, dy: Float) -> Unit = { _, _, _ -> },
 ) {
     val haptics = rememberHaptics()
     val density = LocalDensity.current
     val cancelDist = with(density) { 88.dp.toPx() }
-    val lockDist = with(density) { 58.dp.toPx() }
-    val tapSlop = with(density) { 12.dp.toPx() }
+    // the MD's lock distance: 80-120 dp of upward travel
+    val lockDist = with(density) { 96.dp.toPx() }
     var dragX by remember { mutableStateOf(0f) }
     var dragY by remember { mutableStateOf(0f) }
     val cancelArmed = dragX <= -cancelDist
     val lockArmed = dragY <= -lockDist
-    // r73-19 (the owner's screenshots show Telegram's affordance): the target
-    // is up from the moment the recording starts — it is what the finger is
-    // aiming at — and it fills once the finger is there.
+    // the capsule is up from the moment the recording starts — it is what the
+    // finger is aiming at (the MD's "lock control appears above").
     val lockShowing = recording || dragY <= -12f
     val lockAlpha by animateFloatAsState(if (lockShowing) 1f else 0f, tween(120), label = "lockalpha")
     val animX by animateFloatAsState(if (recording) dragX else 0f, spring(stiffness = 900f), label = "micdrag")
+    val animY by animateFloatAsState(if (recording) dragY else 0f, spring(stiffness = 900f), label = "miclift")
 
     Box(
         Modifier
             .size(42.dp)
-            .offset { IntOffset((if (recording) animX else 0f).roundToInt(), 0) }
+            .offset { IntOffset(animX.roundToInt(), animY.roundToInt()) }
             // r71-16 (owner: "ei shadow ta amar ekdomi valo lage na"): the
             // 3D-lift drop shadow stays gone. The ring + fill carry the button.
             .clip(CircleShape)
@@ -5537,11 +5502,10 @@ private fun HoldMicButton(
                     dragX = 0f
                     dragY = 0f
                     var armed = false
-                    var lockHad = false
-                    // r74-19: the badge is the ONLY lock target, so arming it is
-                    // decided here — the finger cannot pass through it by accident.
-                    var lockReached = false
-                    val downAt = android.os.SystemClock.uptimeMillis()
+                    // r75-1: the lock fires ONCE, mid-drag; after it the
+                    // gesture is inert — the composer has already swapped this
+                    // seat for the locked toolbar's Send.
+                    var locked = false
                     onStartRecord()
                     while (true) {
                         val event = awaitPointerEvent()
@@ -5549,41 +5513,39 @@ private fun HoldMicButton(
                         val dx = change.positionChange().x
                         val dy = change.positionChange().y
                         if (dx != 0f) dragX = (dragX + dx).coerceIn(-cancelDist * 1.5f, 0f)
-                        // r71-19: up is the lock (the mic only ever slid left
-                        // before, so the vertical axis was free).
+                        // r75-1: up is the lock's own axis, and the zone is the
+                        // ONLY lock — the finger must travel the whole distance.
                         if (dy != 0f) dragY = (dragY + dy).coerceIn(-lockDist * 1.6f, 0f)
                         val nowArmed = dragX <= -cancelDist
                         if (nowArmed && !armed) haptics.heavy()
                         armed = nowArmed
-                        val nowLocked = dragY <= -lockDist
-                        if (nowLocked && !lockHad) haptics.confirm()
-                        lockHad = nowLocked
-                        if (nowLocked) lockReached = true
+                        if (!locked && dragY <= -lockDist) {
+                            locked = true
+                            onLockRecord()
+                        }
                         event.changes.forEach { it.consume() }
                         if (event.changes.all { !it.pressed }) break
                     }
-                    // r74-19: the release is decided by the pure rules (see
-                    // VoiceHoldGesture) and by whether the badge was actually
-                    // REACHED — a finger that let go before it stays a send.
-                    val how =
-                        VoiceHoldGesture.decide(
-                            dx = dragX,
-                            dy = dragY,
-                            ms = android.os.SystemClock.uptimeMillis() - downAt,
-                            cancelDist = cancelDist,
-                            lockDist = lockDist,
-                            slop = tapSlop,
-                        )
-                    val reached = lockReached || dragY <= -lockDist
+                    val endX = dragX
+                    val endY = dragY
                     dragX = 0f
                     dragY = 0f
-                    when (how) {
-                        VoiceHoldGesture.Result.CANCEL -> onFinishRecord(true)
-                        // the badge is the target; letting go on or above it locks
-                        VoiceHoldGesture.Result.TAP_LOCK -> onLockRecord()
-                        VoiceHoldGesture.Result.SWIPE_LOCK ->
-                            if (reached) onLockRecord() else onFinishRecord(false)
-                        VoiceHoldGesture.Result.SEND -> onFinishRecord(false)
+                    // The release only matters while the take is still a HOLD —
+                    // a locked one belongs to the toolbar now (the MD: once
+                    // lockRecording() fired, the UP must not stop the take).
+                    if (!locked) {
+                        val how =
+                            VoiceHoldGesture.decide(
+                                dx = endX,
+                                dy = endY,
+                                cancelDist = cancelDist,
+                                lockDist = lockDist,
+                            )
+                        when (how) {
+                            VoiceHoldGesture.Result.CANCEL -> onFinishRecord(true)
+                            VoiceHoldGesture.Result.LOCK -> onLockRecord()
+                            VoiceHoldGesture.Result.SEND -> onFinishRecord(false)
+                        }
                     }
                 }
             },
@@ -5591,14 +5553,13 @@ private fun HoldMicButton(
     ) {
         Icon(
             if (cancelArmed) Icons.Filled.Delete else Icons.Filled.Mic,
-            contentDescription = if (cancelArmed) "Release to cancel" else "Hold to record",
+            contentDescription = if (cancelArmed) "Release to cancel" else "Record voice message",
             tint = if (!enabled) Muted else if (cancelArmed) Red else accent,
             modifier = Modifier.size(20.dp),
         )
     }
-    // r74-19: the badge itself belongs to the composer now (it has to sit over
-    // BOTH seats when the note is locked) — this is only its state, published as
-    // it changes so the row above can draw it at the finger's height.
+    // r75-1: the capsule itself belongs to the composer (it has to clear the
+    // mic's clip) — this is only its state, published as it changes.
     SideEffect { onLockVisual(lockAlpha, lockArmed, dragY) }
 }
 

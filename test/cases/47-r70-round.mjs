@@ -215,27 +215,25 @@ const main = (f) => read(`${ANDROID}/${f}`);
     chat.indexOf("private fun HoldMicButton("),
     chat.indexOf("private val VIDEO_NAME_EXT"),
   );
+  const vnotes = main("VoiceNote.kt");
   check(
-    'r71-19 + r74-19 (owner: "voice button a click kore hold korle normal voice record hobe but upore swipe korle voice lock hobe ar voice button ta send button a hoye jabe"): the hold grows a vertical axis — slide UP and releasing LOCKS the take, a quick touch that never moved locks it too, slide-left past 88 dp cancels, and a plain hold-and-release SENDS; the release is decided by the pure rules in VoiceHoldGesture, and only a finger that actually REACHED the badge locks on an up-swipe',
-    mic.includes("val lockDist = with(density) { 58.dp.toPx() }") &&
-      mic.includes("val tapSlop = with(density) { 12.dp.toPx() }") &&
-      mic.includes("var dragY by remember { mutableStateOf(0f) }") &&
-      mic.includes("if (dy != 0f) dragY = (dragY + dy).coerceIn(-lockDist * 1.6f, 0f)") &&
-      mic.includes("val lockArmed = dragY <= -lockDist") &&
-      mic.includes("var lockReached = false") &&
-      mic.includes("if (nowLocked) lockReached = true") &&
+    'r75-1 (owner: "current voice lock system hold swipe up system shob remove koro ami ekta md file diyechi dekho ei vabe hobe shob"): the hold is the MD\'s state machine — press records at once, the capsule is the ONLY lock target and the take locks MID-DRAG the instant the finger crosses 96 dp (a release never locks), slide-left past 88 dp cancels, a plain hold-and-release SENDS, and the mic follows the finger on both axes; the release is decided by the pure rules in VoiceHoldGesture (LOCK / CANCEL / SEND)',
+    mic.includes("val cancelDist = with(density) { 88.dp.toPx() }") &&
+      mic.includes("val lockDist = with(density) { 96.dp.toPx() }") &&
+      mic.includes("if (!locked && dragY <= -lockDist) {") &&
+      mic.includes("locked = true") &&
+      mic.includes("onLockRecord()") &&
+      mic.includes("if (!locked) {") &&
       mic.includes("VoiceHoldGesture.decide(") &&
-      mic.includes("val reached = lockReached || dragY <= -lockDist") &&
       mic.includes("VoiceHoldGesture.Result.CANCEL -> onFinishRecord(true)") &&
-      mic.includes("VoiceHoldGesture.Result.TAP_LOCK -> onLockRecord()") &&
-      mic.includes("VoiceHoldGesture.Result.SWIPE_LOCK ->") &&
-      mic.includes("if (reached) onLockRecord() else onFinishRecord(false)") &&
+      mic.includes("VoiceHoldGesture.Result.LOCK -> onLockRecord()") &&
       mic.includes("VoiceHoldGesture.Result.SEND -> onFinishRecord(false)") &&
-      // the badge is a SIBLING of the mic (the mic circle clips its children)
-      mic.includes("SideEffect { onLockVisual(lockAlpha, lockArmed, dragY) }") &&
-      comp.includes("LockBadgePill(") &&
-      // the import is at the top of the FILE, not inside the slice
-      chat.includes("import androidx.compose.material.icons.filled.Lock"),
+      mic.includes("val animY by animateFloatAsState") &&
+      mic.includes("IntOffset(animX.roundToInt(), animY.roundToInt())") &&
+      vnotes.includes("fun decide(") &&
+      vnotes.includes("if (dy <= -lockDist) return Result.LOCK") &&
+      vnotes.includes("if (dx <= -cancelDist) return Result.CANCEL") &&
+      vnotes.includes("return Result.SEND"),
   );
   check(
     "r71-19: the locked strip is a different animal — the mic seat becomes Send (a locked recording has no finger on the mic), ✕ drops the note, the lock glyph says why the strip is up, and the unlocked strip keeps its slide-to-cancel hint",
@@ -251,16 +249,15 @@ const main = (f) => read(`${ANDROID}/${f}`);
       comp.includes("locked: Boolean = false,") &&
       comp.includes("onLockRecord: () -> Unit = {},"),
   );
+  /* ---- the r72 seat window: the composer's Send runs on its own clock ---- */
+  const app = "native-android/app/src/main/java/app/kuchupuchu/android/";
+  const ui = readFileSync(app + "Ui.kt", "utf8");
   check(
-    "r71-19: the chat owns the locked state — set by lockRecording (with its confirm buzz), cleared the moment the take starts and the moment it ends, and a locked note that the user then SENDS is never swallowed by the sub-second slip rule in silence",
+    "r75-1: the chat owns the locked state — set ONLY by lockRecording (the mid-drag threshold, with its confirm buzz), a new take is always born a HOLD, cleared the moment the take ends, and a locked note the user then SENDS is never swallowed by the sub-second slip rule in silence",
     chat.includes("var voiceLocked by remember { mutableStateOf(false) }") &&
       chat.includes("fun lockRecording() {") &&
-      // r72-19: the early return became a QUEUE (the tap can land before the
-      // take exists — the permission sheet on first use).
-      chat.includes("if (recStarting) lockPending = true") &&
       chat.includes("voiceLocked = true") &&
-      (chat.match(/voiceLocked = false/g) || []).length === 1 &&
-      chat.includes("voiceLocked = lockPending") &&
+      (chat.match(/voiceLocked = false/g) || []).length === 2 &&
       chat.includes("val wasLocked = voiceLocked") &&
       chat.includes('if (wasLocked) error = "That voice note is too short."') &&
       chat.includes("locked = voiceLocked,") &&
@@ -268,25 +265,23 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes("onSendVoice = { finishRecording(cancelled = false) },") &&
       chat.includes("onCancelVoice = { finishRecording(cancelled = true) },"),
   );
-  /* ---- the r72 redo of 19 (owner: the lock "thik moto implement hoini") ---- */
-  const app = "native-android/app/src/main/java/app/kuchupuchu/android/";
-  const ui = readFileSync(app + "Ui.kt", "utf8");
   check(
-    "r72-19 + r73-19 + r74-19: the lock goal is the owner's Telegram pill — lock over an up-arrow, 42x48 dp — drawn by the COMPOSER (the mic circle clips its children), sliding up with the finger while the hold is live and parking above mic + send once the take is locked",
+    "r75-1 + the MD: the lock goal is a dark rounded VERTICAL CAPSULE with a white lock icon just above the mic — it pulses (1.0 -> 1.08, no bounce) with the accent border when the finger reaches it, slides up with the finger while the hold is live, and is GONE once locked (the MD's toolbar has no badge)",
     comp.includes("private fun LockBadgePill(") &&
-      comp.includes(".size(width = 42.dp, height = 48.dp)") &&
-      comp.includes("Icons.Filled.KeyboardArrowUp,") &&
-      comp.includes('if (armed) "Release to lock" else "Slide up to lock"') &&
-      comp.includes("SideEffect { onLockVisual(lockAlpha, lockArmed, dragY) }") &&
-      // .. and the runtime import that effect needs is at the top of the FILE
-      // (the harness cannot compile Kotlin, so an unresolved name would only
-      // show up as a red apk job three minutes in)
-      chat.includes("import androidx.compose.runtime.SideEffect") &&
-      // the live badge rises with the drag ..
+      comp.includes(".size(width = 40.dp, height = 56.dp)") &&
+      comp.includes("RoundedCornerShape(percent = 50)") &&
+      comp.includes('"Lock recording",') &&
+      comp.includes(
+        'animateFloatAsState(if (armed) 1.08f else 1f, tween(90), label = "lockpulse")',
+      ) &&
+      comp.includes(".scale(pulse)") &&
+      comp.includes("if (recording && !locked && lockAlpha > 0.01f) {") &&
       comp.includes(".offset { IntOffset(0, (-18.dp.toPx() + lockDragY * 0.6f).roundToInt()) }") &&
-      // .. and the locked one parks over the row
-      comp.includes("Modifier.align(Alignment.CenterVertically).offset(y = (-54).dp).zIndex(3f)") &&
-      mic.includes("val lockShowing = recording || dragY <= -12f"),
+      !comp.includes(".offset(y = (-54).dp)") &&
+      mic.includes("val lockShowing = recording || dragY <= -12f") &&
+      mic.includes("SideEffect { onLockVisual(lockAlpha, lockArmed, dragY) }") &&
+      chat.includes("import androidx.compose.material.icons.filled.Lock") &&
+      !chat.includes("import androidx.compose.material.icons.filled.KeyboardArrowUp"),
   );
   check(
     'r74-5 (owner: "voice button a click kore hold korle normal voice record hobe but upore swipe korle voice lock hobe ar voice button ta send button a hoye jabe screenshot a jemon ta ache"): a LOCKED take offers a real Send — Telegram\'s white glass circle (0xE6FFFFFF) with a near-black chevron at 22 dp — while text and media Send keep the accent fill and the 19 dp paper plane',
@@ -297,23 +292,16 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes("import androidx.compose.material.icons.filled.DoubleArrow"),
   );
   check(
-    'r72-19: a tap that lands before the recorder exists is not lost — while the start is in flight the lock is QUEUED and the take comes up LOCKED, so the mic seat is the Send circle from its first frame (owner: "voice a tap lock korle send button hoye jabe tokhono voice button na")',
-    chat.includes("var lockPending by remember { mutableStateOf(false) }") &&
-      chat.includes("var recStarting by remember { mutableStateOf(false) }") &&
-      chat.includes("recStarting = true") &&
-      chat.includes("recStarting = false") &&
-      chat.includes("lockPending = false") &&
-      /gateMicCamera\(video = false\) \{[\s\S]{0,300}?recStarting = false[\s\S]{0,500}?voiceLocked = lockPending[\s\S]{0,120}?lockPending = false/.test(
-        chat,
-      ) &&
-      // and the queue never survives a failed start or an ended take
-      chat.includes(
-        'lockPending = false\n                    error = "Mic is not available. Check the mic permission."',
-      ) &&
-      /val wasLocked = voiceLocked\n        voiceLocked = false\n        lockPending = false/.test(
-        chat,
-      ),
+    "r75-1: the tap-to-lock machine is gone with the system it served — no queued lock, no recStarting window, no tap shortcut anywhere on the recorder's path, and a failed start still says why",
+    !chat.includes("lockPending") &&
+      !chat.includes("recStarting") &&
+      !vnotes.includes("TAP_LOCK") &&
+      !vnotes.includes("TAP_MS") &&
+      !mic.includes("tapSlop") &&
+      !mic.includes("lockReached") &&
+      chat.includes('error = "Mic is not available. Check the mic permission."'),
   );
+  /* ---- r73-19: the owner's screenshots — the locked row is a transport ---- */
   /* ---- r73-19: the owner's screenshots — the locked row is a transport ---- */
   const vn = main("VoiceNote.kt");
   check(
