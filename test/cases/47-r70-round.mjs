@@ -216,20 +216,24 @@ const main = (f) => read(`${ANDROID}/${f}`);
     chat.indexOf("private val VIDEO_NAME_EXT"),
   );
   check(
-    "r71-19: the mic gesture grows a vertical axis — slide UP past 58 dp arms the lock (badge hollow on the way up, filled on arm) and releasing there LOCKS the recording; a plain tap (< 300 ms, no slide) locks too; slide-left still cancels; any other release sends",
+    'r71-19 + r74-19 (owner: "voice button a click kore hold korle normal voice record hobe but upore swipe korle voice lock hobe ar voice button ta send button a hoye jabe"): the hold grows a vertical axis — slide UP and releasing LOCKS the take, a quick touch that never moved locks it too, slide-left past 88 dp cancels, and a plain hold-and-release SENDS; the release is decided by the pure rules in VoiceHoldGesture, and only a finger that actually REACHED the badge locks on an up-swipe',
     mic.includes("val lockDist = with(density) { 58.dp.toPx() }") &&
       mic.includes("val tapSlop = with(density) { 12.dp.toPx() }") &&
       mic.includes("var dragY by remember { mutableStateOf(0f) }") &&
       mic.includes("if (dy != 0f) dragY = (dragY + dy).coerceIn(-lockDist * 1.6f, 0f)") &&
       mic.includes("val lockArmed = dragY <= -lockDist") &&
-      mic.includes("val tapped =") &&
-      mic.includes("android.os.SystemClock.uptimeMillis() - downAt < 300 &&") &&
-      /when \{[\s\S]{0,200}?cancelled -> onFinishRecord\(true\)[\s\S]{0,80}?lock \|\| tapped -> onLockRecord\(\)[\s\S]{0,60}?else -> onFinishRecord\(false\)/.test(
-        mic,
-      ) &&
+      mic.includes("var lockReached = false") &&
+      mic.includes("if (nowLocked) lockReached = true") &&
+      mic.includes("VoiceHoldGesture.decide(") &&
+      mic.includes("val reached = lockReached || dragY <= -lockDist") &&
+      mic.includes("VoiceHoldGesture.Result.CANCEL -> onFinishRecord(true)") &&
+      mic.includes("VoiceHoldGesture.Result.TAP_LOCK -> onLockRecord()") &&
+      mic.includes("VoiceHoldGesture.Result.SWIPE_LOCK ->") &&
+      mic.includes("if (reached) onLockRecord() else onFinishRecord(false)") &&
+      mic.includes("VoiceHoldGesture.Result.SEND -> onFinishRecord(false)") &&
       // the badge is a SIBLING of the mic (the mic circle clips its children)
-      mic.includes("if (lockAlpha > 0.01f) {") &&
-      mic.includes('if (lockArmed) "Release to lock" else "Slide up to lock"') &&
+      mic.includes("SideEffect { onLockVisual(lockAlpha, lockArmed, dragY) }") &&
+      comp.includes("LockBadgePill(") &&
       // the import is at the top of the FILE, not inside the slice
       chat.includes("import androidx.compose.material.icons.filled.Lock"),
   );
@@ -268,13 +272,17 @@ const main = (f) => read(`${ANDROID}/${f}`);
   const app = "native-android/app/src/main/java/app/kuchupuchu/android/";
   const ui = readFileSync(app + "Ui.kt", "utf8");
   check(
-    'r72-19 + r73-19: the lock goal sits ABOVE the mic (owner: "lock icon ta upore thakbe side a na") as the dark pill of his screenshots — lock over an up-arrow — a SIBLING of the mic circle (that circle clips its children), up from the moment the recording starts',
-    mic.includes(".offset { IntOffset(0, -(58.dp.toPx()).roundToInt()) }") &&
-      mic.includes(".size(width = 30.dp, height = 54.dp)") &&
-      mic.includes("Icons.Filled.KeyboardArrowUp,") &&
-      mic.includes("val lockShowing = recording || dragY <= -12f") &&
-      mic.includes("if (lockAlpha > 0.01f) {") &&
-      mic.includes('if (lockArmed) "Release to lock" else "Slide up to lock"'),
+    "r72-19 + r73-19 + r74-19: the lock goal is the owner's Telegram pill — lock over an up-arrow, 42x48 dp — drawn by the COMPOSER (the mic circle clips its children), sliding up with the finger while the hold is live and parking above mic + send once the take is locked",
+    comp.includes("private fun LockBadgePill(") &&
+      comp.includes(".size(width = 42.dp, height = 48.dp)") &&
+      comp.includes("Icons.Filled.KeyboardArrowUp,") &&
+      comp.includes('if (armed) "Release to lock" else "Slide up to lock"') &&
+      comp.includes("SideEffect { onLockVisual(lockAlpha, lockArmed, dragY) }") &&
+      // the live badge rises with the drag ..
+      comp.includes(".offset { IntOffset(0, (-18.dp.toPx() + lockDragY * 0.6f).roundToInt()) }") &&
+      // .. and the locked one parks over the row
+      comp.includes("Modifier.align(Alignment.CenterVertically).offset(y = (-54).dp).zIndex(3f)") &&
+      mic.includes("val lockShowing = recording || dragY <= -12f"),
   );
   check(
     'r72-19: a tap that lands before the recorder exists is not lost — while the start is in flight the lock is QUEUED and the take comes up LOCKED, so the mic seat is the Send circle from its first frame (owner: "voice a tap lock korle send button hoye jabe tokhono voice button na")',

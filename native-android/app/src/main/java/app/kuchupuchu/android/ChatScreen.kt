@@ -5134,6 +5134,11 @@ private fun Composer(
     // Owner round 33 (item 11b): a cancelled recording plays the bin for
     // 520 ms in the strip's place — the lid lifts, the note drops in, the
     // lid closes — and only then does the pill come back.
+    // r74-19: the mic's badge state, hoisted to the row so the pill can be drawn
+    // outside the mic's clip — at the finger's height while the hold is live.
+    var lockAlpha by remember { mutableStateOf(0f) }
+    var lockArmed by remember { mutableStateOf(false) }
+    var lockDragY by remember { mutableStateOf(0f) }
     var binPlaying by remember { mutableStateOf(false) }
     LaunchedEffect(voiceBinNonce) {
         if (voiceBinNonce > 0) {
@@ -5317,6 +5322,30 @@ private fun Composer(
             }
         }
         Spacer(Modifier.width(6.dp))
+        // r74-19: the badge parks above the whole row once the note is locked —
+        // the owner's screenshot has it over the mic/send seat, and it overlaps
+        // the strip on purpose (zIndex), like Telegram's does.
+        if (locked) {
+            LockBadgePill(
+                alpha = 1f,
+                armed = true,
+                accent = accent,
+                modifier = Modifier.align(Alignment.CenterVertically).offset(y = (-54).dp).zIndex(3f),
+            )
+        } else if (lockAlpha > 0.01f) {
+            // the live target: it slides up WITH the finger (Telegram moves it on
+            // drag) — from just above the mic to the resting spot the locked
+            // state parks it in, so releasing on it is where the eye expects.
+            LockBadgePill(
+                alpha = lockAlpha,
+                armed = lockArmed,
+                accent = accent,
+                modifier =
+                    Modifier
+                        .align(Alignment.CenterVertically)
+                        .offset { IntOffset(0, (-18.dp.toPx() + lockDragY * 0.6f).roundToInt()) },
+            )
+        }
 
         /* mic/send circle. Text typed OR chat media selected (forward) ->
            it's SEND; otherwise a HOLD button: press = record, slide = cancel.
@@ -5386,8 +5415,52 @@ private fun Composer(
                     accent = accent,
                     onStartRecord = onStartRecord,
                     onFinishRecord = onFinishRecord,
+                    onLockVisual = { a, armed, dy ->
+                        lockAlpha = a
+                        lockArmed = armed
+                        lockDragY = dy
+                    },
                 )
             }
+        }
+    }
+}
+
+/**
+ * r74-19 (the owner's Telegram screenshot): the lock badge — a dark pill with
+ * the lock over an up-arrow, the height of a row button. Drawn by the COMPOSER
+ * (not inside the mic's own Box, which clips its children) so the hold can slide
+ * it up with the finger and the locked state can park it above the mic.
+ */
+@Composable
+private fun LockBadgePill(
+    alpha: Float,
+    armed: Boolean,
+    accent: Color,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier
+            .size(width = 42.dp, height = 48.dp)
+            .alpha(alpha)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xE614181F))
+            .border(1.5.dp, if (armed) accent else Color(0x33FFFFFF), RoundedCornerShape(14.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                Icons.Filled.Lock,
+                if (armed) "Release to lock" else "Slide up to lock",
+                tint = if (armed) accent else Color.White,
+                modifier = Modifier.size(16.dp),
+            )
+            Icon(
+                Icons.Filled.KeyboardArrowUp,
+                null,
+                tint = if (armed) accent else Color(0x99FFFFFF),
+                modifier = Modifier.size(16.dp),
+            )
         }
     }
 }
@@ -5408,6 +5481,8 @@ private fun HoldMicButton(
     // note keeps recording; a plain TAP on the mic does the same (owner: "mic a
     // ekbar click korleo lock hoye jabe").
     onLockRecord: () -> Unit = {},
+    // r74-19: the composer draws the badge, so the mic publishes its state.
+    onLockVisual: (alpha: Float, armed: Boolean, dy: Float) -> Unit = { _, _, _ -> },
 ) {
     val haptics = rememberHaptics()
     val density = LocalDensity.current
@@ -5452,6 +5527,9 @@ private fun HoldMicButton(
                     dragY = 0f
                     var armed = false
                     var lockHad = false
+                    // r74-19: the badge is the ONLY lock target, so arming it is
+                    // decided here — the finger cannot pass through it by accident.
+                    var lockReached = false
                     val downAt = android.os.SystemClock.uptimeMillis()
                     onStartRecord()
                     while (true) {
@@ -5469,23 +5547,32 @@ private fun HoldMicButton(
                         val nowLocked = dragY <= -lockDist
                         if (nowLocked && !lockHad) haptics.confirm()
                         lockHad = nowLocked
+                        if (nowLocked) lockReached = true
                         event.changes.forEach { it.consume() }
                         if (event.changes.all { !it.pressed }) break
                     }
-                    val cancelled = dragX <= -cancelDist
-                    val lock = dragY <= -lockDist
-                    // A plain tap (no slide at all, finger up quickly) locks the
-                    // recording instead of the old silent cancel — the owner's
-                    // "mic a ekbar click korleo lock hoye jabe".
-                    val tapped =
-                        android.os.SystemClock.uptimeMillis() - downAt < 300 &&
-                            dragX > -tapSlop && dragY > -tapSlop
+                    // r74-19: the release is decided by the pure rules (see
+                    // VoiceHoldGesture) and by whether the badge was actually
+                    // REACHED — a finger that let go before it stays a send.
+                    val how =
+                        VoiceHoldGesture.decide(
+                            dx = dragX,
+                            dy = dragY,
+                            ms = android.os.SystemClock.uptimeMillis() - downAt,
+                            cancelDist = cancelDist,
+                            lockDist = lockDist,
+                            slop = tapSlop,
+                        )
+                    val reached = lockReached || dragY <= -lockDist
                     dragX = 0f
                     dragY = 0f
-                    when {
-                        cancelled -> onFinishRecord(true)
-                        lock || tapped -> onLockRecord()
-                        else -> onFinishRecord(false)
+                    when (how) {
+                        VoiceHoldGesture.Result.CANCEL -> onFinishRecord(true)
+                        // the badge is the target; letting go on or above it locks
+                        VoiceHoldGesture.Result.TAP_LOCK -> onLockRecord()
+                        VoiceHoldGesture.Result.SWIPE_LOCK ->
+                            if (reached) onLockRecord() else onFinishRecord(false)
+                        VoiceHoldGesture.Result.SEND -> onFinishRecord(false)
                     }
                 }
             },
@@ -5498,40 +5585,10 @@ private fun HoldMicButton(
             modifier = Modifier.size(20.dp),
         )
     }
-    // r71-19 + r72-19: the lock target, ABOVE the mic (the finger slides up to
-    // reach it) — hollow while the finger is heading up, filled once it is
-    // there.
-    if (lockAlpha > 0.01f) {
-        Column(
-            Modifier
-                // r72-19 + r73-19: the goal sits ABOVE the mic (owner: "lock
-                // icon ta upore thakbe side a na") and now looks like the one in
-                // his screenshots — a small dark pill with the lock over an
-                // up-arrow. It is a SIBLING of the mic on purpose: the mic's
-                // circle clips its children, and the badge rides outside it.
-                .offset { IntOffset(0, -(58.dp.toPx()).roundToInt()) }
-                .size(width = 30.dp, height = 54.dp)
-                .alpha(lockAlpha)
-                .clip(RoundedCornerShape(15.dp))
-                .background(Color(0xE614181F))
-                .border(1.5.dp, if (lockArmed) accent else Color(0x33FFFFFF), RoundedCornerShape(15.dp)),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Icon(
-                Icons.Filled.Lock,
-                if (lockArmed) "Release to lock" else "Slide up to lock",
-                tint = if (lockArmed) accent else Color.White,
-                modifier = Modifier.size(15.dp),
-            )
-            Icon(
-                Icons.Filled.KeyboardArrowUp,
-                null,
-                tint = if (lockArmed) accent else Color(0x99FFFFFF),
-                modifier = Modifier.size(15.dp),
-            )
-        }
-    }
+    // r74-19: the badge itself belongs to the composer now (it has to sit over
+    // BOTH seats when the note is locked) — this is only its state, published as
+    // it changes so the row above can draw it at the finger's height.
+    SideEffect { onLockVisual(lockAlpha, lockArmed, dragY) }
 }
 
 private val VIDEO_NAME_EXT = listOf(".mp4", ".mov", ".mkv", ".webm", ".3gp", ".m4v", ".avi")
