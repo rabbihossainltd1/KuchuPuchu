@@ -5232,55 +5232,73 @@ private fun Composer(
                     )
                 }
             }
-        } else {
-            /* live recording panel: timer + slide-to-cancel hint.
-               Owner round 16: no card background — transparent like the bar. */
-            Row(
+        } else if (locked) {
+            /* r75-3 (owner, frame-by-frame over the WhatsApp recording: "eita
+               WhatsApp er voice system ar tui jeta banaichia puray faltu kono
+               alignment nai"): the locked state is WhatsApp's TWO-ROW PANEL —
+               one dark rounded panel with the clock, the live wave and the
+               lock circle on top, the bin circle, the full-width Pause pill
+               and the Send circle below. Every control sits on its own seat. */
+            Column(
                 Modifier
                     .weight(1f)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .clip(RoundedCornerShape(24.dp))
+                    // r75-2: the app's own charcoal (DarkCard) — the panel, not
+                    // a strip of loose parts.
+                    .background(DarkCard)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
             ) {
-                if (locked) {
-                    // r73-19 (the owner's screenshots show Telegram's locked
-                    // row): with the finger free this is a real transport — the
-                    // bin on the left throws the note away, the clock and the
-                    // live wave stay in the middle, and Pause / Resume sits next
-                    // to the Send circle on the right.
-                    IconButton(onClick = { onCancelVoice() }, Modifier.size(30.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "%d:%02d".format(recMs / 1000 / 60, recMs / 1000 % 60),
+                        color = if (paused) Muted else Ink,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    LiveVoiceWave(color = accent, modifier = Modifier.width(96.dp).height(22.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Box(
+                        Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.08f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.Lock,
+                            "Recording locked",
+                            tint = accent,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.08f))
+                            .clickable { onCancelVoice() },
+                        contentAlignment = Alignment.Center,
+                    ) {
                         Icon(
                             Icons.Filled.Delete,
                             "Delete recording",
                             tint = Red,
-                            modifier = Modifier.size(17.dp),
+                            modifier = Modifier.size(18.dp),
                         )
                     }
-                } else {
-                    PulsingDot()
-                    Spacer(Modifier.width(8.dp))
-                }
-                Text(
-                    "%d:%02d".format(recMs / 1000 / 60, recMs / 1000 % 60),
-                    color = if (locked && paused) Muted else Ink,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                )
-                Spacer(Modifier.width(10.dp))
-                if (locked) {
-                    // r75-1 (the MD): the locked toolbar owns the live wave —
-                    // the HOLD keeps just the clock and the hint.
-                    LiveVoiceWave(color = accent, modifier = Modifier.weight(1f).height(22.dp))
                     Spacer(Modifier.width(10.dp))
-                    // r73-19: the transport's other half — a paused note says so
-                    // and the clock holds still (VoiceNote stops with it).
                     Row(
                         Modifier
-                            .clip(RoundedCornerShape(14.dp))
-                            // r75-2: the app's own charcoal (DarkCard) — not a
-                            // hardcoded black that ignores the theme.
-                            .background(DarkCard)
+                            .weight(1f)
+                            .clip(RoundedCornerShape(17.dp))
+                            .background(Color.White.copy(alpha = 0.08f))
                             .clickable { onTogglePause() }
-                            .padding(horizontal = 12.dp, vertical = 5.dp),
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(
@@ -5293,17 +5311,60 @@ private fun Composer(
                         Text(
                             if (paused) "Resume" else "Pause",
                             color = Color.White,
-                            fontSize = 12.5.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
                         )
                     }
-                } else {
-                    Text("‹ Slide to cancel", color = Red, fontSize = 12.5.sp, maxLines = 1)
+                    Spacer(Modifier.width(10.dp))
+                    // r71-19b keeps its seat on the panel's Send: one tap sends,
+                    // a double tap sends the note view-once.
+                    KpDoubleTapSeat {
+                        Box(
+                            Modifier
+                                .size(44.dp)
+                                .fxMicAnchor()
+                                .clip(CircleShape)
+                                .background(accent)
+                                .combinedClickable(
+                                    onClick = onSendVoice,
+                                    onDoubleClick = if (selectCount == 0) onSendVoiceOnce else null,
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Send,
+                                "Send voice message",
+                                tint = AmberInk,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
                 }
+            }
+        } else {
+            /* live HOLD strip (r75-3, WhatsApp's frames): the clock on the left
+               and the cancel hint beside it — nothing else. The wave and the
+               dot belong to the locked panel; the bar stays bare while the
+               finger is down. */
+            Row(
+                Modifier
+                    .weight(1f)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "%d:%02d".format(recMs / 1000 / 60, recMs / 1000 % 60),
+                    color = Ink,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+                Spacer(Modifier.width(12.dp))
+                Text("‹ Slide to cancel", color = Muted, fontSize = 12.5.sp, maxLines = 1)
             }
         }
         Spacer(Modifier.width(6.dp))
+        // r75-1 (the MD): the capsule is the HOLD's target only        Spacer(Modifier.width(6.dp))
         // r75-1 (the MD): the capsule is the HOLD's target only — it slides up
         // with the finger and vanishes the moment the toolbar takes over.
         // The locked state has NO badge (the MD's toolbar has none).
@@ -5315,7 +5376,9 @@ private fun Composer(
                 modifier =
                     Modifier
                         .align(Alignment.CenterVertically)
-                        .offset { IntOffset(0, (-18.dp.toPx() + lockDragY * 0.6f).roundToInt()) },
+                        // r75-3 (the frames): the capsule hangs just above the mic and rises
+                        // 1:1 WITH the finger — no lag, no partial factor.
+                        .offset { IntOffset(0, (-48.dp.toPx() + lockDragY).roundToInt()) },
             )
         }
 
@@ -5323,82 +5386,72 @@ private fun Composer(
            it's SEND; otherwise a HOLD button: press = record, slide = cancel.
            Owner round 32 (item 19): a gallery pick no longer takes this slot
            — the attach panel has its own Send under the mic.
-           r71-19: a LOCKED recording takes it too — the finger is off the mic
-           and this circle (Send) is what closes the note. */
-        if (!input.isBlank() || selectCount > 0 || locked) {
-            val sendInteraction = remember { MutableInteractionSource() }
-            val sendPressed by sendInteraction.collectIsPressedAsState()
-            // r72-19: this seat's double tap is the once-send, and the owner
-            // picked a 0.45 s window for it (the platform's is ~0.3 s) — the
-            // seat runs inside a ViewConfiguration of its own.
-            KpDoubleTapSeat {
-                Box(
-                    Modifier
-                        .size(42.dp)
-                        .fxMicAnchor()
-                        .pressScale(sendInteraction)
-                        // Owner round 10: the send/mic circles carry the same 3D
-                        // lift as the header call buttons now. r73-16 (owner,
-                        // again): no shadow anywhere — the fill carries it.
-                        .clip(CircleShape)
-                        // r75-2 (owner: "colour system ta amar app onujai
-                        // hobe"): the locked Send is the SAME accent circle as
-                        // every other send in the app — no white glass.
-                        .background(accent)
-                        // Owner round 32 (item 18): tap = send, hold = "send
-                        // later" (text only — media goes with its own flow, item 19).
-                        .combinedClickable(
-                            interactionSource = sendInteraction,
-                            indication = null,
-                            // r71-19b: with a note locked, the second tap of a
-                            // double tap is the view-once send. combinedClickable
-                            // already holds onClick for the double-tap window, so
-                            // a plain tap still sends immediately-ish and the
-                            // second tap upgrades it.
-                            onDoubleClick =
-                                when {
-                                    // r71-20: text typed + a second tap = view-once.
-                                    input.isNotBlank() -> onSendTextOnce
-                                    locked && selectCount == 0 -> onSendVoiceOnce
-                                    else -> null
-                                },
-                            onLongClick = if (input.isNotBlank()) onScheduleSend else null,
-                        ) {
-                            when {
-                                input.isNotBlank() -> onSend()
-                                // r71-19: nothing typed, a note is locked and
-                                // waiting — Send closes (and sends) it.
-                                locked -> onSendVoice()
-                                else -> onSendSelection()
-                            }
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Send,
-                        contentDescription = if (locked && input.isBlank()) "Send voice message" else "Send",
-                        tint = AmberInk,
-                        modifier =
-                            Modifier
-                                .size(19.dp)
-                                .scale(if (sendPressed) 0.9f else 1f),
-                    )
+           r75-3 (WhatsApp's frames): a LOCKED recording renders NOTHING here —
+           the panel's own Send circle is the only send on screen. */
+        when {
+            locked -> Unit
+            !input.isBlank() || selectCount > 0 -> {
+                val sendInteraction = remember { MutableInteractionSource() }
+                val sendPressed by sendInteraction.collectIsPressedAsState()
+                // r72-19: this seat's double tap is the once-send, and the owner
+                // picked a 0.45 s window for it (the platform's is ~0.3 s) — the
+                // seat runs inside a ViewConfiguration of its own.
+                KpDoubleTapSeat {
+                    Box(
+                        Modifier
+                            .size(42.dp)
+                            .fxMicAnchor()
+                            .pressScale(sendInteraction)
+                            // Owner round 10: the send/mic circles carry the same 3D
+                            // lift as the header call buttons now. r73-16 (owner,
+                            // again): no shadow anywhere — the fill carries it.
+                            .clip(CircleShape)
+                            // r75-2: the app's accent circle, like every send.
+                            .background(accent)
+                            // Owner round 32 (item 18): tap = send, hold = "send
+                            // later" (text only — media goes with its own flow, item 19).
+                            .combinedClickable(
+                                interactionSource = sendInteraction,
+                                indication = null,
+                                onDoubleClick =
+                                    when {
+                                        // r71-20: text typed + a second tap = view-once.
+                                        input.isNotBlank() -> onSendTextOnce
+                                        else -> null
+                                    },
+                                onLongClick = if (input.isNotBlank()) onScheduleSend else null,
+                            ) {
+                                if (input.isNotBlank()) onSend() else onSendSelection()
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Send,
+                            contentDescription = "Send",
+                            tint = AmberInk,
+                            modifier =
+                                Modifier
+                                    .size(19.dp)
+                                    .scale(if (sendPressed) 0.9f else 1f),
+                        )
+                    }
                 }
             }
-        } else {
-            Box(Modifier.fxMicAnchor()) {
-                HoldMicButton(
-                    recording = recording,
-                    enabled = micEnabled,
-                    accent = accent,
-                    onStartRecord = onStartRecord,
-                    onFinishRecord = onFinishRecord,
-                    onLockVisual = { a, armed, dy ->
-                        lockAlpha = a
-                        lockArmed = armed
-                        lockDragY = dy
-                    },
-                )
+            else -> {
+                Box(Modifier.fxMicAnchor()) {
+                    HoldMicButton(
+                        recording = recording,
+                        enabled = micEnabled,
+                        accent = accent,
+                        onStartRecord = onStartRecord,
+                        onFinishRecord = onFinishRecord,
+                        onLockVisual = { a, armed, dy ->
+                            lockAlpha = a
+                            lockArmed = armed
+                            lockDragY = dy
+                        },
+                    )
+                }
             }
         }
     }
@@ -5471,13 +5524,15 @@ private fun HoldMicButton(
     // finger is aiming at (the MD's "lock control appears above").
     val lockShowing = recording || dragY <= -12f
     val lockAlpha by animateFloatAsState(if (lockShowing) 1f else 0f, tween(120), label = "lockalpha")
+    // r75-3 (the frames): the mic NEVER leaves its seat vertically — only
+    // the capsule climbs with the finger. The slide-left cancel still drags
+    // it sideways, as before.
     val animX by animateFloatAsState(if (recording) dragX else 0f, spring(stiffness = 900f), label = "micdrag")
-    val animY by animateFloatAsState(if (recording) dragY else 0f, spring(stiffness = 900f), label = "miclift")
 
     Box(
         Modifier
             .size(42.dp)
-            .offset { IntOffset(animX.roundToInt(), animY.roundToInt()) }
+            .offset { IntOffset(animX.roundToInt(), 0) }
             // r71-16 (owner: "ei shadow ta amar ekdomi valo lage na"): the
             // 3D-lift drop shadow stays gone. The ring + fill carry the button.
             .clip(CircleShape)
@@ -5622,25 +5677,6 @@ internal fun VoiceBinDrop(accent: Color) {
         }
     }
 }
-
-/** Small breathing red dot for the recording panel. */
-@Composable
-private fun PulsingDot() {
-    val t = rememberInfiniteTransition(label = "recdot")
-    val a by t.animateFloat(
-        initialValue = 1f,
-        targetValue = 0.25f,
-        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
-        label = "alpha",
-    )
-    Box(
-        Modifier
-            .size(9.dp)
-            .clip(CircleShape)
-            .background(Red.copy(alpha = a)),
-    )
-}
-
 
 /**
  * Small raised 3D circle for the header call icons: top-lit gradient and a

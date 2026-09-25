@@ -217,7 +217,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
   const vnotes = main("VoiceNote.kt");
   check(
-    'r75-1 (owner: "current voice lock system hold swipe up system shob remove koro ami ekta md file diyechi dekho ei vabe hobe shob"): the hold is the MD\'s state machine — press records at once, the capsule is the ONLY lock target and the take locks MID-DRAG the instant the finger crosses 96 dp (a release never locks), slide-left past 88 dp cancels, a plain hold-and-release SENDS, and the mic follows the finger on both axes; the release is decided by the pure rules in VoiceHoldGesture (LOCK / CANCEL / SEND)',
+    'r75-1 (owner: "current voice lock system hold swipe up system shob remove koro ami ekta md file diyechi dekho ei vabe hobe shob"): the hold is the MD\'s state machine — press records at once, the capsule is the ONLY lock target and the take locks MID-DRAG the instant the finger crosses 96 dp (a release never locks), slide-left past 88 dp cancels, a plain hold-and-release SENDS, the mic never leaves its seat (only the capsule climbs), and the release is decided by the pure rules in VoiceHoldGesture (LOCK / CANCEL / SEND)',
     mic.includes("val cancelDist = with(density) { 88.dp.toPx() }") &&
       mic.includes("val lockDist = with(density) { 96.dp.toPx() }") &&
       mic.includes("if (!locked && dragY <= -lockDist) {") &&
@@ -228,28 +228,32 @@ const main = (f) => read(`${ANDROID}/${f}`);
       mic.includes("VoiceHoldGesture.Result.CANCEL -> onFinishRecord(true)") &&
       mic.includes("VoiceHoldGesture.Result.LOCK -> onLockRecord()") &&
       mic.includes("VoiceHoldGesture.Result.SEND -> onFinishRecord(false)") &&
-      mic.includes("val animY by animateFloatAsState") &&
-      mic.includes("IntOffset(animX.roundToInt(), animY.roundToInt())") &&
+      mic.includes("IntOffset(animX.roundToInt(), 0)") &&
       vnotes.includes("fun decide(") &&
       vnotes.includes("if (dy <= -lockDist) return Result.LOCK") &&
       vnotes.includes("if (dx <= -cancelDist) return Result.CANCEL") &&
       vnotes.includes("return Result.SEND"),
   );
   check(
-    "r71-19: the locked strip is a different animal — the mic seat becomes Send (a locked recording has no finger on the mic), ✕ drops the note, the lock glyph says why the strip is up, and the unlocked strip keeps its slide-to-cancel hint",
-    comp.includes("if (!input.isBlank() || selectCount > 0 || locked) {") &&
-      comp.includes("locked -> onSendVoice()") &&
-      comp.includes("if (locked) {") &&
-      // r73-19: the ✕ + "Locked" label became Telegram's transport — a bin on
-      // the left and a Pause / Resume pill beside the Send circle.
+    "r75-3 (owner, frame-by-frame over the WhatsApp recording: \"eita WhatsApp er voice system ar tui jeta banaichia puray faltu kono alignment nai\"): the locked state is WhatsApp's TWO-ROW PANEL — one dark rounded panel (DarkCard, 24 dp corners) with the clock + the 96 dp live wave + a lock circle on top and the bin circle + the full-width Pause pill + the accent Send circle below; the composer's right slot renders NOTHING while locked, the hold strip is bare (clock + hint, no dot, no wave), and '‹ Slide to cancel' reads Muted",
+    comp.includes(".background(DarkCard)") &&
+      comp.includes("RoundedCornerShape(24.dp)") &&
+      comp.includes(
+        "LiveVoiceWave(color = accent, modifier = Modifier.width(96.dp).height(22.dp))",
+      ) &&
+      comp.includes('"Recording locked",') &&
       comp.includes('"Delete recording",') &&
       comp.includes("if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,") &&
-      comp.includes('if (paused) "Resume" else "Pause",') &&
-      comp.includes('Text("‹ Slide to cancel", color = Red, fontSize = 12.5.sp, maxLines = 1)') &&
+      comp.includes(".clickable { onTogglePause() }") &&
+      comp.includes("onDoubleClick = if (selectCount == 0) onSendVoiceOnce else null,") &&
+      comp.includes('"Send voice message",') &&
+      comp.includes("locked -> Unit") &&
+      comp.includes('Text("‹ Slide to cancel", color = Muted, fontSize = 12.5.sp, maxLines = 1)') &&
+      !comp.includes("PulsingDot()") &&
       comp.includes("locked: Boolean = false,") &&
       comp.includes("onLockRecord: () -> Unit = {},"),
   );
-  /* ---- the r72 seat window: the composer's Send runs on its own clock ---- */
+  /* ---- the r72 seat window: the composer's Send runs on its own clock ---- */ /* ---- the r72 seat window: the composer's Send runs on its own clock ---- */
   const app = "native-android/app/src/main/java/app/kuchupuchu/android/";
   const ui = readFileSync(app + "Ui.kt", "utf8");
   check(
@@ -276,7 +280,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       ) &&
       comp.includes(".scale(pulse)") &&
       comp.includes("if (recording && !locked && lockAlpha > 0.01f) {") &&
-      comp.includes(".offset { IntOffset(0, (-18.dp.toPx() + lockDragY * 0.6f).roundToInt()) }") &&
+      comp.includes(".offset { IntOffset(0, (-48.dp.toPx() + lockDragY).roundToInt()) }") &&
       !comp.includes(".offset(y = (-54).dp)") &&
       mic.includes("val lockShowing = recording || dragY <= -12f") &&
       mic.includes("SideEffect { onLockVisual(lockAlpha, lockArmed, dragY) }") &&
@@ -292,7 +296,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
       !comp.includes("Color(0xE6FFFFFF)") &&
       !comp.includes("if (locked) 22.dp") &&
       (comp.match(/\.background\(DarkCard\)/g) || []).length === 2 &&
-      chat.includes('if (locked && input.isBlank()) "Send voice message" else "Send",') &&
+      (comp.match(/Color\.White\.copy\(alpha = 0\.08f\)/g) || []).length === 3 &&
+      comp.includes('"Send voice message",') &&
       chat.includes('if (paused) "Resume recording" else "Pause recording",') &&
       !chat.includes("import androidx.compose.material.icons.filled.DoubleArrow"),
   );
@@ -306,22 +311,15 @@ const main = (f) => read(`${ANDROID}/${f}`);
       !mic.includes("lockReached") &&
       chat.includes('error = "Mic is not available. Check the mic permission."'),
   );
-  /* ---- r73-19: the owner's screenshots — the locked row is a transport ---- */
-  /* ---- r73-19: the owner's screenshots — the locked row is a transport ---- */
+  /* ---- r75-3: the locked panel — WhatsApp's two rows, Pause is real ---- */
   const vn = main("VoiceNote.kt");
   check(
-    'r73-19 (owner: "dekho tap hol korle kemom hobe ar lock korle kemon kore record korbe"): the locked strip is Telegram\'s transport — a red bin on the left, the clock and the live wave in the middle, Pause / Resume beside the Send circle — while the unlocked strip keeps the pulsing dot and "‹ Slide to cancel"',
-    comp.includes("IconButton(onClick = { onCancelVoice() }, Modifier.size(30.dp))") &&
-      comp.includes('"Delete recording",') &&
-      comp.includes(".clickable { onTogglePause() }") &&
+    "r73-19 + r75-3: Pause / Resume is the panel's wide pill — a REAL pause with the bin circle beside it, the clock greys out while paused, and the chat's state wiring is unchanged",
+    comp.includes(".clickable { onTogglePause() }") &&
       comp.includes("if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,") &&
-      comp.includes("color = if (locked && paused) Muted else Ink,") &&
-      comp.includes("comp_pulse_placeholder") === false &&
-      comp.includes("PulsingDot()") &&
-      comp.includes('Text("‹ Slide to cancel", color = Red, fontSize = 12.5.sp, maxLines = 1)') &&
-      // the composer's new contract + the chat's state
-      comp.includes("paused: Boolean = false,") &&
-      comp.includes("onTogglePause: () -> Unit = {},") &&
+      comp.includes('if (paused) "Resume recording" else "Pause recording",') &&
+      comp.includes('if (paused) "Resume" else "Pause",') &&
+      comp.includes("color = if (paused) Muted else Ink,") &&
       chat.includes("paused = recPaused,") &&
       chat.includes("onTogglePause = { toggleRecPause() },") &&
       chat.includes("var recPaused by remember { mutableStateOf(false) }") &&
@@ -351,7 +349,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       ui.includes("override val doubleTapTimeoutMillis: Long get() = ms") &&
       ui.includes("fun KpDoubleTapSeat(content: @Composable () -> Unit)") &&
       chat.includes("KpDoubleTapSeat {") &&
-      chat.includes("KpDoubleTapSeat {\n                Box("),
+      chat.includes("KpDoubleTapSeat {\n                    Box("),
   );
 }
 
@@ -362,10 +360,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     "r71-19b: the locked seat's SECOND tap is the view-once send — combinedClickable's own double-tap window holds the plain tap, so one tap still sends a normal note and two send it once",
     chat.includes("onSendVoiceOnce: () -> Unit = {},") &&
-      // r71-20 branches the seat's double tap with a `when` (text first).
-      /onDoubleClick =\n\s+when \{[\s\S]{0,240}?locked && selectCount == 0 -> onSendVoiceOnce[\s\S]{0,80}?else -> null/.test(
-        chat,
-      ) &&
+      // r75-3: the double tap lives on the PANEL's Send now (the 0.45 s seat).
+      chat.includes("onDoubleClick = if (selectCount == 0) onSendVoiceOnce else null,") &&
       chat.includes("onSendVoiceOnce = { finishRecording(cancelled = false, once = true) },") &&
       chat.includes("fun finishRecording(cancelled: Boolean, once: Boolean = false) {") &&
       chat.includes("sendVoice(take.file, take.seconds, name, take.waveform, once)"),
@@ -415,7 +411,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     "r71-20: text typed + a second tap on Send = the message goes out view-once — the seat's double tap branches on what is being sent, and `sendText` takes the flag through the meta, the payload and the optimistic echo",
     chat.includes("onSendTextOnce: () -> Unit = {},") &&
-      /onDoubleClick =\n\s+when \{[\s\S]{0,220}?input\.isNotBlank\(\) -> onSendTextOnce[\s\S]{0,160}?locked && selectCount == 0 -> onSendVoiceOnce[\s\S]{0,80}?else -> null/.test(
+      /onDoubleClick =\n\s+when \{[\s\S]{0,220}?input\.isNotBlank\(\) -> onSendTextOnce[\s\S]{0,80}?else -> null/.test(
         chat,
       ) &&
       chat.includes("onSendTextOnce = { requestAttachExit {") &&

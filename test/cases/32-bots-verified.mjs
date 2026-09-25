@@ -10,7 +10,7 @@ import { makeReg, installGoogleStub, phoneFrom, fakeIdToken } from "../helpers/p
 installGoogleStub();
 
 const SEAT_DOUBLE_TAP =
-  /onDoubleClick =\n\s+when \{\n\s+\/\/ r71-20[^\n]*\n\s+input\.isNotBlank\(\) -> onSendTextOnce\n\s+locked && selectCount == 0 -> onSendVoiceOnce\n\s+else -> null\n\s+\},/;
+  /onDoubleClick =\n\s+when \{\n\s+\/\/ r71-20[^\n]*\n\s+input\.isNotBlank\(\) -> onSendTextOnce\n\s+else -> null\n\s+\},/;
 
 const WORKER = new URL("../../src/worker/index.ts", import.meta.url).href;
 let n = 0;
@@ -1129,7 +1129,7 @@ const convBetween = (db, a, b) =>
         "heightIn(min = 38.dp)\n                    // Owner round 18: the pill is BACK",
       ) ||
       chat.includes("v204 WhatsApp-style: outer bar transparent, inner pill Card")) &&
-      chat.includes("no card background — transparent like the bar"),
+      chat.includes("live HOLD strip (r75-3, WhatsApp's frames)"),
   );
   check(
     "r17-11: reply-quote sender names are full ink (white on own bubbles), not gold-on-gold",
@@ -5727,7 +5727,7 @@ const convBetween = (db, a, b) =>
     const vn = kt("VoiceNote.kt");
     const chat = kt("ChatScreen.kt");
     check(
-      "r32-45: voice bubble is compact — a 28dp play circle (v168, was 32/36), a 16dp wave (was 18/22), duration right under it, the bubble keeps a 3dp bottom for voice notes instead of the blank 15dp band (voiceNote); the recording strip paints VoiceNote.livePeaks (newest 4 s, sqrt curve, LIVE_BARS wide) between the timer and the cancel hint; both draw through DrawScope.drawVoiceBars",
+      "r32-45: voice bubble is compact — a 28dp play circle (v168, was 32/36), a 16dp wave (was 18/22), duration right under it, the bubble keeps a 3dp bottom for voice notes instead of the blank 15dp band (voiceNote); VoiceNote.livePeaks paint the wave (newest 4 s, sqrt curve, LIVE_BARS wide) in the locked panel's top row; both draw through DrawScope.drawVoiceBars",
       chat.includes("internal fun fileLooksVoice(m: JSONObject): Boolean {") &&
         chat.includes('val fileRow = kind == "FILE"') &&
         chat.includes("val isVoice = !asDocument && fileLooksVoice(m)") &&
@@ -5742,9 +5742,11 @@ const convBetween = (db, a, b) =>
           "Canvas(modifier) { drawVoiceBars(VoiceNote.livePeaks, 1f, color, color, newest = true) }",
         ) &&
         chat.includes(
-          "LiveVoiceWave(color = accent, modifier = Modifier.weight(1f).height(22.dp))",
+          "LiveVoiceWave(color = accent, modifier = Modifier.width(96.dp).height(22.dp))",
         ) &&
-        chat.includes('Text("‹ Slide to cancel", color = Red, fontSize = 12.5.sp, maxLines = 1)') &&
+        chat.includes(
+          'Text("‹ Slide to cancel", color = Muted, fontSize = 12.5.sp, maxLines = 1)',
+        ) &&
         (chat.match(/\.size\(28\.dp\)\n\s+\.pressScale\(interaction\)/g) || []).length === 1 &&
         vn.includes("var livePeaks: List<Int> by mutableStateOf(emptyList())") &&
         vn.includes("livePeaks = VoiceWaveform.live(amps)") &&
@@ -6674,12 +6676,12 @@ const convBetween = (db, a, b) =>
         // r72-19: the seat is wrapped in KpDoubleTapSeat (the 0.45 s window),
         // so its own chain is indented one level deeper.
         chat.includes(
-          ".combinedClickable(\n                            interactionSource = sendInteraction,\n                            indication = null,",
+          ".combinedClickable(\n                                interactionSource = sendInteraction,\n                                indication = null,",
         ) &&
         // r71-20: the branch is a `when` now — text typed upgrades too.
         SEAT_DOUBLE_TAP.test(chat) &&
         chat.includes(
-          "onLongClick = if (input.isNotBlank()) onScheduleSend else null,\n                        ) {",
+          "onLongClick = if (input.isNotBlank()) onScheduleSend else null,\n                            ) {",
         ) &&
         chat.includes(
           "@OptIn(ExperimentalFoundationApi::class)\n@Composable\nprivate fun Composer(",
@@ -6929,13 +6931,12 @@ const convBetween = (db, a, b) =>
         // the composer's circle is the MIC while a gallery pick is active
         !chat.includes("gridSelCount") &&
         !chat.includes("onSendGrid") &&
-        // r71-19: a LOCKED recording takes the seat too (it is Send then).
-        chat.includes("if (!input.isBlank() || selectCount > 0 || locked) {") &&
-        // r71-19: the seat's action became a `when` — text, then a locked
-        // voice note, then the selection send.
-        chat.includes("input.isNotBlank() -> onSend()") &&
-        chat.includes("locked -> onSendVoice()") &&
-        chat.includes("else -> onSendSelection()"),
+        // r75-3: the slot is a `when` — a LOCKED take renders NOTHING there
+        // (the locked panel's own Send is the only send), and the text /
+        // selection seat is a plain if/else.
+        chat.includes("locked -> Unit") &&
+        chat.includes("!input.isBlank() || selectCount > 0 -> {") &&
+        chat.includes("if (input.isNotBlank()) onSend() else onSendSelection()"),
     );
     check(
       "r32-19: chat — the panel's hold opens item 18's ScheduleSheet for the batch (sendAttachSelection(sendAt)); a scheduled photo / video / document uploads now and parks on the server with sendAt (no bubble, the clock chip lists it); Edit clears the pick and opens mediaedit/{conv}/0/{arg} (unarmed; once is the editor\u2019s own toggle)",
