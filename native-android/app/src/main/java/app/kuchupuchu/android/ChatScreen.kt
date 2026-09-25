@@ -104,7 +104,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -5703,6 +5702,12 @@ private fun HoldMicButton(
     val escDx = with(density) { 44.dp.toPx() }
     var dragX by remember { mutableStateOf(0f) }
     var dragY by remember { mutableStateOf(0f) }
+    // r76-2 (owner: "swipe up kora jai na"): the axis reads the ACCUMULATED
+    // pull, not one event's delta — a slow deliberate swipe never puts 18 dp
+    // into a single move event, so per-event slop killed the up-swipe on the
+    // phone while a fast left flick still armed.
+    var totX by remember { mutableStateOf(0f) }
+    var totY by remember { mutableStateOf(0f) }
     // r76-1: the cancel arm latches with hysteresis (arm at 120, unarm at 84)
     // so a trembling finger never flickers the red state.
     var cancelHold by remember { mutableStateOf(false) }
@@ -5743,6 +5748,8 @@ private fun HoldMicButton(
                     }
                     dragX = 0f
                     dragY = 0f
+                    totX = 0f
+                    totY = 0f
                     axis = 0
                     cancelHold = false
                     onStartRecord()
@@ -5754,13 +5761,16 @@ private fun HoldMicButton(
                         // pass used to eat the change first, so dragY stayed 0.
                         val dx = change.positionChangeIgnoreConsumed().x
                         val dy = change.positionChangeIgnoreConsumed().y
-                        // r76-1: the FIRST dominant direction owns the drag.
+                        totX += dx
+                        totY += dy
+                        // r76-2: the FIRST dominant direction owns the drag —
+                        // decided on the accumulated pull so slow swipes count.
                         if (axis == 0) {
-                            if (dx < -slop && -dx > -dy * 1.15f) axis = 2
-                            else if (dy < -slop && -dy > -dx * 1.15f) axis = 1
+                            if (totX < -slop && -totX > -totY * 1.15f) axis = 2
+                            else if (totY < -slop && -totY > -totX * 1.15f) axis = 1
                         }
                         // a low, clearly-leftward pull escapes an early y-lock
-                        if (axis == 1 && -dragY < escRise && -dx > escDx && -dx > -dy * 1.8f) axis = 2
+                        if (axis == 1 && -dragY < escRise && totX < -escDx && -totX > -totY * 1.8f) axis = 2
                         when (axis) {
                             2 -> dragX = (dragX + dx).coerceIn(-slideCap, 0f)
                             1 -> dragY = (dragY + dy).coerceIn(-riseMax, 0f)
@@ -5783,6 +5793,8 @@ private fun HoldMicButton(
                     val wasCancel = cancelHold
                     dragX = 0f
                     dragY = 0f
+                    totX = 0f
+                    totY = 0f
                     axis = 0
                     cancelHold = false
                     // r76-1: the release decides EVERYTHING — nothing fired
@@ -5811,9 +5823,13 @@ private fun HoldMicButton(
             modifier = Modifier.size(20.dp),
         )
     }
-    // r76-1: the column + the swallow belong to the composer (they clear the
-    // mic's clip) — this is only their state, published as it changes.
-    SideEffect { onLockVisual(lockAlpha, lockArmed, cancelArmed, micX, micY) }
+    // r76-2 (owner: the swipe-up bar never showed): SideEffect's lambda reads
+    // state UNTRACKED, so the 120 ms fade never advanced a frame on the phone —
+    // the column sat at alpha 0. A LaunchedEffect keyed on the values re-runs
+    // on every frame of the fade / every drag tick and really publishes.
+    LaunchedEffect(lockAlpha, lockArmed, cancelArmed, micX, micY) {
+        onLockVisual(lockAlpha, lockArmed, cancelArmed, micX, micY)
+    }
 }
 private val VIDEO_NAME_EXT = listOf(".mp4", ".mov", ".mkv", ".webm", ".3gp", ".m4v", ".avi")
 
@@ -5837,20 +5853,21 @@ internal fun SmallDustbin(
             size = androidx.compose.ui.geometry.Size(14 * d, 15 * d),
             cornerRadius = androidx.compose.ui.geometry.CornerRadius(3f * d),
         )
-        // the thin lid + its little handle, on a left hinge
-        val hinge = Offset(-1f * d, 2f * d)
+        // r76-2 (owner: "dustbin er cap ta onek boro"): the lid is a THIN cap
+        // only as wide as the can, not the old 22 dp plank.
+        val hinge = Offset(1f * d, 2f * d)
         withTransform({ rotate(-42f * lidOpen, hinge) }) {
             drawRoundRect(
                 color = Red,
-                topLeft = Offset(hinge.x, 0.5f * d),
-                size = androidx.compose.ui.geometry.Size(22 * d, 2.5f * d),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.25f * d),
+                topLeft = Offset(1f * d, 0.5f * d),
+                size = androidx.compose.ui.geometry.Size(14 * d, 2 * d),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(1f * d),
             )
             drawRoundRect(
                 color = Red,
-                topLeft = Offset(hinge.x + 8 * d, -1.5f * d),
-                size = androidx.compose.ui.geometry.Size(6 * d, 2f * d),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(1f * d),
+                topLeft = Offset(6 * d, -1f * d),
+                size = androidx.compose.ui.geometry.Size(4 * d, 1.5f * d),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(0.75f * d),
             )
         }
     }
@@ -5894,9 +5911,12 @@ internal fun ComposerBinSwallow(
         with(density) {
             val startX = -23.dp.toPx() + micXpx
             val startY = micYpx
-            val mouthX = 30.dp.toPx() - rowWidthPx
+            // r76-2: the bin's centre is 38 dp from the row's left (8 pad +
+            // 12 slidebin left + half the 20 dp bin) — the old 30 dp put the
+            // flyer beside the mouth, so the mic never visibly went in.
+            val mouthX = 38.dp.toPx() - rowWidthPx
             val hoverY = -22.dp.toPx()
-            val inY = -4.dp.toPx()
+            val inY = 0f
             val x = startX + (mouthX - startX) * ease
             val y = if (drop <= 0f) startY + (hoverY - startY) * ease else hoverY + (inY - hoverY) * drop
             Triple(x, y, 1f - 0.7f * drop)

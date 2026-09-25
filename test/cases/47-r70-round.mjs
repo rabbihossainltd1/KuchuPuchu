@@ -226,10 +226,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
       mic.includes("val riseMax = with(density) { 138.dp.toPx() }") &&
       mic.includes("val slideCap = with(density) { 150.dp.toPx() }") &&
       mic.includes("change.positionChangeIgnoreConsumed()") &&
-      mic.includes("if (dx < -slop && -dx > -dy * 1.15f) axis = 2") &&
-      mic.includes("else if (dy < -slop && -dy > -dx * 1.15f) axis = 1") &&
+      mic.includes("if (totX < -slop && -totX > -totY * 1.15f) axis = 2") &&
+      mic.includes("else if (totY < -slop && -totY > -totX * 1.15f) axis = 1") &&
       mic.includes(
-        "if (axis == 1 && -dragY < escRise && -dx > escDx && -dx > -dy * 1.8f) axis = 2",
+        "if (axis == 1 && -dragY < escRise && totX < -escDx && -totX > -totY * 1.8f) axis = 2",
       ) &&
       mic.includes("cancelHold = true") &&
       mic.includes("VoiceHoldGesture.decide(") &&
@@ -290,7 +290,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       comp.includes(
         ".border(2.dp, if (cancelArmed) Red else if (enabled) accent else Muted, CircleShape)",
       ) &&
-      mic.includes("SideEffect { onLockVisual(lockAlpha, lockArmed, cancelArmed, micX, micY) }") &&
+      mic.includes("LaunchedEffect(lockAlpha, lockArmed, cancelArmed, micX, micY) {") &&
       chat.includes("import androidx.compose.material.icons.filled.KeyboardArrowUp"),
   );
   check(
