@@ -34,6 +34,13 @@ object VoiceNote {
         object : Runnable {
             override fun run() {
                 if (!isRecording) return
+                // r76-11 (owner: "pause korleo time pause hoi but wave stop
+                // hoi na"): a paused take appends NO peaks — the frozen strip
+                // is what pause looks like; the loop stays warm for resume.
+                if (isPaused) {
+                    handler.postDelayed(this, SAMPLE_MS)
+                    return
+                }
                 // maxAmplitude = the loudest sample since the previous read;
                 // it throws once the recorder is gone, hence runCatching.
                 amps.add(runCatching { recorder?.maxAmplitude ?: 0 }.getOrDefault(0))

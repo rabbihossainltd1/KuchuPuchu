@@ -254,7 +254,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
       ) &&
       comp.includes(
         "CenteredOnceIcon(20.dp, tint = if (voiceOnce) accent else Color.White, fillBounds = true)",
-        comp.includes("Box(Modifier.offset { IntOffset(-2, 0) }) {"),
+        comp.includes("Box(Modifier.offset { IntOffset(-2, 0) }) {") &&
+          comp.includes("Modifier.size(40.dp).clickable { onToggleVoiceOnce() },") &&
+          vnotes.includes("r76-11 (owner:"),
       ) &&
       comp.includes(".clickable { onToggleVoiceOnce() }") &&
       comp.includes(".background(Red.copy(alpha = 0.16f))") &&
