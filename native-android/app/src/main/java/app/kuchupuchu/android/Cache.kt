@@ -508,6 +508,9 @@ object Outbox {
                             ?.let { runCatching { File(it).delete() } }
                         null
                     } else if (status in 400..499 && status != 408 && status != 429) {
+                        // r76-20 (owner item 14): a 403 refusal means THEY
+                        // blocked us — the pack has a tone for exactly that.
+                        if (status == 403) appCtx?.let { runCatching { KpSounds.blockedSend(it) } }
                         refuse(clientId)
                         Result.failure(e)
                     } else {
@@ -789,6 +792,8 @@ object Outbox {
                         continue
                     }
                     if (status in 400..499 && status != 408 && status != 429) {
+                        // r76-20 (owner item 14): blocked-by-them tone (queue walk).
+                        if (status == 403) appCtx?.let { runCatching { KpSounds.blockedSend(it) } }
                         markDropped(item)
                         dropLocal(item)
                         remove(clientId)

@@ -243,8 +243,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
   const trimmed = feel.match(/0\.(?:6|7|55)f \* MSG_VOLUME_TRIM/g) || [];
   check(
+    // r76-20 (owner item 14): the pack's own chat tones (emoji send, sticker
+    // send) honour the SAME trim constant — six trimmed call sites now.
     "r67-6: send (0.60), sent (0.70), in-app (0.70) and receive (0.55) all honour it",
-    trimmed.length === 4,
+    trimmed.length === 6,
     JSON.stringify(trimmed),
   );
   check(

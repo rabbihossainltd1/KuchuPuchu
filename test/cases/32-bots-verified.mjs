@@ -1417,6 +1417,23 @@ const convBetween = (db, a, b) =>
       chat.includes("KpSounds.photoSend(ctx)") &&
       chat.includes("KpSounds.voiceSend(ctx)") &&
       chat.includes("KpSounds.voiceCancel(ctx)") &&
+      // r76-20 (owner item 14): the UI-sound pack — emoji-only + sticker
+      // sends, the typing tone (once per lease), voice start / lock, the
+      // capture-alert tone, and the two blocked-by-them failures.
+      chat.includes("KpSounds.emojiSend(ctx)") &&
+      chat.includes("KpSounds.stickerSend(ctx)") &&
+      chat.includes("KpSounds.typing(ctx)") &&
+      chat.includes("KpSounds.voiceStart(ctx)") &&
+      chat.includes("KpSounds.voiceLock(ctx)") &&
+      chat.includes("KpSounds.captureAlert(capCtx)") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/Cache.kt",
+        "utf8",
+      ).split("KpSounds.blockedSend(it)").length === 3 &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/CallEngine.kt",
+        "utf8",
+      ).includes("KpSounds.blockedCall(app)") &&
       readFileSync(
         "native-android/app/src/main/java/app/kuchupuchu/android/CallEngine.kt",
         "utf8",

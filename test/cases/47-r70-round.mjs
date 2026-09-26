@@ -714,7 +714,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes('b.endsWith("started a screen recording of this chat") -> "rec"') &&
       // r73-18c: the alert is a single small line of red text on the wallpaper.
       !chat.includes("Icons.Filled.Videocam else Icons.Filled.VisibilityOff") &&
-      chat.includes("if (fresh) h.reject()"),
+      // r76-20 (owner item 14): the fresh alert buzzes AND plays the pack's
+      // capture tone — the reject moved inside a block.
+      chat.includes("if (fresh) {") &&
+      chat.includes("KpSounds.captureAlert(capCtx)"),
   );
   check(
     "r71-18: the save permission is enforced where media is opened — their switch withholds MY save (photo viewer, gallery, clip, document) and never my own media",

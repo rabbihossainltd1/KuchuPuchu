@@ -22,6 +22,11 @@ it. A row whose wiring cannot be named end-to-end is a shipped bug.
 6. CANCEL release: decide()=CANCEL -> onFinishRecord(true) + flyDx/flyDy
    captured -> swallowT anim -> RecorderAnchors.swallowOn/V -> flyer over bar.
 7. SEND release: decide()=SEND -> onFinishRecord(false).
+8. r76-20 (owner item 14): tones only, no wiring change — voiceStart plays
+   inside startRecording() after VoiceNote.start succeeds (never before the
+   mic is live); voiceLock plays inside lockRecording() beside the confirm
+   haptic (still gated on `recording`). Neither touches recording state,
+   column mounts, or the decide() paths above.
 
 ## Draw-order contract (HTML v5.8 stacking)
 wallpaper < messages < bar < lock column < mic < swallow flyer.

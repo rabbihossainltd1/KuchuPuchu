@@ -1451,6 +1451,10 @@ class CallEngine(private val app: Application) {
                     publishChange()
                     delay(2200)
                 }
+                // r76-20 (owner item 14): the call failed because THEY
+                // blocked us (403 BLOCKED from POST /api/calls) — the pack's
+                // own tone says so before the screen closes.
+                if (api?.status == 403) runCatching { KpSounds.blockedCall(app) }
                 notify(message)
                 hangupLocal()
             }

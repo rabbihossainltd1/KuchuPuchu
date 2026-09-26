@@ -822,6 +822,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                 val typingStale = lastOtherMsgTime.isNotBlank() && parsed.typingAt > 0 &&
                     (runCatching { java.time.Instant.parse(lastOtherMsgTime).toEpochMilli() }.getOrDefault(0L) >= parsed.typingAt)
                 if (parsed.typingAt > 0 && !typingStale) {
+                    // r76-20 (owner item 14): once per lease here too.
+                    if (otherTypingAt == 0L || System.currentTimeMillis() - otherTypingAt > 6_000L)
+                        runCatching { KpSounds.typing(ctx) }
                     otherTypingAt = System.currentTimeMillis()
                 } else {
                     otherTypingAt = 0L
@@ -1327,6 +1330,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                             otherTypingAt = 0L
                             otherTypingKind = null
                         } else {
+                            // r76-20 (owner item 14): the typing tone fires
+                            // ONCE per typing lease, not on every ping.
+                            if (otherTypingAt == 0L || System.currentTimeMillis() - otherTypingAt > 6_000L)
+                                runCatching { KpSounds.typing(ctx) }
                             otherTypingAt = System.currentTimeMillis()
                             otherTypingKind = kStr.takeIf { it.isNotBlank() }
                         }
@@ -1665,7 +1672,15 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
         // Owner round 11: tap sound on the send itself…
         lastTypingPing = 0L
-        runCatching { KpSounds.send(ctx) }
+        // r76-20 (owner item 14): stickers and emoji-only texts carry their
+        // OWN tones from the pack — a plain send keeps the classic one.
+        runCatching {
+            when {
+                kind == "STICKER" -> KpSounds.stickerSend(ctx)
+                kind == "TEXT" && emojiOnlyCount(body) > 0 -> KpSounds.emojiSend(ctx)
+                else -> KpSounds.send(ctx)
+            }
+        }
         // Owner round 33 (item 3): queue-FIRST, off this screen's scope. The
         // POST used to run on the composable's coroutine scope with the queue
         // as its exception path only: backing out of the chat mid-request
@@ -1777,7 +1792,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .also { if (replyId != null) it.put("replyTo", replyId) },
         )
         scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
-        runCatching { KpSounds.send(ctx) }
+        // r76-20 (owner item 14): a gif is a sticker-panel send — its tone.
+        runCatching { KpSounds.stickerSend(ctx) }
         scope.launch {
             try {
                 withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
@@ -2552,6 +2568,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                 if (VoiceNote.start(ctx)) {
                     recMs = 0
                     recording = true
+                    // r76-20 (owner item 14): the pack's record-start tone.
+                    runCatching { KpSounds.voiceStart(ctx) }
                     // r75-1: a take is always born a HOLD — the lock is earned
                     // by the drag into the capsule, never queued or assumed.
                     voiceLocked = false
@@ -2663,6 +2681,8 @@ fun ChatScreen(nav: NavController, convId: String) {
         if (!recording) return
         voiceLocked = true
         runCatching { haptics.confirm() }
+        // r76-20 (owner item 14): the pack's lock tone.
+        runCatching { KpSounds.voiceLock(ctx) }
     }
 
     /* ---- selection actions: unsend (everyone) / delete (me) / edit / forward ---- */
@@ -7302,6 +7322,9 @@ private fun MessageRow(
     val captureAlert = captureAlertOf(m)
     if (captureAlert != null) {
         val h = rememberHaptics()
+        // r76-20: the context is captured OUTSIDE the effect — a @Composable
+        // getter cannot be called from the coroutine.
+        val capCtx = androidx.compose.ui.platform.LocalContext.current
         LaunchedEffect(m.optString("id")) {
             val fresh = runCatching {
                 java.time.Duration.between(
@@ -7309,7 +7332,11 @@ private fun MessageRow(
                     java.time.Instant.now(),
                 ).seconds < 60
             }.getOrDefault(false)
-            if (fresh) h.reject()
+            // r76-20 (owner item 14): the alert buzzes AND rings its own tone.
+            if (fresh) {
+                h.reject()
+                runCatching { KpSounds.captureAlert(capCtx) }
+            }
         }
         // r73-18c (owner: "alert eto boro kore ekdom choto kore jabe background
         // border thakbe na just text"): the alert is one small line of red text

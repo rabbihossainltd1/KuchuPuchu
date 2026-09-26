@@ -122,6 +122,18 @@ object KpSounds {
     private var screenShareId = 0
     private var lineBusyId = 0
 
+    // r76-20 (owner item 14): his UI-sound pack — emoji-only sends, sticker
+    // sends, typing, voice start/lock, the capture alert, and the two
+    // blocked-by-them failures.
+    private var emojiSendId = 0
+    private var stickerSendId = 0
+    private var typingId = 0
+    private var voiceStartId = 0
+    private var voiceLockId = 0
+    private var captureAlertId = 0
+    private var blockedSendId = 0
+    private var blockedCallId = 0
+
     @Synchronized
     fun ensure(ctx: Context) {
         if (pool != null) return
@@ -147,6 +159,14 @@ object KpSounds {
         statusShareId = pool!!.load(ctx, R.raw.kp_status_share, 1)
         screenShareId = pool!!.load(ctx, R.raw.kp_screen_share, 1)
         lineBusyId = pool!!.load(ctx, R.raw.kp_line_busy, 1)
+        emojiSendId = pool!!.load(ctx, R.raw.kp_emoji_send, 1)
+        stickerSendId = pool!!.load(ctx, R.raw.kp_sticker_send, 1)
+        typingId = pool!!.load(ctx, R.raw.kp_typing, 1)
+        voiceStartId = pool!!.load(ctx, R.raw.kp_voice_start, 1)
+        voiceLockId = pool!!.load(ctx, R.raw.kp_voice_lock, 1)
+        captureAlertId = pool!!.load(ctx, R.raw.kp_capture_alert, 1)
+        blockedSendId = pool!!.load(ctx, R.raw.kp_blocked_send, 1)
+        blockedCallId = pool!!.load(ctx, R.raw.kp_blocked_call, 1)
     }
 
     /** Owner round 21: per-event sounds from his pack. */
@@ -158,6 +178,16 @@ object KpSounds {
     fun statusShare(ctx: Context) = play(ctx, statusShareId, 0.7f)
     fun screenShare(ctx: Context) = play(ctx, screenShareId, 0.7f)
     fun lineBusy(ctx: Context) = play(ctx, lineBusyId, 0.9f)
+
+    /** r76-20 (owner item 14): the pack's own events. */
+    fun emojiSend(ctx: Context) = play(ctx, emojiSendId, 0.6f * MSG_VOLUME_TRIM)
+    fun stickerSend(ctx: Context) = play(ctx, stickerSendId, 0.6f * MSG_VOLUME_TRIM)
+    fun typing(ctx: Context) = play(ctx, typingId, 0.5f * MSG_VOLUME_TRIM)
+    fun voiceStart(ctx: Context) = play(ctx, voiceStartId, 0.7f)
+    fun voiceLock(ctx: Context) = play(ctx, voiceLockId, 0.7f)
+    fun captureAlert(ctx: Context) = play(ctx, captureAlertId, 0.8f)
+    fun blockedSend(ctx: Context) = play(ctx, blockedSendId, 0.8f)
+    fun blockedCall(ctx: Context) = play(ctx, blockedCallId, 0.8f)
 
     private fun play(ctx: Context, id: Int, vol: Float) {
         runCatching {
