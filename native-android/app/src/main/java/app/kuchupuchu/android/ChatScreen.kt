@@ -5395,8 +5395,15 @@ private fun LockColumn(
     armed: Boolean,
     dimmed: Boolean,
     accent: Color,
+    risePx: Float = 0f,
     modifier: Modifier = Modifier,
 ) {
+    // r76-9 (owner): the column is the BUTTON's width (46, was 50 = "mota"),
+    // and as the button rises the column shrinks from its BOTTOM — rounded
+    // end riding right behind the button, top edge staying put.
+    val colH = with(LocalDensity.current) {
+        (172.dp.toPx() - risePx).coerceIn(46.dp.toPx(), 172.dp.toPx()).toDp()
+    }
     val chev by rememberInfiniteTransition(label = "chev").animateFloat(
         initialValue = 0f,
         targetValue = -7f,
@@ -5405,7 +5412,7 @@ private fun LockColumn(
     )
     Box(
         modifier
-            .size(width = 50.dp, height = 172.dp)
+            .size(width = 46.dp, height = colH)
             .alpha(if (dimmed) 0.3f else 1f)
             .clip(RoundedCornerShape(22.dp))
             .background(DarkCard)
@@ -5465,10 +5472,11 @@ private fun RecorderFloatOverlay(
             armed = RecorderAnchors.columnArmed,
             dimmed = RecorderAnchors.columnDim,
             accent = accent,
+            risePx = RecorderAnchors.micRise,
             modifier =
                 Modifier.offset {
                     IntOffset(
-                        (mic.right - 50.dp.toPx() - rootOrigin.x).roundToInt(),
+                        (mic.right - 46.dp.toPx() - rootOrigin.x).roundToInt(),
                         (mic.bottom - 172.dp.toPx() - rootOrigin.y).roundToInt(),
                     )
                 },
@@ -5797,7 +5805,9 @@ private fun HoldMicButton(
     val cancelDist = with(density) { 120.dp.toPx() }
     val cancelUnarm = with(density) { 84.dp.toPx() }
     val lockAtDist = with(density) { 62.dp.toPx() }
-    val riseMax = with(density) { 138.dp.toPx() }
+    // r76-9 (owner: "bar er baire uthe jacche"): the button stops AT the
+    // column's top edge — 172dp column minus the 46dp button.
+    val riseMax = with(density) { 126.dp.toPx() }
     val slideCap = with(density) { 150.dp.toPx() }
     val slop = with(density) { 18.dp.toPx() }
     val escRise = with(density) { 26.dp.toPx() }
@@ -5822,6 +5832,8 @@ private fun HoldMicButton(
     // toward the dustbin, 1:1 on the chosen axis.
     val micX by animateFloatAsState(if (recording) dragX else 0f, spring(stiffness = 1200f), label = "micdrag")
     val micY by animateFloatAsState(if (recording) dragY else 0f, spring(stiffness = 1200f), label = "micrise")
+    // r76-9: the column rides the button's rise (shrinks from its bottom).
+    LaunchedEffect(micY) { RecorderAnchors.micRise = -micY }
 
     Box(
         modifier

@@ -46,6 +46,9 @@ object RecorderAnchors {
     var barBounds: Rect? by mutableStateOf(null)
     var swallowOn by mutableStateOf(false)
     var swallowV by mutableStateOf(-1f)
+    // r76-9: how far the mic has risen (px, >=0) — the column shrinks from
+    // its bottom by exactly this, riding the button.
+    var micRise by mutableStateOf(0f)
     var flyDx by mutableStateOf(0f)
     var flyDy by mutableStateOf(0f)
 }

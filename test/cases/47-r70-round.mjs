@@ -219,11 +219,11 @@ const main = (f) => read(`${ANDROID}/${f}`);
   const app = "native-android/app/src/main/java/app/kuchupuchu/android/";
   const ui = readFileSync(app + "Ui.kt", "utf8");
   check(
-    'r76-1 (owner: "kono bug na just eita implement korte hobe ... screenshot ta dekh ki korche ager session ar html a dekh koto sundor kore gochano"): the recorder is REBUILT state by state from the approved preview v5.8 — the hold stays the release-decides machine, now with the preview\'s thresholds (cancel arms past 120 dp with an 84 dp unarm hysteresis, lock-at 62 dp, rise cap 138 dp, slide cap 150 dp) and the axis-lock with the low-left escape; NOTHING fires while the finger is down',
+    'r76-1 (owner: "kono bug na just eita implement korte hobe ... screenshot ta dekh ki korche ager session ar html a dekh koto sundor kore gochano"): the recorder is REBUILT state by state from the approved preview v5.8 — the hold stays the release-decides machine, now with the preview\'s thresholds (cancel arms past 120 dp with an 84 dp unarm hysteresis, lock-at 62 dp, rise cap 126 dp (r76-9: the button stops AT the column top), slide cap 150 dp) and the axis-lock with the low-left escape; NOTHING fires while the finger is down',
     mic.includes("val cancelDist = with(density) { 120.dp.toPx() }") &&
       mic.includes("val cancelUnarm = with(density) { 84.dp.toPx() }") &&
       mic.includes("val lockAtDist = with(density) { 62.dp.toPx() }") &&
-      mic.includes("val riseMax = with(density) { 138.dp.toPx() }") &&
+      mic.includes("val riseMax = with(density) { 126.dp.toPx() }") &&
       mic.includes("val slideCap = with(density) { 150.dp.toPx() }") &&
       mic.includes("change.positionChangeIgnoreConsumed()") &&
       mic.includes("if (totX < -slop && -totX > -totY * 1.15f) axis = 2") &&
@@ -274,7 +274,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     "r76-1: the seat wrap is the preview's #seatWrap — the FIXED 50x172 lock column (22 dp corners both ends, 2 dp accent border only when armed, dimmed to 30% while the cancel arm holds) sits BEHIND the 46 dp mic (2 dp ring over the screen's own background so the column never shows through) flushed to its bottom right; only the mic rides the finger, and the column is gone once locked",
     comp.includes("private fun LockColumn(") &&
-      comp.includes(".size(width = 50.dp, height = 172.dp)") &&
+      comp.includes(".size(width = 46.dp, height = colH)") &&
+      comp.includes("LaunchedEffect(micY) { RecorderAnchors.micRise = -micY }") &&
       comp.includes(
         ".border(2.dp, if (armed) accent else Color.Transparent, RoundedCornerShape(22.dp))",
       ) &&
