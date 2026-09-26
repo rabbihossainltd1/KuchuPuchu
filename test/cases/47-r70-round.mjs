@@ -216,6 +216,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
     chat.indexOf("private val VIDEO_NAME_EXT"),
   );
   const vnotes = main("VoiceNote.kt");
+  const e2 = main("E2eeMsg.kt");
   const app = "native-android/app/src/main/java/app/kuchupuchu/android/";
   const ui = readFileSync(app + "Ui.kt", "utf8");
   check(
@@ -256,7 +257,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
         "CenteredOnceIcon(20.dp, tint = if (voiceOnce) accent else Color.White, fillBounds = true)",
         comp.includes("Box(Modifier.offset { IntOffset(-2, 0) }) {") &&
           comp.includes("Modifier.size(40.dp).clickable { onToggleVoiceOnce() },") &&
-          vnotes.includes("r76-11 (owner:"),
+          vnotes.includes("r76-11 (owner:") &&
+          chat.includes("LaunchedEffect(e2eePeerKey, E2eeMsg.restoredNonce) {") &&
+          e2.includes("restoreRoaming(ctx)"),
       ) &&
       comp.includes(".clickable { onToggleVoiceOnce() }") &&
       comp.includes(".background(Red.copy(alpha = 0.16f))") &&

@@ -3201,6 +3201,12 @@ async function ensureSchema(db: D1Database) {
     // (P-256 SPKI, base64). Stored and served in user payloads; opaque to the
     // worker. The private key never leaves the phone.
     `ALTER TABLE users ADD COLUMN e2ee_public_key TEXT`,
+    // r76-12 (owner: "new phone a login korle shob message ashe na — fix
+    // koro"): the key pair ROAMS with the account. A reinstall used to mint a
+    // fresh identity and every old envelope became a lock glyph. The phones
+    // now back up their key pair (base64 JSON, opaque here) and a fresh
+    // install restores it before minting anything, so history opens again.
+    `ALTER TABLE users ADD COLUMN e2ee_backup TEXT`,
   ];
   const fingerprint = await sha256Hex(
     [...statements, ...migrations, CLIENT_ID_BACKFILL].join("\n"),
@@ -6293,6 +6299,22 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       body.e2eePublicKey !== undefined;
     if (identityChanged) ctx.waitUntil(fanOutProfileChange(env, db, uid));
     return json({ user: userSelf(row, true) });
+  }
+
+  /* ---------- r76-12: roaming E2EE identity backup ---------- */
+  if (path === "/api/e2ee/backup" && method === "GET") {
+    const row = await one<Record<string, unknown>>(
+      db,
+      "SELECT e2ee_backup FROM users WHERE id = ?",
+      uid,
+    );
+    return json({ backup: (row?.e2ee_backup as string) ?? null });
+  }
+  if (path === "/api/e2ee/backup" && method === "PUT") {
+    const b = String(body.backup ?? "").slice(0, 4096);
+    if (b && !/^[A-Za-z0-9+/=]{16,4096}$/.test(b)) fail(400, "Bad backup.", "BAD_E2EE_BACKUP");
+    await run(db, "UPDATE users SET e2ee_backup = ? WHERE id = ?", b || null, uid);
+    return json({ ok: true });
   }
 
   /* ---------- KuchuPuchu AI ---------- */

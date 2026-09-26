@@ -10628,7 +10628,7 @@ const convBetween = (db, a, b) =>
         e266.includes("E2eeSendPolicy.protectBody(") &&
         e266.includes('m.optText("kpEnvelope")') &&
         chat66.includes("val e2eePeerKey by remember {") &&
-        chat66.includes("LaunchedEffect(e2eePeerKey)") &&
+        chat66.includes("LaunchedEffect(e2eePeerKey, E2eeMsg.restoredNonce) {") &&
         chat66.includes('.put("conversationId", convId)'),
     );
   }
@@ -10725,6 +10725,8 @@ const convBetween = (db, a, b) =>
       src.includes('const E2EE_PREFIX = "KP1.";') &&
         src.includes("3 * MESSAGE_MAX_LENGTH + 28") &&
         src.includes("`ALTER TABLE users ADD COLUMN e2ee_public_key TEXT`") &&
+        src.includes("`ALTER TABLE users ADD COLUMN e2ee_backup TEXT`") &&
+        src.includes('if (path === "/api/e2ee/backup" && method === "PUT")') &&
         src.includes("e2eePublicKey: row.e2ee_public_key ?? null,") &&
         src.includes(
           'if (key && !/^[A-Za-z0-9+/=]{16,512}$/.test(key)) fail(400, "Bad key.", "BAD_E2EE_KEY");',

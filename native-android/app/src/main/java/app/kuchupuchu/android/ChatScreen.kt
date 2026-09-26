@@ -894,7 +894,8 @@ fun ChatScreen(nav: NavController, convId: String) {
 
     // r66: metadata can arrive after rows. Re-open preserved envelopes when
     // the peer key appears/changes, without waiting for another message.
-    LaunchedEffect(e2eePeerKey) {
+    // r76-12: same when our OWN roaming identity lands on a fresh install.
+    LaunchedEffect(e2eePeerKey, E2eeMsg.restoredNonce) {
         ScreenStore.setMsgs(convId, ScreenStore.msgsOf(convId).map { unseal(it) })
         paintFromStore()
         for (i in pending.indices) pending[i] = unseal(pending[i])

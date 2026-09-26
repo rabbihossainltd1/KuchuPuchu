@@ -80,6 +80,9 @@ internal object E2eeMsg {
     @Volatile
     private var identityCache: Pair<String, String>? = null
 
+    /** r76-12: bumped when a roaming identity lands — open chats re-unseal. */
+    var restoredNonce by mutableStateOf(0)
+
     private val publication = E2eePublicationGate()
 
     // ---------- pure core (JVM-testable, no Android) ----------
@@ -263,6 +266,9 @@ internal object E2eeMsg {
     private fun ensurePublished(ctx: Context): Boolean {
         val session = Api.token.orEmpty()
         return publication.ensure(session, { Api.token == session }) {
+            // r76-12: restore (or back up) the roaming identity BEFORE reading
+            // ours — a fresh install must not mint a key over its history.
+            restoreRoaming(ctx)
             val pub = identity(ctx).second
             // Do not use the offline GET cache as a server acknowledgement.
             val me = Api.request("/api/me", "GET", null).optJSONObject("user")
@@ -274,6 +280,52 @@ internal object E2eeMsg {
             true
         }
     }
+
+    // ---------- r76-12: roaming identity (owner: history on a new phone) ----------
+
+    private fun encodeBackup(priv: String, pub: String): String =
+        Base64.getEncoder()
+            .encodeToString(
+                JSONObject().put("p", priv).put("u", pub).toString().toByteArray(Charsets.UTF_8),
+            )
+
+    /** Restore the backed-up pair when we have none; back ours up when the
+     *  server lacks one. Runs on the caller's IO thread (ensurePublished). */
+    private fun restoreRoaming(ctx: Context): Boolean =
+        runCatching {
+            val prefs = ctx.getSharedPreferences(PREFS, 0)
+            val priv = prefs.getString(KEY_PRIV, null).orEmpty()
+            val pub = prefs.getString(KEY_PUB, null).orEmpty()
+            val remote = Api.request("/api/e2ee/backup", "GET", null).optText("backup")
+            if (priv.isBlank() || pub.isBlank()) {
+                if (remote.isNotBlank()) {
+                    val j = JSONObject(String(Base64.getDecoder().decode(remote), Charsets.UTF_8))
+                    val rp = j.optText("p")
+                    val ru = j.optText("u")
+                    if (parsePriv(rp) != null && parsePub(ru) != null) {
+                        prefs.edit().putString(KEY_PRIV, rp).putString(KEY_PUB, ru).apply()
+                        identityCache = rp to ru
+                        restoredNonce++
+                        return@runCatching true
+                    }
+                }
+                // First device ever: mint, then back up for the next phone.
+                identity(ctx)
+                return@runCatching backupLocal(ctx)
+            }
+            if (remote.isBlank()) return@runCatching backupLocal(ctx)
+            true
+        }.getOrDefault(false)
+
+    private fun backupLocal(ctx: Context): Boolean =
+        runCatching {
+            val prefs = ctx.getSharedPreferences(PREFS, 0)
+            val priv = prefs.getString(KEY_PRIV, null).orEmpty()
+            val pub = prefs.getString(KEY_PUB, null).orEmpty()
+            if (priv.isBlank() || pub.isBlank()) return@runCatching false
+            Api.request("/api/e2ee/backup", "PUT", JSONObject().put("backup", encodeBackup(priv, pub)))
+            true
+        }.getOrDefault(false)
 
     /**
      * The final transport guard covers outbox, schedules, forwards, external
