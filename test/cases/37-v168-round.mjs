@@ -250,7 +250,15 @@ check(
     fx8.includes("val lift = sin(v * PI.toFloat()) * 8f * density") &&
     fx8.includes("snapshotFlow { seat }.filterNotNull().first()") &&
     fx8.includes("val p0 = Offset(0f, startAbs.y - s.top)") &&
-    !fx8.includes("scaleX =") &&
+    // r76-19 (owner: "emojis ... nicher theke kichu ongsho kata pore
+    // jacche"): the flight no longer TRANSLATES the row out of the viewport
+    // (the old +68/+84 offsets clipped the bubble's own bottom/right on the
+    // last row). It grows out of the seat's bottom corner instead - a draw
+    // transform, never a layout change, so text still cannot re-wrap.
+    fx8.includes(
+      "transformOrigin = if (isSent) TransformOrigin(1f, 1f) else TransformOrigin(0f, 1f)",
+    ) &&
+    !fx8.includes("bottomOffset") &&
     chat.includes(".fxComposerAnchor()") &&
     chat.includes("FxArrivals.markSeen(id)") &&
     chat.includes(

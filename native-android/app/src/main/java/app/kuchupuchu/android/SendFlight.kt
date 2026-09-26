@@ -12,6 +12,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -153,12 +154,21 @@ fun Modifier.fxFlyIn(
                 val lift = sin(v * PI.toFloat()) * 8f * density
                 translationX = 0f
             }
-            // r60 (owner: "massage bolechilam nicher corner theke asbe aro niche theke asbe eita fix koro. shob items . sender receiver same update hobe"):
-            // Sent items smoothly glide in diagonally from bottom-right (+68dp X, +84dp Y); received glide in from bottom-left (-68dp X, +84dp Y).
-            val sideOffset = (if (isSent) 68f else -68f) * density * (1f - v)
-            val bottomOffset = 84f * density * (1f - v)
-            translationX = if (active) sideOffset else 0f
-            translationY = if (active) bottomOffset else 0f
-            alpha = if (v < 0.12f) (v / 0.12f).coerceIn(0f, 1f) else 1f
+            // r76-19 (owner: "emojis jokhon right side a nicher theke asche
+            // tokhon emoji full body soho asche na ... nicher theke kichu
+            // ongsho kata pore jacche"): the old +68dp/+84dp translation
+            // started the row BELOW and BESIDE the list's edges, so the
+            // viewport clipped the bubble's own bottom/right for the first
+            // frames - a cut emoji gliding in. The flight now GROWS out of
+            // the seat's bottom corner instead (transform origin pinned to
+            // the corner it arrives from): every frame is drawn fully inside
+            // the row's own bounds, so nothing can ever be cut, and it still
+            // reads as rising from the bottom-right (sent) / bottom-left
+            // (received) corner.
+            transformOrigin = if (isSent) TransformOrigin(1f, 1f) else TransformOrigin(0f, 1f)
+            val sc = if (active) 0.55f + 0.45f * v else 1f
+            scaleX = sc
+            scaleY = sc
+            alpha = if (v < 0.25f) (v / 0.25f).coerceIn(0f, 1f) else 1f
         }
 }

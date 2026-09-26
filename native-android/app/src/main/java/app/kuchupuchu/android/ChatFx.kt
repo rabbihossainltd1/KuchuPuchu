@@ -217,10 +217,12 @@ fun Modifier.fxSlotOpen(active: Boolean, fromDp: Float = -30f, ms: Int = 480): M
         if (active && scale > 0f) t.animateTo(1f, tween(ms, easing = FastOutSlowInEasing))
     }
     val v = t.value
-    return graphicsLayer {
-        alpha = v
-        translationY = (fromDp + (8f - fromDp) * v) * density
-    }
+    // r76-19 (owner: emojis arrive with their bottom cut): the slot used to
+    // translate the row -30dp..+8dp while it faded. Combined with the flight
+    // offsets below the list's bottom edge, the bubble's own body was clipped
+    // by the viewport during the whole entrance. The slot now only FADES —
+    // all movement lives in fxFlyIn, which never leaves the row's bounds.
+    return graphicsLayer { alpha = v }
 }
 
 /* -------------------------------------------------------- the send flight */
@@ -441,7 +443,6 @@ fun Modifier.fxSideSlide(
     durMs: Int = 300,
 ): Modifier {
     val scale = fxAnimatorScale()
-    val density = LocalDensity.current.density
     val p = remember(active) { Animatable(if (active && scale > 0f) 0f else 1f) }
 
     LaunchedEffect(active) {
@@ -453,20 +454,13 @@ fun Modifier.fxSideSlide(
         }
     }
 
-    return graphicsLayer {
-        val v = p.value
-        if (v < 1f) {
-            val dist = 68f * density
-            val yDist = 84f * density
-            translationX = if (isSent) dist * (1f - v) else -dist * (1f - v)
-            translationY = yDist * (1f - v)
-            alpha = v.coerceIn(0f, 1f)
-        } else {
-            translationX = 0f
-            translationY = 0f
-            alpha = 1f
-        }
-    }
+    // r76-19 (owner: arriving emojis lose part of their body): this used to
+    // slide the bubble +68dp/+84dp OUT of the viewport edges on top of the
+    // row's own flight - the last row started fully below the list's bottom
+    // and its content came back visibly CUT. The bubble now only fades while
+    // the row's fxFlyIn grows it in from its bottom corner (one motion, zero
+    // translation, nothing can be clipped).
+    return graphicsLayer { alpha = p.value }
 }
 
 /**
