@@ -10,8 +10,10 @@ it. A row whose wiring cannot be named end-to-end is a shipped bug.
    Composer Row (real child) AND RecorderAnchors.columnOn via LaunchedEffect.
 2. LOCK column: overlay reads columnOn + FlightAnchors.micBounds; offset from
    the overlay's OWN onGloballyPositioned origin (never chatRootOrigin).
-3. Mic while recording: drawn by the overlay ON TOP of the column (z6>z5);
-   seat keeps only the 50x46 fxMicAnchor spacer (row geometry + bounds).
+3. Mic (idle AND recording): ONE permanent instance in the overlay, ON TOP
+   of the column (z6>z5); seat keeps only the 50x46 fxMicAnchor spacer. A mic
+   that changes home on press remounts mid-gesture and kills the drag
+   (r76-8: 'press first then slide' bug). Overlay hides with composerShown.
 4. Lock arm visual: HoldMicButton drag -> onLockVisual -> RecorderAnchors.
    columnArmed/columnDim (mic writes directly; bar reads columnDim tracked).
 5. LOCK release: decide()=LOCK -> onLockRecord -> lockRecording() ->

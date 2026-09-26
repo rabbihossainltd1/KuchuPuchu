@@ -399,3 +399,11 @@
 - docs/VOICE_RECORDER_SELF_CHECK.md added: ship-time wiring trace (state -> publisher ->
   consumer -> draw) the owner mandated; tick every line before any recorder commit.
 - v224/3.9.147 @ 2a7c922, green run 36220320151.
+
+## r76-8 (2026-09-26): mic permanent in overlay; once icon 1px left
+- Owner (happy: "sundor hoiche"): but slide needed a pre-press; once icon 1px left.
+- Cause of pre-press: press -> recording=true unmounted the seat mic and mounted the
+  overlay mic mid-gesture, killing the pointer stream. Fix: overlay draws the mic idle
+  AND recording; seat = pure spacer. Overlay visibility = composerShown (same condition
+  as the Composer call: !blockWall && !requestPending && !noReply && (!showAttach || !attachFs)).
+- v225/3.9.148 @ 5acb6b4, green run 36222551283. Self-check doc line 3 updated.
