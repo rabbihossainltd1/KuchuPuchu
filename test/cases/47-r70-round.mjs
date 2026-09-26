@@ -415,6 +415,11 @@ const main = (f) => read(`${ANDROID}/${f}`);
       // 1-mark seat cycles playback speed.
       chat.includes("player.cycleSpeed(id)") &&
       chat.includes("player.speedOf(id).toInt()}x") &&
+      // r76-18 item 2: the empty-pill hint carries the field's exact line
+      // metrics, so the composer is one size typed or not.
+      chat.includes(
+        "lineHeight = 20.sp,\n                                modifier = Modifier.padding(vertical = 6.dp),",
+      ) &&
       chat.includes("Modifier.heightIn(min = 44.dp)") &&
       chat.includes(
         "ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme, onDoubleTapHeart)",
