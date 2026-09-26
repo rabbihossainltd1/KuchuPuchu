@@ -126,6 +126,7 @@ object SnapshotSingletons {
             PhoneBook.syncing.value
             UploadProgress.fracs.size
             CallEngine.instance
+            FlightAnchors.micBounds
         }
     }
 }

@@ -1241,8 +1241,10 @@ fun KpDoubleTapSeat(content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalViewConfiguration provides kpDoubleTapWindow()) { content() }
 }
 
-/** The owner's double-tap window (r72 Q&A): 450 ms, not the platform's ~300. */
-const val KP_DOUBLE_TAP_MS = 450L
+/** r76-16 (owner: "late kore send hoi"): the double-tap window is back at
+ *  the platform's ~300 ms — the 450 ms window made every single tap wait
+ *  almost half a second before the send fired. */
+const val KP_DOUBLE_TAP_MS = 300L
 
 /** Scales down slightly while pressed — attach to any clickable's modifier. */
 @Composable

@@ -369,7 +369,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
   check(
     "r72-19: the composer's Send seat runs in the owner's 0.45 s double-tap window (the platform's ~0.3 s was too tight for the once-send) — one seat-local ViewConfiguration, everything else inherited",
-    ui.includes("const val KP_DOUBLE_TAP_MS = 450L") &&
+    ui.includes("const val KP_DOUBLE_TAP_MS = 300L") &&
       ui.includes("object : ViewConfiguration by base {") &&
       ui.includes("override val doubleTapTimeoutMillis: Long get() = ms") &&
       ui.includes("fun KpDoubleTapSeat(content: @Composable () -> Unit)") &&
@@ -412,8 +412,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes("else -> List(fit) { bars[it * bars.size / fit] }") &&
       // r76-14: the NORMAL voice bubble mirrors the once card and the
       // 1-mark seat cycles playback speed.
-      chat.includes("player.cycleSpeed()") &&
-      chat.includes("player.speed.toInt()}x") &&
+      chat.includes("player.cycleSpeed(id)") &&
+      chat.includes("player.speedOf(id).toInt()}x") &&
       chat.includes("Modifier.heightIn(min = 44.dp)") &&
       chat.includes(
         "ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme, onDoubleTapHeart)",

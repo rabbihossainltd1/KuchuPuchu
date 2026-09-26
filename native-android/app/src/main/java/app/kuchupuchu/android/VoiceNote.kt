@@ -298,25 +298,28 @@ class VoicePlayer {
     var pausedId: String? by mutableStateOf(null)
         private set
 
-    /** r76-14 (owner): playback speed — the circle on a voice bubble cycles
-     *  1x/2x/3x/4x; it applies to the live player and the next load. */
-    var speed: Float by mutableStateOf(1f)
-        private set
+    /** r76-16 (owner: "ekta voice a 2x korle shob voice a 2x hoye jay — ami
+     *  individual korte chai"): speed is PER message — the map keys on the
+     *  row id, so one note at 2x leaves every other note at its own speed. */
+    private val speeds = mutableStateMapOf<String, Float>()
 
-    fun cycleSpeed() {
-        speed =
-            when (speed) {
+    fun speedOf(id: String): Float = speeds[id] ?: 1f
+
+    fun cycleSpeed(id: String) {
+        val next =
+            when (speedOf(id)) {
                 1f -> 2f
                 2f -> 3f
                 3f -> 4f
                 else -> 1f
             }
-        applySpeed(player)
+        speeds[id] = next
+        if (playingId == id || pausedId == id) applySpeed(player, next)
     }
 
-    private fun applySpeed(p: MediaPlayer?) {
+    private fun applySpeed(p: MediaPlayer?, s: Float) {
         if (android.os.Build.VERSION.SDK_INT < 23 || p == null) return
-        runCatching { p.playbackParams = p.playbackParams.setSpeed(speed) }
+        runCatching { p.playbackParams = p.playbackParams.setSpeed(s) }
     }
 
     /** 0..1 through the note that is playing or paused — the bubble paints its
@@ -350,7 +353,7 @@ class VoicePlayer {
                 handler.removeCallbacks(ticker)
             } else {
                 runCatching { live.start() }
-                applySpeed(live)
+                applySpeed(live, speedOf(id))
                 pausedId = null
                 playingId = id
                 handler.post(ticker)
@@ -424,7 +427,7 @@ class VoicePlayer {
                     if (startAt > 0f) runCatching { p.seekTo((startAt * p.duration).toInt()) }
                     loadingId = null
                     p.start()
-                    applySpeed(p)
+                    applySpeed(p, speedOf(id))
                     player = p
                     focusAm = am
                     focusToken = focus

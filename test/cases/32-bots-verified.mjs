@@ -8991,7 +8991,7 @@ const convBetween = (db, a, b) =>
         !vid.includes("fillMaxWidth(0.62f)") &&
         (vid.match(/\.size\(38\.dp\)/g) || []).length === 2 &&
         (vid.match(/modifier = Modifier\.size\(32\.dp\),/g) || []).length === 2 &&
-        (chat.match(/\.size\(46\.dp\)/g) || []).length === 1 &&
+        (chat.match(/\.size\(46\.dp\)/g) || []).length === 2 &&
         chat.includes("val albumWidth = 208.dp") &&
         !chat.includes("264.dp"),
     );

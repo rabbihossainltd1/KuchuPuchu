@@ -5329,7 +5329,7 @@ private fun Composer(
                 KpDoubleTapSeat {
                     Box(
                         Modifier
-                            .size(42.dp)
+                            .size(46.dp)
                             .fxMicAnchor()
                             .pressScale(sendInteraction)
                             // Owner round 10: the send/mic circles carry the same 3D
@@ -5361,7 +5361,7 @@ private fun Composer(
                             tint = AmberInk,
                             modifier =
                                 Modifier
-                                    .size(19.dp)
+                                    .size(21.dp)
                                     .scale(if (sendPressed) 0.9f else 1f),
                         )
                     }
@@ -10083,7 +10083,7 @@ private fun FileBubble(
             Box(
                 Modifier.size(34.dp).clickable {
                     haptics.tap()
-                    player.cycleSpeed()
+                    player.cycleSpeed(id)
                 },
                 contentAlignment = Alignment.Center,
             ) {
@@ -10095,7 +10095,7 @@ private fun FileBubble(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        "${player.speed.toInt()}x",
+                        "${player.speedOf(id).toInt()}x",
                         fontSize = 10.sp,
                         color = ink,
                         fontWeight = FontWeight.SemiBold,
