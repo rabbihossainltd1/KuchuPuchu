@@ -5651,19 +5651,23 @@ private fun RecorderLockedPanel(
             Spacer(Modifier.width(9.dp))
             LiveVoiceWave(color = Muted, modifier = Modifier.weight(1f).height(28.dp))
             Spacer(Modifier.width(9.dp))
-            // r76-9/10 (owner): no border ring, ever — arming only recolors
-            // the glyph blue; the glyph keeps its original 20dp size and sits
-            // 2px left of center.
+            // r76-11 (owner): the tinted circle shrank with the glyph — the
+            // 40dp seat stays ONLY as the tap target; the visible background
+            // is the small 26dp circle; arming still just recolors the glyph.
             Box(
-                Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.08f))
-                    .clickable { onToggleVoiceOnce() },
+                Modifier.size(40.dp).clickable { onToggleVoiceOnce() },
                 contentAlignment = Alignment.Center,
             ) {
-                Box(Modifier.offset { IntOffset(-2, 0) }) {
-                    CenteredOnceIcon(20.dp, tint = if (voiceOnce) accent else Color.White, fillBounds = true)
+                Box(
+                    Modifier
+                        .size(26.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.08f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(Modifier.offset { IntOffset(-2, 0) }) {
+                        CenteredOnceIcon(20.dp, tint = if (voiceOnce) accent else Color.White, fillBounds = true)
+                    }
                 }
             }
         }
