@@ -2,6 +2,7 @@ package app.kuchupuchu.android
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -137,9 +138,12 @@ fun Modifier.fxFlyIn(
             startAbs = Offset(s.left, startY)
         }
         progress.snapTo(0f)
-        // r76-18 (owner: "send animation smooth koro, vengo felo na"): one
-        // longer, softer glide — the same arc, no snap at either end.
-        progress.animateTo(1f, androidx.compose.animation.core.tween((durMs * scale).toInt().coerceIn(320, 700), easing = FlightEase))
+        // r76-20 (owner: "animation ta smooth na" — jerky): the old spec
+        // fought itself — FlightEase's slow start read as a hesitate-then-
+        // rush, the 700 ms tail dragged, and the landing squash snapped the
+        // bubble the moment the flight ended. One decelerate curve instead:
+        // it rises right away and settles gently, 300-520 ms.
+        progress.animateTo(1f, androidx.compose.animation.core.tween((durMs * scale).toInt().coerceIn(300, 520), easing = FastOutSlowInEasing))
         done = true
         onDone()
     }
@@ -166,9 +170,9 @@ fun Modifier.fxFlyIn(
             // reads as rising from the bottom-right (sent) / bottom-left
             // (received) corner.
             transformOrigin = if (isSent) TransformOrigin(1f, 1f) else TransformOrigin(0f, 1f)
-            val sc = if (active) 0.55f + 0.45f * v else 1f
+            val sc = if (active) 0.6f + 0.4f * v else 1f
             scaleX = sc
             scaleY = sc
-            alpha = if (v < 0.25f) (v / 0.25f).coerceIn(0f, 1f) else 1f
+            alpha = if (v < 0.35f) (v / 0.35f).coerceIn(0f, 1f) else 1f
         }
 }

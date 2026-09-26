@@ -248,9 +248,13 @@ fun Modifier.fxLanding(trigger: Any?): Modifier {
     val sy = remember { Animatable(1f) }
     LaunchedEffect(trigger) {
         if (trigger == null || scale <= 0f) return@LaunchedEffect
-        sx.snapTo(1.05f); sy.snapTo(0.94f)
-        sx.animateTo(1f, tween(520, easing = FastOutSlowInEasing))
-        sy.animateTo(1f, tween(520, easing = FastOutSlowInEasing))
+        // r76-20 (owner: arrival animation "smooth na"): the landing used to
+        // SNAP the bubble to (1.05, 0.94) the instant the flight ended — a
+        // visible jerk on the handoff. The settle is gentle now: a barely-there
+        // (1.02, 0.98) released over 360 ms.
+        sx.snapTo(1.02f); sy.snapTo(0.98f)
+        sx.animateTo(1f, tween(360, easing = FastOutSlowInEasing))
+        sy.animateTo(1f, tween(360, easing = FastOutSlowInEasing))
     }
     return graphicsLayer {
         scaleX = sx.value
