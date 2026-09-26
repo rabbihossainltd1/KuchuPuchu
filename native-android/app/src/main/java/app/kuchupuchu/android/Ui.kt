@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.ui.focus.FocusRequester
@@ -1010,7 +1011,18 @@ internal fun KpMuteChooser(
     onPick: (callOff: Boolean, msgOff: Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    // r76-19 (owner item 9: "all ba 2 ta eksathe mute option nai otaw add
+    // kore daw"): one tap mutes BOTH aspects (or unmutes both when both are
+    // already off) — the two single-aspect rows stay under it.
+    val allMuted = callMuted && msgMuted
     KpSheet(onDismiss = onDismiss) {
+        KpSheetRow(
+            if (allMuted) Icons.Filled.NotificationsActive else Icons.Filled.NotificationsOff,
+            if (allMuted) "Unmute all" else "Mute all",
+        ) {
+            onDismiss()
+            onPick(!allMuted, !allMuted)
+        }
         KpSheetRow(
             if (callMuted) Icons.Filled.CallEnd else Icons.Filled.Call,
             if (callMuted) "Unmute calls" else "Mute calls",

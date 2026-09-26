@@ -269,6 +269,10 @@ const detail = (k, who, convId) =>
     ui.includes("internal fun KpMuteChooser(") &&
       ui.includes('if (callMuted) "Unmute calls" else "Mute calls"') &&
       ui.includes('if (msgMuted) "Unmute messages" else "Mute messages"') &&
+      // r76-19 (owner item 9): the chooser grew the BOTH-aspects row —
+      // "Mute all" / "Unmute all" writes the two switches in one tap.
+      ui.includes('if (allMuted) "Unmute all" else "Mute all"') &&
+      ui.includes("onPick(!allMuted, !allMuted)") &&
       chat.includes("KpMuteChooser(") &&
       chat.includes("setMuteAspect(callOff, msgOff)") &&
       cl.includes("KpMuteChooser(") &&
