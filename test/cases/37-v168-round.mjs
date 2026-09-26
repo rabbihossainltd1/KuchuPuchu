@@ -155,12 +155,12 @@ check(
 /* 6 — the voice card is compact, body included */
 check(
   "v168 item 6 (owner: 'voice message ta er bubble ta body shoho onek boro ... choto kore daw'): the voice bubble came in another notch WITH its body - a 28 dp play circle (17 dp glyphs), a 112 x 16 dp wave centred by the 6 dp column pad, a 10 sp time line, and the bubble's own text padding tightened around the card (voiceNote: 8/3/6/3); the r33 scrub-to-seek row and the 16 dp spinner seat are untouched",
-  chat.includes(".size(28.dp)\n                    .pressScale(interaction)") &&
-    (chat.match(/size\(17\.dp\)\.scale\(if \(pressed\) 0\.85f else 1f\)/g) || []).length === 2 &&
-    chat.includes("Column(Modifier.padding(top = 3.dp)) {\n                VoiceWave(") &&
-    chat.includes("modifier = Modifier.width(150.dp).height(22.dp),") &&
+  chat.includes(".size(32.dp)\n                    .pressScale(interaction)") &&
+    (chat.match(/size\(18\.dp\)\.scale\(if \(pressed\) 0\.85f else 1f\)/g) || []).length === 2 &&
+    chat.includes("Spacer(Modifier.width(8.dp))\n            VoiceWave(") &&
+    chat.includes("modifier = Modifier.width(150.dp).height(20.dp),") &&
     chat.includes(
-      "fontSize = 10.sp,\n                    lineHeight = 12.sp,\n                    color = if (mine) Color(0x99FFFFFF) else Muted,",
+      "fontSize = 10.sp,\n                lineHeight = 12.sp,\n                color = if (mine) Color(0x99FFFFFF) else Muted,",
     ) &&
     // v169: the body frame is back to the shared one - the stamp left the
     // bubble instead, which is what actually shrinks the card's footprint.
@@ -233,7 +233,6 @@ check(
       chat.includes('EmojiGlyphRow(st, 56f, fxFresh, m.optString("id"))') ||
       chat.includes('EmojiGlyphRow(st, 56f, fxFresh, m.optString("id"),')) &&
     chat.includes(".fxBlurIn(fxFresh)") &&
-    chat.includes("grow = fxGrow,") &&
     chat.includes(".fxPopIn(fxGrow)") &&
     chat.includes(".fxProgressLine(fxGrow, docInk)"),
 );

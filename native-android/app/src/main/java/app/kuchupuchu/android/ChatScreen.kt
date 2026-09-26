@@ -8454,76 +8454,56 @@ private fun VoiceOnceTile(
     val progress = if (playing || paused) player.progress else 0f
     val secs = m.optJSONObject("meta")?.optInt("seconds") ?: 0
     val upFrac = UploadProgress.fracs[m.optString("clientId")]
-    // r76-12 (owner): the once-voice card IS the normal voice row — play with
-    // the duration under it, the 150dp seekable wave beside — and where the
-    // once mark sat, a speed circle: 1x/2x/3x/4x, tap cycles the playback.
-    Row(verticalAlignment = Alignment.Top) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                Modifier
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .background(Color(0x33FFFFFF))
-                    .clickable(enabled = ready) {
-                        haptics.tap()
-                        // r71-19b: playing it once IS the opening.
-                        player.toggle(ctx, id, source) { onSpent() }
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                when {
-                    loading || pendingEcho -> CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
-                    playing -> Icon(Icons.Filled.Pause, "Pause", tint = Color.White, modifier = Modifier.size(17.dp))
-                    else -> Icon(Icons.Filled.PlayArrow, "Play once", tint = Color.White, modifier = Modifier.size(17.dp))
-                }
-            }
-            Text(
-                when {
-                    secs > 0 -> "%d:%02d".format(secs / 60, secs % 60)
-                    upFrac != null -> "Sending"
-                    else -> "0:00"
-                },
-                fontSize = 10.sp,
-                lineHeight = 12.sp,
-                color = Color(0x99FFFFFF),
-                maxLines = 1,
-            )
-        }
-        Spacer(Modifier.width(6.dp))
-        Column(Modifier.padding(top = 3.dp)) {
-            VoiceWave(
-                bars = bars,
-                progress = progress,
-                played = Color.White,
-                rest = Color(0x66FFFFFF),
-                grow = false,
-                onSeek = { frac ->
-                    if (ready) player.seekTo(ctx, id, source, frac)
-                },
-                onScrub = {},
-                modifier = Modifier.width(150.dp).height(22.dp),
-            )
-        }
-        Spacer(Modifier.width(6.dp))
+    Row(
+        Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Box(
             Modifier
-                .size(28.dp)
+                .size(32.dp)
                 .clip(CircleShape)
                 .background(Color(0x33FFFFFF))
-                .clickable {
+                .clickable(enabled = ready) {
                     haptics.tap()
-                    player.cycleSpeed()
+                    // r71-19b: playing it once IS the opening.
+                    player.toggle(ctx, id, source) { onSpent() }
                 },
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                "${player.speed.toInt()}x",
-                fontSize = 10.sp,
-                color = Color.White,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-            )
+            when {
+                loading || pendingEcho -> CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+                playing -> Icon(Icons.Filled.Pause, "Pause", tint = Color.White, modifier = Modifier.size(18.dp))
+                else -> Icon(Icons.Filled.PlayArrow, "Play once", tint = Color.White, modifier = Modifier.size(18.dp))
+            }
         }
+        Spacer(Modifier.width(8.dp))
+        VoiceWave(
+            bars = bars,
+            progress = progress,
+            played = Color.White,
+            rest = Color(0x66FFFFFF),
+            grow = false,
+            // no seeking on a once-only note: it is heard once, from the top
+            onSeek = {},
+            onScrub = {},
+            modifier = Modifier.weight(1f).height(20.dp),
+        )
+        // r76-10 (owner): the duration rides the RIGHT side, vertically
+        // centered — nothing under the play circle anymore.
+        Spacer(Modifier.width(8.dp))
+        Text(
+            when {
+                secs > 0 -> "%d:%02d".format(secs / 60, secs % 60)
+                upFrac != null -> "Sending"
+                else -> "0:00"
+            },
+            fontSize = 10.sp,
+            lineHeight = 12.sp,
+            color = Color(0x99FFFFFF),
+            maxLines = 1,
+        )
+        Spacer(Modifier.width(6.dp))
+        Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) { CenteredOnceIcon(30.dp) }
     }
 }
 
@@ -8663,7 +8643,7 @@ private fun ViewOnceRow(
                     // Modifier.heightIn(max = 220.dp).aspectRatio(boxRatio)
                     // r71-19b: a voice card is wide and short (play + wave +
                     // the mark); the photo / video tile keeps its own box.
-                    .widthIn(max = if (voice) 236.dp else 138.dp)
+                    .widthIn(max = if (voice) 196.dp else 138.dp)
                     .then(
                         // r76-11 (owner): the voice card wraps its row — no
                         // fixed height, no blank bands above/below.
@@ -8679,9 +8659,7 @@ private fun ViewOnceRow(
                         },
                     )
                     .clip(bubbleShape)
-                    // r76-12 (owner): a once-VOICE note wears the normal
-                    // voice bubble's fills; photos / videos keep the tile.
-                    .background(if (voice) (if (mine) chatMineFill(theme) else chatOtherFill(theme)) else androidx.compose.ui.graphics.SolidColor(Color(0xFF1B1E26)))
+                    .background(Color(0xFF1B1E26))
                     // r76-9 (owner): a view-once VOICE bubble rides like a
                     // normal voice bubble — no border ring.
                     .then(if (voice) Modifier else Modifier.border(1.dp, Color(0xFF3B82F6), bubbleShape))
@@ -9623,7 +9601,16 @@ internal fun DrawScope.drawVoiceBars(bars: List<Int>, progress: Float, played: C
     if (bars.isEmpty() || size.width <= 0f) return
     val gap = 2.dp.toPx()
     val fit = ((size.width + gap) / (2.dp.toPx() + gap)).toInt().coerceAtLeast(1)
-    val shown = if (newest && bars.size > fit) bars.subList(bars.size - fit, bars.size) else bars
+    // r76-13 (owner: "time overlap ta thik kore de"): a canvas too narrow for
+    // every bar at 2dp used to OVERFLOW its bounds — the tail painted right
+    // over the duration text. Now it shows a spread sample that FITS, so the
+    // wave never reaches past its own width again.
+    val shown =
+        when {
+            bars.size <= fit -> bars
+            newest -> bars.subList(bars.size - fit, bars.size)
+            else -> List(fit) { bars[it * bars.size / fit] }
+        }
     val n = shown.size
     // Bars never fatten past 3dp on a wide strip — they stay bars, not blocks.
     val stroke = ((size.width - gap * (n - 1)) / n).coerceIn(2f, 3.5.dp.toPx())
@@ -10006,17 +9993,17 @@ private fun FileBubble(
         // er moto"): back to top-aligned - the wave centres on the play
         // button exactly like v172, the time tucks RIGHT under the wave
         // (2dp, right end), no blank band.
-        Row(verticalAlignment = Alignment.Top) {
+        // r76-13 (owner: "normal massage bubble o ei same view once voice
+        // massage er moto kore dite"): the normal voice row wears the
+        // once-voice card's arrangement — play, wave, duration on ONE centred
+        // line; nothing hangs under the play button anymore, no once mark.
+        Row(verticalAlignment = Alignment.CenterVertically) {
             val interaction = remember { MutableInteractionSource() }
             val pressed by interaction.collectIsPressedAsState()
-            // r49 (owner: "voice timer ta play icon er niche thakbe"):
-            // the duration line hangs centred UNDER the play button.
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                val secs = m.optJSONObject("meta")?.optInt("seconds") ?: 0
-                val vFrac = UploadProgress.fracs[m.optString("clientId")]
-                Box(
+            val secs = m.optJSONObject("meta")?.optInt("seconds") ?: 0
+            Box(
                 Modifier
-                    .size(28.dp)
+                    .size(32.dp)
                     .pressScale(interaction)
                     .clip(CircleShape)
                     .background(if (mine) Color(0x33FFFFFF) else chatAccent(theme).copy(alpha = 0.18f))
@@ -10037,59 +10024,51 @@ private fun FileBubble(
                         Icons.Filled.Pause,
                         contentDescription = "Pause",
                         tint = ink,
-                        modifier = Modifier.size(17.dp).scale(if (pressed) 0.85f else 1f),
+                        modifier = Modifier.size(18.dp).scale(if (pressed) 0.85f else 1f),
                     )
                     else -> Icon(
                         Icons.Filled.PlayArrow,
                         contentDescription = "Play",
                         tint = ink,
-                        modifier = Modifier.size(17.dp).scale(if (pressed) 0.85f else 1f),
+                        modifier = Modifier.size(18.dp).scale(if (pressed) 0.85f else 1f),
                     )
                 }
-                }
-                // r62 (owner: "screenshot ta dekho upper ta sent hoye geche original shape a ache. nicher voice ta dekho sending er somoy barti left side a roye geche ota not fixed"):
-                // voice bubble keeps exact original shape during sending by displaying duration line (not wide "Sending · 89%" text that bloated column and created extra left space).
-                Text(
-                    when {
-                        // While it plays (or the finger scrubs), the line
-                        // counts the elapsed seconds.
-                        (active || scrubAt != null) && secs > 0 -> {
-                            val at = (progress * secs).toInt()
-                            "%d:%02d".format(at / 60, at % 60)
-                        }
-                        secs > 0 -> "%d:%02d".format(secs / 60, secs % 60)
-                        pendingEcho -> "0:00"
-                        else -> FilesUtil.displaySize(m.optInt("fileSize"))
-                    },
-                    fontSize = 10.sp,
-                    lineHeight = 12.sp,
-                    color = if (mine) Color(0x99FFFFFF) else Muted,
-                    maxLines = 1,
-                )
             }
-            Spacer(Modifier.width(6.dp))
-            // Owner round 25: the wave column carries only the wave now -
-            // the duration line moved under the play button (r49).
-            // r51 (owner: "play icon er middle er sathe wave er alignment
-            // thik nai"): the wave's middle sits ON the play icon's middle:
-            // (28 - 22) / 2 = 3dp top.
-            Column(Modifier.padding(top = 3.dp)) {
-                VoiceWave(
-                    bars = bars,
-                    progress = progress,
-                    played = ink,
-                    rest = faint,
-                    // r62: full waveform rendered immediately without fake grow animation
-                    grow = false, // grow = fxGrow,
-                    modifier = Modifier.width(150.dp).height(22.dp),
-                    onSeek = { frac ->
-                        if (!pendingEcho && fileKey.isNotBlank()) player.seekTo(ctx, id, fileKey, frac)
-                    },
-                    onScrub = { frac ->
-                        scrubAt = if (!pendingEcho && fileKey.isNotBlank()) frac else null
-                    },
-                )
-            }
+            Spacer(Modifier.width(8.dp))
+            VoiceWave(
+                bars = bars,
+                progress = progress,
+                played = ink,
+                rest = faint,
+                // r62: full waveform rendered immediately without fake grow animation
+                grow = false,
+                modifier = Modifier.width(150.dp).height(20.dp),
+                onSeek = { frac ->
+                    if (!pendingEcho && fileKey.isNotBlank()) player.seekTo(ctx, id, fileKey, frac)
+                },
+                onScrub = { frac ->
+                    scrubAt = if (!pendingEcho && fileKey.isNotBlank()) frac else null
+                },
+            )
+            // The duration rides the RIGHT of the wave, vertically centred —
+            // the once-card's picture. While it plays (or the finger scrubs),
+            // the line counts the elapsed seconds.
+            Spacer(Modifier.width(8.dp))
+            Text(
+                when {
+                    (active || scrubAt != null) && secs > 0 -> {
+                        val at = (progress * secs).toInt()
+                        "%d:%02d".format(at / 60, at % 60)
+                    }
+                    secs > 0 -> "%d:%02d".format(secs / 60, secs % 60)
+                    pendingEcho -> "0:00"
+                    else -> FilesUtil.displaySize(m.optInt("fileSize"))
+                },
+                fontSize = 10.sp,
+                lineHeight = 12.sp,
+                color = if (mine) Color(0x99FFFFFF) else Muted,
+                maxLines = 1,
+            )
         }
         return
     }

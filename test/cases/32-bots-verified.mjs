@@ -5732,7 +5732,7 @@ const convBetween = (db, a, b) =>
       chat.includes("internal fun fileLooksVoice(m: JSONObject): Boolean {") &&
         chat.includes('val fileRow = kind == "FILE"') &&
         chat.includes("val isVoice = !asDocument && fileLooksVoice(m)") &&
-        chat.includes("modifier = Modifier.width(150.dp).height(22.dp),") &&
+        chat.includes("modifier = Modifier.width(150.dp).height(20.dp),") &&
         !chat.includes("modifier = Modifier.width(150.dp).height(30.dp),") &&
         chat.includes(
           "internal fun DrawScope.drawVoiceBars(bars: List<Int>, progress: Float, played: Color, rest: Color, newest: Boolean = false, reveal: Float = Float.MAX_VALUE) {",
@@ -5746,7 +5746,7 @@ const convBetween = (db, a, b) =>
           "LiveVoiceWave(color = Muted, modifier = Modifier.weight(1f).height(28.dp))",
         ) &&
         chat.includes('Text("‹ Slide to cancel", color = Muted, fontSize = 12.sp, maxLines = 1)') &&
-        (chat.match(/\.size\(28\.dp\)\n\s+\.pressScale\(interaction\)/g) || []).length === 1 &&
+        (chat.match(/\.size\(32\.dp\)\n\s+\.pressScale\(interaction\)/g) || []).length === 1 &&
         vn.includes("var livePeaks: List<Int> by mutableStateOf(emptyList())") &&
         vn.includes("livePeaks = VoiceWaveform.live(amps)") &&
         (vn.match(/livePeaks = emptyList\(\)/g) || []).length === 3 &&
@@ -8724,14 +8724,14 @@ const convBetween = (db, a, b) =>
       chat.includes("var scrubAt by remember(id) { mutableStateOf<Float?>(null) }") &&
         chat.includes("val progress = scrubAt ?: if (active) player.progress else 0f") &&
         chat.includes(
-          "onScrub = { frac ->\n                        scrubAt = if (!pendingEcho && fileKey.isNotBlank()) frac else null\n                    },",
+          "onScrub = { frac ->\n                    scrubAt = if (!pendingEcho && fileKey.isNotBlank()) frac else null\n                },",
         ) &&
         chat.includes("(active || scrubAt != null) && secs > 0 -> {") &&
         chat.includes(
-          "Row(verticalAlignment = Alignment.Top) {\n            val interaction = remember { MutableInteractionSource() }",
+          "Row(verticalAlignment = Alignment.CenterVertically) {\n            val interaction = remember { MutableInteractionSource() }",
         ) &&
-        chat.includes("Column(Modifier.padding(top = 3.dp)) {\n                VoiceWave(") &&
-        chat.includes("modifier = Modifier.width(150.dp).height(22.dp),"),
+        chat.includes("Spacer(Modifier.width(8.dp))\n            VoiceWave(") &&
+        chat.includes("modifier = Modifier.width(150.dp).height(20.dp),"),
     );
   }
   // Item 8: the status / chat-video trim strip shows a playhead — the

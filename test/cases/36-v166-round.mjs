@@ -91,7 +91,7 @@ const pkg = readFileSync(
 /* the round's own bookkeeping */
 check(
   "r76-8: versionCode 225 / versionName 3.9.148 (mic permanent in overlay — press-then-slide fixed; once icon 1px left; release policy still > 215)",
-  /versionCode\s*=\s*229\b/.test(pkg) && /versionName\s*=\s*"3\.9\.152"/.test(pkg),
+  /versionCode\s*=\s*230\b/.test(pkg) && /versionName\s*=\s*"3\.9\.153"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */
@@ -254,14 +254,13 @@ check(
 /* 7 — new#1: the voice bubble is smaller again */
 check(
   "v166 new#1: the voice card shrank — and v168 shrank it again: a 28 dp play circle (17 dp glyphs, 16 dp spinner), a 6 dp gap, a 112 × 16 dp wave and the 10 sp time line, with the column's 6 dp top keeping the wave centred on the button (and the bubble's own padding tightened via voiceNote)",
-  chat.includes(".size(28.dp)\n                    .pressScale(interaction)") &&
-    chat.includes("modifier = Modifier.size(17.dp).scale(if (pressed) 0.85f else 1f),") &&
+  chat.includes(".size(32.dp)\n                    .pressScale(interaction)") &&
+    chat.includes("modifier = Modifier.size(18.dp).scale(if (pressed) 0.85f else 1f),") &&
     chat.includes("modifier = Modifier.size(16.dp),") &&
-    chat.includes("Spacer(Modifier.width(6.dp))") &&
-    chat.includes("modifier = Modifier.width(150.dp).height(22.dp),") &&
-    chat.includes("Column(Modifier.padding(top = 3.dp)) {\n                VoiceWave(") &&
-    chat.includes("fontSize = 10.sp,") &&
-    chat.includes("Column(horizontalAlignment = Alignment.CenterHorizontally) {"),
+    chat.includes("Spacer(Modifier.width(8.dp))") &&
+    chat.includes("modifier = Modifier.width(150.dp).height(20.dp),") &&
+    chat.includes("Spacer(Modifier.width(8.dp))\n            VoiceWave(") &&
+    chat.includes("fontSize = 10.sp,"),
 );
 
 /* 8 — new#2: the link card is a thumbnail card */
