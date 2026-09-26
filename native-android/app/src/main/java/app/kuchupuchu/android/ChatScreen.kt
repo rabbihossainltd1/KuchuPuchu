@@ -263,6 +263,15 @@ fun ChatScreen(nav: NavController, convId: String) {
     val loadingOlder = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     var lastTypingPing by remember { mutableStateOf(0L) }
     var showAttach by remember { mutableStateOf(false) }
+    // r76-20 (owner item 4): coming back from the editor's Discard sheet
+    // ("dismiss debar por ekbare ber hobe na attach panel ei thakbe") — the
+    // panel is alive again the moment this screen recomposes.
+    LaunchedEffect(Unit) {
+        if (ScreenStore.reopenAttach) {
+            ScreenStore.reopenAttach = false
+            showAttach = true
+        }
+    }
     // Owner round 41 (item 2): the panel reports its fullscreen
     // flips here so the composer below can stay until they happen.
     var attachFs by remember { mutableStateOf(false) }

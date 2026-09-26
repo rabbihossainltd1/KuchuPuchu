@@ -2384,6 +2384,9 @@ private fun MediaEditItemScreen(
         KpSheet(onDismiss = { showDiscard = false }, title = "Discard edits?") {
             KpSheetRow(icon = Icons.Filled.Close, label = "Dismiss") {
                 showDiscard = false
+                // r76-20 (owner item 4): Dismiss leaves the EDITOR, not the
+                // flow — the chat re-opens the attach panel on return.
+                ScreenStore.reopenAttach = true
                 nav.popBackStack()
             }
             KpSheetRow(icon = Icons.Filled.Edit, label = "Not now") { showDiscard = false }

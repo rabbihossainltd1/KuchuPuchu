@@ -6818,7 +6818,12 @@ const convBetween = (db, a, b) =>
         ) &&
         edit.includes('KpSheet(onDismiss = { showDiscard = false }, title = "Discard edits?")') &&
         edit.includes('KpSheetRow(icon = Icons.Filled.Close, label = "Dismiss")') &&
-        edit.includes('KpSheetRow(icon = Icons.Filled.Edit, label = "Not now")'),
+        edit.includes('KpSheetRow(icon = Icons.Filled.Edit, label = "Not now")') &&
+        // r76-20 (owner item 4): Dismiss drops back into the ATTACH PANEL,
+        // not out of the flow — the editor flags, the chat re-opens.
+        edit.includes("ScreenStore.reopenAttach = true") &&
+        chat.includes("if (ScreenStore.reopenAttach) {") &&
+        store.includes("var reopenAttach = false"),
     );
     check(
       "v167 no-fly: the morph-&-fly engine of r46-r49 is GONE — a send lands in its own place with no travel, no clone, no landing bounce, and every launch/report hint the flight needed is gone with the engine (dead origin hints, not code); all five send paths still exist and still paint their pending echo row",

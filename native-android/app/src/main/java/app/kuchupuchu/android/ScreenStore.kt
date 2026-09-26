@@ -344,6 +344,11 @@ object ScreenStore {
     // clears it on dispose.
     var editPool: List<MediaItem> = emptyList()
 
+    /** r76-20 (owner item 4): set by the editor's Discard sheet — the chat
+     *  reads it on return and re-opens the attach panel ("dismiss debar por
+     *  ekbare ber hobe na attach panel ei thakbe"). */
+    var reopenAttach = false
+
 
     /** Bumped on FCM so an open chat refreshes immediately. */
     var poke by mutableStateOf(0)
