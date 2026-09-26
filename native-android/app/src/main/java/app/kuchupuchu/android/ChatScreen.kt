@@ -8489,7 +8489,7 @@ private fun VoiceOnceTile(
             // no seeking on a once-only note: it is heard once, from the top
             onSeek = {},
             onScrub = {},
-            modifier = Modifier.weight(1f).fillMaxWidth().height(20.dp),
+            modifier = Modifier.weight(1f).height(20.dp),
         )
         // r76-10 (owner): the duration rides the RIGHT side, vertically
         // centered — nothing under the play circle anymore.
@@ -8648,8 +8648,10 @@ private fun ViewOnceRow(
                     // the mark); the photo / video tile keeps its own box.
                     .widthIn(max = if (voice) 196.dp else 138.dp)
                     .then(
+                        // r76-11 (owner): the voice card wraps its row — no
+                        // fixed height, no blank bands above/below.
                         if (voice) {
-                            Modifier.height(74.dp)
+                            Modifier.heightIn(min = 44.dp)
                         } else if (boxRatio > 0f) {
                             // v165: .heightIn(max = 220.dp)
                             Modifier.heightIn(max = 175.dp).aspectRatio(boxRatio)

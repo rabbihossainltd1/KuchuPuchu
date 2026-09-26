@@ -398,7 +398,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
         'VoiceOnceTile(m = m, mine = mine, pendingEcho = pendingEcho, player = player, playing = player.playingId == m.optString("id"), onSpent = { if (!mine) ViewOnce.spend(m.optString("id")) })',
       ) &&
       chat.includes(".widthIn(max = if (voice) 196.dp else 138.dp)") &&
-      chat.includes("Modifier.height(74.dp)") &&
+      chat.includes("Modifier.heightIn(min = 44.dp)") &&
       chat.includes(
         "ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme, onDoubleTapHeart)",
       ),
