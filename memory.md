@@ -358,3 +358,15 @@
 - Two red CI runs burned on compile errors before green: centerX imports, then the import
   itself. Kotlin is only provable in CI — keep patches to member APIs when unsure.
 - Version 221/3.9.144; green run 36198509068 @ e8ac6dd (fix chain 2e14200 -> b7901fc -> e8ac6dd).
+
+## r76-5 (2026-09-26): overlay must be a ROOT-BOX child, never a column child
+- Owner's 9:50 screenshot: hold bar floated ~215dp above the bottom edge, still no column.
+- Cause: my r76-4 mount anchor (`if (forwarding)`) sits INSIDE the chat Column (3244),
+  not the root Box. As a column child the overlay claimed its 172dp of real layout —
+  pushed the composer up — and its offset painted the column far below the screen.
+- Fix (d77e186, v222/3.9.145, green run 36216487901): mount RecorderFloatOverlay after
+  the column's closing brace, as a child of the root Box (3221). Box children stack:
+  zero layout impact; offset from chatRootOrigin lands it on the mic.
+- Lesson: before placing an overlay "at the top level", walk the braces to the real
+  parent. Dialogs (EditDialog/ForwardDialog) are window-popups so they were safe
+  anywhere; a drawn overlay is not.
