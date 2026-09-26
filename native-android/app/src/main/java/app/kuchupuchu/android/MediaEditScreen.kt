@@ -433,6 +433,9 @@ private fun MediaEditItemScreen(
         strokes.isNotEmpty() || texts.isNotEmpty() || stickers.isNotEmpty() ||
             rotation != 0 || filterIdx != 0 || cropBox != null || hd ||
             (clip != null && (start > 0L || end < clip.durationMs))
+    // r76-18 (owner): leaving with unbaked edits asks first — Dismiss drops
+    // the edit, Not now stays on the canvas.
+    var showDiscard by remember { mutableStateOf(false) }
     val aspectShot = if (cropping) shotFull else shot
     // Full-frame aspect while the box is open, so the box maths (normalised
     // units) and the on-screen pixels agree without any extra measuring.
@@ -1896,7 +1899,7 @@ private fun MediaEditItemScreen(
                     .padding(horizontal = 4.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { if (cropping) exitCrop() else nav.popBackStack() }, modifier = Modifier.size(36.dp)) {
+                IconButton(onClick = { if (cropping) exitCrop() else if (hasEdits) showDiscard = true else nav.popBackStack() }, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Filled.Close, "Close", tint = Color.White, modifier = Modifier.size(20.dp))
                 }
                 // v170 (owner: "done button left side a thakbe"): Done rides
