@@ -8681,7 +8681,7 @@ private fun ViewOnceRow(
                     .clip(bubbleShape)
                     // r76-12 (owner): a once-VOICE note wears the normal
                     // voice bubble's fills; photos / videos keep the tile.
-                    .background(if (voice) (if (mine) chatMineFill(theme) else chatOtherFill(theme)) else Color(0xFF1B1E26))
+                    .background(if (voice) (if (mine) chatMineFill(theme) else chatOtherFill(theme)) else androidx.compose.ui.graphics.SolidColor(Color(0xFF1B1E26)))
                     // r76-9 (owner): a view-once VOICE bubble rides like a
                     // normal voice bubble — no border ring.
                     .then(if (voice) Modifier else Modifier.border(1.dp, Color(0xFF3B82F6), bubbleShape))

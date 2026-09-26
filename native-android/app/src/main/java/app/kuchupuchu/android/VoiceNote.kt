@@ -316,7 +316,7 @@ class VoicePlayer {
 
     private fun applySpeed(p: MediaPlayer?) {
         if (android.os.Build.VERSION.SDK_INT < 23 || p == null) return
-        runCatching { p.playbackParams = android.media.PlaybackParams(p.playbackParams).setSpeed(speed) }
+        runCatching { p.playbackParams = p.playbackParams.setSpeed(speed) }
     }
 
     /** 0..1 through the note that is playing or paused — the bubble paints its
