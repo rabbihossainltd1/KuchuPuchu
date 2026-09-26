@@ -370,3 +370,16 @@
 - Lesson: before placing an overlay "at the top level", walk the braces to the real
   parent. Dialogs (EditDialog/ForwardDialog) are window-popups so they were safe
   anywhere; a drawn overlay is not.
+
+## r76-6 (2026-09-26): z-order split — column UNDER composer, flyer OVER; own origin
+- Owner (post-3.9.145): "voice button bar-er niche chole geche, middle-a nai" + locked
+  options not right. Cause of #1: overlay as LAST root-Box child painted the lock column
+  ON TOP of the mic (HTML: lockcol z5 UNDER seat z6) — the mic vanished beneath it.
+- Fix (230c567, v223/3.9.146, green run 36217914195): two RecorderFloatOverlay mounts —
+  showFlyer=false BEFORE the chat Column (column under composer, mic on top),
+  showColumn=false AFTER it (flyer over the hold bar). Overlay measures its own window
+  origin via onGloballyPositioned into mutableStateOf (chatRootOrigin is an unobserved
+  plain array — a copied param could shift everything by the top bar height).
+- Locked panel code diffed line-by-line vs HTML (row1 clock+grey wave+once40; gap 9;
+  spacer 10; row2 bin48+pausepill48+send48) — matches; if owner still sees it wrong on
+  device, need a LOCKED-state screenshot before more theories.
