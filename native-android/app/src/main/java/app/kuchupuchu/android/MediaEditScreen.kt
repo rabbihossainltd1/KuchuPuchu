@@ -2266,17 +2266,18 @@ private fun MediaEditItemScreen(
                             // blue while once is armed.
                             // r76-18 (owner): the ① rides BARE and BIG — no
                             // circle, no border; a tap turns the glyph itself
-                            // blue.
+                            // blue. r76-19 (owner: "icon ta ar ektu boro
+                            // hobe"): 32 -> 36 dp glyph in a 44 dp seat.
                             Box(
                                 Modifier
-                                    .size(40.dp)
+                                    .size(44.dp)
                                     .clickable {
                                         haptics.toggle(!once)
                                         once = !once
                                     },
                                 contentAlignment = Alignment.Center,
                             ) {
-                                CenteredOnceIcon(32.dp, tint = if (once) ActionBlue else Color(0xB3FFFFFF))
+                                CenteredOnceIcon(36.dp, tint = if (once) ActionBlue else Color(0xB3FFFFFF))
                             }
                         }
                     }
