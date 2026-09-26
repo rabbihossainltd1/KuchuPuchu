@@ -3216,6 +3216,20 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
         }
     }
+    // r76-7: hoisted to the screen body — BOTH the composer call (inside the
+    // column) and the window overlay mount (outside it) share these paths.
+    val recStart = {
+        if (showAttach && attachSel.isNotEmpty()) requestAttachExit { }
+        else {
+            haptics.tap()
+            showAttach = false
+            showStickers = false
+            startRecording()
+        }
+    }
+    val recFinish: (Boolean) -> Unit = { cancelled ->
+        finishRecording(cancelled)
+    }
     // r63: root Box paints CoinWallpaper across the entire screen so transparent
     // composer pill, voice recording bar, and attach panel show coins wallpaper behind them
     Box(
@@ -4413,20 +4427,6 @@ fun ChatScreen(nav: NavController, convId: String) {
             )
         }
         ReplyQuoteBar(replyTo, chatTheme) { replyTo = null }
-        // r76-7: hoisted above the branch chain — the window-level overlay
-        // mic shares the very same start/finish paths as the idle mic.
-        val recStart = {
-            if (showAttach && attachSel.isNotEmpty()) requestAttachExit { }
-            else {
-                haptics.tap()
-                showAttach = false
-                showStickers = false
-                startRecording()
-            }
-        }
-        val recFinish: (Boolean) -> Unit = { cancelled ->
-            finishRecording(cancelled)
-        }
         if (blockWall) {
             // Owner round 38 (item 1): the wall is ONE thin row — the
             // unavailable line and the buttons NEVER stack (that stacking
