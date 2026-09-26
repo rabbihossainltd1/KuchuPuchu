@@ -2255,18 +2255,19 @@ private fun MediaEditItemScreen(
                             // its seat — no ring — and fills it (28.dp), the
                             // size the ringed button used to read. Still fills
                             // blue while once is armed.
+                            // r76-18 (owner): the ① rides BARE and BIG — no
+                            // circle, no border; a tap turns the glyph itself
+                            // blue.
                             Box(
                                 Modifier
-                                    .size(32.dp)
-                                    .clip(CircleShape)
-                                    .background(if (once) ActionBlue else Color.Transparent)
+                                    .size(40.dp)
                                     .clickable {
                                         haptics.toggle(!once)
                                         once = !once
                                     },
                                 contentAlignment = Alignment.Center,
                             ) {
-                                CenteredOnceIcon(28.dp, tint = if (once) Color.White else Color(0xB3FFFFFF))
+                                CenteredOnceIcon(32.dp, tint = if (once) ActionBlue else Color(0xB3FFFFFF))
                             }
                         }
                     }

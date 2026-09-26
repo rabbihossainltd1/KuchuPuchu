@@ -7054,7 +7054,7 @@ const convBetween = (db, a, b) =>
         // r71-16: the rail's ink is adaptive now (white on dark media, near-black on light).
         edit.includes('Text("Aa", color = chromeInk') &&
         edit.includes("Icons.Filled.Edit") &&
-        edit.includes("CenteredOnceIcon(28.dp") &&
+        edit.includes("CenteredOnceIcon(32.dp") &&
         // v169: the swipe-up hint is gone; the rail owns the filter strip.
         !edit.includes("Swipe up for filters") &&
         edit.includes("Icons.Filled.AutoAwesome") &&
@@ -8311,7 +8311,7 @@ const convBetween = (db, a, b) =>
     const edit38 = kt("MediaEditScreen.kt");
     check(
       "r38-2: the editor ① is borderless at 28.dp (r40-4: centered + 0.85 layout scale, geometry verbatim), the HD pill has no border, and the caption bar carries no add-photo button",
-      edit38.includes("CenteredOnceIcon(28.dp") &&
+      edit38.includes("CenteredOnceIcon(32.dp") &&
         kt("ViewOnceIcon.kt").includes(
           "internal fun CenteredOnceIcon(iconSize: Dp, tint: Color = Color.White) {",
         ) &&
@@ -8592,12 +8592,12 @@ const convBetween = (db, a, b) =>
         // survive.
         // r71-16: the undo / redo IconButtons lost their inline `.shadow(...)`,
         // so the 32 dp chain is unchanged but each one still exists.
-        (edit.match(/\.size\(32\.dp\)/g) || []).length === 4 &&
+        (edit.match(/\.size\(32\.dp\)/g) || []).length === 3 &&
         (edit.match(/\.size\(36\.dp\)/g) || []).length === 1 &&
         (edit.match(/\.size\(26\.dp\)/g) || []).length === 2 &&
         // v167: undo / redo float on the stage as two 40 dp seats (the pair the
         // owner marked), so the 40 dp count is the select circle + those two.
-        (edit.match(/\.size\(40\.dp\)/g) || []).length === 2 &&
+        (edit.match(/\.size\(40\.dp\)/g) || []).length === 3 &&
         edit.includes(
           "fun StageHistory(can: Boolean, onClick: () -> Unit, glyph: @Composable () -> Unit)",
         ) &&
