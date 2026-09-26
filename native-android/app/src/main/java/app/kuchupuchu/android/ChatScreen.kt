@@ -3241,6 +3241,10 @@ fun ChatScreen(nav: NavController, convId: String) {
             .background(chatWallpaper(chatTheme)),
     ) {
         CoinWallpaper()
+        // r76-6: the lock column paints UNDER the composer (HTML z-index 5 vs
+        // the seat's 6) so the mic button stays on top of it; the flyer is a
+        // second overlay AFTER the column of content (over the bar).
+        RecorderFloatOverlay(accent = chatAccent(chatTheme), showFlyer = false)
         Column(
             Modifier
                 .fillMaxSize()
@@ -5027,11 +5031,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             )
         }
     }
-    // r76-4 fix: the overlay must be a child of the ROOT BOX. Inside the
-    // column it claimed its 172dp of layout (pushed the whole composer up)
-    // and its offset painted it far below the screen. As a Box child it
-    // stacks over the content: zero layout impact, window-anchored drawing.
-    RecorderFloatOverlay(accent = chatAccent(chatTheme), rootOrigin = chatRootOrigin[0])
+    // r76-4/6: root-Box child (zero layout impact). Flyer half only — it must
+    // paint OVER the hold bar while the mic glyph drops into the dustbin.
+    RecorderFloatOverlay(accent = chatAccent(chatTheme), showColumn = false)
     }
 }
 
@@ -5444,11 +5446,21 @@ private fun LockColumn(
  * bar's dustbin mouth, hover, drop, shrink — the preview's timeline.
  */
 @Composable
-private fun RecorderFloatOverlay(accent: Color, rootOrigin: Offset) {
+private fun RecorderFloatOverlay(
+    accent: Color,
+    showColumn: Boolean = true,
+    showFlyer: Boolean = true,
+) {
+    // r76-6: measure our own window origin as STATE. chatRootOrigin is a
+    // plain array nobody observes, so a copied parameter could stay stale
+    // and shift the whole overlay by the top bar's height.
+    var ownOrigin by remember { mutableStateOf(Offset.Zero) }
+    Box(Modifier.onGloballyPositioned { ownOrigin = it.boundsInWindow().topLeft }) {
+    val rootOrigin = ownOrigin
     val mic = FlightAnchors.micBounds
     val bar = RecorderAnchors.barBounds
     val density = LocalDensity.current
-    if (RecorderAnchors.columnOn && mic != null) {
+    if (showColumn && RecorderAnchors.columnOn && mic != null) {
         LockColumn(
             armed = RecorderAnchors.columnArmed,
             dimmed = RecorderAnchors.columnDim,
@@ -5463,7 +5475,7 @@ private fun RecorderFloatOverlay(accent: Color, rootOrigin: Offset) {
         )
     }
     val v = RecorderAnchors.swallowV
-    if (RecorderAnchors.swallowOn && mic != null && bar != null && v in 0.001f..0.999f) {
+    if (showFlyer && RecorderAnchors.swallowOn && mic != null && bar != null && v in 0.001f..0.999f) {
         val fly = ((v - 0.03f) / 0.34f).coerceIn(0f, 1f)
         val drop = ((v - 0.34f) / 0.23f).coerceIn(0f, 1f)
         val ease = fly * fly * (3f - 2f * fly)
@@ -5503,6 +5515,7 @@ private fun RecorderFloatOverlay(accent: Color, rootOrigin: Offset) {
                         },
             )
         }
+    }
     }
 }
 

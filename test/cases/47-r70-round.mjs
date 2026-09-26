@@ -294,9 +294,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
         "LaunchedEffect(lockArmed, cancelArmed) { onLockVisual(lockArmed, cancelArmed) }",
       ) &&
       chat.includes("import androidx.compose.material.icons.filled.KeyboardArrowUp") &&
-      chat.includes(
-        "RecorderFloatOverlay(accent = chatAccent(chatTheme), rootOrigin = chatRootOrigin[0])",
-      ) &&
+      chat.includes("RecorderFloatOverlay(accent = chatAccent(chatTheme), showFlyer = false)") &&
+      chat.includes("RecorderFloatOverlay(accent = chatAccent(chatTheme), showColumn = false)") &&
+      chat.includes("var ownOrigin by remember { mutableStateOf(Offset.Zero) }") &&
       chat.includes("FlightAnchors.micBounds"),
   );
   check(
