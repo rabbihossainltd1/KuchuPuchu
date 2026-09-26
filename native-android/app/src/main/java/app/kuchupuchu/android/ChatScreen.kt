@@ -5960,6 +5960,9 @@ private fun HoldMicButton(
                     totY = 0f
                     axis = 0
                     cancelHold = false
+                    // r76-19 (owner item 10): the tap window is timed from
+                    // the finger landing.
+                    val downAt = android.os.SystemClock.uptimeMillis()
                     onStartRecord()
                     while (true) {
                         val event = awaitPointerEvent()
@@ -6020,6 +6023,13 @@ private fun HoldMicButton(
                             dy = endY,
                             cancelDist = if (wasCancel) cancelUnarm else cancelDist,
                             lockDist = lockAtDist,
+                            // r76-19 (owner item 10): a quick tap with no
+                            // drag at all = LOCKED recording (the slide-up
+                            // outcome); hold-and-release still sends.
+                            tap =
+                                endX == 0f &&
+                                    endY == 0f &&
+                                    android.os.SystemClock.uptimeMillis() - downAt < 250L,
                         )
                     when (how) {
                         VoiceHoldGesture.Result.CANCEL -> onFinishRecord(true)

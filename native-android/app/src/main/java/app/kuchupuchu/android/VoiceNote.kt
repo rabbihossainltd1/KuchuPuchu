@@ -205,7 +205,13 @@ object VoiceHoldGesture {
         dy: Float,
         cancelDist: Float,
         lockDist: Float,
+        tap: Boolean = false,
     ): Result {
+        // r76-19 (owner item 10: "voice button a just single tap korle voice
+        // locked system a record on hoye jabe. jemon ta slide up a hoto"):
+        // a single tap — down and up, no drag — is the LOCK now, exactly
+        // like the slide-up release.
+        if (tap) return Result.LOCK
         // Cancelling wins: the finger went left on purpose.
         if (dx <= -cancelDist) return Result.CANCEL
         // Inside the zone the take is already locked (mid-drag); the MD's

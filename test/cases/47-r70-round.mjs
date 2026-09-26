@@ -239,6 +239,12 @@ const main = (f) => read(`${ANDROID}/${f}`);
       mic.includes("VoiceHoldGesture.Result.CANCEL -> onFinishRecord(true)") &&
       mic.includes("VoiceHoldGesture.Result.LOCK -> onLockRecord()") &&
       mic.includes("VoiceHoldGesture.Result.SEND -> onFinishRecord(false)") &&
+      // r76-19 (owner item 10): a single tap (< 250 ms, no drag) locks the
+      // take like the slide-up release; the decide() grew the tap arm.
+      mic.includes("tap =") &&
+      read("native-android/app/src/main/java/app/kuchupuchu/android/VoiceNote.kt").includes(
+        "if (tap) return Result.LOCK",
+      ) &&
       mic.includes("IntOffset(micX.roundToInt(), micY.roundToInt())") &&
       vnotes.includes("fun decide(") &&
       vnotes.includes("if (dy <= -lockDist) return Result.LOCK") &&
