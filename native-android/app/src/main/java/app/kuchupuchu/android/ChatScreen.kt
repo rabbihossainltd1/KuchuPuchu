@@ -7091,7 +7091,10 @@ private fun MessageRow(
     // is a live birth AND is no longer a sending echo - so the emoji plays at
     // the moment the message becomes sent, while the flight above belongs to
     // the arrival and never replays.
-    val fxEmoji = fxBorn && fxScaleOf(ctx) > 0f
+    // r76-18 (owner: "emoji sent hobar por zoom in animation remove kor ...
+    // asbar animation er por ar kono effect na"): the glyph is STATIC — the
+    // arrival flight is the only animation a row ever plays.
+    val fxEmoji = false
     // Owner round 15: the night theme's other-bubble is dark in BOTH app
     // themes — its text needs a light ink or it vanishes in light mode.
     // Owner round 20: the DARK-BLUE default chat has dark bubbles on both

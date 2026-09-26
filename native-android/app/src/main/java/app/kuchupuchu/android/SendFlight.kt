@@ -136,7 +136,9 @@ fun Modifier.fxFlyIn(
             startAbs = Offset(s.left, startY)
         }
         progress.snapTo(0f)
-        progress.animateTo(1f, androidx.compose.animation.core.tween((durMs * scale).toInt().coerceIn(280, 550), easing = FlightEase))
+        // r76-18 (owner: "send animation smooth koro, vengo felo na"): one
+        // longer, softer glide — the same arc, no snap at either end.
+        progress.animateTo(1f, androidx.compose.animation.core.tween((durMs * scale).toInt().coerceIn(320, 700), easing = FlightEase))
         done = true
         onDone()
     }
@@ -157,6 +159,6 @@ fun Modifier.fxFlyIn(
             val bottomOffset = 84f * density * (1f - v)
             translationX = if (active) sideOffset else 0f
             translationY = if (active) bottomOffset else 0f
-            alpha = if (v < 0.05f) (v / 0.05f).coerceIn(0f, 1f) else 1f
+            alpha = if (v < 0.12f) (v / 0.12f).coerceIn(0f, 1f) else 1f
         }
 }
