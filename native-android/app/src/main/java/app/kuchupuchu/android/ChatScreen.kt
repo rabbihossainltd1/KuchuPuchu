@@ -5650,18 +5650,20 @@ private fun RecorderLockedPanel(
             Spacer(Modifier.width(9.dp))
             LiveVoiceWave(color = Muted, modifier = Modifier.weight(1f).height(28.dp))
             Spacer(Modifier.width(9.dp))
+            // r76-9 (owner): no border ring, ever — the glyph itself is the
+            // border's size (the whole 40dp circle) and selecting it just
+            // turns it blue.
             Box(
                 Modifier
                     .size(40.dp)
                     .clip(CircleShape)
                     .background(Color.White.copy(alpha = 0.08f))
-                    .border(1.5.dp, if (voiceOnce) accent else Color.Transparent, CircleShape)
                     .clickable { onToggleVoiceOnce() },
                 contentAlignment = Alignment.Center,
             ) {
                 // r76-8 (owner): the view-once glyph sits 1px left.
                 Box(Modifier.offset { IntOffset(-1, 0) }) {
-                    CenteredOnceIcon(20.dp, tint = if (voiceOnce) accent else Color.White, fillBounds = true)
+                    CenteredOnceIcon(40.dp, tint = if (voiceOnce) accent else Color.White, fillBounds = true)
                 }
             }
         }

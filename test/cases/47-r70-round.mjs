@@ -244,7 +244,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       vnotes.includes("return Result.SEND"),
   );
   check(
-    "r76-1: the HOLD bar and the LOCKED panel are the preview's geometry, control for control — 25 dp cards, 14/11 padding; hold row: 15 sp clock (min 42 dp), 28 dp accent wave, 12 sp muted hint; the cancel arm sinks the clock 26 dp (180 ms) and raises the small dustbin 100 ms late (never overlapping); locked rows: grey 28 dp wave + the app's own view-once icon in a 40 dp circle (1.5 dp accent ring armed), then the 48 dp red bin (DIRECT cancel), the 48 dp Pause pill (16 dp glyph + 14.5 sp label) and the 48 dp accent Send with the APP's own send glyph in the preview's dark ink",
+    "r76-1: the HOLD bar and the LOCKED panel are the preview's geometry, control for control — 25 dp cards, 14/11 padding; hold row: 15 sp clock (min 42 dp), 28 dp accent wave, 12 sp muted hint; the cancel arm sinks the clock 26 dp (180 ms) and raises the small dustbin 100 ms late (never overlapping); locked rows: grey 28 dp wave + the app's own view-once glyph filling the 40 dp circle (borderless; arming only recolors it, r76-9), then the 48 dp red bin (DIRECT cancel), the 48 dp Pause pill (16 dp glyph + 14.5 sp label) and the 48 dp accent Send with the APP's own send glyph in the preview's dark ink",
     comp.includes("private fun RecorderLockedPanel(") &&
       comp.includes("private fun RecorderHoldBar(") &&
       (comp.match(/\.clip\(RoundedCornerShape\(25\.dp\)\)/g) || []).length >= 2 &&
@@ -253,7 +253,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
         "LiveVoiceWave(color = accent, modifier = Modifier.weight(1f).height(28.dp))",
       ) &&
       comp.includes(
-        "CenteredOnceIcon(20.dp, tint = if (voiceOnce) accent else Color.White, fillBounds = true)",
+        "CenteredOnceIcon(40.dp, tint = if (voiceOnce) accent else Color.White, fillBounds = true)",
       ) &&
       comp.includes(".clickable { onToggleVoiceOnce() }") &&
       comp.includes(".background(Red.copy(alpha = 0.16f))") &&
