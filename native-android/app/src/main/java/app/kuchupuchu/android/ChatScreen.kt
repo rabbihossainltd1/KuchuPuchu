@@ -4942,7 +4942,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             // r72-18: below Android 14 the screenshot alert reads the system's
             // Screenshots folder, so that row tells the truth about the Photos
             // permission it needs.
-            folderWatch = KpCapture.folderPermission() != null,
+            folderWatch = KpCapture.folderPermissions().isNotEmpty(),
             folderGranted = KpCapture.folderGranted(ctx),
             onClose = { showChatPrivacy = false },
             onShot = { on ->
@@ -4950,13 +4950,23 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // The owner's Q&A (r72): ask for the Photos / Storage permission
                 // the moment the switch goes ON — once answered, the watch
                 // re-arms above and the folder side goes live.
-                val perm = KpCapture.folderPermission()
+                val perms = KpCapture.folderPermissions()
                 val act = MainActivity.current
-                if (on && perm != null && act != null) {
-                    act.ensurePermissions(listOf(perm)) { capturePermNonce++ }
+                if (on && perms.isNotEmpty() && act != null) {
+                    act.ensurePermissions(perms) { capturePermNonce++ }
                 }
             },
-            onRec = { setChatPrivacy(rec = it) },
+            onRec = { on ->
+                setChatPrivacy(rec = on)
+                // r76-20 (owner item 3): below 15 the recording alert reads
+                // the Screen recordings folder — the switch asks for the
+                // Videos permission the moment it goes ON, like the shot.
+                val perms = KpCapture.folderPermissions()
+                val act = MainActivity.current
+                if (on && perms.isNotEmpty() && act != null) {
+                    act.ensurePermissions(perms) { capturePermNonce++ }
+                }
+            },
             onSave = { setChatPrivacy(save = it) },
             onAllowShot = { setChatPrivacy(allowShot = it) },
             onAllowRec = { setChatPrivacy(allowRec = it) },
@@ -10643,6 +10653,8 @@ private fun ChatPrivacySheet(
                 label = "Screenshot alert",
                 sub =
                     when {
+                        android.os.Build.VERSION.SDK_INT >= 34 ->
+                            "Alert me when they screenshot this chat"
                         folderWatch && folderGranted ->
                             "Alert me when they screenshot this chat (via your Screenshots folder)"
                         folderWatch -> "Allow Photos so screenshots can be spotted"
@@ -10665,11 +10677,23 @@ private fun ChatPrivacySheet(
             PrivacyToggle(
                 icon = Icons.Filled.Notifications,
                 label = "Screen record alert",
+                // r76-20 (owner item 3: "screen record alert toggle ta on
+                // korte parchi na ... eita lower a o jeno kaj kore"): the OS
+                // callback only exists on 15+, but below that the system
+                // recorder SAVES a file — the watch reads the Screen
+                // recordings folder exactly like the screenshot half reads
+                // its own. The switch is live on EVERY version.
                 sub =
-                    if (android.os.Build.VERSION.SDK_INT >= 35) "Alert me when they record this chat"
-                    else "Alerts need Android 15 or newer — recording is still blocked below that",
+                    when {
+                        android.os.Build.VERSION.SDK_INT >= 35 ->
+                            "Alert me when they record this chat"
+                        folderWatch && folderGranted ->
+                            "Alert me when their saved recording shows up (via your Screen recordings folder)"
+                        folderWatch -> "Allow Videos so recordings can be spotted"
+                        else -> "Alert me when they record this chat"
+                    },
                 checked = rec,
-                enabled = android.os.Build.VERSION.SDK_INT >= 35,
+                enabled = true,
                 onChange = onRec,
             )
         PrivacyToggle(

@@ -87,6 +87,11 @@ object KpCapture {
         }
         // r72-18: Android 12/13 answer with the folder instead of a callback.
         if (folderPermission() != null && folderGranted(activity)) startFolder(activity)
+        // r76-20 (owner item 3): Android 14 HAS the screenshot callback but
+        // the recording callback only arrives on 15 — the video half of the
+        // folder watch covers the gap (when the Videos permission is on).
+        else if (Build.VERSION.SDK_INT == 34 && folderGranted(activity))
+            startFolder(activity, shots = false)
         if (Build.VERSION.SDK_INT >= 35) {
             val cb = java.util.function.Consumer<Int> { state ->
                 if (state == WindowManager.SCREEN_RECORDING_STATE_VISIBLE) report("rec")
@@ -139,18 +144,41 @@ object KpCapture {
             else -> android.Manifest.permission.READ_EXTERNAL_STORAGE
         }
 
+    /** r76-20 (owner item 3: "screen record alert ... lower a o jeno kaj
+     *  kore"): EVERY permission the folder watch needs — the recording half
+     *  reads the video store, which on 13+ is its own permission. Empty on
+     *  15+, where both alerts have real OS callbacks. */
+    fun folderPermissions(): List<String> =
+        when {
+            Build.VERSION.SDK_INT >= 35 -> emptyList()
+            Build.VERSION.SDK_INT == 34 -> listOf(android.Manifest.permission.READ_MEDIA_VIDEO)
+            Build.VERSION.SDK_INT == 33 ->
+                listOf(
+                    android.Manifest.permission.READ_MEDIA_IMAGES,
+                    android.Manifest.permission.READ_MEDIA_VIDEO,
+                )
+            else -> listOf(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+
     /** Has the phone already granted it? (False = the switch explains itself.) */
     fun folderGranted(ctx: android.content.Context?): Boolean {
-        val perm = folderPermission() ?: return true
+        val perms = folderPermissions()
+        if (perms.isEmpty()) return true
         if (ctx == null) return false
-        return androidx.core.content.ContextCompat.checkSelfPermission(ctx, perm) ==
-            android.content.pm.PackageManager.PERMISSION_GRANTED
+        return perms.all {
+            androidx.core.content.ContextCompat.checkSelfPermission(ctx, it) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
     }
 
     private var observer: android.database.ContentObserver? = null
+    private var recObserver: android.database.ContentObserver? = null
     private var handler: android.os.Handler? = null
     private var poll: Runnable? = null
     private var watermark = 0L
+    private var recWatermark = 0L
+    private var lastRec = 0L
+    private var shotsOn = true
 
     /** Newest screenshot-looking row of the system's image store: (id, seconds). */
     private fun newestShot(ctx: android.content.Context): Pair<Long, Long>? =
@@ -186,11 +214,49 @@ object KpCapture {
                 }
         }.getOrNull()
 
-    private fun startFolder(ctx: android.content.Context) {
-        // The watermark is TODAY's newest screenshot: the ones already there say
-        // nothing about this chat.
-        val newest = newestShot(ctx) ?: return
-        watermark = newest.first
+    /** Newest screen-recording-looking row of the system's video store:
+     *  (id, seconds). The system recorder saves as recording-… into a
+     *  Screen recordings bucket; third-party recorders almost always carry
+     *  "record" in the file or bucket name — the same honest folder
+     *  heuristic the screenshot half runs. */
+    private fun newestRec(ctx: android.content.Context): Pair<Long, Long>? =
+        runCatching {
+            val uri = android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+            val cols =
+                arrayOf(
+                    android.provider.MediaStore.Video.Media._ID,
+                    android.provider.MediaStore.Video.Media.DATE_ADDED,
+                    android.provider.MediaStore.Video.Media.BUCKET_DISPLAY_NAME,
+                    android.provider.MediaStore.Video.Media.DISPLAY_NAME,
+                )
+            ctx.contentResolver
+                .query(uri, cols, null, null, android.provider.MediaStore.Video.Media._ID + " DESC")
+                ?.use { c ->
+                    while (c.moveToNext()) {
+                        val bucket = c.getString(2)?.lowercase().orEmpty()
+                        val name = c.getString(3)?.lowercase().orEmpty()
+                        val rec =
+                            bucket.contains("screenrecord") ||
+                                bucket.contains("screen_record") ||
+                                bucket.contains("screen record") ||
+                                bucket.contains("recordings") ||
+                                name.contains("screenrecord") ||
+                                name.contains("screen_record") ||
+                                name.contains("screen record") ||
+                                name.startsWith("recording") ||
+                                name.contains("recorder")
+                        if (rec) return@use c.getLong(0) to c.getLong(1)
+                    }
+                    null
+                }
+        }.getOrNull()
+
+    private fun startFolder(ctx: android.content.Context, shots: Boolean = true) {
+        shotsOn = shots
+        // The watermark is TODAY's newest screenshot / recording: the ones
+        // already there say nothing about this chat.
+        watermark = if (shots) newestShot(ctx)?.first ?: 0L else 0L
+        recWatermark = newestRec(ctx)?.first ?: 0L
         val h = android.os.Handler(android.os.Looper.getMainLooper())
         handler = h
         val cb =
@@ -207,12 +273,29 @@ object KpCapture {
             )
             observer = cb
         }
+        // r76-20: the video store gets its own observer (a recording only
+        // lands there when the recorder stops and saves).
+        val recCb =
+            object : android.database.ContentObserver(h) {
+                override fun onChange(selfChange: Boolean) {
+                    changedRec(ctx)
+                }
+            }
+        runCatching {
+            ctx.contentResolver.registerContentObserver(
+                android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                true,
+                recCb,
+            )
+            recObserver = recCb
+        }
         // Some phones do not announce a fresh screenshot without a media scan —
         // this slow poll is the backstop while (and only while) a chat is open.
         val r =
             object : Runnable {
                 override fun run() {
                     changed(ctx)
+                    changedRec(ctx)
                     h.postDelayed(this, 5_000)
                 }
             }
@@ -221,7 +304,7 @@ object KpCapture {
     }
 
     private fun changed(ctx: android.content.Context) {
-        if (convId.isBlank()) return
+        if (convId.isBlank() || !shotsOn) return
         val newest = newestShot(ctx) ?: return
         val (id, addedSec) = newest
         if (id <= watermark) return
@@ -232,10 +315,32 @@ object KpCapture {
         if (age in 0..120) report("shot")
     }
 
+    /** r76-20: the recording half below Android 15 — a FRESH recording file
+     *  in the system's video store while this chat is on screen. It fires
+     *  when the recorder SAVES (the callback versions fire at the start);
+     *  the same two-minute freshness rule keeps old files quiet. */
+    private fun changedRec(ctx: android.content.Context) {
+        if (convId.isBlank()) return
+        if (Build.VERSION.SDK_INT >= 35) return
+        val newest = newestRec(ctx) ?: return
+        val (id, addedSec) = newest
+        if (id <= recWatermark) return
+        recWatermark = id
+        val age = System.currentTimeMillis() / 1000 - addedSec
+        if (age in 0..120) {
+            val now = System.currentTimeMillis()
+            if (now - lastRec < 1500L) return
+            lastRec = now
+            report("rec")
+        }
+    }
+
     private fun stopFolder() {
         observer?.let { cb -> runCatching { watched?.contentResolver?.unregisterContentObserver(cb) } }
+        recObserver?.let { cb -> runCatching { watched?.contentResolver?.unregisterContentObserver(cb) } }
         poll?.let { r -> handler?.removeCallbacks(r) }
         observer = null
+        recObserver = null
         poll = null
         handler = null
     }

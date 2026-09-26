@@ -604,9 +604,14 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes("They cannot save the media I send here") &&
       // r72-18: the screenshot row is no longer "Android 14 or newer" — the
       // 12/13 folder watch covers the versions below it, so the row is live
-      // everywhere; the screen-recording row keeps its honest floor.
-      chat.includes('else "Alerts need Android 15 or newer') &&
-      chat.includes("folderWatch = KpCapture.folderPermission() != null,") &&
+      // everywhere. r76-20 (owner item 3): the RECORDING row lost its
+      // "Android 15 or newer" floor too — below 15 the saved-recording file
+      // is read from the Screen recordings folder, so it is live everywhere.
+      chat.includes(
+        "Alert me when their saved recording shows up (via your Screen recordings folder)",
+      ) &&
+      !chat.includes("Alerts need Android 15 or newer") &&
+      chat.includes("folderWatch = KpCapture.folderPermissions().isNotEmpty(),") &&
       chat.includes("folderGranted = KpCapture.folderGranted(ctx),"),
   );
   check(
@@ -636,18 +641,30 @@ const main = (f) => read(`${ANDROID}/${f}`);
       cap.includes('name.startsWith("screencap")') &&
       cap.includes('MediaStore.Images.Media._ID + " DESC"') &&
       // the watermark + the freshness window + the poll
-      cap.includes("watermark = newest.first") &&
+      // r76-20: the watermark line grew the recording half.
+      cap.includes("watermark = if (shots) newestShot(ctx)?.first ?: 0L else 0L") &&
       cap.includes("val age = System.currentTimeMillis() / 1000 - addedSec") &&
       cap.includes('if (age in 0..120) report("shot")') &&
       cap.includes("registerContentObserver(") &&
       cap.includes("h.postDelayed(this, 5_000)") &&
       cap.includes("stopFolder()") &&
+      // r76-20 (owner item 3: "screen record alert ... lower a o jeno kaj
+      // kore"): the recording half below 15 — the video store's own query /
+      // observer / watermark / freshness rule, the 15+ callback untouched.
+      cap.includes("private fun newestRec(") &&
+      cap.includes("MediaStore.Video.Media.EXTERNAL_CONTENT_URI") &&
+      cap.includes('name.startsWith("recording")') &&
+      cap.includes("private fun changedRec(") &&
+      cap.includes("if (age in 0..120) {") &&
+      cap.includes('report("rec")') &&
+      cap.includes("startFolder(activity, shots = false)") &&
+      cap.includes("fun folderPermissions(): List<String>") &&
       // armed only where the callback is missing, and only with the permission
       cap.includes(
         "if (folderPermission() != null && folderGranted(activity)) startFolder(activity)",
       ) &&
       // the switch asks for it (owner Q&A: on the switch, not at launch)
-      chat.includes("act.ensurePermissions(listOf(perm)) { capturePermNonce++ }") &&
+      chat.includes("act.ensurePermissions(perms) { capturePermNonce++ }") &&
       chat.includes("DisposableEffect(convId, capturePermNonce) {") &&
       chat.includes("var capturePermNonce by remember { mutableStateOf(0) }") &&
       chat.includes("Alert me when they screenshot this chat (via your Screenshots folder)") &&
@@ -665,7 +682,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
         cap,
       ) &&
       // the watermark is taken at ARM time (today's newest shot), not at boot
-      cap.includes("watermark = newest.first") &&
+      // r76-20: the watermark line grew the recording half.
+      cap.includes("watermark = if (shots) newestShot(ctx)?.first ?: 0L else 0L") &&
       // and the activity drives it
       read("native-android/app/src/main/java/app/kuchupuchu/android/MainActivity.kt").includes(
         "KpCapture.resume()",
