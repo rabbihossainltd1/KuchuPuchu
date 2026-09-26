@@ -6692,7 +6692,9 @@ const convBetween = (db, a, b) =>
           "@OptIn(ExperimentalFoundationApi::class)\n@Composable\nprivate fun Composer(",
         ) &&
         chat.includes("onPick: (java.time.Instant, Boolean) -> Unit,") &&
-        chat.includes("var once by remember { mutableStateOf(false) }") &&
+        // r76-19 (owner item 12): the r76-17 once TOGGLE became a SEND
+        // button — tap on the View-once row sends the typed text veiled.
+        chat.includes("onOnceNow: () -> Unit = {},") &&
         chat.includes('KpSheet(onDismiss = onClose, title = "Send later") {') &&
         [
           '"In 1 hour"',

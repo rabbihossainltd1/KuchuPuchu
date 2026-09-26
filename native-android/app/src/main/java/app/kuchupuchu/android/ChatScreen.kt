@@ -4500,6 +4500,16 @@ fun ChatScreen(nav: NavController, convId: String) {
             ScheduleSheet(
                 onClose = { showSchedule = false },
                 withOnce = true,
+                // r76-19 (owner item 12): one tap on the sheet's View-once
+                // row sends the typed text NOW as a view-once message.
+                onOnceNow = {
+                    showSchedule = false
+                    haptics.confirm()
+                    showAttach = false
+                    showStickers = false
+                    sendText(input, "TEXT", once = true)
+                    input = ""
+                },
                 onPick = { at, once ->
                     showSchedule = false
                     haptics.confirm()
@@ -6819,6 +6829,7 @@ private fun ScheduleSheet(
     onClose: () -> Unit,
     onPick: (java.time.Instant, Boolean) -> Unit,
     withOnce: Boolean = false,
+    onOnceNow: () -> Unit = {},
 ) {
     val haptics = rememberHaptics()
     val now = dhakaNow().withSecond(0).withNano(0)
@@ -6830,9 +6841,9 @@ private fun ScheduleSheet(
             "Tomorrow 6 PM" to now.plusDays(1).withHour(18).withMinute(0),
         )
     var custom by remember { mutableStateOf(false) }
-    // r76-17 (owner): the once-text that the seat's double tap used to carry
-    // lives here now — one toggle, and the scheduled text goes out veiled.
-    var once by remember { mutableStateOf(false) }
+    // r76-19 (owner item 12: "ei button a click korlei once view massage send
+    // hoye jabe"): the r76-17 toggle is gone — the View-once row is a SEND
+    // button now (onOnceNow), riding above the send-later picks.
     // Custom: day offset (0..29) + 12-hour clock.
     var dayOff by remember { mutableStateOf(0) }
     var hour12 by remember { mutableStateOf(((now.hour + 1) % 12).let { if (it == 0) 12 else it }) }
@@ -6848,24 +6859,25 @@ private fun ScheduleSheet(
                     .fillMaxWidth()
                     .padding(horizontal = 6.dp, vertical = 4.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(if (once) ChipSelected else ChipIdle)
-                    .clickable { haptics.tap(); once = !once }
+                    .background(ChipIdle)
+                    .clickable { haptics.tap(); onOnceNow() }
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CenteredOnceIcon(18.dp)
-                Spacer(Modifier.width(8.dp))
+                // r76-19 (owner item 12): the ① grew 18 -> 24 dp.
+                CenteredOnceIcon(24.dp)
+                Spacer(Modifier.width(10.dp))
                 Text(
                     "View once",
-                    color = if (once) ActionBlueDeep else Ink,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
+                    color = ActionBlueDeep,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
                 )
             }
         }
         if (!custom) {
             quick.forEach { (label, at) ->
-                KpSheetRow(Icons.Filled.Schedule, label) { onPick(at.toInstant(), once) }
+                KpSheetRow(Icons.Filled.Schedule, label) { onPick(at.toInstant(), false) }
             }
             KpSheetRow(Icons.Filled.Edit, "Pick date & time") { custom = true }
         } else {
@@ -6936,7 +6948,7 @@ private fun ScheduleSheet(
                 "Schedule",
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
                 enabled = valid,
-            ) { onPick(picked.toInstant(), once) }
+            ) { onPick(picked.toInstant(), false) }
         }
     }
 }

@@ -464,6 +464,11 @@ const main = (f) => read(`${ANDROID}/${f}`);
     ) &&
       chat.includes("withOnce = true,") &&
       chat.includes("scheduleText(input, at, once)") &&
+      // r76-19 (owner item 12): the sheet's View-once row is a SEND button
+      // (bigger ①, tap = the typed text goes out veiled right now).
+      chat.includes("onOnceNow: () -> Unit = {},") &&
+      chat.includes('sendText(input, "TEXT", once = true)') &&
+      chat.includes("CenteredOnceIcon(24.dp)") &&
       !chat.includes("input.isNotBlank() -> onSendTextOnce") &&
       chat.includes('fun sendText(body: String, kind: String = "TEXT", once: Boolean = false) {') &&
       chat.includes(
