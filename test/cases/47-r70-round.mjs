@@ -295,6 +295,13 @@ const main = (f) => read(`${ANDROID}/${f}`);
       mic.includes("val armAtDist = with(density) { 32.dp.toPx() }") &&
       mic.includes("val lockArmed = axis == 1 && dragY <= -armAtDist") &&
       comp.includes("Box(Modifier.width(50.dp).height(46.dp).fxMicAnchor())") &&
+      // r76-19 (owner item 2: "massage type korle massage bar ta halka right
+      // side a bere jai ba boro hoi"): the send circle sits in the SAME
+      // 50x46 seat as the mic spacer, so the bar's width cannot change on
+      // the first typed character.
+      comp.includes(
+        "Box(\n                    Modifier\n                        .width(50.dp)\n                        .height(46.dp)\n                        .fxMicAnchor(),\n                    contentAlignment = Alignment.Center,\n                ) {",
+      ) &&
       comp.includes("onLockRecord = onLockRecord,") &&
       comp.includes(".background(Cream)") &&
       comp.includes(

@@ -5391,10 +5391,23 @@ private fun Composer(
                 // the seat runs inside a ViewConfiguration of its own.
                 // r76-17 (owner: "instant send button jeno work kore"): no
                 // double-tap seat anymore — the tap sends on the same frame.
+                // r76-19 (owner: "massage type korle massage bar ta halka
+                // right side a bere jai ba boro hoi"): the send circle is
+                // 46dp but the mic-side seat is 50x46 — the first typed
+                // character shrank this seat by 4dp and the weighted pill
+                // grew to the right with it. The circle now sits INSIDE the
+                // same 50x46 seat, so the bar's geometry is identical empty
+                // or typing.
                 Box(
+                    Modifier
+                        .width(50.dp)
+                        .height(46.dp)
+                        .fxMicAnchor(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
                         Modifier
                             .size(46.dp)
-                            .fxMicAnchor()
                             .pressScale(sendInteraction)
                             // Owner round 10: the send/mic circles carry the same 3D
                             // lift as the header call buttons now. r73-16 (owner,
@@ -5423,6 +5436,7 @@ private fun Composer(
                                     .scale(if (sendPressed) 0.9f else 1f),
                         )
                     }
+                }
             }
             locked -> {
             }
