@@ -65,10 +65,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
   check(
     // r68-5 collapsed the per-control fills into one capsule, so the count is 1.
-    // r70-14: the ground itself is lighter now (0x66000000); what this pin
+    // r76-19 (owner item 13): the ground deepened to 0x99000000; what this pin
     // guards is that it is still ONE fill, not 0x80000000 specifically.
     "r67-1/r68-5: the bar still carries the dim (one rounded ground now)",
-    (attach.match(/Color\(0x(80|66)000000\)/g) || []).length === 1,
+    (attach.match(/Color\(0x(80|66|99)000000\)/g) || []).length === 1,
   );
 }
 
@@ -82,12 +82,12 @@ const main = (f) => read(`${ANDROID}/${f}`);
   // of that merge is pinned in case 43.
   check(
     "r67-5/r68-5: the dim survives as ONE ground for the whole bar",
-    (attach.match(/Color\(0x(80|66)000000\)/g) || []).length === 1 &&
-      attach.includes(".background(Color(0x66000000), RoundedCornerShape(barH / 2 + 8.dp))"),
+    (attach.match(/Color\(0x(80|66|99)000000\)/g) || []).length === 1 &&
+      attach.includes(".background(Color(0x99000000), RoundedCornerShape(barH / 2 + 8.dp))"),
   );
   check(
     "r67-5/r68-5: no control keeps a fill of its own",
-    !attach.includes(".background(Color(0x66000000), CircleShape)") &&
+    !attach.includes(".background(Color(0x99000000), CircleShape)") &&
       !attach.includes(".background(Color(0x80000000), CircleShape)"),
   );
 }

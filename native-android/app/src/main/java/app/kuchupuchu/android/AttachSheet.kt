@@ -874,10 +874,12 @@ fun AttachPanel(
                             // is exactly what both grids reserve below their last
                             // row (contentPadding) so nothing hides under it.
                             // r70-14: the side air is 4 dp (it was 10) so the bar
-                            // runs almost the whole width — "lomba" — and the
-                            // ground is 40% black (it was 50%) — "halka".
+                            // runs almost the whole width — "lomba".
+                            // r76-19 (owner item 13: "sundor background ta
+                            // arektu garo hobe"): the ground deepened 40% ->
+                            // 60% black.
                             .padding(horizontal = 4.dp, vertical = 8.dp)
-                            .background(Color(0x66000000), RoundedCornerShape(barH / 2 + 8.dp))
+                            .background(Color(0x99000000), RoundedCornerShape(barH / 2 + 8.dp))
                             .padding(horizontal = 8.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {

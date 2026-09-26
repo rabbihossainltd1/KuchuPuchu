@@ -128,12 +128,12 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     // r70-14: the same capsule, now 40% black (owner: "ar halka ... Hobe").
     "r68-5: ONE rounded ground behind the whole bar (not one fill per control)",
-    attach.includes(".background(Color(0x66000000), RoundedCornerShape(barH / 2 + 8.dp))") &&
-      (attach.match(/Color\(0x66000000\)/g) || []).length === 1,
+    attach.includes(".background(Color(0x99000000), RoundedCornerShape(barH / 2 + 8.dp))") &&
+      (attach.match(/Color\(0x99000000\)/g) || []).length === 1,
   );
   check(
     "r68-5: the per-control fills are gone (pen, pill, once seat, send seat)",
-    !attach.includes(".background(Color(0x66000000))\n") &&
+    !attach.includes(".background(Color(0x99000000))\n") &&
       !attach.includes(".background(Color(0x80000000))\n") &&
       !attach.includes(".size(barH - 8.dp)\n                                    .background(") &&
       !attach.includes(".size(barH + 4.dp)\n                                .background("),

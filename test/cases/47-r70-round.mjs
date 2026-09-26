@@ -96,8 +96,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
   check(
     "r70-14: the ground is lighter — 40% black, ONE capsule for the whole bar (it was 50%)",
-    (attach.match(/Color\(0x66000000\)/g) || []).length === 1 &&
-      attach.includes(".background(Color(0x66000000), RoundedCornerShape(barH / 2 + 8.dp))") &&
+    (attach.match(/Color\(0x99000000\)/g) || []).length === 1 &&
+      attach.includes(".background(Color(0x99000000), RoundedCornerShape(barH / 2 + 8.dp))") &&
       !attach.includes("Color(0x80000000)"),
   );
 }
