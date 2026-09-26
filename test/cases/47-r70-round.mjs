@@ -253,7 +253,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
         "LiveVoiceWave(color = accent, modifier = Modifier.weight(1f).height(28.dp))",
       ) &&
       comp.includes(
-        "CenteredOnceIcon(40.dp, tint = if (voiceOnce) accent else Color.White, fillBounds = true)",
+        "CenteredOnceIcon(20.dp, tint = if (voiceOnce) accent else Color.White, fillBounds = true)",
+        comp.includes("Box(Modifier.offset { IntOffset(-2, 0) }) {"),
       ) &&
       comp.includes(".clickable { onToggleVoiceOnce() }") &&
       comp.includes(".background(Red.copy(alpha = 0.16f))") &&
