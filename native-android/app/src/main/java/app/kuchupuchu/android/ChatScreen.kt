@@ -3230,6 +3230,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     val recFinish: (Boolean) -> Unit = { cancelled ->
         finishRecording(cancelled)
     }
+    // r76-8: the overlay mic/column/flyer must hide exactly when the composer
+    // hides (attach fullscreen, block wall, ...) — same condition as the call.
+    val composerShown = !blockWall && !requestPending && !noReply && (!showAttach || !attachFs)
     // r63: root Box paints CoinWallpaper across the entire screen so transparent
     // composer pill, voice recording bar, and attach panel show coins wallpaper behind them
     Box(
@@ -4605,7 +4608,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             )
         // r63-4: composer stays visible in half panel even when media is selected
         // (prevents abrupt message bar disappearance and avoids messages dropping 1 line)
-        } else if (!showAttach || !attachFs) {
+        } else if (composerShown) {
         Composer(
             input = input,
             replyFocusNonce = replyFocusNonce,
@@ -5038,6 +5041,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         accent = chatAccent(chatTheme),
         recording = recording,
         locked = voiceLocked,
+        composerVisible = composerShown,
         onStartRecord = recStart,
         onFinishRecord = recFinish,
         onLockRecord = { lockRecording() },
@@ -5368,21 +5372,10 @@ private fun Composer(
                 // here now; the FIXED lock column and the swallow flyer paint
                 // at window level (RecorderFloatOverlay) because the phone
                 // never drew them as row overflow.
-                // r76-7: while recording the mic itself lives in the window
-                // overlay (on top of the column, like the preview's z6 seat);
-                // this spacer keeps the row geometry + the mic bounds anchor.
-                Box(Modifier.width(50.dp).height(46.dp).fxMicAnchor()) {
-                    if (!binPlaying && !recording) {
-                        HoldMicButton(
-                            recording = recording,
-                            enabled = micEnabled,
-                            accent = accent,
-                            onStartRecord = onStartRecord,
-                            onFinishRecord = onFinishRecord,
-                            modifier = Modifier.align(Alignment.BottomEnd),
-                        )
-                    }
-                }
+                // r76-8: pure spacer — the mic (idle + recording) lives in
+                // the window overlay so press->record never remounts it; this
+                // only keeps the row geometry and the bounds anchor.
+                Box(Modifier.width(50.dp).height(46.dp).fxMicAnchor())
             }
         }
     }
@@ -5454,6 +5447,7 @@ private fun RecorderFloatOverlay(
     onStartRecord: () -> Unit,
     onFinishRecord: (Boolean) -> Unit,
     onLockRecord: () -> Unit,
+    composerVisible: Boolean,
     showColumn: Boolean = true,
     showFlyer: Boolean = true,
 ) {
@@ -5466,7 +5460,7 @@ private fun RecorderFloatOverlay(
     val mic = FlightAnchors.micBounds
     val bar = RecorderAnchors.barBounds
     val density = LocalDensity.current
-    if (showColumn && RecorderAnchors.columnOn && mic != null) {
+    if (showColumn && composerVisible && RecorderAnchors.columnOn && mic != null) {
         LockColumn(
             armed = RecorderAnchors.columnArmed,
             dimmed = RecorderAnchors.columnDim,
@@ -5480,10 +5474,11 @@ private fun RecorderFloatOverlay(
                 },
         )
     }
-    // r76-7: the MIC itself rides the overlay while recording — on top of the
-    // column (preview z6 over z5), at the seat's window bounds; the spacer in
-    // the row keeps the geometry and the anchor.
-    if (recording && !locked && mic != null) {
+    // r76-8: the mic (IDLE and recording) lives here permanently — moving it
+    // between seat and overlay on press remounted the button mid-gesture and
+    // killed the drag, forcing 'press first, then slide'. One instance, one
+    // home; on top of the column (preview z6 over z5).
+    if (composerVisible && !locked && !RecorderAnchors.swallowOn && mic != null) {
         HoldMicButton(
             recording = recording,
             enabled = true,
@@ -5505,7 +5500,7 @@ private fun RecorderFloatOverlay(
         )
     }
     val v = RecorderAnchors.swallowV
-    if (showFlyer && RecorderAnchors.swallowOn && mic != null && bar != null && v in 0.001f..0.999f) {
+    if (showFlyer && composerVisible && RecorderAnchors.swallowOn && mic != null && bar != null && v in 0.001f..0.999f) {
         val fly = ((v - 0.03f) / 0.34f).coerceIn(0f, 1f)
         val drop = ((v - 0.34f) / 0.23f).coerceIn(0f, 1f)
         val ease = fly * fly * (3f - 2f * fly)
@@ -5656,7 +5651,10 @@ private fun RecorderLockedPanel(
                     .clickable { onToggleVoiceOnce() },
                 contentAlignment = Alignment.Center,
             ) {
-                CenteredOnceIcon(20.dp, tint = if (voiceOnce) accent else Color.White, fillBounds = true)
+                // r76-8 (owner): the view-once glyph sits 1px left.
+                Box(Modifier.offset { IntOffset(-1, 0) }) {
+                    CenteredOnceIcon(20.dp, tint = if (voiceOnce) accent else Color.White, fillBounds = true)
+                }
             }
         }
         Spacer(Modifier.height(10.dp))

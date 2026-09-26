@@ -284,8 +284,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
       comp.includes("RepeatMode.Reverse") &&
       comp.includes(".padding(top = 10.dp),") &&
       comp.includes("Modifier.offset(y = (chev - 12f).dp).size(20.dp)") &&
-      comp.includes("Box(Modifier.width(50.dp).height(46.dp).fxMicAnchor()) {") &&
-      comp.includes("Modifier.align(Alignment.BottomEnd),") &&
+      comp.includes("Box(Modifier.width(50.dp).height(46.dp).fxMicAnchor())") &&
+      comp.includes("onLockRecord = onLockRecord,") &&
       comp.includes(".background(Cream)") &&
       comp.includes(
         ".border(2.dp, if (cancelArmed) Red else if (enabled) accent else Muted, CircleShape)",
@@ -295,6 +295,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       ) &&
       chat.includes("import androidx.compose.material.icons.filled.KeyboardArrowUp") &&
       chat.includes("RecorderAnchors.columnArmed = armed") &&
+      chat.includes("val composerShown =") &&
       chat.includes("onLockRecord = { lockRecording() }") &&
       chat.includes("var ownOrigin by remember { mutableStateOf(Offset.Zero) }") &&
       chat.includes("FlightAnchors.micBounds"),

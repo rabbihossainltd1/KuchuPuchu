@@ -6923,8 +6923,10 @@ const convBetween = (db, a, b) =>
         !attach.includes('"${sel.size} selected"') &&
         !attach.includes("the composer's mic IS the\n                // send button") &&
         // Owner round 41 (item 2); r63-item3: composer stays in half panel even with selection.
-        (chat.includes("} else if (!showAttach || !attachFs) {") ||
-          chat.includes("} else if (!showAttach || (attachSel.isEmpty() && !attachFs)) {")) &&
+        chat.includes("} else if (composerShown) {") &&
+        chat.includes(
+          "val composerShown = !blockWall && !requestPending && !noReply && (!showAttach || !attachFs)",
+        ) &&
         chat.includes("onFullscreenChange = { attachFs = it }") &&
         attach.includes("onFullscreenChange(value)") &&
         // the composer's circle is the MIC while a gallery pick is active
