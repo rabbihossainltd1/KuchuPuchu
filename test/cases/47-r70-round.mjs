@@ -284,7 +284,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
       comp.includes("Icons.Filled.KeyboardArrowUp,") &&
       comp.includes("RepeatMode.Reverse") &&
       comp.includes(".padding(top = 10.dp),") &&
-      comp.includes("Modifier.offset(y = (chev - 12f).dp).size(20.dp)") &&
+      comp.includes("Modifier.offset(y = (chev - 18f).dp).size(20.dp)") &&
+      mic.includes("val armAtDist = with(density) { 32.dp.toPx() }") &&
+      mic.includes("val lockArmed = axis == 1 && dragY <= -armAtDist") &&
       comp.includes("Box(Modifier.width(50.dp).height(46.dp).fxMicAnchor())") &&
       comp.includes("onLockRecord = onLockRecord,") &&
       comp.includes(".background(Cream)") &&

@@ -5430,7 +5430,8 @@ private fun LockColumn(
                     Icons.Filled.KeyboardArrowUp,
                     null,
                     tint = Color.White.copy(alpha = 0.55f),
-                    modifier = Modifier.offset(y = (chev - 12f).dp).size(20.dp),
+                    // r76-10 (owner): the ^ sits a bit higher.
+                    modifier = Modifier.offset(y = (chev - 18f).dp).size(20.dp),
                 )
             }
         }
@@ -5807,6 +5808,10 @@ private fun HoldMicButton(
     val cancelDist = with(density) { 120.dp.toPx() }
     val cancelUnarm = with(density) { 84.dp.toPx() }
     val lockAtDist = with(density) { 62.dp.toPx() }
+    // r76-10 (owner): the armed look (blue ring + closed shackle) arrives on
+    // a LIGHT rise — no need to reach the middle; the release still locks at
+    // the half, exactly like the preview.
+    val armAtDist = with(density) { 32.dp.toPx() }
     // r76-9 (owner: "bar er baire uthe jacche"): the button stops AT the
     // column's top edge — 172dp column minus the 46dp button.
     val riseMax = with(density) { 126.dp.toPx() }
@@ -5829,7 +5834,7 @@ private fun HoldMicButton(
     // 1 = up the column, 2 = left to the dustbin. No free diagonal move.
     var axis by remember { mutableStateOf(0) }
     val cancelArmed = cancelHold
-    val lockArmed = axis == 1 && dragY <= -lockAtDist
+    val lockArmed = axis == 1 && dragY <= -armAtDist
     // r76-1: the button ITSELF rides the finger — up the column or left
     // toward the dustbin, 1:1 on the chosen axis.
     val micX by animateFloatAsState(if (recording) dragX else 0f, spring(stiffness = 1200f), label = "micdrag")
