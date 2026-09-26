@@ -8462,7 +8462,6 @@ private fun VoiceOnceTile(
         Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             Modifier
                 .size(32.dp)
@@ -8481,21 +8480,6 @@ private fun VoiceOnceTile(
                 else -> Icon(Icons.Filled.PlayArrow, "Play once", tint = Color.White, modifier = Modifier.size(18.dp))
             }
         }
-        // r76-9 (owner: "ek line a thakbe shob"): the duration sits under the
-        // play circle (like the normal voice bubble), so wave + once mark stay
-        // on the same centered line instead of stacking up/down.
-        Text(
-            when {
-                secs > 0 -> "%d:%02d".format(secs / 60, secs % 60)
-                upFrac != null -> "Sending"
-                else -> "0:00"
-            },
-            fontSize = 10.sp,
-            lineHeight = 12.sp,
-            color = Color(0x99FFFFFF),
-            maxLines = 1,
-        )
-    }
         Spacer(Modifier.width(8.dp))
         VoiceWave(
             bars = bars,
@@ -8508,7 +8492,21 @@ private fun VoiceOnceTile(
             onScrub = {},
             modifier = Modifier.weight(1f).fillMaxWidth().height(20.dp),
         )
+        // r76-10 (owner): the duration rides the RIGHT side, vertically
+        // centered — nothing under the play circle anymore.
         Spacer(Modifier.width(8.dp))
+        Text(
+            when {
+                secs > 0 -> "%d:%02d".format(secs / 60, secs % 60)
+                upFrac != null -> "Sending"
+                else -> "0:00"
+            },
+            fontSize = 10.sp,
+            lineHeight = 12.sp,
+            color = Color(0x99FFFFFF),
+            maxLines = 1,
+        )
+        Spacer(Modifier.width(6.dp))
         Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) { CenteredOnceIcon(30.dp) }
     }
 }
