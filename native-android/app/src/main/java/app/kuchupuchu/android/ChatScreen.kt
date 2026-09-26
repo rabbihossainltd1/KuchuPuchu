@@ -7158,7 +7158,7 @@ private fun MessageRow(
                 m.optString("body"),
                 fontSize = 10.5.sp,
                 lineHeight = 13.sp,
-                color = Red.copy(alpha = 0.9f),
+                color = Muted,
                 fontWeight = FontWeight.Medium,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = 18.dp),

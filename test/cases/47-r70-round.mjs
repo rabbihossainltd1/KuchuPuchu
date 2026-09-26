@@ -647,7 +647,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       // the tiny alert: one line of red text, no chip around it
       chat.includes('r73-18c (owner: "alert eto boro kore ekdom choto kore jabe background') &&
       chat.includes("fontSize = 10.5.sp,") &&
-      chat.includes("color = Red.copy(alpha = 0.9f),") &&
+      chat.includes("lineHeight = 13.sp,\n                color = Muted,") &&
       chat.includes("textAlign = TextAlign.Center,"),
   );
   check(
