@@ -178,6 +178,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import android.net.Uri
 import android.view.ViewTreeObserver
@@ -439,6 +440,13 @@ fun ChatScreen(nav: NavController, convId: String) {
     // the profile-defaulted value (private: off; public: shot on, rec off).
     var privAllowShot by remember(convId) { mutableStateOf(true) }
     var privAllowRec by remember(convId) { mutableStateOf(false) }
+    // r76-19 (owner item 3: "options gula rapidly on off korle majhe majhe
+    // auto off hochhe"): while a privacy write is on its way, the pokes of
+    // the OLDER writes must not repaint the sheet - the switch flipped back
+    // by itself. Writes count themselves here and serialize on the mutex, so
+    // the last POST (and its poke) is always the final word.
+    var privWrites by remember(convId) { mutableStateOf(0) }
+    val privMutex = remember(convId) { kotlinx.coroutines.sync.Mutex() }
     var muteInFlight by remember { mutableStateOf(false) }
     var searchQ by remember { mutableStateOf("") }
     var searchHits by remember { mutableStateOf(listOf<JSONObject>()) }
@@ -1579,20 +1587,28 @@ fun ChatScreen(nav: NavController, convId: String) {
         // r76-18 (owner item 3): the Allow switches ride the same POST.
         if (allowShot != null) privAllowShot = allowShot
         if (allowRec != null) privAllowRec = allowRec
+        privWrites++
         scope.launch {
-            runCatching {
-                withContext(Dispatchers.IO) {
-                    Api.post(
-                        "/api/conversations/$convId/privacy",
-                        JSONObject().apply {
-                            shot?.let { put("shot", it) }
-                            rec?.let { put("rec", it) }
-                            save?.let { put("save", it) }
-                            allowShot?.let { put("allowShot", it) }
-                            allowRec?.let { put("allowRec", it) }
-                        },
-                    )
+            try {
+                // r76-19 (owner item 3): one at a time, in tap order — the
+                // server (and its pokes) always see the LAST flip last.
+                privMutex.withLock {
+                    withContext(Dispatchers.IO) {
+                        Api.post(
+                            "/api/conversations/$convId/privacy",
+                            JSONObject().apply {
+                                shot?.let { put("shot", it) }
+                                rec?.let { put("rec", it) }
+                                save?.let { put("save", it) }
+                                allowShot?.let { put("allowShot", it) }
+                                allowRec?.let { put("allowRec", it) }
+                            },
+                        )
+                    }
                 }
+            } catch (_: Exception) {
+            } finally {
+                privWrites--
             }
         }
     }
@@ -2819,6 +2835,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     // or a reopen re-reads them), and "Media Save permission" is the OTHER
     // side's switch — it decides whether I may save what THEY send here.
     LaunchedEffect(c?.optJSONObject("privacy")?.toString()) {
+        // r76-19 (owner item 3): never repaint while a write is in flight —
+        // a stale poke used to flip the switch back under the owner's thumb.
+        if (privWrites > 0) return@LaunchedEffect
         val pr = c?.optJSONObject("privacy") ?: return@LaunchedEffect
         privShot = pr.optBoolean("shot")
         privRec = pr.optBoolean("rec")

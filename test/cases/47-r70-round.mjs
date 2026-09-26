@@ -675,6 +675,11 @@ const main = (f) => read(`${ANDROID}/${f}`);
         "fun setChatPrivacy(\n        shot: Boolean? = null,\n        rec: Boolean? = null,\n        save: Boolean? = null,\n        allowShot: Boolean? = null,\n        allowRec: Boolean? = null,\n    )",
       ) &&
       chat.includes('"/api/conversations/$convId/privacy"') &&
+      // r76-19 (owner item 3: rapid flips auto-reverted): pokes are ignored
+      // while a write is in flight, and the writes serialize on a mutex, so
+      // the last flip is the last write and its poke is the final word.
+      chat.includes("if (privWrites > 0) return@LaunchedEffect") &&
+      chat.includes("privMutex.withLock {") &&
       chat.includes("internal fun captureAlertOf(m: JSONObject): String?") &&
       chat.includes('b.endsWith("took a screenshot of this chat") -> "shot"') &&
       chat.includes('b.endsWith("started a screen recording of this chat") -> "rec"') &&
