@@ -307,11 +307,11 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes("FlightAnchors.micBounds"),
   );
   check(
-    "r76-1: the recorder wears the APP'S palette on the preview's geometry — accent circles, DarkCard bar/panel/column, 8% white once circle + Pause pill, Red bin; the old DoubleArrow chevron send is gone with the rebuild (import included)",
+    "r76-1: the recorder wears the APP'S palette on the preview's geometry — accent circles, DarkCard bar/panel/column, 8% white Pause pill (the once glyph has been bare since r76-12), Red bin; the old DoubleArrow chevron send is gone with the rebuild (import included)",
     comp.includes(".background(accent)") &&
       comp.includes("Icons.AutoMirrored.Filled.Send,") &&
       (comp.match(/\.background\(DarkCard\)/g) || []).length === 3 &&
-      (comp.match(/Color\.White\.copy\(alpha = 0\.08f\)/g) || []).length === 2 &&
+      (comp.match(/Color\.White\.copy\(alpha = 0\.08f\)/g) || []).length === 1 &&
       comp.includes('"Send voice message",') &&
       !comp.includes("Icons.Filled.DoubleArrow,") &&
       !chat.includes("import androidx.compose.material.icons.filled.DoubleArrow") &&
