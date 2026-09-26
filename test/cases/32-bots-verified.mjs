@@ -6801,7 +6801,17 @@ const convBetween = (db, a, b) =>
         edit.includes("works[uriKey] = bits") &&
         edit.includes(
           "DisposableEffect(Unit) { onDispose { ScreenStore.editPool = emptyList() } }",
-        ),
+        ) &&
+        // r76-19 (owner item 5 — the r76-18 half that never landed: state +
+        // top-bar gate shipped, handler + sheet did not, so the popup never
+        // showed): system back with unbaked edits asks first; Dismiss leaves,
+        // Not now stays on the canvas.
+        edit.includes(
+          "BackHandler(enabled = hasEdits && !cropping && !showDiscard) { showDiscard = true }",
+        ) &&
+        edit.includes('KpSheet(onDismiss = { showDiscard = false }, title = "Discard edits?")') &&
+        edit.includes('KpSheetRow(icon = Icons.Filled.Close, label = "Dismiss")') &&
+        edit.includes('KpSheetRow(icon = Icons.Filled.Edit, label = "Not now")'),
     );
     check(
       "v167 no-fly: the morph-&-fly engine of r46-r49 is GONE — a send lands in its own place with no travel, no clone, no landing bounce, and every launch/report hint the flight needed is gone with the engine (dead origin hints, not code); all five send paths still exist and still paint their pending echo row",

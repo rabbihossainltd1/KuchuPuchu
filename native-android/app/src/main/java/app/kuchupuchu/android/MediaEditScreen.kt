@@ -712,6 +712,12 @@ private fun MediaEditItemScreen(
         cropping = false
     }
     BackHandler(enabled = cropping) { exitCrop() }
+    // r76-19 (owner item 5 — the r76-18 half that never landed: the state and
+    // the top-bar gate shipped, but the handler and the sheet did not, so the
+    // system back just popped and the top-bar back looked dead): leaving with
+    // unbaked edits asks first. Dismiss drops the edit and exits; Not now
+    // closes the sheet and stays on the canvas.
+    BackHandler(enabled = hasEdits && !cropping && !showDiscard) { showDiscard = true }
 
     fun rotateTap() {
         exitCrop()
@@ -2368,6 +2374,18 @@ private fun MediaEditItemScreen(
                     }
                 }
             }
+        }
+    }
+
+    /* r76-19 (owner item 5): the discard ask — "dismiss" leaves, "not now"
+       keeps editing. A bottom sheet like every popup in the app. */
+    if (showDiscard) {
+        KpSheet(onDismiss = { showDiscard = false }, title = "Discard edits?") {
+            KpSheetRow(icon = Icons.Filled.Close, label = "Dismiss") {
+                showDiscard = false
+                nav.popBackStack()
+            }
+            KpSheetRow(icon = Icons.Filled.Edit, label = "Not now") { showDiscard = false }
         }
     }
 
