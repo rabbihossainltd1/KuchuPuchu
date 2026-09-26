@@ -90,8 +90,8 @@ const pkg = readFileSync(
 
 /* the round's own bookkeeping */
 check(
-  "r76-4: versionCode 221 / versionName 3.9.144 (window-level recorder overlay; the build says its own name; release policy still > 215)",
-  /versionCode\s*=\s*221\b/.test(pkg) && /versionName\s*=\s*"3\.9\.144"/.test(pkg),
+  "r76-4: versionCode 222 / versionName 3.9.145 (overlay moved to the root Box; the build says its own name; release policy still > 215)",
+  /versionCode\s*=\s*222\b/.test(pkg) && /versionName\s*=\s*"3\.9\.145"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */

@@ -5020,9 +5020,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                 },
             )
         }
-        // r76-4: the lock column + the swallow flyer paint at window level —
-        // three phone verdicts proved the composer row never draws overflow.
-        RecorderFloatOverlay(accent = chatAccent(chatTheme), rootOrigin = chatRootOrigin[0])
         if (forwarding) {
             ForwardDialog(
                 onClose = { forwarding = false },
@@ -5030,6 +5027,11 @@ fun ChatScreen(nav: NavController, convId: String) {
             )
         }
     }
+    // r76-4 fix: the overlay must be a child of the ROOT BOX. Inside the
+    // column it claimed its 172dp of layout (pushed the whole composer up)
+    // and its offset painted it far below the screen. As a Box child it
+    // stacks over the content: zero layout impact, window-anchored drawing.
+    RecorderFloatOverlay(accent = chatAccent(chatTheme), rootOrigin = chatRootOrigin[0])
     }
 }
 
