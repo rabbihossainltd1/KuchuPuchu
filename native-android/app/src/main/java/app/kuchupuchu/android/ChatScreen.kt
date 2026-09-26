@@ -3241,10 +3241,6 @@ fun ChatScreen(nav: NavController, convId: String) {
             .background(chatWallpaper(chatTheme)),
     ) {
         CoinWallpaper()
-        // r76-6: the lock column paints UNDER the composer (HTML z-index 5 vs
-        // the seat's 6) so the mic button stays on top of it; the flyer is a
-        // second overlay AFTER the column of content (over the bar).
-        RecorderFloatOverlay(accent = chatAccent(chatTheme), showFlyer = false)
         Column(
             Modifier
                 .fillMaxSize()
@@ -4417,6 +4413,20 @@ fun ChatScreen(nav: NavController, convId: String) {
             )
         }
         ReplyQuoteBar(replyTo, chatTheme) { replyTo = null }
+        // r76-7: hoisted above the branch chain — the window-level overlay
+        // mic shares the very same start/finish paths as the idle mic.
+        val recStart = {
+            if (showAttach && attachSel.isNotEmpty()) requestAttachExit { }
+            else {
+                haptics.tap()
+                showAttach = false
+                showStickers = false
+                startRecording()
+            }
+        }
+        val recFinish: (Boolean) -> Unit = { cancelled ->
+            finishRecording(cancelled)
+        }
         if (blockWall) {
             // Owner round 38 (item 1): the wall is ONE thin row — the
             // unavailable line and the buttons NEVER stack (that stacking
@@ -4649,15 +4659,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             onScheduleSend = { requestAttachExit { haptics.tap(); showSchedule = true } },
             recording = recording,
             recMs = recMs,
-            onStartRecord = {
-                if (showAttach && attachSel.isNotEmpty()) requestAttachExit { }
-                else {
-                    haptics.tap()
-                    showAttach = false
-                    showStickers = false
-                    startRecording()
-                }
-            },
+            onStartRecord = recStart,
             // Owner round 31 (item 17): the AI hears voice notes now (the
             // worker feeds the clip to Gemini), so the mic works here too.
             micEnabled = true,
@@ -4667,9 +4669,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             // follows by SCROLL on the same glide above; the Box itself
             // keeps no padding (that's what painted the black band).
             padForIme = if (!showAttach && !showStickers) imeGlideDp else 0.dp,
-            onFinishRecord = { cancelled ->
-                finishRecording(cancelled)
-            },
+            onFinishRecord = recFinish,
             voiceBinNonce = voiceBinNonce,
             selectCount = selected.size,
             onSendSelection = {
@@ -5031,9 +5031,17 @@ fun ChatScreen(nav: NavController, convId: String) {
             )
         }
     }
-    // r76-4/6: root-Box child (zero layout impact). Flyer half only — it must
-    // paint OVER the hold bar while the mic glyph drops into the dustbin.
-    RecorderFloatOverlay(accent = chatAccent(chatTheme), showColumn = false)
+    // r76-7: the ONE window-level overlay, stacked exactly like the approved
+    // preview: column, then the mic ON TOP of it, then the swallow flyer —
+    // all above the chat, none of them claiming layout space.
+    RecorderFloatOverlay(
+        accent = chatAccent(chatTheme),
+        recording = recording,
+        locked = voiceLocked,
+        onStartRecord = recStart,
+        onFinishRecord = recFinish,
+        onLockRecord = { lockRecording() },
+    )
     }
 }
 
@@ -5142,8 +5150,6 @@ private fun Composer(
     // FIXED (only the voice button rises), the cancel arm drops the strip's
     // clock and raises the small dustbin, and the release plays the swallow —
     // the mic glyph flies into the dustbin's open mouth, straight down in.
-    var lockArmed by remember { mutableStateOf(false) }
-    var holdCancelArmed by remember { mutableStateOf(false) }
     var binPlaying by remember { mutableStateOf(false) }
     val swallowT = remember { Animatable(0f) }
     LaunchedEffect(voiceBinNonce) {
@@ -5156,10 +5162,8 @@ private fun Composer(
     }
     // r76-4: the window-level overlay reads these — snapshot state, tracked
     // writes, so the column/flyer really recompose on every change.
-    LaunchedEffect(recording, locked, lockArmed, holdCancelArmed) {
+    LaunchedEffect(recording, locked) {
         RecorderAnchors.columnOn = recording && !locked
-        RecorderAnchors.columnArmed = lockArmed
-        RecorderAnchors.columnDim = holdCancelArmed
     }
     LaunchedEffect(binPlaying && !recording) {
         RecorderAnchors.swallowOn = binPlaying && !recording
@@ -5297,7 +5301,7 @@ private fun Composer(
             RecorderHoldBar(
                 recMs = recMs,
                 accent = accent,
-                cancelVisual = holdCancelArmed,
+                cancelVisual = RecorderAnchors.columnDim,
                 lidOpen = 0f,
                 modifier = Modifier.weight(1f),
             )
@@ -5364,20 +5368,17 @@ private fun Composer(
                 // here now; the FIXED lock column and the swallow flyer paint
                 // at window level (RecorderFloatOverlay) because the phone
                 // never drew them as row overflow.
+                // r76-7: while recording the mic itself lives in the window
+                // overlay (on top of the column, like the preview's z6 seat);
+                // this spacer keeps the row geometry + the mic bounds anchor.
                 Box(Modifier.width(50.dp).height(46.dp).fxMicAnchor()) {
-                    // r76-1: while the swallow plays the mic stays gone — its
-                    // glyph is already flying into the dustbin.
-                    if (!binPlaying) {
+                    if (!binPlaying && !recording) {
                         HoldMicButton(
                             recording = recording,
                             enabled = micEnabled,
                             accent = accent,
                             onStartRecord = onStartRecord,
                             onFinishRecord = onFinishRecord,
-                            onLockVisual = { armed, cArmed ->
-                                lockArmed = armed
-                                holdCancelArmed = cArmed
-                            },
                             modifier = Modifier.align(Alignment.BottomEnd),
                         )
                     }
@@ -5448,6 +5449,11 @@ private fun LockColumn(
 @Composable
 private fun RecorderFloatOverlay(
     accent: Color,
+    recording: Boolean,
+    locked: Boolean,
+    onStartRecord: () -> Unit,
+    onFinishRecord: (Boolean) -> Unit,
+    onLockRecord: () -> Unit,
     showColumn: Boolean = true,
     showFlyer: Boolean = true,
 ) {
@@ -5470,6 +5476,30 @@ private fun RecorderFloatOverlay(
                     IntOffset(
                         (mic.right - 50.dp.toPx() - rootOrigin.x).roundToInt(),
                         (mic.bottom - 172.dp.toPx() - rootOrigin.y).roundToInt(),
+                    )
+                },
+        )
+    }
+    // r76-7: the MIC itself rides the overlay while recording — on top of the
+    // column (preview z6 over z5), at the seat's window bounds; the spacer in
+    // the row keeps the geometry and the anchor.
+    if (recording && !locked && mic != null) {
+        HoldMicButton(
+            recording = recording,
+            enabled = true,
+            accent = accent,
+            onStartRecord = onStartRecord,
+            onFinishRecord = onFinishRecord,
+            onLockRecord = onLockRecord,
+            onLockVisual = { armed, cArmed ->
+                RecorderAnchors.columnArmed = armed
+                RecorderAnchors.columnDim = cArmed
+            },
+            modifier =
+                Modifier.offset {
+                    IntOffset(
+                        (mic.right - 46.dp.toPx() - rootOrigin.x).roundToInt(),
+                        (mic.bottom - 46.dp.toPx() - rootOrigin.y).roundToInt(),
                     )
                 },
         )
