@@ -1718,6 +1718,51 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
+    /** r76-18 (owner item 6): "gif hisabe jai ar download hoye na jai direct
+     *  server thekei jai" — the phone hands the worker the GIF's CDN URL
+     *  (fetchUrl); the worker fetches it, buckets it, and it lands as a normal
+     *  image/gif FILE. Nothing is downloaded on this phone, and there is no
+     *  still-photo fallback anymore. */
+    fun sendGifUrl(url: String) {
+        val clientId = "c_${java.util.UUID.randomUUID()}"
+        val payload =
+            JSONObject()
+                .put("kind", "FILE")
+                .put("fetchUrl", url)
+                .put("fileName", "gif.gif")
+                .put("fileType", "image/gif")
+                .put("clientId", clientId)
+        // r70-13: a gif answers its quote too, echo and row alike.
+        val replyId = replyTo?.optString("id")?.takeIf { it.isNotBlank() }
+        replyTo = null
+        replyId?.let { payload.put("replyTo", it) }
+        bornKeys.add(clientId)
+        LiveArrivals.markLive(clientId)
+        pending.add(
+            JSONObject()
+                .put("id", clientId)
+                .put("clientId", clientId)
+                .put("senderId", Store.myId())
+                .put("kind", "FILE")
+                .put("fileName", "gif.gif")
+                .put("fileType", "image/gif")
+                .put("body", "")
+                .put("createdAt", java.time.Instant.now().toString())
+                .also { if (replyId != null) it.put("replyTo", replyId) },
+        )
+        scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
+        runCatching { KpSounds.send(ctx) }
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
+                runCatching { KpSounds.sent(ctx) }
+            } catch (e: Exception) {
+                pending.removeAll { it.optString("clientId") == clientId }
+                error = (e as? ApiException)?.message?.takeIf { it.isNotBlank() } ?: "Could not send the GIF."
+            }
+        }
+    }
+
     fun cancelScheduled(id: String) {
         scheduledRows.removeAll { it.optString("id") == id }
         scope.launch {
@@ -4784,26 +4829,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                 onDismiss = { showStickers = false },
                 onSend = { content ->
                     // v206: sticker direct send, GIF direct send as image file (not link)
-                    // v207: GIF URLs download and send as image/gif file so bubble shows GIF directly
+                    // r76-18 (owner item 6): the GIF URL goes straight to the
+                    // worker (fetchUrl) — the SERVER pulls the bytes into the
+                    // bucket. The old phone-side OkHttp download is gone, so a
+                    // gif can never degrade into a plain text link either.
                     if (content.startsWith("http")) {
-                        // Real Tenor GIF - download and send as file
-                        scope.launch {
-                            try {
-                                val client = okhttp3.OkHttpClient.Builder()
-                                    .callTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-                                    .build()
-                                val req = okhttp3.Request.Builder().url(content).build()
-                                val resp = withContext(kotlinx.coroutines.Dispatchers.IO) { client.newCall(req).execute() }
-                                if (!resp.isSuccessful) throw Exception("HTTP ${resp.code}")
-                                val bytes = resp.body?.bytes() ?: throw Exception("Empty")
-                                val file = java.io.File(ctx.cacheDir, "gif_${System.currentTimeMillis()}.gif")
-                                file.writeBytes(bytes)
-                                sendFile(file.name, "image/gif", file)
-                            } catch (e: Exception) {
-                                // Fallback to text link if download fails
-                                sendText(content, "TEXT")
-                            }
-                        }
+                        sendGifUrl(content)
                     } else {
                         sendText(content, "STICKER")
                     }

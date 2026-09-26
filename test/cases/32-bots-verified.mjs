@@ -9541,7 +9541,8 @@ const convBetween = (db, a, b) =>
       "r33-11b: chat — bornKeys marks my text / photo / file / voice sends and live socket arrivals; each list row (thread + pending) consumes its key once (remember(rowKey) { bornKeys.remove(rowKey) }) and rises in; deletes go through vanishingIds → the pixel-destroy (DeleteRowShell) before the rows leave (r34-3: explicit grace windows)",
       chat.includes("val bornKeys = remember { HashSet<String>() }") &&
         chat.includes("val vanishingIds = remember { mutableStateListOf<String>() }") &&
-        (chat.match(/bornKeys\.add\(clientId\)/g) || []).length === 4 &&
+        // r76-18: the 5th born send is the server-fetched gif (sendGifUrl).
+        (chat.match(/bornKeys\.add\(clientId\)/g) || []).length === 5 &&
         chat.includes(
           'bornKeys.add(liveMsg.optString("clientId").ifBlank { liveMsg.optString("id") })',
         ) &&

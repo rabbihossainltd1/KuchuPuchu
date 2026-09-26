@@ -2435,6 +2435,33 @@ const ALLOWED_MESSAGE_KINDS = new Set(["TEXT", "STICKER", "IMAGE", "FILE"]);
 const ALLOWED_STATUS_KINDS = new Set(["TEXT", "IMAGE", "VIDEO"]);
 const FILE_KEY_RE = /^[A-Za-z0-9][A-Za-z0-9._\/-]{0,200}$/;
 
+// r76-18 (owner item 6): the GIF CDNs the worker may fetch for a send. The
+// phone hands the Tenor/Giphy URL and the worker pulls the bytes itself —
+// the gif rides the bucket like any other media, never a phone download.
+const GIF_FETCH_HOSTS = new Set([
+  "media.tenor.com",
+  "c.tenor.com",
+  "www.tenor.com",
+  "tenor.com",
+  "media.giphy.com",
+  "i.giphy.com",
+  "media0.giphy.com",
+  "media1.giphy.com",
+  "media2.giphy.com",
+  "media3.giphy.com",
+  "media4.giphy.com",
+  "media5.giphy.com",
+]);
+function safeGifUrl(value: string): string | null {
+  try {
+    const u = new URL(value);
+    if (u.protocol !== "https:") return null;
+    return GIF_FETCH_HOSTS.has(u.hostname) ? u.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 const SAFE_DATA_URL =
   /^data:(image\/(?:jpeg|png|webp|gif)|audio\/(?:mpeg|mp4|aac|ogg|wav)|video\/(?:mp4|webm));base64,/i;
 
@@ -8627,8 +8654,32 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (typeof body.imageData === "string" && body.imageData.startsWith("data:") && !imageData) {
       fail(400, "Unsupported image format.", "BAD_MEDIA");
     }
-    const fileKey =
+    const declaredKey =
       typeof body.fileKey === "string" && FILE_KEY_RE.test(body.fileKey) ? body.fileKey : null;
+    // r76-18 (owner item 6): "gif hisabe jai ar download hoye na jai direct
+    // server thekei jai" — a GIF sent by URL: the worker fetches it from the
+    // allowlisted CDN, stores it in the bucket, and it rides the normal
+    // fileKey path from there. No bytes ever touch the sender's phone.
+    let fetchedKey: string | null = null;
+    if (kind === "FILE" && !declaredKey && !imageData && typeof body.fetchUrl === "string") {
+      if (!env.MEDIA) fail(501, "File storage is not configured yet.");
+      rateLimit(`gif:${uid}`, 30, 60);
+      const gifUrl = safeGifUrl(body.fetchUrl);
+      if (!gifUrl) fail(400, "Unsupported GIF source.", "BAD_GIF_URL");
+      const gifRes = await fetch(gifUrl, { redirect: "follow" }).catch(() => null);
+      if (!gifRes || !gifRes.ok) fail(502, "Could not fetch the GIF.", "GIF_FETCH");
+      const gifType = (gifRes.headers.get("content-type") || "")
+        .split(";")[0]!
+        .trim()
+        .toLowerCase();
+      if (gifType !== "image/gif") fail(415, "That link is not a GIF.", "NOT_GIF");
+      const gifBytes = await gifRes.arrayBuffer();
+      if (gifBytes.byteLength === 0 || gifBytes.byteLength > 8_000_000)
+        fail(413, "GIF too large.", "GIF_SIZE");
+      fetchedKey = `gif/${uid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.gif`;
+      await env.MEDIA.put(fetchedKey, gifBytes, { httpMetadata: { contentType: "image/gif" } });
+    }
+    const fileKey = declaredKey ?? fetchedKey;
     if (imageData && imageData.length > 450_000)
       fail(400, "Photo too large — pick a smaller image.");
     if (kind === "STICKER" && !text) fail(400, "Pick a sticker.");
