@@ -28,7 +28,12 @@ import kotlinx.coroutines.flow.first
  */
 object FlightAnchors {
     @Volatile var composerBounds: Rect? = null
-    @Volatile var micBounds: Rect? = null
+    // r76-15 (owner: "attach panel close korle mic upore theke jay"): snapshot
+    // STATE — the window overlay reads this during composition, so every
+    // layout move (IME / inline panel glide) repositions the mic live. As a
+    // plain var the overlay only saw it on unrelated recompositions and the
+    // mic clung to a stale top spot until something else invalidated.
+    var micBounds: Rect? by mutableStateOf(null)
     @Volatile var attachBounds: Rect? = null
 }
 

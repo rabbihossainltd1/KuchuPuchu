@@ -5043,6 +5043,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         recording = recording,
         locked = voiceLocked,
         composerVisible = composerShown,
+        sendSeat = input.isNotBlank() || selected.size > 0,
         onStartRecord = recStart,
         onFinishRecord = recFinish,
         onLockRecord = { lockRecording() },
@@ -5457,6 +5458,10 @@ private fun RecorderFloatOverlay(
     onFinishRecord: (Boolean) -> Unit,
     onLockRecord: () -> Unit,
     composerVisible: Boolean,
+    // r76-15 (owner: "type korle mic theke giye send niche pore"): when the
+    // seat carries the SEND circle, the overlay mic must stand down — the
+    // send circle IS the seat now; a mic painted over it read as a swap.
+    sendSeat: Boolean = false,
     showColumn: Boolean = true,
     showFlyer: Boolean = true,
 ) {
@@ -5488,7 +5493,7 @@ private fun RecorderFloatOverlay(
     // between seat and overlay on press remounted the button mid-gesture and
     // killed the drag, forcing 'press first, then slide'. One instance, one
     // home; on top of the column (preview z6 over z5).
-    if (composerVisible && !locked && !RecorderAnchors.swallowOn && mic != null) {
+    if (composerVisible && !locked && !RecorderAnchors.swallowOn && !sendSeat && mic != null) {
         HoldMicButton(
             recording = recording,
             enabled = true,

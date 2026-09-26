@@ -217,6 +217,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
   const vnotes = main("VoiceNote.kt");
   const e2 = main("E2eeMsg.kt");
+  const sf = main("SendFlight.kt");
   const app = "native-android/app/src/main/java/app/kuchupuchu/android/";
   const ui = readFileSync(app + "Ui.kt", "utf8");
   check(
@@ -307,7 +308,12 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes("val composerShown =") &&
       chat.includes("onLockRecord = { lockRecording() }") &&
       chat.includes("var ownOrigin by remember { mutableStateOf(Offset.Zero) }") &&
-      chat.includes("FlightAnchors.micBounds"),
+      chat.includes("FlightAnchors.micBounds") &&
+      // r76-15: the mic seat anchor is snapshot state (overlay follows every
+      // layout move) and the mic stands down while the send circle is up.
+      sf.includes("var micBounds: Rect? by mutableStateOf(null)") &&
+      chat.includes("sendSeat = input.isNotBlank() || selected.size > 0,") &&
+      chat.includes("!sendSeat && mic != null"),
   );
   check(
     "r76-1: the recorder wears the APP'S palette on the preview's geometry — accent circles, DarkCard bar/panel/column, 8% white Pause pill (the once glyph has been bare since r76-12), Red bin; the old DoubleArrow chevron send is gone with the rebuild (import included)",
