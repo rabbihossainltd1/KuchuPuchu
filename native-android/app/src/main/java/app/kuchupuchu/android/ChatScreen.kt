@@ -7402,7 +7402,7 @@ private fun MessageRow(
                     // the text. Other kinds keep the small bottom band —
                     // except FILE rows (items 45 / 34), whose second line
                     // already leaves the stamp its corner.
-                    .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp)
+                    .padding(start = if (voiceRow) 0.dp else 10.dp, top = if (voiceRow) 0.dp else 4.dp, end = if (voiceRow) 0.dp else 8.dp, bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp)
                     // r58: live sent messages animate from right, received from left; history stays quiet
                     // r62: voice notes fly via fxFlyIn directly with original body; no duplicate box translation.
                     .then(if (voiceRow) Modifier else Modifier.fxSideSlide(active = fxFresh, isSent = mine))
@@ -9993,11 +9993,17 @@ private fun FileBubble(
         // er moto"): back to top-aligned - the wave centres on the play
         // button exactly like v172, the time tucks RIGHT under the wave
         // (2dp, right end), no blank band.
-        // r76-13 (owner: "normal massage bubble o ei same view once voice
-        // massage er moto kore dite"): the normal voice row wears the
-        // once-voice card's arrangement — play, wave, duration on ONE centred
-        // line; nothing hangs under the play button anymore, no once mark.
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // r76-14 (owner, screenshot): "normal voice bubble ta view once er
+        // moto same to same koro — just 1 button er jaigai 1x/2x/3x/4x, bubble
+        // colour blue thakbe": the normal voice bubble IS the view-once voice
+        // card — same 196dp seat, same 6dp top/bottom breathing room, same
+        // 32dp play circle, same short wave, same duration at the right —
+        // and in the seat where the once 1-mark rides, a speed circle that
+        // cycles 1x..4x. Only the bubble fills stay the normal ones.
+        Row(
+            Modifier.width(196.dp).padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             val interaction = remember { MutableInteractionSource() }
             val pressed by interaction.collectIsPressedAsState()
             val secs = m.optJSONObject("meta")?.optInt("seconds") ?: 0
@@ -10042,7 +10048,7 @@ private fun FileBubble(
                 rest = faint,
                 // r62: full waveform rendered immediately without fake grow animation
                 grow = false,
-                modifier = Modifier.width(150.dp).height(20.dp),
+                modifier = Modifier.weight(1f).height(20.dp),
                 onSeek = { frac ->
                     if (!pendingEcho && fileKey.isNotBlank()) player.seekTo(ctx, id, fileKey, frac)
                 },
@@ -10050,9 +10056,6 @@ private fun FileBubble(
                     scrubAt = if (!pendingEcho && fileKey.isNotBlank()) frac else null
                 },
             )
-            // The duration rides the RIGHT of the wave, vertically centred —
-            // the once-card's picture. While it plays (or the finger scrubs),
-            // the line counts the elapsed seconds.
             Spacer(Modifier.width(8.dp))
             Text(
                 when {
@@ -10069,6 +10072,32 @@ private fun FileBubble(
                 color = if (mine) Color(0x99FFFFFF) else Muted,
                 maxLines = 1,
             )
+            Spacer(Modifier.width(6.dp))
+            // The once card's 1-mark seat — on a normal note it cycles the
+            // playback speed instead: 1x -> 2x -> 3x -> 4x -> 1x.
+            Box(
+                Modifier.size(34.dp).clickable {
+                    haptics.tap()
+                    player.cycleSpeed()
+                },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(if (mine) Color(0x33FFFFFF) else chatAccent(theme).copy(alpha = 0.18f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "${player.speed.toInt()}x",
+                        fontSize = 10.sp,
+                        color = ink,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                    )
+                }
+            }
         }
         return
     }

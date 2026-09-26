@@ -91,7 +91,7 @@ const pkg = readFileSync(
 /* the round's own bookkeeping */
 check(
   "r76-8: versionCode 225 / versionName 3.9.148 (mic permanent in overlay — press-then-slide fixed; once icon 1px left; release policy still > 215)",
-  /versionCode\s*=\s*230\b/.test(pkg) && /versionName\s*=\s*"3\.9\.153"/.test(pkg),
+  /versionCode\s*=\s*231\b/.test(pkg) && /versionName\s*=\s*"3\.9\.154"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */
@@ -258,7 +258,7 @@ check(
     chat.includes("modifier = Modifier.size(18.dp).scale(if (pressed) 0.85f else 1f),") &&
     chat.includes("modifier = Modifier.size(16.dp),") &&
     chat.includes("Spacer(Modifier.width(8.dp))") &&
-    chat.includes("modifier = Modifier.width(150.dp).height(20.dp),") &&
+    chat.includes("modifier = Modifier.weight(1f).height(20.dp),") &&
     chat.includes("Spacer(Modifier.width(8.dp))\n            VoiceWave(") &&
     chat.includes("fontSize = 10.sp,"),
 );

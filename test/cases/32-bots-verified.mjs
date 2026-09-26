@@ -5732,7 +5732,7 @@ const convBetween = (db, a, b) =>
       chat.includes("internal fun fileLooksVoice(m: JSONObject): Boolean {") &&
         chat.includes('val fileRow = kind == "FILE"') &&
         chat.includes("val isVoice = !asDocument && fileLooksVoice(m)") &&
-        chat.includes("modifier = Modifier.width(150.dp).height(20.dp),") &&
+        chat.includes("modifier = Modifier.weight(1f).height(20.dp),") &&
         !chat.includes("modifier = Modifier.width(150.dp).height(30.dp),") &&
         chat.includes(
           "internal fun DrawScope.drawVoiceBars(bars: List<Int>, progress: Float, played: Color, rest: Color, newest: Boolean = false, reveal: Float = Float.MAX_VALUE) {",
@@ -8728,10 +8728,10 @@ const convBetween = (db, a, b) =>
         ) &&
         chat.includes("(active || scrubAt != null) && secs > 0 -> {") &&
         chat.includes(
-          "Row(verticalAlignment = Alignment.CenterVertically) {\n            val interaction = remember { MutableInteractionSource() }",
+          "verticalAlignment = Alignment.CenterVertically,\n        ) {\n            val interaction = remember { MutableInteractionSource() }",
         ) &&
         chat.includes("Spacer(Modifier.width(8.dp))\n            VoiceWave(") &&
-        chat.includes("modifier = Modifier.width(150.dp).height(20.dp),"),
+        chat.includes("modifier = Modifier.weight(1f).height(20.dp),"),
     );
   }
   // Item 8: the status / chat-video trim strip shows a playhead — the

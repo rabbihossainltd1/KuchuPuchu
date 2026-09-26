@@ -158,7 +158,7 @@ check(
   chat.includes(".size(32.dp)\n                    .pressScale(interaction)") &&
     (chat.match(/size\(18\.dp\)\.scale\(if \(pressed\) 0\.85f else 1f\)/g) || []).length === 2 &&
     chat.includes("Spacer(Modifier.width(8.dp))\n            VoiceWave(") &&
-    chat.includes("modifier = Modifier.width(150.dp).height(20.dp),") &&
+    chat.includes("modifier = Modifier.weight(1f).height(20.dp),") &&
     chat.includes(
       "fontSize = 10.sp,\n                lineHeight = 12.sp,\n                color = if (mine) Color(0x99FFFFFF) else Muted,",
     ) &&
@@ -166,7 +166,7 @@ check(
     // bubble instead, which is what actually shrinks the card's footprint.
     !chat.includes("val voiceNote") &&
     chat.includes(
-      ".padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp)",
+      ".padding(start = if (voiceRow) 0.dp else 10.dp, top = if (voiceRow) 0.dp else 4.dp, end = if (voiceRow) 0.dp else 8.dp, bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp)",
     ) &&
     chat.includes("horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,") &&
     // r33's scrub-to-seek and the spinner survive verbatim

@@ -404,6 +404,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
       ) &&
       chat.includes(".widthIn(max = if (voice) 196.dp else 138.dp)") &&
       chat.includes("else -> List(fit) { bars[it * bars.size / fit] }") &&
+      // r76-14: the NORMAL voice bubble mirrors the once card and the
+      // 1-mark seat cycles playback speed.
+      chat.includes("player.cycleSpeed()") &&
+      chat.includes("player.speed.toInt()}x") &&
       chat.includes("Modifier.heightIn(min = 44.dp)") &&
       chat.includes(
         "ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme, onDoubleTapHeart)",
