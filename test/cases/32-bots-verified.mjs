@@ -6695,7 +6695,9 @@ const convBetween = (db, a, b) =>
         // r76-19 (owner item 12): the r76-17 once TOGGLE became a SEND
         // button — tap on the View-once row sends the typed text veiled.
         chat.includes("onOnceNow: () -> Unit = {},") &&
-        chat.includes('KpSheet(onDismiss = onClose, title = "Send later") {') &&
+        // r76-20 (owner item 12): the sheet lost its global title — "Send
+        // later" heads its own section now, below the separate View-once top.
+        chat.includes("KpSheet(onDismiss = onClose, title = null) {") &&
         [
           '"In 1 hour"',
           '"Tonight 9 PM"',
@@ -8646,7 +8648,9 @@ const convBetween = (db, a, b) =>
         chat7.includes(
           "fontSize = 13.sp,\n                        fontWeight = FontWeight.SemiBold,\n                        maxLines = 1,",
         ) &&
-        (chat7.match(/\.padding\(horizontal = 14\.dp, vertical = 6\.dp\)/g) || []).length === 6 &&
+        // r76-20: +1 — the ScheduleSheet's "Send later" section header wears
+        // the same compact (14, 6) padding; the six wall pills are unchanged.
+        (chat7.match(/\.padding\(horizontal = 14\.dp, vertical = 6\.dp\)/g) || []).length === 7 &&
         (chat7.match(/\.padding\(vertical = 7\.dp\)/g) || []).length === 2 &&
         chat7.includes(
           '{ Text("Ignore", color = Muted, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }',

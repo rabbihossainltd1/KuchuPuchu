@@ -468,7 +468,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       // (bigger ①, tap = the typed text goes out veiled right now).
       chat.includes("onOnceNow: () -> Unit = {},") &&
       chat.includes('sendText(input, "TEXT", once = true)') &&
-      chat.includes("CenteredOnceIcon(24.dp)") &&
+      chat.includes("CenteredOnceIcon(30.dp)") &&
       !chat.includes("input.isNotBlank() -> onSendTextOnce") &&
       chat.includes('fun sendText(body: String, kind: String = "TEXT", once: Boolean = false) {') &&
       chat.includes(

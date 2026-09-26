@@ -6871,7 +6871,11 @@ private fun ScheduleSheet(
     val picked =
         now.toLocalDate().plusDays(dayOff.toLong()).atTime((hour12 % 12) + if (pm) 12 else 0, minute).atZone(DHAKA)
     val valid = picked.isAfter(now)
-    KpSheet(onDismiss = onClose, title = "Send later") {
+    // r76-20 (owner item 12: "eita to schedule er sathe connected na tai
+    // eita ekdom top a thakba alada schedule time er list a na"): View once
+    // is its OWN section at the very top — the sheet title moved down to the
+    // schedule half it actually names.
+    KpSheet(onDismiss = onClose, title = null) {
         if (withOnce) {
             Row(
                 Modifier
@@ -6884,7 +6888,8 @@ private fun ScheduleSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // r76-19 (owner item 12): the ① grew 18 -> 24 dp.
-                CenteredOnceIcon(24.dp)
+                // r76-20 (owner: "icon ta boro hobe"): 24 -> 30 dp.
+                CenteredOnceIcon(30.dp)
                 Spacer(Modifier.width(10.dp))
                 Text(
                     "View once",
@@ -6893,7 +6898,23 @@ private fun ScheduleSheet(
                     fontWeight = FontWeight.SemiBold,
                 )
             }
+            // The seam between the two sections: once-send above, the
+            // schedule list (with its own title) below.
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .height(1.dp)
+                    .background(Line.copy(alpha = 0.35f)),
+            )
         }
+        Text(
+            "Send later",
+            color = Ink,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+        )
         if (!custom) {
             quick.forEach { (label, at) ->
                 KpSheetRow(Icons.Filled.Schedule, label) { onPick(at.toInstant(), false) }
