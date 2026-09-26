@@ -8453,56 +8453,76 @@ private fun VoiceOnceTile(
     val progress = if (playing || paused) player.progress else 0f
     val secs = m.optJSONObject("meta")?.optInt("seconds") ?: 0
     val upFrac = UploadProgress.fracs[m.optString("clientId")]
-    Row(
-        Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    // r76-12 (owner): the once-voice card IS the normal voice row — play with
+    // the duration under it, the 150dp seekable wave beside — and where the
+    // once mark sat, a speed circle: 1x/2x/3x/4x, tap cycles the playback.
+    Row(verticalAlignment = Alignment.Top) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(Color(0x33FFFFFF))
+                    .clickable(enabled = ready) {
+                        haptics.tap()
+                        // r71-19b: playing it once IS the opening.
+                        player.toggle(ctx, id, source) { onSpent() }
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                when {
+                    loading || pendingEcho -> CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+                    playing -> Icon(Icons.Filled.Pause, "Pause", tint = Color.White, modifier = Modifier.size(17.dp))
+                    else -> Icon(Icons.Filled.PlayArrow, "Play once", tint = Color.White, modifier = Modifier.size(17.dp))
+                }
+            }
+            Text(
+                when {
+                    secs > 0 -> "%d:%02d".format(secs / 60, secs % 60)
+                    upFrac != null -> "Sending"
+                    else -> "0:00"
+                },
+                fontSize = 10.sp,
+                lineHeight = 12.sp,
+                color = Color(0x99FFFFFF),
+                maxLines = 1,
+            )
+        }
+        Spacer(Modifier.width(6.dp))
+        Column(Modifier.padding(top = 3.dp)) {
+            VoiceWave(
+                bars = bars,
+                progress = progress,
+                played = Color.White,
+                rest = Color(0x66FFFFFF),
+                grow = false,
+                onSeek = { frac ->
+                    if (ready) player.seekTo(ctx, id, source, frac)
+                },
+                onScrub = {},
+                modifier = Modifier.width(150.dp).height(22.dp),
+            )
+        }
+        Spacer(Modifier.width(6.dp))
         Box(
             Modifier
-                .size(32.dp)
+                .size(28.dp)
                 .clip(CircleShape)
                 .background(Color(0x33FFFFFF))
-                .clickable(enabled = ready) {
+                .clickable {
                     haptics.tap()
-                    // r71-19b: playing it once IS the opening.
-                    player.toggle(ctx, id, source) { onSpent() }
+                    player.cycleSpeed()
                 },
             contentAlignment = Alignment.Center,
         ) {
-            when {
-                loading || pendingEcho -> CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
-                playing -> Icon(Icons.Filled.Pause, "Pause", tint = Color.White, modifier = Modifier.size(18.dp))
-                else -> Icon(Icons.Filled.PlayArrow, "Play once", tint = Color.White, modifier = Modifier.size(18.dp))
-            }
+            Text(
+                "${player.speed.toInt()}x",
+                fontSize = 10.sp,
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
         }
-        Spacer(Modifier.width(8.dp))
-        VoiceWave(
-            bars = bars,
-            progress = progress,
-            played = Color.White,
-            rest = Color(0x66FFFFFF),
-            grow = false,
-            // no seeking on a once-only note: it is heard once, from the top
-            onSeek = {},
-            onScrub = {},
-            modifier = Modifier.weight(1f).height(20.dp),
-        )
-        // r76-10 (owner): the duration rides the RIGHT side, vertically
-        // centered — nothing under the play circle anymore.
-        Spacer(Modifier.width(8.dp))
-        Text(
-            when {
-                secs > 0 -> "%d:%02d".format(secs / 60, secs % 60)
-                upFrac != null -> "Sending"
-                else -> "0:00"
-            },
-            fontSize = 10.sp,
-            lineHeight = 12.sp,
-            color = Color(0x99FFFFFF),
-            maxLines = 1,
-        )
-        Spacer(Modifier.width(6.dp))
-        Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) { CenteredOnceIcon(30.dp) }
     }
 }
 
@@ -8642,7 +8662,7 @@ private fun ViewOnceRow(
                     // Modifier.heightIn(max = 220.dp).aspectRatio(boxRatio)
                     // r71-19b: a voice card is wide and short (play + wave +
                     // the mark); the photo / video tile keeps its own box.
-                    .widthIn(max = if (voice) 196.dp else 138.dp)
+                    .widthIn(max = if (voice) 236.dp else 138.dp)
                     .then(
                         // r76-11 (owner): the voice card wraps its row — no
                         // fixed height, no blank bands above/below.
@@ -8658,7 +8678,9 @@ private fun ViewOnceRow(
                         },
                     )
                     .clip(bubbleShape)
-                    .background(Color(0xFF1B1E26))
+                    // r76-12 (owner): a once-VOICE note wears the normal
+                    // voice bubble's fills; photos / videos keep the tile.
+                    .background(if (voice) (if (mine) chatMineFill(theme) else chatOtherFill(theme)) else Color(0xFF1B1E26))
                     // r76-9 (owner): a view-once VOICE bubble rides like a
                     // normal voice bubble — no border ring.
                     .then(if (voice) Modifier else Modifier.border(1.dp, Color(0xFF3B82F6), bubbleShape))
