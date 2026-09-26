@@ -348,6 +348,11 @@ fun StickerPanel(
             }
 
             // Bottom categories - recent first, restored per latest screenshot
+            // r76-19 (owner item 11: "emoji category select korar options ta
+            // gif sticker a geleo theke jacche ... ota just emojis a
+            // thakbe"): the selector belongs to the EMOJI tab alone — the
+            // GIF / sticker grids have no categories to pick.
+            if (tab == 0)
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp).background(Color.Transparent),
                 verticalAlignment = Alignment.CenterVertically,
