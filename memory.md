@@ -420,3 +420,11 @@
   arming only recolors to accent.
 - Green run 36225098248. Lesson re-confirmed: changed lock literals need same-commit
   pin updates (rose-cap 138->126 and once-icon 20->40 pins broke 46/47 twice).
+
+## r76-10 (2026-09-26): polish round 2 — v227/3.9.150, green run 36226824858
+- 938a8b2 item 3: armed look (blue ring + shackle) now at 32dp rise (armAtDist; was
+  lockAtDist 62) — release still locks at the half. Chevron offset -12 -> -18dp.
+- ace589c item 5: once-voice duration moved to the RIGHT side, vertically centered
+  (play / wave / time / once on one line; nothing under the play circle).
+- 5fa5052 items 6+7: locked once glyph back to 20dp (40 was "beshi boro"), borderless
+  system kept; offset now -2px (one more left).
