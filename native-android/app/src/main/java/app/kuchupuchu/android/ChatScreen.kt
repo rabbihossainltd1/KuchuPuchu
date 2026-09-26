@@ -1669,13 +1669,16 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    fun scheduleText(body: String, at: java.time.Instant) {
+    fun scheduleText(body: String, at: java.time.Instant, once: Boolean = false) {
         if (body.isBlank()) return
         val clientId = "c_${java.util.UUID.randomUUID()}"
         val payload =
             // r64 E2EE: the scheduled body is sealed like any other TEXT —
             // the cron later posts the stored envelope through the same path.
             JSONObject().put("kind", "TEXT").put("body", sealOut(body)).put("clientId", clientId).put("sendAt", at.toString())
+        // r76-17 (owner): the schedule sheet's view-once toggle — the flag
+        // rides the stored payload exactly like a live once-text.
+        if (once) payload.put("meta", JSONObject().put("viewOnce", true)).put("viewOnce", true)
         // r70-13: the same one-value shape as every other send — a send-later
         // text answers its quote as well (it already did) and clears the bar.
         val replyId = replyTo?.optString("id")?.takeIf { it.isNotBlank() }
@@ -4403,12 +4406,13 @@ fun ChatScreen(nav: NavController, convId: String) {
         if (showSchedule) {
             ScheduleSheet(
                 onClose = { showSchedule = false },
-                onPick = { at ->
+                withOnce = true,
+                onPick = { at, once ->
                     showSchedule = false
                     haptics.confirm()
                     showAttach = false
                     showStickers = false
-                    scheduleText(input, at)
+                    scheduleText(input, at, once)
                     input = ""
                 },
             )
@@ -4423,7 +4427,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         if (showScheduleMedia) {
             ScheduleSheet(
                 onClose = { showScheduleMedia = false },
-                onPick = { at ->
+                onPick = { at, _ ->
                     showScheduleMedia = false
                     haptics.confirm()
                     sendAttachSelection(sendAt = at)
@@ -4650,16 +4654,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                 sendText(input)
                 input = ""
             } },
-            // r71-20: double-tap Send with text typed → the message goes out
-            // veiled (its body is revealed only by the far side's tap).
-            onSendTextOnce = { requestAttachExit {
-                haptics.confirm()
-                showAttach = false
-                showStickers = false
-                sendText(input, once = true)
-                input = ""
-            } },
-            // Owner round 32 (item 18): hold Send → pick a time.
+            // Owner round 32 (item 18): hold Send → pick a time. r76-17: the
+            // once-text moved INTO the schedule sheet (owner), so the seat's
+            // single tap fires the send with zero double-tap wait.
             onScheduleSend = { requestAttachExit { haptics.tap(); showSchedule = true } },
             recording = recording,
             recMs = recMs,
@@ -5092,7 +5089,6 @@ private fun Composer(
     onSend: () -> Unit,
     // r71-20: the second tap of a double tap on Send with text typed — the
     // message goes out as view-once.
-    onSendTextOnce: () -> Unit = {},
     // Owner round 32 (item 18): long-press on Send (text typed) → schedule.
     onScheduleSend: () -> Unit = {},
     recording: Boolean,
@@ -5233,6 +5229,7 @@ private fun Composer(
                                 "Message",
                                 color = Muted,
                                 fontSize = 14.sp,
+                                lineHeight = 20.sp,
                                 modifier = Modifier.padding(vertical = 6.dp),
                             )
                         }
@@ -5326,8 +5323,9 @@ private fun Composer(
                 // r72-19: this seat's double tap is the once-send, and the owner
                 // picked a 0.45 s window for it (the platform's is ~0.3 s) —
                 // the seat runs inside a ViewConfiguration of its own.
-                KpDoubleTapSeat {
-                    Box(
+                // r76-17 (owner: "instant send button jeno work kore"): no
+                // double-tap seat anymore — the tap sends on the same frame.
+                Box(
                         Modifier
                             .size(46.dp)
                             .fxMicAnchor()
@@ -5343,12 +5341,6 @@ private fun Composer(
                             .combinedClickable(
                                 interactionSource = sendInteraction,
                                 indication = null,
-                                onDoubleClick =
-                                    when {
-                                        // r71-20: text typed + a second tap = view-once.
-                                        input.isNotBlank() -> onSendTextOnce
-                                        else -> null
-                                    },
                                 onLongClick = if (input.isNotBlank()) onScheduleSend else null,
                             ) {
                                 if (input.isNotBlank()) onSend() else onSendSelection()
@@ -5365,7 +5357,6 @@ private fun Composer(
                                     .scale(if (sendPressed) 0.9f else 1f),
                         )
                     }
-                }
             }
             locked -> {
             }
@@ -6715,7 +6706,11 @@ internal fun scheduleStamp(iso: String): String {
 /** Owner round 32 (item 18): the "send later" sheet — quick picks first,
  *  then a custom date + time (hour / minute wheels, no dialogs). */
 @Composable
-private fun ScheduleSheet(onClose: () -> Unit, onPick: (java.time.Instant) -> Unit) {
+private fun ScheduleSheet(
+    onClose: () -> Unit,
+    onPick: (java.time.Instant, Boolean) -> Unit,
+    withOnce: Boolean = false,
+) {
     val haptics = rememberHaptics()
     val now = dhakaNow().withSecond(0).withNano(0)
     val quick =
@@ -6726,6 +6721,9 @@ private fun ScheduleSheet(onClose: () -> Unit, onPick: (java.time.Instant) -> Un
             "Tomorrow 6 PM" to now.plusDays(1).withHour(18).withMinute(0),
         )
     var custom by remember { mutableStateOf(false) }
+    // r76-17 (owner): the once-text that the seat's double tap used to carry
+    // lives here now — one toggle, and the scheduled text goes out veiled.
+    var once by remember { mutableStateOf(false) }
     // Custom: day offset (0..29) + 12-hour clock.
     var dayOff by remember { mutableStateOf(0) }
     var hour12 by remember { mutableStateOf(((now.hour + 1) % 12).let { if (it == 0) 12 else it }) }
@@ -6735,9 +6733,30 @@ private fun ScheduleSheet(onClose: () -> Unit, onPick: (java.time.Instant) -> Un
         now.toLocalDate().plusDays(dayOff.toLong()).atTime((hour12 % 12) + if (pm) 12 else 0, minute).atZone(DHAKA)
     val valid = picked.isAfter(now)
     KpSheet(onDismiss = onClose, title = "Send later") {
+        if (withOnce) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (once) ChipSelected else ChipIdle)
+                    .clickable { haptics.tap(); once = !once }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CenteredOnceIcon(18.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "View once",
+                    color = if (once) ActionBlueDeep else Ink,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+        }
         if (!custom) {
             quick.forEach { (label, at) ->
-                KpSheetRow(Icons.Filled.Schedule, label) { onPick(at.toInstant()) }
+                KpSheetRow(Icons.Filled.Schedule, label) { onPick(at.toInstant(), once) }
             }
             KpSheetRow(Icons.Filled.Edit, "Pick date & time") { custom = true }
         } else {
@@ -6808,7 +6827,7 @@ private fun ScheduleSheet(onClose: () -> Unit, onPick: (java.time.Instant) -> Un
                 "Schedule",
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
                 enabled = valid,
-            ) { onPick(picked.toInstant()) }
+            ) { onPick(picked.toInstant(), once) }
         }
     }
 }
@@ -7072,7 +7091,7 @@ private fun MessageRow(
     // is a live birth AND is no longer a sending echo - so the emoji plays at
     // the moment the message becomes sent, while the flight above belongs to
     // the arrival and never replays.
-    val fxEmoji = fxBorn && !pendingEcho && fxScaleOf(ctx) > 0f
+    val fxEmoji = fxBorn && fxScaleOf(ctx) > 0f
     // Owner round 15: the night theme's other-bubble is dark in BOTH app
     // themes — its text needs a light ink or it vanishes in light mode.
     // Owner round 20: the DARK-BLUE default chat has dark bubbles on both

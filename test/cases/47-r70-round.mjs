@@ -374,7 +374,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
       ui.includes("override val doubleTapTimeoutMillis: Long get() = ms") &&
       ui.includes("fun KpDoubleTapSeat(content: @Composable () -> Unit)") &&
       chat.includes("KpDoubleTapSeat {") &&
-      (chat.match(/KpDoubleTapSeat \{/g) || []).length === 2,
+      // r76-17: only the locked panel's send circle keeps the seat now.
+      (chat.match(/KpDoubleTapSeat \{/g) || []).length === 1,
   );
 }
 
@@ -439,13 +440,13 @@ const main = (f) => read(`${ANDROID}/${f}`);
   const chat = main("ChatScreen.kt");
   const list = main("ChatListScreen.kt");
   check(
-    "r71-20: text typed + a second tap on Send = the message goes out view-once — the seat's double tap branches on what is being sent, and `sendText` takes the flag through the meta, the payload and the optimistic echo",
-    chat.includes("onSendTextOnce: () -> Unit = {},") &&
-      /onDoubleClick =\n\s+when \{[\s\S]{0,220}?input\.isNotBlank\(\) -> onSendTextOnce[\s\S]{0,80}?else -> null/.test(
-        chat,
-      ) &&
-      chat.includes("onSendTextOnce = { requestAttachExit {") &&
-      chat.includes("sendText(input, once = true)") &&
+    "r71-20 + r76-17: the once-text lives in the SCHEDULE sheet now (owner: double tap remove, schedule er vetor once icon) — the sheet's View-once toggle rides scheduleText's once flag into the stored payload; the seat's tap is instant (no double-tap seat), and `sendText` still takes the flag through the meta, the payload and the optimistic echo",
+    chat.includes(
+      "fun scheduleText(body: String, at: java.time.Instant, once: Boolean = false) {",
+    ) &&
+      chat.includes("withOnce = true,") &&
+      chat.includes("scheduleText(input, at, once)") &&
+      !chat.includes("input.isNotBlank() -> onSendTextOnce") &&
       chat.includes('fun sendText(body: String, kind: String = "TEXT", once: Boolean = false) {') &&
       chat.includes(
         'if (once) payload.put("meta", JSONObject().put("viewOnce", true)).put("viewOnce", true)',

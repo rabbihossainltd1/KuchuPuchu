@@ -9,9 +9,6 @@ import { makeReg, installGoogleStub, phoneFrom, fakeIdToken } from "../helpers/p
 
 installGoogleStub();
 
-const SEAT_DOUBLE_TAP =
-  /onDoubleClick =\n\s+when \{\n\s+\/\/ r71-20[^\n]*\n\s+input\.isNotBlank\(\) -> onSendTextOnce\n\s+else -> null\n\s+\},/;
-
 const WORKER = new URL("../../src/worker/index.ts", import.meta.url).href;
 let n = 0;
 const freshWorker = async () => (await import(`${WORKER}?v=${n++}`)).default;
@@ -6678,16 +6675,15 @@ const convBetween = (db, a, b) =>
           ".combinedClickable(\n                                interactionSource = sendInteraction,\n                                indication = null,",
         ) &&
         // r71-20: the branch is a `when` now — text typed upgrades too.
-        SEAT_DOUBLE_TAP.test(chat) &&
+        !chat.includes("input.isNotBlank() -> onSendTextOnce") &&
         chat.includes(
           "onLongClick = if (input.isNotBlank()) onScheduleSend else null,\n                            ) {",
         ) &&
         chat.includes(
           "@OptIn(ExperimentalFoundationApi::class)\n@Composable\nprivate fun Composer(",
         ) &&
-        chat.includes(
-          "private fun ScheduleSheet(onClose: () -> Unit, onPick: (java.time.Instant) -> Unit) {",
-        ) &&
+        chat.includes("onPick: (java.time.Instant, Boolean) -> Unit,") &&
+        chat.includes("var once by remember { mutableStateOf(false) }") &&
         chat.includes('KpSheet(onDismiss = onClose, title = "Send later") {') &&
         [
           '"In 1 hour"',
@@ -6707,10 +6703,12 @@ const convBetween = (db, a, b) =>
           "NumberWheel(value = minute, range = 0..55 step 5, pad = true, modifier = Modifier.weight(1f)) { minute = it }",
         ) &&
         chat.includes('GoldBtn(\n                "Schedule",') &&
-        chat.includes("fun scheduleText(body: String, at: java.time.Instant) {") &&
+        chat.includes(
+          "fun scheduleText(body: String, at: java.time.Instant, once: Boolean = false) {",
+        ) &&
         chat.includes('.put("clientId", clientId).put("sendAt", at.toString())') &&
         chat.includes(
-          '                    scheduleText(input, at)\n                    input = ""',
+          '                    scheduleText(input, at, once)\n                    input = ""',
         ) &&
         chat.includes("if (input.isBlank()) input = body") &&
         // the sheet is a bottom sheet, no dialog anywhere in it

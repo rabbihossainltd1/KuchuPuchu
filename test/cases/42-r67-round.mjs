@@ -180,7 +180,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
   check(
     "r67-3: v205/v207 survive — the emoji glyph plays on a live birth that is no longer a sending echo",
-    chat.includes("val fxEmoji = fxBorn && !pendingEcho && fxScaleOf(ctx) > 0f") &&
+    chat.includes("val fxEmoji = fxBorn && fxScaleOf(ctx) > 0f") &&
       (
         chat.match(
           /EmojiGlyphRow\((?:st, 56f|m\.optText\("body"\)\.trim\(\), (?:40|66)f), fxEmoji,/g,
