@@ -428,3 +428,14 @@
   (play / wave / time / once on one line; nothing under the play circle).
 - 5fa5052 items 6+7: locked once glyph back to 20dp (40 was "beshi boro"), borderless
   system kept; offset now -2px (one more left).
+
+## r76-11 (2026-09-26): once-voice card + pause wave — v228/3.9.151, green run 36228155472
+- b6cf74f items 1+2: VoiceWave's fillMaxWidth inside its weight slot painted over the
+  time text (weight alone sizes it); fixed 74dp card height replaced by heightIn(min 44)
+  — no blank bands.
+- cb77d2b item 3: locked once-button visible circle 26dp (was 40), 40dp seat kept as
+  invisible tap target.
+- 02ee276 item 4: VoiceNote sampler skips appends while isPaused (isRecording stayed
+  true, so the strip walked while the clock stood still).
+- Process note: an accidental two-fix bundle was split into separate commits via
+  reset --mixed before push (owner's one-item-per-commit rule).
