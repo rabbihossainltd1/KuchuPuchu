@@ -8455,6 +8455,7 @@ private fun VoiceOnceTile(
         Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             Modifier
                 .size(32.dp)
@@ -8473,32 +8474,33 @@ private fun VoiceOnceTile(
                 else -> Icon(Icons.Filled.PlayArrow, "Play once", tint = Color.White, modifier = Modifier.size(18.dp))
             }
         }
+        // r76-9 (owner: "ek line a thakbe shob"): the duration sits under the
+        // play circle (like the normal voice bubble), so wave + once mark stay
+        // on the same centered line instead of stacking up/down.
+        Text(
+            when {
+                secs > 0 -> "%d:%02d".format(secs / 60, secs % 60)
+                upFrac != null -> "Sending"
+                else -> "0:00"
+            },
+            fontSize = 10.sp,
+            lineHeight = 12.sp,
+            color = Color(0x99FFFFFF),
+            maxLines = 1,
+        )
+    }
         Spacer(Modifier.width(8.dp))
-        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-            VoiceWave(
-                bars = bars,
-                progress = progress,
-                played = Color.White,
-                rest = Color(0x66FFFFFF),
-                grow = false,
-                // no seeking on a once-only note: it is heard once, from the top
-                onSeek = {},
-                onScrub = {},
-                modifier = Modifier.fillMaxWidth().height(20.dp),
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                when {
-                    secs > 0 -> "%d:%02d".format(secs / 60, secs % 60)
-                    upFrac != null -> "Sending"
-                    else -> "0:00"
-                },
-                fontSize = 10.sp,
-                lineHeight = 12.sp,
-                color = Color(0x99FFFFFF),
-                maxLines = 1,
-            )
-        }
+        VoiceWave(
+            bars = bars,
+            progress = progress,
+            played = Color.White,
+            rest = Color(0x66FFFFFF),
+            grow = false,
+            // no seeking on a once-only note: it is heard once, from the top
+            onSeek = {},
+            onScrub = {},
+            modifier = Modifier.weight(1f).fillMaxWidth().height(20.dp),
+        )
         Spacer(Modifier.width(8.dp))
         Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) { CenteredOnceIcon(30.dp) }
     }
