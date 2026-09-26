@@ -383,3 +383,19 @@
 - Locked panel code diffed line-by-line vs HTML (row1 clock+grey wave+once40; gap 9;
   spacer 10; row2 bin48+pausepill48+send48) — matches; if owner still sees it wrong on
   device, need a LOCKED-state screenshot before more theories.
+
+## r76-7 (2026-09-26): onLockRecord was never wired; mic moved into the overlay
+- Owner: locked options still absent; voice over bubbles wtf; "check systems yourself
+  before I report". Verified root cause #1: ChatScreen passed onLockRecord to Composer,
+  but Composer's HoldMicButton call OMITTED it (default {}) since the r76 rebuild — a
+  LOCK release literally did nothing on device; the panel could never appear.
+- Root cause #2 (z): HTML stacking = wallpaper < messages < bar < column(z5) < mic(z6) <
+  flyer. Final structure: ONE window overlay after the content Column drawing column,
+  then the RECORDING mic (HoldMicButton moved there; seat keeps 50x46 fxMicAnchor spacer),
+  then flyer. armed/dim state moved into RecorderAnchors (mic writes, bar reads tracked).
+  recStart/recFinish hoisted to the screen body (the Composer call is inside the content
+  Column; the overlay mount is outside it — first attempt scoped them at the chain head
+  and CI failed Unresolved).
+- docs/VOICE_RECORDER_SELF_CHECK.md added: ship-time wiring trace (state -> publisher ->
+  consumer -> draw) the owner mandated; tick every line before any recorder commit.
+- v224/3.9.147 @ 2a7c922, green run 36220320151.
