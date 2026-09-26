@@ -8655,11 +8655,9 @@ private fun ViewOnceRow(
                     )
                     .clip(bubbleShape)
                     .background(Color(0xFF1B1E26))
-                    .border(
-                        1.dp,
-                        Color(0xFF3B82F6),
-                        bubbleShape,
-                    )
+                    // r76-9 (owner): a view-once VOICE bubble rides like a
+                    // normal voice bubble — no border ring.
+                    .then(if (voice) Modifier else Modifier.border(1.dp, Color(0xFF3B82F6), bubbleShape))
                     .pointerInput(m.optString("id")) {
                         detectHorizontalDragGestures(
                             onHorizontalDrag = { change, dragAmount ->
