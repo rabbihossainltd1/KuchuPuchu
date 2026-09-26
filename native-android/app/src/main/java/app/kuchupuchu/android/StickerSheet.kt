@@ -352,36 +352,37 @@ fun StickerPanel(
             // gif sticker a geleo theke jacche ... ota just emojis a
             // thakbe"): the selector belongs to the EMOJI tab alone — the
             // GIF / sticker grids have no categories to pick.
-            if (tab == 0)
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp).background(Color.Transparent),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                val categories = listOf(
-                    Triple(0, Icons.Filled.Schedule, "Recents"),
-                    Triple(1, Icons.Filled.Mood, "Smileys"),
-                    Triple(2, Icons.Filled.Pets, "Animals"),
-                    Triple(3, Icons.Filled.Restaurant, "Food"),
-                    Triple(4, Icons.Filled.SportsSoccer, "Activities"),
-                    Triple(5, Icons.Filled.Flight, "Travel"),
-                    Triple(6, Icons.Filled.Lightbulb, "Objects"),
-                    Triple(7, Icons.Filled.Star, "Symbols"),
-                    Triple(8, Icons.Filled.Flag, "Flags"),
-                )
-                categories.forEach { (idx, icon, desc) ->
-                    val sel = selectedCategory == idx && tab == 0
-                    Box(
-                        Modifier.size(30.dp).clip(CircleShape)
-                            .background(if (sel) ChipSelected else Color.Transparent)
-                            .clickable {
-                                haptics.tap()
-                                if (tab != 0) tab = 0
-                                selectedCategory = idx
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(icon, contentDescription = desc, tint = if (sel) ActionBlueDeep else Muted, modifier = Modifier.size(if (sel) 18.dp else 16.dp))
+            if (tab == 0) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp).background(Color.Transparent),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    val categories = listOf(
+                        Triple(0, Icons.Filled.Schedule, "Recents"),
+                        Triple(1, Icons.Filled.Mood, "Smileys"),
+                        Triple(2, Icons.Filled.Pets, "Animals"),
+                        Triple(3, Icons.Filled.Restaurant, "Food"),
+                        Triple(4, Icons.Filled.SportsSoccer, "Activities"),
+                        Triple(5, Icons.Filled.Flight, "Travel"),
+                        Triple(6, Icons.Filled.Lightbulb, "Objects"),
+                        Triple(7, Icons.Filled.Star, "Symbols"),
+                        Triple(8, Icons.Filled.Flag, "Flags"),
+                    )
+                    categories.forEach { (idx, icon, desc) ->
+                        val sel = selectedCategory == idx && tab == 0
+                        Box(
+                            Modifier.size(30.dp).clip(CircleShape)
+                                .background(if (sel) ChipSelected else Color.Transparent)
+                                .clickable {
+                                    haptics.tap()
+                                    if (tab != 0) tab = 0
+                                    selectedCategory = idx
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(icon, contentDescription = desc, tint = if (sel) ActionBlueDeep else Muted, modifier = Modifier.size(if (sel) 18.dp else 16.dp))
+                        }
                     }
                 }
             }

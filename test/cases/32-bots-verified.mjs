@@ -2921,7 +2921,7 @@ const convBetween = (db, a, b) =>
       // r76-19 (owner item 11): the bottom category selector renders ONLY on
       // the emoji tab — it used to sit under the GIF / sticker grids too.
       kt("StickerSheet.kt").includes(
-        "if (tab == 0)\n            Row(\n                Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp).background(Color.Transparent),",
+        "if (tab == 0) {\n                Row(\n                    Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp).background(Color.Transparent),",
       ) &&
       kt("ChatScreen.kt").includes("internal fun emojiOnlyCount(body: String): Int") &&
       (kt("ChatScreen.kt").includes(
