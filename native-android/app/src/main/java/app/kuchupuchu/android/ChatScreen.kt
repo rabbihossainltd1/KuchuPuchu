@@ -434,6 +434,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     var privShot by remember(convId) { mutableStateOf(false) }
     var privRec by remember(convId) { mutableStateOf(false) }
     var privSave by remember(convId) { mutableStateOf(true) }
+    // r76-18 (owner item 3): the two Allow switches — the server answers with
+    // the profile-defaulted value (private: off; public: shot on, rec off).
+    var privAllowShot by remember(convId) { mutableStateOf(true) }
+    var privAllowRec by remember(convId) { mutableStateOf(false) }
     var muteInFlight by remember { mutableStateOf(false) }
     var searchQ by remember { mutableStateOf("") }
     var searchHits by remember { mutableStateOf(listOf<JSONObject>()) }
@@ -1561,10 +1565,19 @@ fun ChatScreen(nav: NavController, convId: String) {
 
     /** r71-18: one switch of "Chat privacy" — optimistic locally, and the
      *  conversation poke brings the server's answer back. */
-    fun setChatPrivacy(shot: Boolean? = null, rec: Boolean? = null, save: Boolean? = null) {
+    fun setChatPrivacy(
+        shot: Boolean? = null,
+        rec: Boolean? = null,
+        save: Boolean? = null,
+        allowShot: Boolean? = null,
+        allowRec: Boolean? = null,
+    ) {
         if (shot != null) privShot = shot
         if (rec != null) privRec = rec
         if (save != null) privSave = save
+        // r76-18 (owner item 3): the Allow switches ride the same POST.
+        if (allowShot != null) privAllowShot = allowShot
+        if (allowRec != null) privAllowRec = allowRec
         scope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
@@ -1574,6 +1587,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                             shot?.let { put("shot", it) }
                             rec?.let { put("rec", it) }
                             save?.let { put("save", it) }
+                            allowShot?.let { put("allowShot", it) }
+                            allowRec?.let { put("allowRec", it) }
                         },
                     )
                 }
@@ -2762,8 +2777,18 @@ fun ChatScreen(nav: NavController, convId: String) {
         privShot = pr.optBoolean("shot")
         privRec = pr.optBoolean("rec")
         privSave = pr.optBoolean("save", true)
+        // r76-18: the server sends the EFFECTIVE Allow values — NULL rows are
+        // answered with the member's profile defaults (private: shot/rec/save
+        // off; public: shot on, rec off, save on).
+        privAllowShot = pr.optBoolean("allowShot", true)
+        privAllowRec = pr.optBoolean("allowRec")
     }
     val peerSaveOk = c?.optBoolean("peerSave", true) != false
+    // r76-18 (owner item 4): the peer's Allow switches — when either is off my
+    // phone hard-blocks capture with FLAG_SECURE, on EVERY Android version
+    // (the old record-alert trick only existed on 15+).
+    val peerShotOk = c?.optBoolean("peerShotOk", true) != false
+    val peerRecOk = c?.optBoolean("peerRecOk", true) != false
     val isGroup = c?.optBoolean("isGroup") == true
     val otherUserId = c?.optJSONObject("other")?.optString("id") ?: ""
     // System accounts: full name in the header (no call buttons there, so
@@ -2830,7 +2855,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     // selfPrivate left this gate; a PRIVATE PEER (or a private group) still
     // withholds save / forward / capture exactly as r31-21 built it.
     val privateChat = KpSecure.privatePeer(c) || privateGroup
-    KpSecure.Guard(privateChat)
+    // r76-18 (owner item 4): "allow screenshot off / allow screen record off"
+    // is enforced HERE — FLAG_SECURE blocks both screenshots and recording on
+    // every Android version, so the switches work below Android 15 too.
+    KpSecure.Guard(privateChat || !peerShotOk || !peerRecOk)
     // Recompose exactly when the six-second typing lease expires. Computing
     // directly from currentTimeMillis() left the label visible indefinitely
     // on an otherwise idle screen because time passing is not Compose state.
@@ -4846,6 +4874,10 @@ fun ChatScreen(nav: NavController, convId: String) {
             shot = privShot,
             rec = privRec,
             save = privSave,
+            // r76-18 (owner item 3): the two Allow switches — the alert rows
+            // only exist while their Allow switch is on.
+            allowShot = privAllowShot,
+            allowRec = privAllowRec,
             // r72-18: below Android 14 the screenshot alert reads the system's
             // Screenshots folder, so that row tells the truth about the Photos
             // permission it needs.
@@ -4865,6 +4897,8 @@ fun ChatScreen(nav: NavController, convId: String) {
             },
             onRec = { setChatPrivacy(rec = it) },
             onSave = { setChatPrivacy(save = it) },
+            onAllowShot = { setChatPrivacy(allowShot = it) },
+            onAllowRec = { setChatPrivacy(allowRec = it) },
         )
         if (showTheme) ThemeDialog(
             current = chatTheme,
@@ -10480,6 +10514,11 @@ private fun ChatPrivacySheet(
     shot: Boolean,
     rec: Boolean,
     save: Boolean,
+    // r76-18 (owner item 3): the two Allow switches. Profile defaults come
+    // from the server (private: off; public: shot on, rec off, save on); the
+    // alert rows below only show while their Allow switch is on.
+    allowShot: Boolean,
+    allowRec: Boolean,
     // r72-18: true on Android 12/13, where the alert is read from the system's
     // Screenshots folder and therefore needs the Photos / Storage permission.
     folderWatch: Boolean = false,
@@ -10488,6 +10527,8 @@ private fun ChatPrivacySheet(
     onShot: (Boolean) -> Unit,
     onRec: (Boolean) -> Unit,
     onSave: (Boolean) -> Unit,
+    onAllowShot: (Boolean) -> Unit,
+    onAllowRec: (Boolean) -> Unit,
 ) {
     // r72-18 (owner: "screenshot alert ta android 14 newer keno ami to Snapchat
     // a dekhchi eita hocche Android 13/12 a o"): Android 14+ answers with the
@@ -10496,31 +10537,57 @@ private fun ChatPrivacySheet(
     // The screen-recording row stays Android 15+ — a recording leaves no file
     // to read, so claiming it below that would be a lie.
     KpSheet(onDismiss = onClose, title = "Chat privacy") {
+        // r76-18 (owner item 3): "allow screenshot" first, its alert second —
+        // and the alert row only EXISTS while the Allow switch is on. The
+        // block itself (FLAG_SECURE on the other phone) works everywhere;
+        // only the ALERT needs the newer OS hooks.
         PrivacyToggle(
             icon = Icons.Filled.Lock,
-            label = "Screenshot alert",
+            label = "Allow Screenshot",
             sub =
-                when {
-                    folderWatch && folderGranted ->
-                        "Alert me when they screenshot this chat (via your Screenshots folder)"
-                    folderWatch -> "Allow Photos so screenshots can be spotted"
-                    else -> "Alert me when they screenshot this chat"
-                },
-            checked = shot,
+                if (allowShot) "They may screenshot this chat" else "Screenshots of this chat are blocked on their phone",
+            checked = allowShot,
             enabled = true,
-            onChange = onShot,
+            onChange = onAllowShot,
         )
+        if (allowShot)
+            PrivacyToggle(
+                icon = Icons.Filled.Notifications,
+                label = "Screenshot alert",
+                sub =
+                    when {
+                        folderWatch && folderGranted ->
+                            "Alert me when they screenshot this chat (via your Screenshots folder)"
+                        folderWatch -> "Allow Photos so screenshots can be spotted"
+                        else -> "Alert me when they screenshot this chat"
+                    },
+                checked = shot,
+                enabled = true,
+                onChange = onShot,
+            )
         PrivacyToggle(
             icon = Icons.Filled.Videocam,
-            label = "Screen record alert",
-            sub = if (android.os.Build.VERSION.SDK_INT >= 35) "Alert me when they record this chat" else "Android 15 or newer",
-            checked = rec,
-            enabled = android.os.Build.VERSION.SDK_INT >= 35,
-            onChange = onRec,
+            label = "Allow Screen Record",
+            sub =
+                if (allowRec) "They may screen-record this chat" else "Screen recording of this chat is blocked on their phone",
+            checked = allowRec,
+            enabled = true,
+            onChange = onAllowRec,
         )
+        if (allowRec)
+            PrivacyToggle(
+                icon = Icons.Filled.Notifications,
+                label = "Screen record alert",
+                sub =
+                    if (android.os.Build.VERSION.SDK_INT >= 35) "Alert me when they record this chat"
+                    else "Alerts need Android 15 or newer — recording is still blocked below that",
+                checked = rec,
+                enabled = android.os.Build.VERSION.SDK_INT >= 35,
+                onChange = onRec,
+            )
         PrivacyToggle(
             icon = Icons.Filled.PermMedia,
-            label = "Media Save permission",
+            label = "Allow Media Save",
             sub = if (save) "They may save the media I send here" else "They cannot save the media I send here",
             checked = save,
             enabled = true,

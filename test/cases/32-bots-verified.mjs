@@ -3102,7 +3102,9 @@ const convBetween = (db, a, b) =>
         // v168: selfPrivate left the gate - a private profile protects against
         // others, never against the owner themself (the peer rule is intact).
         chat.includes("val privateChat = KpSecure.privatePeer(c) || privateGroup") &&
-        chat.includes("KpSecure.Guard(privateChat)") &&
+        // r76-18 (owner item 4): the peer's Allow switches join the guard —
+        // FLAG_SECURE blocks capture on EVERY Android version.
+        chat.includes("KpSecure.Guard(privateChat || !peerShotOk || !peerRecOk)") &&
         // r32-17: a view-once photo / video rides the same guards.
         chat.includes("if (!echo && !privateChat && !isViewOnce(m)) {") &&
         // r71-17/18: the owner's own rule comes first, then the once/peer gate.
@@ -3139,7 +3141,9 @@ const convBetween = (db, a, b) =>
         kt("MediaViewer.kt").includes(
           'val canForward = m != null && !privateClip && m.optText("fileKey").isNotBlank()',
         ) &&
-        kt("ChatMediaScreen.kt").includes("KpSecure.Guard(privateChat)") &&
+        kt("ChatMediaScreen.kt").includes(
+          "KpSecure.Guard(privateChat || !peerShotOk || !peerRecOk)",
+        ) &&
         readFileSync("src/worker/index.ts", "utf8").includes(
           "privateProfile: Number(row.private_profile ?? 0) !== 0,\n    ...(viewer",
         ),
@@ -3658,7 +3662,7 @@ const convBetween = (db, a, b) =>
               w.includes("const MEMBER_COLS =") &&
               // r71-18: the list gained the three chat-privacy columns.
               w.includes(
-                '"conv_id, user_id, role, muted, unread, last_read_at, hidden, hidden_key, muted_call, muted_msg, priv_shot, priv_rec, priv_save";',
+                '"conv_id, user_id, role, muted, unread, last_read_at, hidden, hidden_key, muted_call, muted_msg, priv_shot, priv_rec, priv_save, priv_allow_shot, priv_allow_rec";',
               ) &&
               w.includes(
                 '"UPDATE members SET hidden = ?, hidden_key = ? WHERE conv_id = ? AND user_id = ?",',

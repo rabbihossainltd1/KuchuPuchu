@@ -573,7 +573,13 @@ const main = (f) => read(`${ANDROID}/${f}`);
     chat.includes("private fun ChatPrivacySheet(") &&
       chat.includes('label = "Screenshot alert"') &&
       chat.includes('label = "Screen record alert"') &&
-      chat.includes('label = "Media Save permission"') &&
+      chat.includes('label = "Allow Media Save"') &&
+      // r76-18 (owner item 3): the sheet grew the two Allow switches, and the
+      // alert rows only exist while their Allow switch is on.
+      chat.includes('label = "Allow Screenshot"') &&
+      chat.includes('label = "Allow Screen Record"') &&
+      chat.includes("if (allowShot)") &&
+      chat.includes("if (allowRec)") &&
       chat.includes("Alert me when they screenshot this chat") &&
       chat.includes("Alert me when they record this chat") &&
       chat.includes("They may save the media I send here") &&
@@ -581,7 +587,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       // r72-18: the screenshot row is no longer "Android 14 or newer" — the
       // 12/13 folder watch covers the versions below it, so the row is live
       // everywhere; the screen-recording row keeps its honest floor.
-      chat.includes('else "Android 15 or newer"') &&
+      chat.includes('else "Alerts need Android 15 or newer') &&
       chat.includes("folderWatch = KpCapture.folderPermission() != null,") &&
       chat.includes("folderGranted = KpCapture.folderGranted(ctx),"),
   );
@@ -659,7 +665,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
     "r71-18: the switches are the server's (read from the conversation, written back one at a time) and a capture alert lands as a red chip with one buzz",
     chat.includes('c?.optJSONObject("privacy")') &&
       chat.includes(
-        "fun setChatPrivacy(shot: Boolean? = null, rec: Boolean? = null, save: Boolean? = null)",
+        "fun setChatPrivacy(\n        shot: Boolean? = null,\n        rec: Boolean? = null,\n        save: Boolean? = null,\n        allowShot: Boolean? = null,\n        allowRec: Boolean? = null,\n    )",
       ) &&
       chat.includes('"/api/conversations/$convId/privacy"') &&
       chat.includes("internal fun captureAlertOf(m: JSONObject): String?") &&
@@ -694,11 +700,18 @@ const main = (f) => read(`${ANDROID}/${f}`);
       worker.includes("ALTER TABLE members ADD COLUMN priv_rec INTEGER NOT NULL DEFAULT 0") &&
       worker.includes("ALTER TABLE members ADD COLUMN priv_save INTEGER NOT NULL DEFAULT 1") &&
       worker.includes("path.match(/^\\/api\\/conversations\\/([^/]+)\\/privacy$/)") &&
+      // r76-18 (owner items 3/4): the UPDATE grew the two Allow columns and
+      // the payload answers them — NULL rows come back as the member's
+      // profile defaults (private: off; public: shot on, rec off, save on).
       worker.includes(
-        "UPDATE members SET priv_shot = ?, priv_rec = ?, priv_save = ? WHERE conv_id = ? AND user_id = ?",
+        "UPDATE members SET priv_shot = ?, priv_rec = ?, priv_save = ?, priv_allow_shot = ?, priv_allow_rec = ? WHERE conv_id = ? AND user_id = ?",
       ) &&
-      worker.includes("privacy: { shot: meShot, rec: meRec, save: meSave },") &&
-      worker.includes("peerSave: solo ? (otherSave ?? true) : true,"),
+      worker.includes(
+        "shot: meShot,\n      rec: meRec,\n      save: meSave,\n      allowShot: meAllowShot,\n      allowRec: meAllowRec,",
+      ) &&
+      worker.includes("peerSave: solo ? (otherSave ?? true) : true,") &&
+      worker.includes("peerShotOk: solo ? otherAllowShot : true,") &&
+      worker.includes("peerRecOk: solo ? otherAllowRec : true,"),
   );
   check(
     "r71-18: worker — the capture route alerts only the members whose OWN switch is on, folds a burst into one row per 20 s, writes a real SYSTEM chip and pushes it message-shaped (so a closed app still hears)",

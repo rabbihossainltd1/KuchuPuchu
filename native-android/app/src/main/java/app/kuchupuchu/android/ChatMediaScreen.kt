@@ -76,7 +76,12 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
     val privateChat =
         KpSecure.privatePeer(convSnap) ||
             (convSnap?.optBoolean("isGroup") == true && convSnap.optBoolean("privateGroup"))
-    KpSecure.Guard(privateChat)
+    // r76-18 (owner item 4): their Allow Screenshot / Allow Screen Record
+    // switches block capture on the shared-media screen exactly like they do
+    // in the chat itself (FLAG_SECURE works on every Android version).
+    val peerShotOk = convSnap?.optBoolean("peerShotOk", true) != false
+    val peerRecOk = convSnap?.optBoolean("peerRecOk", true) != false
+    KpSecure.Guard(privateChat || !peerShotOk || !peerRecOk)
     // r71-18: their "Media Save permission" withholds MY save of what THEY
     // send here (my own uploads stay mine to save).
     val peerSaveOk = convSnap?.optBoolean("peerSave", true) != false

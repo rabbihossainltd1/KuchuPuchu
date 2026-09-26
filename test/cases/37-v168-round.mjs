@@ -128,7 +128,8 @@ check(
     // itself is the same one r31-21 built.
     // r71-17/18: the owner's rule is first, then the once/peer gate.
     chat.includes("canSave = KpSecure.amOwner() ||") &&
-    chat.includes("KpSecure.Guard(privateChat)") &&
+    // r76-18: the guard grew the peer's Allow switches (same chat guard).
+    chat.includes("KpSecure.Guard(privateChat || !peerShotOk || !peerRecOk)") &&
     viewer.includes("KpSecure.Guard(secure || !canSave)") &&
     viewer.includes(
       "if (m != null && !saved && (KpSecure.amOwner() || (!privateClip && !noSaveClip))) {",

@@ -3207,6 +3207,11 @@ async function ensureSchema(db: D1Database) {
     // now back up their key pair (base64 JSON, opaque here) and a fresh
     // install restores it before minting anything, so history opens again.
     `ALTER TABLE users ADD COLUMN e2ee_backup TEXT`,
+    // r76-18 (owner): the chat-privacy sheet's Allow Screenshot / Allow
+    // Screen Record switches — per member, per chat, NULL = "use my
+    // profile's defaults" (private: off; public: shot on, rec off).
+    `ALTER TABLE members ADD COLUMN priv_allow_shot`,
+    `ALTER TABLE members ADD COLUMN priv_allow_rec`,
   ];
   const fingerprint = await sha256Hex(
     [...statements, ...migrations, CLIENT_ID_BACKFILL].join("\n"),
@@ -7688,21 +7693,39 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       priv_shot: number | null;
       priv_rec: number | null;
       priv_save: number | null;
+      priv_allow_shot: number | null;
+      priv_allow_rec: number | null;
     }>(
       db,
-      "SELECT priv_shot, priv_rec, priv_save FROM members WHERE conv_id = ? AND user_id = ?",
+      "SELECT priv_shot, priv_rec, priv_save, priv_allow_shot, priv_allow_rec FROM members WHERE conv_id = ? AND user_id = ?",
       convId,
       uid,
     );
     const shot = typeof body.shot === "boolean" ? body.shot : Number(before?.priv_shot ?? 0) === 1;
     const rec = typeof body.rec === "boolean" ? body.rec : Number(before?.priv_rec ?? 0) === 1;
     const save = typeof body.save === "boolean" ? body.save : Number(before?.priv_save ?? 1) === 1;
+    // r76-18: the Allow switches; an older app that never sends them keeps
+    // whatever was stored (or NULL = profile defaults).
+    const allowShot =
+      typeof body.allowShot === "boolean"
+        ? body.allowShot
+        : before?.priv_allow_shot != null
+          ? Number(before.priv_allow_shot) === 1
+          : null;
+    const allowRec =
+      typeof body.allowRec === "boolean"
+        ? body.allowRec
+        : before?.priv_allow_rec != null
+          ? Number(before.priv_allow_rec) === 1
+          : null;
     await run(
       db,
-      "UPDATE members SET priv_shot = ?, priv_rec = ?, priv_save = ? WHERE conv_id = ? AND user_id = ?",
+      "UPDATE members SET priv_shot = ?, priv_rec = ?, priv_save = ?, priv_allow_shot = ?, priv_allow_rec = ? WHERE conv_id = ? AND user_id = ?",
       shot ? 1 : 0,
       rec ? 1 : 0,
       save ? 1 : 0,
+      allowShot == null ? null : allowShot ? 1 : 0,
+      allowRec == null ? null : allowRec ? 1 : 0,
       convId,
       uid,
     );
@@ -7710,7 +7733,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // poke makes both sides re-read the conversation (the save gate is read
     // from it, so it must move without waiting for a poll).
     ctx.waitUntil(fanOutConversationChange(env, db, convId));
-    return json({ ok: true, privacy: { shot, rec, save } });
+    return json({
+      ok: true,
+      privacy: { shot, rec, save, allowShot: allowShot ?? true, allowRec: allowRec ?? false },
+    });
   }
 
   // r71-18: a device reports a capture of the chat IT is showing — its own
@@ -11352,12 +11378,16 @@ type ConvMemberRow = {
   priv_shot?: number | null;
   priv_rec?: number | null;
   priv_save?: number | null;
+  // r76-18: the Allow Screenshot / Allow Screen Record switches (NULL =
+  // the member's profile defaults).
+  priv_allow_shot?: number | null;
+  priv_allow_rec?: number | null;
 };
 
 const CONV_COLS =
   "id, kind, title, owner_id, created_at, last_message_at, last_message, disappear_seconds, theme, hidden_json, avatar_url, avatar_version, request_from, private_group";
 const MEMBER_COLS =
-  "conv_id, user_id, role, muted, unread, last_read_at, hidden, hidden_key, muted_call, muted_msg, priv_shot, priv_rec, priv_save";
+  "conv_id, user_id, role, muted, unread, last_read_at, hidden, hidden_key, muted_call, muted_msg, priv_shot, priv_rec, priv_save, priv_allow_shot, priv_allow_rec";
 
 /** r66: preview uses the existing newest-row query, never one fetch per chat. */
 type ConvPreviewRow = Pick<
@@ -11831,7 +11861,11 @@ function buildConvDetail(
   let meShot = false;
   let meRec = false;
   let meSave = true;
+  let meAllowShot = true;
+  let meAllowRec = false;
   let otherSave: boolean | null = null;
+  let otherAllowShot = true;
+  let otherAllowRec = true;
   let unread = 0;
   // Owner round 30: in a 1:1 chat the two ARE contacts (privacy view), and a
   // switched-off read receipt (either side) hides the peer's read mark.
@@ -11877,7 +11911,14 @@ function buildConvDetail(
         solo && row.user_id !== uid && (!meReceipts || !receiptsOn(user)) ? null : row.last_read_at,
     });
     if (row.user_id !== uid && solo) other = memberUser;
-    if (row.user_id !== uid && solo) otherSave = Number(row.priv_save ?? 1) === 1;
+    if (row.user_id !== uid && solo) {
+      const peerPrivate = Number(users.get(row.user_id)?.private_profile ?? 0) === 1;
+      otherSave = Number(row.priv_save ?? (peerPrivate ? 0 : 1)) === 1;
+      // r76-18: the peer's Allow switches, profile-defaulted — my phone
+      // blocks capture when either is off (every Android version).
+      otherAllowShot = Number(row.priv_allow_shot ?? (peerPrivate ? 0 : 1)) === 1;
+      otherAllowRec = Number(row.priv_allow_rec ?? 0) === 1;
+    }
     if (row.user_id === uid) {
       meMuted = row.muted === 1;
       // r69: both halves ride the row (the header's glyph, the hidden call
@@ -11886,9 +11927,14 @@ function buildConvDetail(
       meMutedMsg = (row.muted_msg ?? 0) === 1;
       meHidden = Number(row.hidden ?? 0) === 1;
       meHiddenKey = meHidden ? (row.hidden_key ?? null) : null;
+      const myPrivate = Number(users.get(uid)?.private_profile ?? 0) === 1;
       meShot = Number(row.priv_shot ?? 0) === 1;
       meRec = Number(row.priv_rec ?? 0) === 1;
-      meSave = Number(row.priv_save ?? 1) === 1;
+      meSave = Number(row.priv_save ?? (myPrivate ? 0 : 1)) === 1;
+      // r76-18 defaults (owner): private profile -> allow shot/rec/save off;
+      // public -> shot on, rec off, save on.
+      meAllowShot = Number(row.priv_allow_shot ?? (myPrivate ? 0 : 1)) === 1;
+      meAllowRec = Number(row.priv_allow_rec ?? 0) === 1;
       unread = row.unread;
     }
   }
@@ -11928,8 +11974,19 @@ function buildConvDetail(
     // r71-18: the ⋮ → "Chat privacy" switches. `privacy` is MINE (what the
     // sheet draws); `peerSave` is whether the other side lets me save the media
     // they send here — what my Save buttons read.
-    privacy: { shot: meShot, rec: meRec, save: meSave },
+    privacy: {
+      shot: meShot,
+      rec: meRec,
+      save: meSave,
+      allowShot: meAllowShot,
+      allowRec: meAllowRec,
+    },
     peerSave: solo ? (otherSave ?? true) : true,
+    // r76-18: the peer's Allow switches — my phone sets FLAG_SECURE on
+    // this chat when they disallow screenshots or recording (any Android
+    // version; the old 15-only record gate is gone).
+    peerShotOk: solo ? otherAllowShot : true,
+    peerRecOk: solo ? otherAllowRec : true,
     // Owner round 31 (item 26): the caller hid this chat (their flag only).
     hidden: meHidden,
     // Owner round 33 (item 6): the hash of the key that reveals it (theirs only).
