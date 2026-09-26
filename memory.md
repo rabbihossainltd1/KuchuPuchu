@@ -407,3 +407,16 @@
   AND recording; seat = pure spacer. Overlay visibility = composerShown (same condition
   as the Composer call: !blockWall && !requestPending && !noReply && (!showAttach || !attachFs)).
 - v225/3.9.148 @ 5acb6b4, green run 36222551283. Self-check doc line 3 updated.
+
+## r76-9 (2026-09-26): owner polish round ("almost perfect") — 4 commits, v226/3.9.149
+- 49fa08d items 1-3: LockColumn width 50->46 (=button, was "mota"); riseMax 138->126dp
+  (172-46: button stops AT column top, "bar er baire uthe jacche"); column shrinks from
+  its BOTTOM by the mic's rise (RecorderAnchors.micRise published from micY; top fixed,
+  rounded end rides behind the button).
+- 13bdda7 item 4: view-once VOICE bubble borderless (border now photo/video only).
+- 2a16809 item 5: VoiceOnceTile one centered line — duration moved under the play
+  circle (normal voice shape); play+time / wave(weight) / once mark siblings.
+- b9f8261 item 6: locked once-button borderless; CenteredOnceIcon 40dp (border's size);
+  arming only recolors to accent.
+- Green run 36225098248. Lesson re-confirmed: changed lock literals need same-commit
+  pin updates (rose-cap 138->126 and once-icon 20->40 pins broke 46/47 twice).
