@@ -1141,6 +1141,23 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ---------- r77-5: the attach gallery keeps its scroll across the editor detour ---------- */
+{
+  const sheet = main("AttachSheet.kt");
+  const chat = main("ChatScreen.kt");
+  check(
+    'r77-5 (owner: "photo attach click korle photo selection page ... edit e click korle ... back dei ... photo selection already kora ache seigulo back korle previous position e chole asche na"): the selection itself already survived (attachSel lives on the chat); what died was the gallery GRID\'s scroll position - the mediaedit route unmounts the panel, so its in-panel remember zeroed. The grid state now lives on the chat and is saved with the back-stack entry (rememberSaveable), handed down as a parameter',
+    sheet.includes("gridState: androidx.compose.foundation.lazy.grid.LazyGridState =") &&
+      !sheet.includes(
+        "val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()",
+      ) &&
+      chat.includes(
+        "rememberSaveable(saver = androidx.compose.foundation.lazy.grid.LazyGridState.Saver)",
+      ) &&
+      chat.includes("gridState = attachGridState,"),
+  );
+}
+
 /* ---------- r77-3: the hero is the ONLY copy; the exit lands on the live seat ---------- */
 {
   const viewer = main("MediaViewer.kt");

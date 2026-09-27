@@ -165,6 +165,14 @@ fun AttachPanel(
     onDocumentPicked: (Uri) -> Unit,
     onContactPicked: (Uri) -> Unit,
     onLocationRequested: () -> Unit,
+    // r77-5 (owner: "edit e jowar por back dei ... back korle previous
+    // position e chole asche na"): the editor detour unmounts this panel, so
+    // the gallery grid's own remember dies with it and reopening lands on
+    // the newest photo again. The scroll lives where the caller lives (the
+    // chat also remembers it across the mediaedit route via
+    // rememberSaveable) - back from Edit returns to the exact row you left.
+    gridState: androidx.compose.foundation.lazy.grid.LazyGridState =
+        androidx.compose.foundation.lazy.grid.rememberLazyGridState(),
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -388,7 +396,6 @@ fun AttachPanel(
                 dragTotal.value += amount
             }
         }
-    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
     var gridPreDownTotal by remember { mutableStateOf(0f) }
     var gridPreTotal by remember { mutableStateOf(0f) }
     val gridScroll = remember {

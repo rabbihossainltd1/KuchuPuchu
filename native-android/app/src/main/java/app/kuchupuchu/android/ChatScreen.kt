@@ -264,6 +264,15 @@ fun ChatScreen(nav: NavController, convId: String) {
     val loadingOlder = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     var lastTypingPing by remember { mutableStateOf(0L) }
     var showAttach by remember { mutableStateOf(false) }
+    // r77-5 (owner: "edit e jowar por back dei ... back korle previous position
+    // e chole asche na"): the gallery's scroll position lives HERE, saved with
+    // this screen's back-stack entry - the mediaedit route pops back onto a
+    // panel whose grid is exactly where the user had it (in-panel remember
+    // used to zero it every detour).
+    val attachGridState =
+        rememberSaveable(saver = androidx.compose.foundation.lazy.grid.LazyGridState.Saver) {
+            androidx.compose.foundation.lazy.grid.LazyGridState()
+        }
     // r76-20 (owner item 4): coming back from the editor's Discard sheet
     // ("dismiss debar por ekbare ber hobe na attach panel ei thakbe") — the
     // panel is alive again the moment this screen recomposes.
@@ -4995,6 +5004,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 onDocumentPicked = { uri -> handleDocumentPicked(uri, asDocument = true) },
                 onContactPicked = ::handleContactPicked,
                 onLocationRequested = ::handleLocationRequested,
+                gridState = attachGridState,
             )
             }
         }
