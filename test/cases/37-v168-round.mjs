@@ -272,8 +272,9 @@ check(
     // SEND-time scrolls SNAP (six sites) — gliding slid the fresh row up
     // from under the viewport and the gate turned that beat into an
     // invisible gap. Received rows (live socket) still glide.
-    chat.split("scope.launch { runCatching { listState.scrollToItem(msgs.size + pending.size - 1) } }")
-      .length === 6 &&
+    chat.split(
+      "scope.launch { runCatching { listState.scrollToItem(msgs.size + pending.size - 1) } }",
+    ).length === 6 &&
     chat.includes("if (total > 0) runCatching { listState.scrollToItem(total - 1) }") &&
     !chat.includes("listState.animateScrollToItem(msgs.size + pending.size - 1)") &&
     !fx8.includes("bottomOffset") &&
