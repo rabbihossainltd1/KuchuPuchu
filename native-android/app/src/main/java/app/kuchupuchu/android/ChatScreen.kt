@@ -1543,7 +1543,21 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
         }
         if (id.isBlank()) return
-        val idx = msgs.indexOfFirst { it.optString("id") == id || (cid.isNotBlank() && it.optString("clientId") == cid) }
+        // r77-crash: the seat lookup is index-based too (same CME family as
+        // the r53 sweeps above) - no iterator ever walks the live snapshot
+        // lists in paintSent; socket frames arrive main-posted now anyway.
+        var idx = -1
+        run {
+            var i = 0
+            while (i < msgs.size) {
+                val it = msgs.getOrNull(i) ?: break
+                if (it.optString("id") == id || (cid.isNotBlank() && it.optString("clientId") == cid)) {
+                    idx = i
+                    break
+                }
+                i++
+            }
+        }
         // Owner round 33 (item 2): decided BEFORE the rows move.
         val info = listState.layoutInfo
         val follow =

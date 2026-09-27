@@ -627,6 +627,8 @@ object KpSocket {
 
     private val conns = ConcurrentHashMap<String, Conn>()
     private val listeners = CopyOnWriteArrayList<(JSONObject) -> Unit>()
+    // r77-crash: one main-loop poster for frame delivery (see onMessage).
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     /** Register an event listener; the returned closure unregisters it. */
     fun onEvent(fn: (JSONObject) -> Unit): () -> Unit {
@@ -721,7 +723,14 @@ object KpSocket {
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     val ev = runCatching { JSONObject(text) }.getOrNull() ?: return
                     if (ev.optString("type") == "hello") c.live.value = true
-                    listeners.forEach { l -> runCatching { l(ev) } }
+                    // r77-crash (owner v247 crash: ConcurrentModificationException
+                    // at paintSent): this callback rides OkHttp's reader thread,
+                    // and the chat listener structurally mutates the msgs/pending
+                    // snapshot lists right here while the main thread walks them
+                    // (StateListIterator - the r53 crash back from the other
+                    // direction). Compose state moves on Main: every frame is
+                    // delivered there; the main queue's FIFO keeps socket order.
+                    mainHandler.post { listeners.forEach { l -> runCatching { l(ev) } } }
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {

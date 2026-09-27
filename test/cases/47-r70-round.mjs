@@ -1047,6 +1047,28 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ---------- r77-crash: socket frames apply on Main; paintSent keeps no iterator ---------- */
+{
+  const api = main("Api.kt");
+  const chat = main("ChatScreen.kt");
+  const onMsg = api.slice(
+    api.indexOf("override fun onMessage(webSocket: WebSocket, text: String)"),
+    api.indexOf("override fun onFailure(webSocket: WebSocket"),
+  );
+  check(
+    "r77-crash (owner v247 report: ConcurrentModificationException at paintSent): KpSocket.onMessage ran on OkHttp's reader thread while it structurally mutated the msgs/pending snapshot lists, racing the main thread's StateListIterator - frames are main-posted now, and paintSent's seat lookup is index-based like the r53 sweeps",
+    api.includes(
+      "private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())",
+    ) &&
+      onMsg.includes("mainHandler.post { listeners.forEach { l -> runCatching { l(ev) } } }") &&
+      !chat.includes(
+        'val idx = msgs.indexOfFirst { it.optString("id") == id || (cid.isNotBlank() && it.optString("clientId") == cid) }',
+      ) &&
+      chat.includes("var idx = -1") &&
+      chat.includes("no iterator ever walks the live snapshot"),
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`r70-round: ${lines.length - broken} ok / ${broken} broken`);
