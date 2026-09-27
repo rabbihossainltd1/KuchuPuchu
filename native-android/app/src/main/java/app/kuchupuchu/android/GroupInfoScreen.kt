@@ -449,6 +449,11 @@ fun GroupSettingsScreen(nav: NavController, convId: String) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     LaunchedEffect(convId, ScreenStore.poke) {
+        // r77-9 (owner: "toggle switch ... auto kaj kore"): a poke landing
+        // DURING the private-group PATCH painted the older truth back over
+        // the optimistic flip - the switch moved on its own. In flight? The
+        // PATCH's own answer is the only truth; pokes resume right after.
+        if (busy) return@LaunchedEffect
         runCatching {
             val data = withContext(Dispatchers.IO) { Api.get("/api/conversations/$convId", true) }
             data.optJSONObject("conversation")?.let {

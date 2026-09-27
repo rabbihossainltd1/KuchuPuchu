@@ -331,6 +331,12 @@ fun PrivacySettingsScreen(nav: NavController) {
             else -> field
         }
 
+    // r77-9 (owner: "toggle switch ... bar bar on off korle auto kaj kore
+    // kichu somoy"): rapid flips used to race - two PATCHes in flight could
+    // ARRIVE (or answer) out of order and the older one's truth put the
+    // switch back by itself. One flight at a time, in tap order - the
+    // r76-19 chat-privacy discipline here too.
+    val privMutex = remember { kotlinx.coroutines.sync.Mutex() }
     fun savePrivacy(field: String, value: Any) {
         // Optimistic: the row flips at once, the server answer replaces it.
         val next = JSONObject(me.value.toString())
@@ -338,13 +344,15 @@ fun PrivacySettingsScreen(nav: NavController) {
         p.put(keyOf(field), value)
         me.value = next
         scope.launch {
-            busy = true
-            runCatching {
-                val updated = withContext(Dispatchers.IO) { Api.patch("/api/me", JSONObject().put(field, value)) }
-                me.value = updated.optJSONObject("user") ?: me.value
-                Store.saveMe(me.value)
+            privMutex.withLock {
+                busy = true
+                runCatching {
+                    val updated = withContext(Dispatchers.IO) { Api.patch("/api/me", JSONObject().put(field, value)) }
+                    me.value = updated.optJSONObject("user") ?: me.value
+                    Store.saveMe(me.value)
+                }
+                busy = false
             }
-            busy = false
         }
     }
 

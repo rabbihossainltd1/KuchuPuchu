@@ -1106,6 +1106,24 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ---------- r77-9: rapid toggle flips never dance back (writes serialized, pokes gated) ---------- */
+{
+  const settings = main("SettingsScreen.kt");
+  const group = main("GroupInfoScreen.kt");
+  // (anchors are find-the-literal-first: SettingsScreen has an earlier fun keyOf,
+  // GroupInfoScreen an earlier val c = conv - absolute indexOf pairs mis-slice.)
+  const save = settings.slice(
+    settings.indexOf("val privMutex = remember { kotlinx.coroutines.sync.Mutex() }"),
+  );
+  const poke = group.slice(Math.max(0, group.indexOf("if (busy) return@LaunchedEffect") - 300));
+  check(
+    'r77-9 (owner: "toggle switch button ... bar bar on off korle auto kaj kore kichu somoy"): the Settings privacy writes are serialized (two rapid flips could ARRIVE or ANSWER out of order and the older truth put the switch back by itself - the r76-19 chat-privacy discipline, here), and the group-screen poke reload must not paint a pre-write truth over an in-flight flip',
+    settings.includes("val privMutex = remember { kotlinx.coroutines.sync.Mutex() }") &&
+      save.includes("privMutex.withLock {") &&
+      poke.includes("if (busy) return@LaunchedEffect"),
+  );
+}
+
 /* ---------- r77-3: the hero is the ONLY copy; the exit lands on the live seat ---------- */
 {
   const viewer = main("MediaViewer.kt");
