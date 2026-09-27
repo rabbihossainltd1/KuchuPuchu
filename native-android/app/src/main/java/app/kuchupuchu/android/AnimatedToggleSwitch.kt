@@ -10,7 +10,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.CornerRadius
@@ -63,21 +66,32 @@ fun AnimatedToggleSwitch(
     val knobRotation = remember { Animatable(if (checked) 360f else 0f) }
     val interactionSource = remember { MutableInteractionSource() }
 
-    LaunchedEffect(checked) {
+    // r78-9 (owner retest: "bar bar on off korle auto kaj kore kichu somoy",
+    // STILL not fixed): the tap used to fire `!checked` read from the CURRENT
+    // composition - under jank the frame's checked lags a tap behind, so a
+    // burst fired the same stale target twice (a missed flip) or an inverted
+    // sequence, and the piece of UI then appeared to move by itself. The
+    // intended value lives HERE and flips in the tap's own frame, so taps
+    // always emit the exact alternating sequence; whenever the parent state
+    // actually changes (optimistic set, server answer, rollback) it re-syncs.
+    var want by remember { mutableStateOf(checked) }
+    LaunchedEffect(checked) { want = checked }
+
+    LaunchedEffect(want) {
         launch {
             fillProgress.animateTo(
-                targetValue = if (checked) 1f else 0f,
+                targetValue = if (want) 1f else 0f,
                 animationSpec = tween(AnimDurationMs, easing = SwitchEasing),
             )
         }
         launch {
             knobProgress.animateTo(
-                targetValue = if (checked) 1f else 0f,
+                targetValue = if (want) 1f else 0f,
                 animationSpec = tween(AnimDurationMs, easing = KnobEasing),
             )
         }
         launch {
-            val target = if (checked) knobRotation.value + 360f else knobRotation.value - 360f
+            val target = if (want) knobRotation.value + 360f else knobRotation.value - 360f
             knobRotation.animateTo(
                 targetValue = target,
                 animationSpec = tween(AnimDurationMs, easing = KnobEasing),
@@ -95,7 +109,8 @@ fun AnimatedToggleSwitch(
                     indication = null,
                     enabled = enabled,
                 ) {
-                    onCheckedChange(!checked)
+                    want = !want
+                    onCheckedChange(want)
                 },
     ) {
         Canvas(modifier = Modifier.size(TrackWidth, TrackHeight)) {

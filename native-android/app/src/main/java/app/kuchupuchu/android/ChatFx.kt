@@ -247,6 +247,43 @@ fun Modifier.fxSlotOpen(active: Boolean, fromDp: Float = -30f, ms: Int = 480): M
     return graphicsLayer { alpha = v }
 }
 
+/**
+ * r78-6/r78-8 (owner: "emoji send korle 0.2 seconds flicking kore halka kata
+ * pore" + "emojis send korle first time animate hobe just ekbar"): an emoji
+ * row IS its glyph - there is no bubble to hide the composer flight's start,
+ * and that flight begins its travel below the LazyColumn viewport, so the
+ * first ~30% of the entrance drew a glyph chopped by the list edge. An emoji
+ * row takes THIS instead: one grow+fade entirely inside its own bounds, so
+ * nothing can clip it - exactly once per message (clientId-keyed, the
+ * first-arm-wins Flight), and the echo->server swap can never re-run it.
+ */
+@Composable
+fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 260): Modifier {
+    val scale = fxAnimatorScale()
+    val f = FlightAnims.of(key)
+    if (!active || scale <= 0f || f == null || f.goAt < 0L) return this
+    var v by remember(key) { mutableStateOf(FlightAnims.valueAt(f, ms)) }
+    LaunchedEffect(key) {
+        while (true) {
+            val now = FlightAnims.valueAt(f, ms)
+            v = now
+            if (now >= 1f) {
+                FlightAnims.markDone(key)
+                break
+            }
+            androidx.compose.runtime.withFrameNanos { }
+        }
+    }
+    if (v >= 1f) return this
+    return graphicsLayer {
+        alpha = 0.25f + 0.75f * v
+        val g = 0.55f + 0.45f * v
+        scaleX = g
+        scaleY = g
+        transformOrigin = androidx.compose.ui.graphics.TransformOrigin.Center
+    }
+}
+
 /* -------------------------------------------------------- the send flight */
 
 /**

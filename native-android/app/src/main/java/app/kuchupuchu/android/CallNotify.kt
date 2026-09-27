@@ -38,6 +38,15 @@ private const val CH_FG = "kp-call-fg"
 object CallSounds {
     private var ring: MediaPlayer? = null
     private var ringback: MediaPlayer? = null
+    // r78-10 (owner: "theke theke massage er sounds na hoye call sounds play
+    // hoi"): a ring / ringback MediaPlayer loops FOREVER, and every stop
+    // path is manual - a single missed or exceptioned one leaves the CALL
+    // tone looping over later messages on any screen. Self-cap: when a tone
+    // starts, a stop is scheduled > the longest legit ring; identity checks
+    // make a stopped / re-started player ignore an older schedule.
+    @Volatile private var ringEpoch = 0
+    @Volatile private var ringbackEpoch = 0
+    private val ringBirthHandler = android.os.Handler(android.os.Looper.getMainLooper())
     /** Which stream the live ringback rides, so a route change can move it. */
     private var ringbackUsage = 0
     private var liftedFrom = -1
@@ -121,11 +130,18 @@ object CallSounds {
         if (usage == android.media.AudioAttributes.USAGE_ALARM) liftAlarmVolume(ctx.applicationContext)
         runCatching { player.start() }
         ringback = player
+        ringbackEpoch += 1
+        val eb = ringbackEpoch
+        ringBirthHandler.postDelayed(
+            { if (eb == ringbackEpoch && ringback === player) stopRingback() },
+            70_000L,
+        )
         ringbackUsage = usage
     }
 
     @Synchronized
     fun stopRingback() {
+        ringbackEpoch += 1
         runCatching { ringback?.stop() }
         ringback?.release()
         ringback = null
@@ -183,6 +199,15 @@ object CallSounds {
         liftAlarmVolume(ctx.applicationContext)
         runCatching { player.start() }
         ring = player
+        ringEpoch += 1
+        val e = ringEpoch
+        ringBirthHandler.postDelayed({
+            // ~95s: way past the server's ~60s unanswered-call sweep and the
+            // engine's own 60s outgoing-ring cap, so nothing legit is cut -
+            // only a leaked loop. The epoch makes an older schedule a no-op
+            // for a stopped / restarted tone.
+            if (e == ringEpoch && ring === player) stop()
+        }, 95_000L)
         vibrate(ctx, longArrayOf(0, 500, 400, 500))
     }
 
@@ -251,6 +276,7 @@ object CallSounds {
 
     @Synchronized
     fun stop(ctx: Context? = null) {
+        ringEpoch += 1
         runCatching { ring?.stop() }
         ring?.release()
         ring = null

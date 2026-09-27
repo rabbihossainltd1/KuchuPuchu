@@ -203,6 +203,17 @@ fun AttachPanel(
             folder = null
         }
     }
+    // r78-5 (owner: "pathanor ager step e chole asho - back dile direct ber
+    // kore dibe na"): the panel eats the back gesture LAYER BY LAYER instead
+    // of the chat's one-shot close - the expanded grid / folders collapse
+    // first, and only the plain panel hands the gesture through to the
+    // chat's handler, which then closes the panel itself. (The last-mounted
+    // enabled BackHandler wins; the chat's one sits below this panel.)
+    androidx.activity.compose.BackHandler(enabled = fullscreen) { setFullscreen(false) }
+    androidx.activity.compose.BackHandler(enabled = foldersOpen) {
+        foldersOpen = false
+        folder = null
+    }
     val dragTotal = remember { mutableStateOf(0f) }
     // Actively dragging: track height directly (dragTotal), no animation
     // spec in the loop — animateDpAsState()'ing a value that's already

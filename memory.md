@@ -439,3 +439,17 @@
   true, so the strip walked while the clock stood still).
 - Process note: an accidental two-fix bundle was split into separate commits via
   reset --mixed before push (owner's one-item-per-commit rule).
+
+## r77 round (owner brief kuchupuchu-r77.md, 2026-09-27)
+All 10 items shipped in sequence; tip 6702cc1c + wrangler deploy (96337c5e-bca4).
+- crash: KpSocket.onMessage now main-posts listener callbacks (Api.kt); paintSent seat lookup index-based (owner v247 CME).
+- 1+6: flight arms at echo birth, 0L — one motion for every send type; no ack dance (r77-1/6 pins).
+- 2: capture alerts silent — no push (worker), no in-chat tone/buzz (app).
+- 3: hero is the ONLY render (PhotoHero.outId hides the tile); exit targets tile's LIVE seat (heroPageId maps page→id); tile returns 1 frame before window detach.
+- 4: VERIFIED already enforced — view-once photo/video guarded even with Allow on (ChatScreen 5151 `secure = privateChat || once`; kpPrivate includes once; worker grid excludes once media). Asked owner for exact repro spot.
+- 5: attach gallery grid scroll hoisted to chat (rememberSaveable, back-stack entry) — survives mediaedit detour.
+- 7: status video-reply back resumes clip (StatusScreens) — shipped earlier this round.
+- 8: emoji rows = plain TEXT rows in the fx tree; armed at birth, clientId-keyed swap, glyph static — one send = one animation. Pin-only.
+- 9: rapid toggle dance killed — Settings privacy writes serialized via mutex (+missing withLock import fixed after CI caught); GroupInfo poke reload gated by busy.
+- 10: privacy realtime without reopen — messages poll carries marker-SEALED privacy truth (peerSave/peerShotOk/peerRecOk + my sheet flags + peerPrivate; groups: privateGroup). App re-reads the detail on any drift within 1 tick. Worker deployed. Behavior proven: 08-change-markers r77-10 (baseline/unchanged/flip-busts/live-truth) + shim probe POLL-PRIV-OK.
+Open for owner: (6) does "same" include the clock->check icon swap (kept; sizes identical since E3).

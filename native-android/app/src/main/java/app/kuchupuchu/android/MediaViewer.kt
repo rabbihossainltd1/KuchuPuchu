@@ -371,7 +371,27 @@ fun KpPhotoViewer(
         // Owner round 31 item 21: a private person's picture — the viewer's
         // own window is the one a screenshot would capture, so guard THAT
         // (Save / Forward are already withheld by the caller).
-        KpSecure.Guard(secure || !canSave)
+        // r78-4 (owner retest: "allow screenshot on thaklei view once capture
+        // hoy — that cannot stand"): a view-once page ignores the chat's Allow
+        // switches PERMANENTLY, and its flag is planted on BOTH windows from
+        // here — the dialog's own and the activity's — so no window resolution
+        // quirk on any device can leave the picture on a capturable surface.
+        KpSecure.Guard(secure || !canSave || once)
+        if (secure || !canSave || once) {
+            val secureWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
+            DisposableEffect(secureWindow) {
+                secureWindow?.setFlags(
+                    android.view.WindowManager.LayoutParams.FLAG_SECURE,
+                    android.view.WindowManager.LayoutParams.FLAG_SECURE,
+                )
+                onDispose { secureWindow?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE) }
+            }
+            val activityWindow = MainActivity.current?.window
+            DisposableEffect(activityWindow) {
+                if (activityWindow != null) KpSecure.acquire(activityWindow)
+                onDispose { if (activityWindow != null) KpSecure.release(activityWindow) }
+            }
+        }
         // White status icons over the black viewer, whatever the app theme.
         val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
         SideEffect {
@@ -735,14 +755,16 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
     // Owner round 31 item 21: a video from / with a private profile — no
     // capture, no Save (the chat passes `kpPrivate` along in the argument).
     val privateClip = m?.optBoolean("kpPrivate") == true
-    KpSecure.Guard(privateClip)
+    // Owner round 32 (item 17): a view-once clip — the opening is spent the
+    // moment the clip is on screen; kpPrivate already withholds Save / Forward.
+    val onceClip = m?.optBoolean("kpOnce") == true
+    // r78-4: a once clip is guarded by itself too — never left to whatever
+    // the nav argument carried in.
+    KpSecure.Guard(privateClip || onceClip)
     // r71-18: the chat's "Media Save permission" — this clip was sent by
     // someone who withheld saving, so the Save row goes and the capture guard
     // stays off (they may look, they may not keep a copy).
     val noSaveClip = m?.optBoolean("kpNoSave") == true
-    // Owner round 32 (item 17): a view-once clip — the opening is spent the
-    // moment the clip is on screen; kpPrivate already withholds Save / Forward.
-    val onceClip = m?.optBoolean("kpOnce") == true
     val sub = m?.let { viewerStamp(it.optText("createdAt")) } ?: ""
     // 0 loading · 1 ready · -1 failed
     var state by remember(b64) { mutableIntStateOf(if (dest != null && dest.exists() && dest.length() > 0L) 1 else 0) }

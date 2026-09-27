@@ -1202,6 +1202,89 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ---------- r78 round (owner retest after r77/v248) ---------- */
+{
+  const media = main("MediaViewer.kt");
+  const chat = main("ChatScreen.kt");
+  const fx = main("ChatFx.kt");
+  const toggle = main("AnimatedToggleSwitch.kt");
+  const attach = main("AttachSheet.kt");
+
+  check(
+    'r78-4 (owner retest: "allow screenshot on thaklei view once photo tuk kora jacche") + the owner\'s permanent rule: view-once media NEVER respects either Allow switch - the photo pager adds `once` to every one of its guard paths, plants FLAG_SECURE on the dialog window directly, and ref-counts it on the activity window too',
+    media.includes("KpSecure.Guard(secure || !canSave || once)") &&
+      media.includes("if (secure || !canSave || once) {") &&
+      media.includes(
+        "val secureWindow = (LocalView.current.parent as? DialogWindowProvider)?.window",
+      ) &&
+      media.includes("secureWindow?.setFlags(") &&
+      media.split("android.view.WindowManager.LayoutParams.FLAG_SECURE").length - 1 >= 3 &&
+      media.includes("val activityWindow = MainActivity.current?.window") &&
+      media.includes("KpSecure.acquire(activityWindow)") &&
+      media.includes("KpSecure.release(activityWindow)"),
+  );
+
+  check(
+    "r78-4b: the once flag reaches the standalone video player (nav arg `kpOnce` for a view-once clip I received) and the player guards on `privateClip || onceClip` - the capture hole was the clip that was ONLY private by its once-ness",
+    chat.includes('.also { if (once && !isMe) it.put("kpOnce", true) }') &&
+      media.includes('val onceClip = m?.optBoolean("kpOnce") == true') &&
+      media.includes("KpSecure.Guard(privateClip || onceClip)"),
+  );
+
+  check(
+    'r78-6/r78-8 (owner: "emoji send korle 0.2 seconds flicking kore halka kata pore abar thik hoi" + "first time animate hobe just ekbar"): the composer flight starts below the LazyColumn viewport, so a 66sp glyph painted CHOPPED at the list edge for ~30% of its entrance - emoji rows now take fxEmojiEntrance, one grow+fade fully inside the row\'s own bounds, clientId-keyed once-per-message, and every non-emoji row keeps its flight',
+    fx.includes(
+      "fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 260): Modifier",
+    ) &&
+      fx.includes("FlightAnims.markDone(key)") &&
+      fx.includes("androidx.compose.ui.graphics.TransformOrigin.Center") &&
+      chat.includes("Modifier.fxEmojiEntrance(fxFresh, fxKey)") &&
+      chat.includes('kind == "TEXT" && emojiOnlyCount(m.optText("body")) > 0') &&
+      chat.includes(
+        '.fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (kind == "FILE" && fileLooksVoice(m)) 720 else 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)',
+      ),
+  );
+
+  check(
+    "r78-9 (owner retest: toggles still act on their own on rapid flips): AnimatedToggleSwitch keeps the intended state LOCALLY (`want`), flips it in the tap's own frame, and the animations chase `want` - a stale composition can no longer swallow or invert a rapid tap burst, and the parent truth re-syncs through LaunchedEffect(checked)",
+    toggle.includes("var want by remember { mutableStateOf(checked) }") &&
+      toggle.includes("LaunchedEffect(checked) { want = checked }") &&
+      toggle.includes("LaunchedEffect(want)") &&
+      toggle.includes("want = !want\n                    onCheckedChange(want)"),
+  );
+
+  check(
+    'r78-5 (owner: "koyta media select korse oi gulai nai" + "back korle ager position a chole asho"): the attach pencil STAGES the pick and keeps the batch for EVERY count (Done replaces it back, Back/Discard reopen the panel with its ticks), the panel eats back layer by layer (fullscreen grid, then folders, then the chat closes the panel), and the chat-level close handler now sits BELOW those inner handlers so it no longer swallows the gesture first',
+    chat.includes(
+      "ScreenStore.editStageUri = item.uri.toString()\n                    showAttach = false",
+    ) &&
+      attach.includes("BackHandler(enabled = fullscreen) { setFullscreen(false) }") &&
+      attach.includes("BackHandler(enabled = foldersOpen)") &&
+      chat.includes("// r78-5: this handler must sit BELOW the panels it closes") &&
+      chat.indexOf("// r78-5: this handler must sit BELOW the panels it closes") <
+        chat.indexOf("AttachPanel(\n"),
+  );
+}
+
+/* ---------- r78-10: call tones can never become a stuck "message sound," and back ---------- */
+{
+  const callNotify = main("CallNotify.kt");
+  check(
+    'r78-10 (owner: "theke theke massage er sounds na hoye call sounds play hoi" - every sound path audited: push types, FCM channels, KpSounds ids and the KpApp msg:1 frame are all disjoint; the one remaining way a phone plays a CALL tone on a message is a ring / ringback MediaPlayer that escaped every manual stop and loops forever): CallSounds self-caps both tones - a scheduled, epoch-guarded stop (> the server\'s ~60s unanswered sweep, so nothing legit is cut) burns any leaked loop',
+    callNotify.includes("@Volatile private var ringEpoch = 0") &&
+      callNotify.includes("ringEpoch += 1") &&
+      callNotify.includes("val e = ringEpoch") &&
+      callNotify.includes("if (e == ringEpoch && ring === player) stop()") &&
+      callNotify.includes("95_000L") &&
+      callNotify.includes("val eb = ringbackEpoch") &&
+      callNotify.includes("eb == ringbackEpoch && ringback === player) stopRingback()") &&
+      callNotify.includes("70_000L") &&
+      callNotify.includes(
+        "private val ringBirthHandler = android.os.Handler(android.os.Looper.getMainLooper())",
+      ),
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`r70-round: ${lines.length - broken} ok / ${broken} broken`);

@@ -4957,6 +4957,17 @@ fun ChatScreen(nav: NavController, convId: String) {
         /* ---------------- inline panels — the attach panel owns the bottom
            (the composer hides while it is open); NOT fullscreen until the
            user taps/swipes the handle up ---------------- */
+        // r78-5: this handler must sit BELOW the panels it closes - the
+        // panel's own layer-by-layer BackHandlers (folders / fullscreen grid
+        // first, panel last) are registered after it and win while they're
+        // enabled; only the plain panel falls through to this close.
+        androidx.activity.compose.BackHandler(enabled = showAttach || showStickers) {
+            requestAttachExit {
+                showAttach = false
+                attachFs = false
+                showStickers = false
+            }
+        }
         if (showAttach) {
             // Owner round 33 (item 11b): the panel pops up from the bar.
             Box(Modifier.popUp().onGloballyPositioned { attachPanelBounds[0] = it.boundsInWindow() }) {
@@ -4985,18 +4996,15 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // unarmed — once is the editor's own toggle now.
                 onEdit = { item ->
                     ScreenStore.editTitle = title
-                    // Owner round 39 (item 6): the pencil on a MULTI batch
-                    // keeps the batch — Done stages the edited photo back
-                    // (replacing this uri). A lone pick sends as before.
-                    if (attachSel.size > 1) ScreenStore.editStageUri = item.uri.toString()
-                    else {
-                        ScreenStore.editStageUri = null
-                        attachSel.clear()
-                        // Owner round 45 (item 7): the lone-pick pencil
-                        // browses the whole pool (a batch pencil must
-                        // return to its staged uri — no browsing there).
-                        ScreenStore.editPool = attachPool
-                    }
+                    // r78-5 (owner: "koyta media select korse oi gulai nai"
+                    // + "photo selection e ebar back korle ager position a
+                    // chole asho"): the pencil STAGES the pick and keeps the
+                    // batch for EVERY count - Done replaces it back into the
+                    // panel's selection (pendingAddMore), Back / Discard
+                    // reopen the panel with the ticks exactly as they were.
+                    // The lone-pick clear+pool-browse detour that ate the
+                    // selection is retired.
+                    ScreenStore.editStageUri = item.uri.toString()
                     showAttach = false
                     nav.navigate("mediaedit/$convId/0/${statusPickArg(item)}")
                 },
@@ -5043,13 +5051,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                 },
             )
-            }
-        }
-        androidx.activity.compose.BackHandler(enabled = showAttach || showStickers) {
-            requestAttachExit {
-                showAttach = false
-                attachFs = false
-                showStickers = false
             }
         }
         if (showDeselect) {
@@ -7583,10 +7584,26 @@ private fun MessageRow(
         Modifier
             .fillMaxWidth()
             .padding(vertical = 2.dp)
-            .fxSlotOpen(fxFresh)
-            .fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (kind == "FILE" && fileLooksVoice(m)) 720 else 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey) {
-                fxLanded = m.optString("id")
-            },
+            .then(
+                // (emojiOnly is declared below the Row, so the check here
+                // recomputes it inline - same helper, same body.)
+                if (kind == "TEXT" && emojiOnlyCount(m.optText("body")) > 0) {
+                    // r78-6/r78-8 (owner: "0.2 seconds flicking kore halka
+                    // kata pore abar thik hoi" + "first time animate hobe just
+                    // ekbar"): an emoji glyph IS the row - the composer flight
+                    // starts below the list viewport, so the first ~30% of the
+                    // entrance painted the 66sp glyph CHOPPED at the list
+                    // edge. Emoji rows take the un-clippable in-bounds
+                    // grow+fade instead - exactly once per message.
+                    Modifier.fxEmojiEntrance(fxFresh, fxKey)
+                } else {
+                    Modifier
+                        .fxSlotOpen(fxFresh)
+                        .fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (kind == "FILE" && fileLooksVoice(m)) 720 else 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey) {
+                            fxLanded = m.optString("id")
+                        }
+                },
+            ),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {

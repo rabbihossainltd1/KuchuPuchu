@@ -3142,7 +3142,7 @@ const convBetween = (db, a, b) =>
         ) &&
         kt("ProfileScreen.kt").includes("KpSecure.Guard(privatePerson)") &&
         kt("ProfileScreen.kt").includes("canSave = !privatePerson,") &&
-        kt("MediaViewer.kt").includes("KpSecure.Guard(secure || !canSave)") &&
+        kt("MediaViewer.kt").includes("KpSecure.Guard(secure || !canSave || once)") &&
         kt("MediaViewer.kt").includes('val privateClip = m?.optBoolean("kpPrivate") == true') &&
         // v167 (owner: "video 3 dot ta upore rotate button ta remove kore
         // okhane thakbe"): Save is offered whenever the clip can be put on the
@@ -6803,11 +6803,14 @@ const convBetween = (db, a, b) =>
     const app = kt("KpApp.kt");
     // Owner round 45 (item 7): swipe-browse the pool inside the editor.
     check(
-      "r45-7: attach editor browses the pool — lone pencil stages ScreenStore.editPool, the editor sessions item screens with per-photo EditBits snapshots + a horizontal swipe, the stage dies with the screen",
+      "r45-7 (the pool-browse half RETIRED by r78-5, owner: 'koyta media select korse oi gulai nai'): the lone-pencil editPool detour that ate the selection is gone - the pencil stages the pick instead; the editor's per-photo EditBits sessions + horizontal swipe stay",
       store.includes("var editPool: List<MediaItem> = emptyList()") &&
         attach.includes("onPool: (List<MediaItem>) -> Unit = {},") &&
         attach.includes("LaunchedEffect(pool) { if (pool.isNotEmpty()) onPool(pool) }") &&
-        chat.includes("ScreenStore.editPool = attachPool") &&
+        !chat.includes("ScreenStore.editPool = attachPool") &&
+        chat.includes(
+          "ScreenStore.editStageUri = item.uri.toString()\n                    showAttach = false",
+        ) &&
         edit.includes("private class EditBits") &&
         edit.includes("@Composable\nprivate fun MediaEditItemScreen(") &&
         edit.includes('pointerInput("editbrowse")') &&
@@ -8392,7 +8395,9 @@ const convBetween = (db, a, b) =>
         ) &&
         edit39.includes("addMore(stageUri)") &&
         chat39b.includes(
-          "if (attachSel.size > 1) ScreenStore.editStageUri = item.uri.toString()",
+          // r78-5 (owner retest): the pencil stages for EVERY count — the
+          // batch stays ticked through the edit detour for 1 photo too.
+          "ScreenStore.editStageUri = item.uri.toString()\n                    showAttach = false",
         ) &&
         chat39b.includes(
           "val at = attachSel.indexOfFirst { it.uri.toString() == more.replaceUri }",

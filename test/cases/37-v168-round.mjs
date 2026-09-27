@@ -130,7 +130,7 @@ check(
     chat.includes("canSave = KpSecure.amOwner() ||") &&
     // r76-18: the guard grew the peer's Allow switches (same chat guard).
     chat.includes("KpSecure.Guard(privateChat || !peerShotOk || !peerRecOk)") &&
-    viewer.includes("KpSecure.Guard(secure || !canSave)") &&
+    viewer.includes("KpSecure.Guard(secure || !canSave || once)") &&
     viewer.includes(
       "if (m != null && !saved && (KpSecure.amOwner() || (!privateClip && !noSaveClip))) {",
     ),
