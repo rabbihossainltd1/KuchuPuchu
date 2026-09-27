@@ -3975,7 +3975,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                         tween(if (flashing) 180 else 700),
                         label = "quoteflash",
                     )
-                    Column(Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)) {
+                    // r76-27 (audit #15): a VANISHED / deleted row fades away
+                    // on its way out (fadeInSpec stays null - arrivals belong
+                    // to the flight system, untouched).
+                    Column(Modifier.animateItem(fadeInSpec = null, fadeOutSpec = tween(220))) {
                         if (e2eeOn && !hasMoreOlder && m === groupedMsgs.firstOrNull()) {
                             Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.Center) {
                                 E2eeMsgCodeRow(ctx, e2eePeerId, e2eePeerKey, rawTitle)
@@ -6398,6 +6401,9 @@ internal fun ForwardDialog(onClose: () -> Unit, onSend: (List<String>) -> Unit, 
         Column(
             Modifier
                 .fillMaxSize()
+                // r76-27 (audit #3): the full-screen editor FADES in (a zoomed
+                // full page reads wrong - hence zoom = false).
+                .kpPopIn(zoom = false)
                 .background(Cream)
                 .statusBarsPadding()
                 .navigationBarsPadding()
@@ -7149,6 +7155,9 @@ private fun ReplyQuoteBar(replyTo: JSONObject?, theme: String, onCancel: () -> U
     Row(
         Modifier
             .fillMaxWidth()
+            // r76-27 (audit #7): the quote bar rises into place (the panel's
+            // own popUp language) instead of snapping into the composer.
+            .popUp()
             .padding(horizontal = 10.dp, vertical = 4.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(Card)

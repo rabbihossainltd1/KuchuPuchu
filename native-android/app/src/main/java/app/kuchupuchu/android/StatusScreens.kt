@@ -345,9 +345,13 @@ fun StatusScreen(nav: NavController) {
             onDismissRequest = { composeText = false },
             properties = DialogProperties(usePlatformDefaultWidth = false),
         ) {
-            StatusComposer {
-                composeText = false
-                refresh()
+            // r76-27 (audit #2): the composer fades in with a small zoom
+            // instead of slamming onto the glass.
+            Box(Modifier.kpPopIn()) {
+                StatusComposer {
+                    composeText = false
+                    refresh()
+                }
             }
         }
     }

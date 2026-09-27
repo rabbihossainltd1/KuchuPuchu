@@ -48,6 +48,7 @@ import kotlinx.coroutines.withContext
 fun KeyBackupSheet(onClose: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val haptics = rememberHaptics()
     // null = still asking the server.
     var remote by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -93,6 +94,8 @@ fun KeyBackupSheet(onClose: () -> Unit) {
                     val ok = E2eeMsg.uploadLockedBackup(ctx, pass)
                     busy = false
                     if (ok) {
+                        // r76-27 (audit H3): a saved backup is felt, not just read.
+                        haptics.confirm()
                         android.widget.Toast.makeText(ctx, "Backup saved", android.widget.Toast.LENGTH_SHORT).show()
                         remote = E2eeMsg.remoteBackup()
                         passDialog = false
@@ -182,6 +185,7 @@ internal fun PassphraseDialog(
 fun E2eeRestoreGate() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val haptics = rememberHaptics()
     var pend by remember { mutableStateOf(E2eeMsg.pendingRestore) }
     var dismissed by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -208,6 +212,8 @@ fun E2eeRestoreGate() {
                     busy = false
                     if (ok) {
                         pend = null
+                        // r76-27 (audit H3): the unlock lands with a confirm tick.
+                        haptics.confirm()
                         android.widget.Toast.makeText(ctx, "Old messages unlocked", android.widget.Toast.LENGTH_SHORT).show()
                     } else {
                         error = "Wrong passphrase — try again"

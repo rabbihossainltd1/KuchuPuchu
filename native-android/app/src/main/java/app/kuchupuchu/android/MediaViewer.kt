@@ -210,6 +210,16 @@ fun KpPhotoViewer(
     val drag = remember { Animatable(0f) }
     var chrome by remember { mutableStateOf(true) }
     var saving by remember { mutableStateOf(false) }
+    // r76-27 (audit #14): the save success pill that slides up inside the
+    // viewer - a system Toast has no app styling to carry.
+    var savedPill by remember { mutableStateOf(false) }
+    val haptics = rememberHaptics()
+    LaunchedEffect(savedPill) {
+        if (savedPill) {
+            kotlinx.coroutines.delay(1_800)
+            savedPill = false
+        }
+    }
     // Owner round 32 (item 46): the viewer's ⋮ opens a sheet with Save /
     // Forward (nothing else); the old always-visible bottom strip is gone.
     var menuOpen by remember { mutableStateOf(false) }
@@ -264,11 +274,14 @@ fun KpPhotoViewer(
                 android.widget.Toast.makeText(ctx, "Could not download the photo", android.widget.Toast.LENGTH_SHORT).show()
             } else {
                 val saved = FilesUtil.saveImage(ctx, bytes, "kuchupuchu_${System.currentTimeMillis()}.jpg")
-                android.widget.Toast.makeText(
-                    ctx,
-                    if (saved != null) "Saved to Pictures/KuchuPuchu" else "Could not save",
-                    android.widget.Toast.LENGTH_SHORT,
-                ).show()
+                if (saved != null) {
+                    // r76-27 (audit H1): success is FELT (confirm tick) and
+                    // shown as the viewer's own pill, not a system Toast.
+                    haptics.confirm()
+                    savedPill = true
+                } else {
+                    android.widget.Toast.makeText(ctx, "Could not save", android.widget.Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
@@ -289,7 +302,9 @@ fun KpPhotoViewer(
         }
         val dim = (1f - abs(drag.value) / 900f).coerceIn(0.35f, 1f)
         val chromeAlpha by animateFloatAsState(if (chrome) 1f else 0f, tween(160), label = "photochrome")
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = dim))) {
+        // r76-27 (audit #1): the window fades in with a small zoom instead of
+        // slamming onto the glass.
+        Box(Modifier.fillMaxSize().kpPopIn().background(Color.Black.copy(alpha = dim))) {
             Box(
                 Modifier
                     .fillMaxSize()
@@ -298,6 +313,7 @@ fun KpPhotoViewer(
                             awaitFirstDown(requireUnconsumed = false)
                             var twoFinger = false
                             var travelled = 0f
+                            var dismissBuzz = false
                             var dismissing = false
                             var dragLocal = 0f
                             while (true) {
@@ -337,6 +353,12 @@ fun KpPhotoViewer(
                                         dragLocal += pan.y
                                         val v = dragLocal
                                         scope.launch { drag.snapTo(v) }
+                                        // r76-27 (audit H2): the moment the drag crosses
+                                        // the close threshold the finger hears it - once.
+                                        if (!dismissBuzz && abs(dragLocal) > size.height * 0.16f) {
+                                            dismissBuzz = true
+                                            haptics.tap()
+                                        }
                                         event.changes.forEach { if (it.positionChanged()) it.consume() }
                                     }
                                 }
@@ -427,6 +449,19 @@ fun KpPhotoViewer(
                         noCache = once,
                     )
                 }
+            }
+            androidx.compose.animation.AnimatedVisibility(
+                visible = savedPill,
+                enter = androidx.compose.animation.slideInVertically(tween(180)) { it } + androidx.compose.animation.fadeIn(tween(140)),
+                exit = androidx.compose.animation.fadeOut(tween(300)),
+                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 30.dp),
+            ) {
+                Text(
+                    "Saved to Pictures/KuchuPuchu",
+                    color = Color.White,
+                    fontSize = 12.5.sp,
+                    modifier = Modifier.clip(RoundedCornerShape(18.dp)).background(Color(0xE620242B)).padding(horizontal = 14.dp, vertical = 8.dp),
+                )
             }
             if (chromeAlpha > 0.01f) {
                 val pageSubtitle = subtitles.getOrElse(pager.currentPage) { subtitle }
@@ -681,6 +716,8 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
                 }
             savingClip = false
             saved = ok
+            // r76-27 (audit H1): the clip's save success ticks like the photo's.
+            if (ok) haptics.confirm()
             android.widget.Toast.makeText(
                 ctx,
                 if (ok) "Saved to Downloads" else "Could not save",

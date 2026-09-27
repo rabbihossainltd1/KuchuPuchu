@@ -1213,6 +1213,26 @@ fun Modifier.vanishOut(gone: Boolean, onDone: () -> Unit): Modifier {
     }
 }
 
+/**
+ * r76-27 (audit items 1-3): the hard-pop Dialog windows - photo viewer,
+ * status composer, the edit screen - fade in with a small zoom instead of
+ * slamming onto the glass. `zoom = false` keeps full-screen pages to a plain
+ * fade (a scaled full page reads wrong).
+ */
+@Composable
+fun Modifier.kpPopIn(zoom: Boolean = true): Modifier {
+    val t = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { t.animateTo(1f, tween(220)) }
+    val v = t.value
+    return this.graphicsLayer {
+        alpha = v
+        if (zoom) {
+            scaleX = 0.94f + 0.06f * v
+            scaleY = 0.94f + 0.06f * v
+        }
+    }
+}
+
 /** Item 11b: an inline panel / bar that pops open from its bottom edge (180 ms). */
 @Composable
 fun Modifier.popUp(): Modifier {

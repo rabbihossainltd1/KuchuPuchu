@@ -910,6 +910,46 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ---------- r76-27: the audit's animations + haptics ---------- */
+{
+  const ui = main("Ui.kt");
+  const viewer = main("MediaViewer.kt");
+  const status = main("StatusScreens.kt");
+  const chat = main("ChatScreen.kt");
+  const list = main("ChatListScreen.kt");
+  const backup = main("E2eeBackup.kt");
+  check(
+    "r76-27: hard pops learned to fade (viewer/composer/editor), quote bar rises, rows travel and fade out, badge springs, dot fades, top bar crossfades; saves/unlocks tick",
+    ui.includes("fun Modifier.kpPopIn(zoom: Boolean = true): Modifier") &&
+      viewer.includes(
+        "Box(Modifier.fillMaxSize().kpPopIn().background(Color.Black.copy(alpha = dim))) {",
+      ) &&
+      viewer.includes("if (!dismissBuzz && abs(dragLocal) > size.height * 0.16f) {") &&
+      viewer.includes("savedPill = true") &&
+      viewer.includes('"Saved to Pictures/KuchuPuchu",') &&
+      viewer.includes("if (ok) haptics.confirm()") &&
+      status.includes("Box(Modifier.kpPopIn()) {") &&
+      chat.includes(".kpPopIn(zoom = false)") &&
+      chat.includes(".popUp()") &&
+      chat.includes(
+        "Column(Modifier.animateItem(fadeInSpec = null, fadeOutSpec = tween(220))) {",
+      ) &&
+      list.includes('label = "chattopbar",') &&
+      (
+        list.match(
+          /Box\(Modifier\.animateItem\(fadeOutSpec = androidx\.compose\.animation\.core\.tween\(200\)\)\)/g,
+        ) || []
+      ).length === 2 &&
+      list.includes(
+        "enter = androidx.compose.animation.scaleIn() + androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(150)),",
+      ) &&
+      list.includes(
+        "enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(300)) + androidx.compose.animation.scaleIn(),",
+      ) &&
+      (backup.match(/haptics\.confirm\(\)/g) || []).length === 2,
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`r70-round: ${lines.length - broken} ok / ${broken} broken`);

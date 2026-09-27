@@ -332,7 +332,13 @@ fun ChatListScreen(nav: NavController) {
             // Leaving the screen ends select mode — nobody returns to a stale
             // set of ticks.
             androidx.compose.runtime.DisposableEffect(Unit) { onDispose { ListSelect.clear() } }
-            if (selecting) {
+            // r76-27 (audit #8): the bar swaps through a fade, not a hard cut.
+            androidx.compose.animation.Crossfade(
+                targetState = selecting,
+                animationSpec = androidx.compose.animation.core.tween(180),
+                label = "chattopbar",
+            ) { selTop ->
+            if (selTop) {
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -383,6 +389,7 @@ fun ChatListScreen(nav: NavController) {
                 if (homeMenu) {
                     HomeMenuSheet(onDismiss = { homeMenu = false }, nav = nav)
                 }
+            }
             }
             }
             // Owner round 32 (item 12): the long-press / ⋮ sheet.
@@ -698,7 +705,9 @@ fun ArchiveScreen(nav: NavController) {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(archived, key = { it.optString("id") }) { conv ->
-                    SwipeConvRow(conv, nav, { rev++ }, archivedMode = true)
+                    Box(Modifier.animateItem(fadeOutSpec = androidx.compose.animation.core.tween(200))) {
+                        SwipeConvRow(conv, nav, { rev++ }, archivedMode = true)
+                    }
                 }
             }
         }
@@ -967,7 +976,11 @@ private fun ChatListBody(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(visible, key = { it.optString("id") }) { conv ->
-            SwipeConvRow(conv, nav, onChange)
+            // r76-27 (audit #4): pins, archives and deletes reorder the list -
+            // rows now travel/fade to their new seat instead of teleporting.
+            Box(Modifier.animateItem(fadeOutSpec = androidx.compose.animation.core.tween(200))) {
+                SwipeConvRow(conv, nav, onChange)
+            }
         }
     }
 }
@@ -1449,13 +1462,19 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                 KpAvatar(name, avatarUrl, 44.dp, avatarRef = avatarRef) // Owner round 25: choto
             }
             if (online) {
-                Box(
-                    Modifier
-                        .align(Alignment.BottomEnd)
-                        .size(13.dp)
-                        .clip(CircleShape)
-                        .background(Green),
-                )
+                // r76-27 (audit #10): the dot fades/scales in instead of popping.
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = true,
+                    enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(300)) + androidx.compose.animation.scaleIn(),
+                    modifier = Modifier.align(Alignment.BottomEnd),
+                ) {
+                    Box(
+                        Modifier
+                            .size(13.dp)
+                            .clip(CircleShape)
+                            .background(Green),
+                    )
+                }
             }
         }
         Spacer(Modifier.width(12.dp))
@@ -1543,6 +1562,11 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                 )
                 if (unread > 0) {
                     Spacer(Modifier.width(8.dp))
+                    // r76-27 (audit #9): a new count springs in, it does not pop.
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = true,
+                        enter = androidx.compose.animation.scaleIn() + androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(150)),
+                    ) {
                     Box(
                         Modifier
                             .height(22.dp)
@@ -1558,6 +1582,7 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                         )
+                    }
                     }
                 }
             }

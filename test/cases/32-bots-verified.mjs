@@ -5569,8 +5569,9 @@ const convBetween = (db, a, b) =>
         chat.includes('FilesUtil.cacheFile(ctx, "viewer-edit.jpg", bytes, "image/jpeg")') &&
         (mv.match(/Icons\.Filled\.MoreVert, "More"/g) || []).length === 2 &&
         !mv.includes("private fun ViewerAction(") &&
-        // r34-6: the album position pill joins the player's seek bar at the bottom.
-        (mv.match(/\.align\(Alignment\.BottomCenter\)/g) || []).length === 2 &&
+        // r34-6: the album position pill joins the player's seek bar at the
+        // bottom. r76-27: the save-success pill is the third.
+        (mv.match(/\.align\(Alignment\.BottomCenter\)/g) || []).length === 3 &&
         mv.includes("onForward = onForward?.let { f -> { menuOpen = false; f() } },") &&
         mv.includes(
           "onForward = if (canForward) ({ menuOpen = false; forwarding = true }) else null,",
@@ -9655,7 +9656,10 @@ const convBetween = (db, a, b) =>
         kt("DeleteAnim.kt").includes("suspend fun capture(bubble: Rect)") &&
         kt("DeleteAnim.kt").includes("PixelCopy.request(") &&
         kt("DeleteAnim.kt").includes("drawToBitmap()") &&
-        chat.includes(".animateItem(fadeInSpec = null, fadeOutSpec = null)"),
+        // r76-27 (audit #15): rows still glide into the gap, and a leaving
+        // row now fades on its way out (fadeInSpec stays null - the flight
+        // system owns arrivals).
+        chat.includes(".animateItem(fadeInSpec = null, fadeOutSpec = tween(220))"),
     );
     check(
       "r35-2: no touch ripples anywhere — KpTheme provides a no-op NoTouchIndication at the root (LocalIndication is non-null here, so silence is an instance; the default indication was the only ripple source; explicit indication = null sites stay)",
