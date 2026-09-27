@@ -453,3 +453,14 @@ All 10 items shipped in sequence; tip 6702cc1c + wrangler deploy (96337c5e-bca4)
 - 9: rapid toggle dance killed — Settings privacy writes serialized via mutex (+missing withLock import fixed after CI caught); GroupInfo poke reload gated by busy.
 - 10: privacy realtime without reopen — messages poll carries marker-SEALED privacy truth (peerSave/peerShotOk/peerRecOk + my sheet flags + peerPrivate; groups: privateGroup). App re-reads the detail on any drift within 1 tick. Worker deployed. Behavior proven: 08-change-markers r77-10 (baseline/unchanged/flip-busts/live-truth) + shim probe POLL-PRIV-OK.
 Open for owner: (6) does "same" include the clock->check icon swap (kept; sizes identical since E3).
+
+## r78 (2026-09-27) — owner's verify-before-touch scolding round; 8 open items from v248 retest
+Verdict: item 1,2,7 confirmed fixed by owner. New work:
+- r78-3: photo hero "almost" — mixed photo/video pager is the real ask (video lives on a separate player route today); deferred to owner repro (screen recording) before touching.
+- r78-4: view-once now guards itself on EVERY surface (photo pager Guard(secure||!canSave||once) + raw dialog FLAG_SECURE + ref-counted activity acquire/release; player Guard(privateClip||onceClip) via new kpOnce nav arg). Never respects Allow switches.
+- r78-5: attach pencil stages for EVERY count (selection kept through edit->back); panel back = folders -> fullscreen grid -> panel -> close; chat-level close handler moved BELOW panel handlers (last-registered-wins in Compose).
+- r78-6/8: NEW fxEmojiEntrance (ChatFx.kt) for emoji rows — grow+fade in-bounds, clientId-keyed once; replaces composer flight for emoji rows (glyph was chopped at list viewport edge for ~30% of flight). fxFlyIn/slotOpen untouched for other kinds.
+- r78-9: AnimatedToggleSwitch local `want` state (tap flips in same frame); parent re-syncs via LaunchedEffect(checked). Covers all toggles app-wide.
+- r78-10: CallSounds self-cap — ring 95s / ringback 70s epoch-guarded scheduled stop (leaked looping MediaPlayer was the last way a call tone plays over messages). All push/channel/SoundPool paths audited disjoint.
+Ship: tip 1512720, CI success run 36355262677 (Kotlin compile green), APK artifact 10943951495 (27.8MB). ktlint clean, tests 47/47 (1916).
+Env drift note: sandbox lost JDK17+Android SDK — Temurin 17 at /tmp/jdk17; scripts/ktlint-check.sh works standalone (its own jar).
