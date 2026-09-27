@@ -1106,6 +1106,26 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ---------- r77-3: the hero is the ONLY copy; the exit lands on the live seat ---------- */
+{
+  const viewer = main("MediaViewer.kt");
+  const chat = main("ChatScreen.kt");
+  check(
+    'r77-3 (owner: "chat media open korle extract oi media tai animation hoye Fullscreen hoye asbe fake doublicate na ar photo theke ber hole extract ager position a chole jabe zero gap properly"): the tapped tile hides while its hero is out (no second render), the exit hero targets the tile\'s LIVE seat (the chat scrolls/rows arrive while the viewer is open - the old snapshot landed mid-air), and the tile returns one frame before the window detaches - zero gap, no blank',
+    viewer.includes("var outId: String? by androidx.compose.runtime.mutableStateOf(null)") &&
+      viewer.includes("fun seatOf(id: String?)") &&
+      viewer.includes(
+        "LaunchedEffect(pager.currentPage) { PhotoHero.outId = heroPageId.invoke(pager.currentPage) }",
+      ) &&
+      viewer.includes("PhotoHero.seatOf(it.invoke(pager.currentPage))") &&
+      viewer.includes("androidx.compose.runtime.withFrameNanos { }") &&
+      chat.includes('heroPageId = { i -> viewerPhotos.getOrNull(i)?.optString("id") ?: "" }') &&
+      chat.includes(
+        'alpha = if (PhotoHero.outId != null && PhotoHero.outId == m.optString("id").ifBlank { m.optString("clientId") }) 0f else 1f',
+      ),
+  );
+}
+
 /* ---------- r77-7: video-status reply - the FIRST back resumes the clip, any nav mode ---------- */
 {
   const status = main("StatusScreens.kt");

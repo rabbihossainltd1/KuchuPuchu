@@ -120,6 +120,17 @@ object PhotoHero {
         )
     var lastId: String? = null
 
+    // r77-3 (owner: "fake doublicate na"): the tile the hero stands in for is
+    // HIDDEN for the whole trip - the hero is the only copy on screen, from
+    // the tap's frame to the landing's.
+    var outId: String? by androidx.compose.runtime.mutableStateOf(null)
+
+    // r77-3: the tile reports its seat on every layout, so the map always
+    // knows where it sits NOW (rows move while the viewer is open - the old
+    // snapshot is what landed the exit hero mid-air, "zero gap na").
+    fun seatOf(id: String?): androidx.compose.ui.geometry.Rect? =
+        if (id.isNullOrBlank()) null else map[id]
+
     fun set(id: String, r: androidx.compose.ui.geometry.Rect) {
         if (id.isNotBlank()) map[id] = r
     }
@@ -227,6 +238,10 @@ fun KpPhotoViewer(
     once: Boolean = false,
     // r76-28: the tapped tile's seat - the photo grows from it to fullscreen.
     heroFrom: androidx.compose.ui.geometry.Rect? = null,
+    // r77-3: page index -> that page's chat-tile id (albums; a single page is
+    // the tapped tile). The exit hero lands on the LIVE seat of whatever page
+    // is showing, and each such tile hides until the landing releases it.
+    heroPageId: ((Int) -> String)? = null,
 ) {
     // Snapshotted once - a later recompose (page flip, chrome) must never
     // restart or cancel the opening.
@@ -247,6 +262,12 @@ fun KpPhotoViewer(
             closing = true
             heroScope.launch {
                 hero.animateTo(0f, tween(260, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+                // r77-3: the landed hero sits exactly on the live seat, fully
+                // opaque. Bring the tile back and commit ONE frame while that
+                // still covers it, THEN detach the window - zero gap, no
+                // blank frame, no duplicate at the handoff.
+                PhotoHero.outId = null
+                androidx.compose.runtime.withFrameNanos { }
                 onClose()
             }
         } else {
@@ -299,6 +320,11 @@ fun KpPhotoViewer(
         }
     }
     val pager = rememberPagerState(initialPage = startIndex.coerceIn(pages.indices)) { pages.size }
+    // r77-3: hide whichever chat tile the hero stands in for. The landing
+    // releases it (see dismiss) exactly when the hero is back on it.
+    if (heroPageId != null) {
+        LaunchedEffect(pager.currentPage) { PhotoHero.outId = heroPageId.invoke(pager.currentPage) }
+    }
     LaunchedEffect(pager.currentPage) {
         scale = 1f
         offX = 0f
@@ -498,7 +524,15 @@ fun KpPhotoViewer(
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer {
-                            val h = heroSeat
+                            // r77-3: on the way OUT the target is the tile's
+                            // seat RIGHT NOW (it may have scrolled while the
+                            // viewer was open); on the way IN the snapshot.
+                            val h =
+                                if (closing) {
+                                    heroPageId?.let { PhotoHero.seatOf(it.invoke(pager.currentPage)) } ?: heroSeat
+                                } else {
+                                    heroSeat
+                                }
                             val t = hero.value
                             if (h != null && t < 1f && size.width > 0f && size.height > 0f) {
                                 val sw = size.width

@@ -5127,6 +5127,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                 url = messageMediaUrl(m),
                 title = who,
                 heroFrom = PhotoHero.take(),
+                // r77-3: the page -> tile id map, so the exit hero lands on
+                // the LIVE seat of the page showing, and that tile hides
+                // until the landing (no duplicate, zero gap).
+                heroPageId = { i -> viewerPhotos.getOrNull(i)?.optString("id") ?: "" },
                 subtitle = if (once) "View once" else viewerStamp(m.optText("createdAt")),
                 once = once,
                 onClose = { viewerPhotos = emptyList() },
@@ -9323,6 +9327,13 @@ private fun ImageMessageRow(
                         m.optString("id").ifBlank { m.optString("clientId") },
                         androidx.compose.ui.geometry.Rect(b.left + loc[0], b.top + loc[1], b.right + loc[0], b.bottom + loc[1]),
                     )
+                }
+                .graphicsLayer {
+                    // r77-3 (owner: "fake doublicate na"): while the viewer
+                    // flies this tile's hero, the tile itself is NOT a second
+                    // copy - the hero is the only render of this photo. The
+                    // seat keeps updating above, so the exit lands on it.
+                    alpha = if (PhotoHero.outId != null && PhotoHero.outId == m.optString("id").ifBlank { m.optString("clientId") }) 0f else 1f
                 }
                 .combinedClickable(
                     onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
