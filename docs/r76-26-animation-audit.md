@@ -1,5 +1,10 @@
 # r76-26 অডিট: যেখানে অ্যাপ abrupt (animation/haptics দরকার)
 
+> **r76-27-এ implement হয়েছে (v244/3.9.167):** নিচের ১–৪, ৭–১০, ১৪, ১৫ + haptic ১–৩ শিপ হয়েছে।
+> ৫ (অ্যাটাচ প্যানেল) ও haptic ৫ (swipe/archive) — আগে থেকেই animation/haptic ছিল, কোড দেখে বাদ।
+> ৬ (IME resize), ১১ (ওয়ালপেপার crossfade), ১২ (deleted-chip fade) — ঝুঁকিপূর্ণ, পরের রাউন্ডের প্রার্থী।
+> ১৩ ও haptic ৪ — সিস্টেম UI (permission dialog / notification), অ্যাপ থেকে বদলানো যায় না।
+
 স্ক্যান: ChatScreen, ChatListScreen, MediaViewer, StatusScreens, SettingsScreen, KpApp (NavHost), Ui.kt।
 ✅ = আগে থেকেই ঠিক আছে (ধরার দরকার নেই)। 🔧 = করা দরকার।
 
