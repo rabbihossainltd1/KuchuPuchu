@@ -600,16 +600,16 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes("if (allowRec)") &&
       chat.includes("Alert me when they screenshot this chat") &&
       chat.includes("Alert me when they record this chat") &&
-      chat.includes("They may save the media I send here") &&
-      chat.includes("They cannot save the media I send here") &&
+      // r76-22 (owner: "short 1 line a rakho"): every sub-line is one short
+      // sentence now.
+      chat.includes("They can save the media I send here") &&
+      chat.includes("They cannot save my media") &&
       // r72-18: the screenshot row is no longer "Android 14 or newer" — the
       // 12/13 folder watch covers the versions below it, so the row is live
       // everywhere. r76-20 (owner item 3): the RECORDING row lost its
       // "Android 15 or newer" floor too — below 15 the saved-recording file
       // is read from the Screen recordings folder, so it is live everywhere.
-      chat.includes(
-        "Alert me when their saved recording shows up (via your Screen recordings folder)",
-      ) &&
+      chat.includes("Needs Videos access to spot them") &&
       !chat.includes("Alerts need Android 15 or newer") &&
       chat.includes("folderWatch = KpCapture.folderPermissions().isNotEmpty(),") &&
       chat.includes("folderGranted = KpCapture.folderGranted(ctx),"),
@@ -667,8 +667,11 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes("act.ensurePermissions(perms) { capturePermNonce++ }") &&
       chat.includes("DisposableEffect(convId, capturePermNonce) {") &&
       chat.includes("var capturePermNonce by remember { mutableStateOf(0) }") &&
-      chat.includes("Alert me when they screenshot this chat (via your Screenshots folder)") &&
-      chat.includes("Allow Photos so screenshots can be spotted"),
+      // r76-22: the alert rows are SUB-options — small row, small toggle,
+      // indented under their Allow switch, and one short line of text.
+      chat.includes("Needs Photos access to spot them") &&
+      chat.split("small = true,").length === 3 &&
+      chat.includes("Modifier.scale(0.72f)"),
   );
   check(
     'r73-18b (owner: "screenshot chat er baire nileo alert jai"): the watch follows the ACTIVITY, not the composition — [pause] tears every registration down when the screen loses focus, [resume] re-arms it, and arming always starts from a FRESH watermark, so a screenshot taken in another app can never be attributed to this chat',

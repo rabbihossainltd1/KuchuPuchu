@@ -1668,7 +1668,12 @@ fun ChatScreen(nav: NavController, convId: String) {
         // scroll cancels the older one, and that must not take the POST with it.
         scope.launch {
             val total = msgs.size + pending.size
-            if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }
+// r76-22 (owner: "sent hole ekhono 0.1 seconds halka kete jai"): SNAP,
+            // don't glide - the glide slid the fresh row up from under the viewport
+            // (its bottom cut for a beat) and r76-21's gate turned that beat into an
+            // invisible gap. Snapped, the row is born in its seat and its ONE flight
+            // plays at once - no cut, no gap.
+            if (total > 0) runCatching { listState.snapToItem(total - 1) }
         }
         // Owner round 11: tap sound on the send itself…
         lastTypingPing = 0L
@@ -1791,7 +1796,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("createdAt", java.time.Instant.now().toString())
                 .also { if (replyId != null) it.put("replyTo", replyId) },
         )
-        scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
+// r76-22 (owner: "sent hole ekhono 0.1 seconds halka kete jai"): SNAP,
+        // don't glide - the glide slid the fresh row up from under the viewport
+        // (its bottom cut for a beat) and r76-21's gate turned that beat into an
+        // invisible gap. Snapped, the row is born in its seat and its ONE flight
+        // plays at once - no cut, no gap.
+        scope.launch { runCatching { listState.snapToItem(msgs.size + pending.size - 1) } }
         // r76-20 (owner item 14): a gif is a sticker-panel send — its tone.
         runCatching { KpSounds.stickerSend(ctx) }
         scope.launch {
@@ -1945,7 +1955,12 @@ fun ChatScreen(nav: NavController, convId: String) {
         // scroll inline, photo #2's launch cancelled photo #1's *before its
         // upload began*, #3 cancelled #2, … so of an N-photo album only the
         // last photo ever reached the server ("multi-photo sends one").
-        scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
+// r76-22 (owner: "sent hole ekhono 0.1 seconds halka kete jai"): SNAP,
+        // don't glide - the glide slid the fresh row up from under the viewport
+        // (its bottom cut for a beat) and r76-21's gate turned that beat into an
+        // invisible gap. Snapped, the row is born in its seat and its ONE flight
+        // plays at once - no cut, no gap.
+        scope.launch { runCatching { listState.snapToItem(msgs.size + pending.size - 1) } }
         scope.launch {
             runCatching { KpSounds.send(ctx) }
             var shotW = 0
@@ -2164,7 +2179,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // r70-13: the file's own echo carries the quote from frame one.
                 .also { if (replyId != null) it.put("replyTo", replyId) },
         )
-        scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
+// r76-22 (owner: "sent hole ekhono 0.1 seconds halka kete jai"): SNAP,
+        // don't glide - the glide slid the fresh row up from under the viewport
+        // (its bottom cut for a beat) and r76-21's gate turned that beat into an
+        // invisible gap. Snapped, the row is born in its seat and its ONE flight
+        // plays at once - no cut, no gap.
+        scope.launch { runCatching { listState.snapToItem(msgs.size + pending.size - 1) } }
         runCatching { KpSounds.send(ctx) }
         // Owner round 32 (item 34): the upload + POST run on Uploads' own
         // scope — this screen only awaits the outcome for its bubble. They
@@ -2285,7 +2305,12 @@ fun ChatScreen(nav: NavController, convId: String) {
         )
         // Owner round 32 (item 48): same split as sendImage — a scroll started
         // by anything else must never cancel the upload coroutine.
-        scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
+// r76-22 (owner: "sent hole ekhono 0.1 seconds halka kete jai"): SNAP,
+        // don't glide - the glide slid the fresh row up from under the viewport
+        // (its bottom cut for a beat) and r76-21's gate turned that beat into an
+        // invisible gap. Snapped, the row is born in its seat and its ONE flight
+        // plays at once - no cut, no gap.
+        scope.launch { runCatching { listState.snapToItem(msgs.size + pending.size - 1) } }
         scope.launch {
             runCatching { KpSounds.send(ctx) }
             // Owner round 33 (item 3): the recording is a file already — the
@@ -2396,7 +2421,12 @@ fun ChatScreen(nav: NavController, convId: String) {
             ScreenStore.pendingVideoSend.value = null
             val cid = job.row.optString("clientId")
             pending.add(job.row)
-            scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
+// r76-22 (owner: "sent hole ekhono 0.1 seconds halka kete jai"): SNAP,
+            // don't glide - the glide slid the fresh row up from under the viewport
+            // (its bottom cut for a beat) and r76-21's gate turned that beat into an
+            // invisible gap. Snapped, the row is born in its seat and its ONE flight
+            // plays at once - no cut, no gap.
+            scope.launch { runCatching { listState.snapToItem(msgs.size + pending.size - 1) } }
             scope.launch {
                 val file = runCatching { job.bake(ctx) }.getOrNull()
                 if (file == null) {
@@ -10699,68 +10729,61 @@ private fun ChatPrivacySheet(
         // and the alert row only EXISTS while the Allow switch is on. The
         // block itself (FLAG_SECURE on the other phone) works everywhere;
         // only the ALERT needs the newer OS hooks.
+        // r76-22 (owner: "onek beshi instructions details a bola ache ...
+        // short 1 line a rakho"): every line under a switch is ONE short
+        // sentence now.
         PrivacyToggle(
             icon = Icons.Filled.Lock,
             label = "Allow Screenshot",
-            sub =
-                if (allowShot) "They may screenshot this chat" else "Screenshots of this chat are blocked on their phone",
+            sub = if (allowShot) "They can screenshot this chat" else "Screenshots blocked on their phone",
             checked = allowShot,
             enabled = true,
             onChange = onAllowShot,
         )
         if (allowShot)
+            // r76-22 (owner: "2 ta option hocche sub option so egula choto
+            // thakbe ... toggle ta onnoder moto boro na"): the alert is a
+            // SUB-option of its Allow switch — smaller row, smaller toggle,
+            // indented under the parent.
             PrivacyToggle(
                 icon = Icons.Filled.Notifications,
                 label = "Screenshot alert",
                 sub =
-                    when {
-                        android.os.Build.VERSION.SDK_INT >= 34 ->
-                            "Alert me when they screenshot this chat"
-                        folderWatch && folderGranted ->
-                            "Alert me when they screenshot this chat (via your Screenshots folder)"
-                        folderWatch -> "Allow Photos so screenshots can be spotted"
-                        else -> "Alert me when they screenshot this chat"
-                    },
+                    if (folderWatch && !folderGranted) "Needs Photos access to spot them"
+                    else "Alert me when they screenshot this chat",
                 checked = shot,
                 enabled = true,
                 onChange = onShot,
+                small = true,
             )
         PrivacyToggle(
             icon = Icons.Filled.Videocam,
             label = "Allow Screen Record",
             sub =
-                if (allowRec) "They may screen-record this chat" else "Screen recording of this chat is blocked on their phone",
+                if (allowRec) "They can screen-record this chat" else "Screen recording blocked on their phone",
             checked = allowRec,
             enabled = true,
             onChange = onAllowRec,
         )
         if (allowRec)
+            // r76-20 (owner item 3): live on EVERY version — below 15 the
+            // saved-recording file is read from the Screen recordings folder.
+            // r76-22: a SUB-option, like the screenshot alert.
             PrivacyToggle(
                 icon = Icons.Filled.Notifications,
                 label = "Screen record alert",
-                // r76-20 (owner item 3: "screen record alert toggle ta on
-                // korte parchi na ... eita lower a o jeno kaj kore"): the OS
-                // callback only exists on 15+, but below that the system
-                // recorder SAVES a file — the watch reads the Screen
-                // recordings folder exactly like the screenshot half reads
-                // its own. The switch is live on EVERY version.
                 sub =
-                    when {
-                        android.os.Build.VERSION.SDK_INT >= 35 ->
-                            "Alert me when they record this chat"
-                        folderWatch && folderGranted ->
-                            "Alert me when their saved recording shows up (via your Screen recordings folder)"
-                        folderWatch -> "Allow Videos so recordings can be spotted"
-                        else -> "Alert me when they record this chat"
-                    },
+                    if (folderWatch && !folderGranted) "Needs Videos access to spot them"
+                    else "Alert me when they record this chat",
                 checked = rec,
                 enabled = true,
                 onChange = onRec,
+                small = true,
             )
         PrivacyToggle(
             icon = Icons.Filled.PermMedia,
             label = "Allow Media Save",
-            sub = if (save) "They may save the media I send here" else "They cannot save the media I send here",
+            sub = if (save) "They can save the media I send here" else "They cannot save my media",
             checked = save,
             enabled = true,
             onChange = onSave,
@@ -10777,23 +10800,43 @@ private fun PrivacyToggle(
     checked: Boolean,
     enabled: Boolean,
     onChange: (Boolean) -> Unit,
+    // r76-22 (owner: the two alerts are SUB-options — "egula choto thakbe
+    // onno options er koro na ... toggle ta onnoder moto boro na"): indented
+    // under the parent, smaller icon / text, and a shrunken switch.
+    small: Boolean = false,
 ) {
     val haptics = rememberHaptics()
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .padding(
+                start = if (small) 34.dp else 14.dp,
+                end = 14.dp,
+                top = if (small) 2.dp else 8.dp,
+                bottom = if (small) 2.dp else 8.dp,
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, label, tint = if (enabled) ActionBlueDeep else Muted, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(12.dp))
+        Icon(
+            icon,
+            label,
+            tint = if (enabled) ActionBlueDeep else Muted,
+            modifier = Modifier.size(if (small) 16.dp else 20.dp),
+        )
+        Spacer(Modifier.width(if (small) 8.dp else 12.dp))
         Column(Modifier.weight(1f)) {
-            Text(label, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-            Text(sub, color = Muted, fontSize = 12.sp)
+            Text(
+                label,
+                color = Ink,
+                fontSize = if (small) 13.sp else 15.sp,
+                fontWeight = if (small) FontWeight.Normal else FontWeight.Medium,
+            )
+            Text(sub, color = Muted, fontSize = if (small) 11.sp else 12.sp)
         }
         Switch(
             checked = checked,
             enabled = enabled,
+            modifier = if (small) Modifier.scale(0.72f) else Modifier,
             onCheckedChange = { on ->
                 haptics.toggle(on)
                 onChange(on)

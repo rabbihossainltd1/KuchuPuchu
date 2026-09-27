@@ -268,6 +268,12 @@ check(
     fx8.includes("withTimeoutOrNull(600L)") &&
     fx8.includes("s.bottom <= lb.bottom + 1f") &&
     chat.includes("FlightAnchors.listBounds = it.boundsInWindow()") &&
+    // r76-22 (owner: "sent hole ekhono 0.1 seconds halka kete jai"): the
+    // SEND-time scrolls SNAP (six sites) — gliding slid the fresh row up
+    // from under the viewport and the gate turned that beat into an
+    // invisible gap. Received rows (live socket) still glide.
+    chat.split("listState.snapToItem").length === 7 &&
+    !chat.includes("listState.animateScrollToItem(msgs.size + pending.size - 1)") &&
     !fx8.includes("bottomOffset") &&
     chat.includes(".fxComposerAnchor()") &&
     chat.includes("FxArrivals.markSeen(id)") &&
@@ -284,8 +290,9 @@ check(
   "r53: the send never hides - the send paths scroll to the bottom right away (no deferred-flight flag anywhere), the flight chases the moving seat instead; paintSent sweeps pending/msgs without iterators (the voice-send ConcurrentModificationException), the See more / See less toggle speaks the stamp's wallpaper ink outside the bubble, and the 2.5 s open-pin never drags back a reader who is scrolling away",
   !chat.includes("pendingScrollAfterLand") &&
     !chat.includes("onFlightLanded") &&
+    // r76-22: the send-time jump is a SNAP now (see the r76-22 pin above).
     chat.includes(
-      "scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }",
+      "scope.launch { runCatching { listState.snapToItem(msgs.size + pending.size - 1) } }",
     ) &&
     chat.includes("var donor: JSONObject? = null") &&
     chat.includes('r54 (owner: "see more ekhono removed ache")') &&
