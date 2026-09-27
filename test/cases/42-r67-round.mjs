@@ -167,22 +167,18 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes('val fxKey = m.optString("clientId").ifBlank { m.optString("id") }'),
   );
   check(
-    // r76-23 (owner: "sending er somoy animation hoi, send hole off hoye jai
-    // instant"): the claim is still ONE per key, but the remember is keyed
-    // on pendingEcho — an OWN row claims its flight at the moment it BECOMES
-    // sent, so the sending echo stays static (nothing to cut mid-send).
+    // r76-25 (owner: "eto slow keno emojis massage chat aste?"): back to the
+    // r67-3 birth claim — waiting for SENT made arrivals crawl. The swap no
+    // longer kills the flight because fxFlyIn's state is global + time-based.
     "r67-3: that claim IS the arrival animation (no per-composition re-decision)",
-    chat.includes("val fxFresh = remember(pendingEcho) { fxBorn && FxFlights.claim(fxKey) }"),
+    chat.includes("val fxFresh = remember { fxBorn && FxFlights.claim(fxKey) }"),
   );
   check(
-    // r76-23: the owner REVERSED r67-3's "echo is eligible" for OWN rows —
-    // the flight belongs to the SENT moment, not the sending phase. Received
-    // rows are unchanged.
-    "r76-23: an own row flies only when it becomes SENT — the sending echo is static again",
-    chat.includes("remember(pendingEcho) {") &&
-      chat.includes("val fxBorn =") &&
+    "r76-25: own rows fly at BIRTH again (the r76-23 pendingEcho gate is gone)",
+    chat.includes("val fxBorn =") &&
+      !chat.includes("mine -> live && !pendingEcho") &&
       chat.includes(
-        'mine -> live && !pendingEcho\n                else -> live || FxArrivals.mark(m.optString("id")) != null',
+        'mine -> live\n                else -> live || FxArrivals.mark(m.optString("id")) != null',
       ),
   );
   check(

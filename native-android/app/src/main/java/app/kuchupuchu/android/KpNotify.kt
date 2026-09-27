@@ -69,6 +69,22 @@ object KpNotify {
             .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
             .build()
+        // r76-25 (owner: "user je massage ringtone set kore rakhche otay
+        // hobe"): a channel's sound FREEZES at creation — a device whose
+        // kp_messages_v2 was born on an older build keeps that build's tone
+        // forever (on the owner's phone it still rings an old call-style
+        // ring). Compare the live channel's sound with the user's current
+        // pick and recreate on any mismatch, so the picked tone always wins.
+        runCatching {
+            val wantUri =
+                android.net.Uri.parse(
+                    "android.resource://" + ctx.packageName + "/" + SoundPrefs.notificationRingRes(ctx),
+                )
+            val live = mgr.getNotificationChannel(CHAT_CHANNEL)
+            if (live != null && live.sound?.toString() != wantUri.toString()) {
+                mgr.deleteNotificationChannel(CHAT_CHANNEL)
+            }
+        }
         mgr.createNotificationChannel(
             NotificationChannel(CHAT_CHANNEL, "Messages", NotificationManager.IMPORTANCE_HIGH)
                 .apply {

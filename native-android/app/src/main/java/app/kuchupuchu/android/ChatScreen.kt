@@ -7304,14 +7304,14 @@ private fun MessageRow(
     //             painted server row share that key, so the row flies in at
     //             birth (still sending) and the swap only takes the seat.
     val fxKey = m.optString("clientId").ifBlank { m.optString("id") }
-    // r76-23 (owner: "sending er somoy animation hoi, send hole off hoye
-    // jai instant ... send sending sent er vitor kono alada system hobe
-    // na"): an OWN row flies exactly ONCE — at the moment it BECOMES SENT.
-    // The sending echo is static (fully painted, nothing to cut); the
-    // remember is keyed on pendingEcho so the flip to sent re-evaluates and
-    // claims the flight then, not during the send.
+    // r76-25 (owner: "eto slow keno emojis massage chat aste?"): back to
+    // r67-3 — the flight belongs to the row's BIRTH, so the message appears
+    // INSTANTLY when sent. What killed r67-3 for the owner was the flight
+    // DYING at the pending->server swap ("send hole off hoye jai instant");
+    // that is fixed in fxFlyIn itself now — the flight is global and time-
+    // based per message key, so the swap continues it instead of killing it.
     val fxBorn =
-        remember(pendingEcho) {
+        remember {
             // r50 / r58 (owner: "history scrolling er somoy o animation keno hocche eita"):
             // the flight is for LIVE arrivals only - history, loadOlder, or reopen
             // never fly; they get the soft fade instead.
@@ -7321,18 +7321,11 @@ private fun MessageRow(
             when {
                 !isRecent -> false
                 m.optString("senderId") == "kp_ai_bot" -> false
-                mine -> live && !pendingEcho
+                mine -> live
                 else -> live || FxArrivals.mark(m.optString("id")) != null
             }
         }
-    val fxFresh = remember(pendingEcho) { fxBorn && FxFlights.claim(fxKey) } && fxScaleOf(ctx) > 0f
-    // r76-24 (owner: "animation hobar agei chat a agei chole asche tarpor
-    // abar hide hoye animation hoye asche"): while a LIVE send is in flight
-    // to the server the row is invisible — it arrives ONCE, animated, at the
-    // SENT moment. A queued echo from an app restart (Outbox seed) is not a
-    // live send; it stays visible with its clock. A failed send must never
-    // stay hidden either.
-    val sendHold = mine && pendingEcho && !m.optBoolean("failed") && LiveArrivals.isLive(fxKey)
+    val fxFresh = remember { fxBorn && FxFlights.claim(fxKey) } && fxScaleOf(ctx) > 0f
     // v205 + v207 (unchanged by r67-3): the emoji glyph animates when the row
     // is a live birth AND is no longer a sending echo - so the emoji plays at
     // the moment the message becomes sent, while the flight above belongs to
@@ -7448,7 +7441,7 @@ private fun MessageRow(
     // image uploads (picked as documents) get the same treatment.
     // Owner round 31 (item 29): photos sent together = one grouped bubble.
     if (m.has("kpAlbum")) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine).fxSendHold(sendHold)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, key = fxKey)) {
             AlbumMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenAlbum, onReply, onLongPress, theme, onDoubleTapHeart)
         }
         return
@@ -7458,7 +7451,7 @@ private fun MessageRow(
     // opens the media ONCE for the recipient; the opening deletes the row
     // for everyone, so there is no opened state left to render.
     if (isViewOnce(m)) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine).fxSendHold(sendHold)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, key = fxKey)) {
             // r71-20: a view-once TEXT is its own bubble (veiled, one tap to
             // reveal, five seconds, then gone for both) — the photo / video /
             // voice flavours keep the tile.
@@ -7471,7 +7464,7 @@ private fun MessageRow(
         return
     }
     if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine).fxSendHold(sendHold)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, key = fxKey)) {
             ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend, onDoubleTapHeart)
         }
         return
@@ -7479,7 +7472,7 @@ private fun MessageRow(
     // Owner round 20: videos render as a tappable video bubble and play
     // IN-APP (the system player could never stream these auth-only files).
     if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine).fxSendHold(sendHold)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, key = fxKey)) {
             VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend, onDoubleTapHeart)
         }
         return
@@ -7497,11 +7490,9 @@ private fun MessageRow(
             .fillMaxWidth()
             .padding(vertical = 2.dp)
             .fxSlotOpen(fxFresh)
-            .fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (kind == "FILE" && fileLooksVoice(m)) 720 else 700, isSent = mine) {
+            .fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (kind == "FILE" && fileLooksVoice(m)) 720 else 700, isSent = mine, key = fxKey) {
                 fxLanded = m.optString("id")
-            }
-            // r76-24: AFTER the flight's onDone lambda — not inside it.
-            .fxSendHold(sendHold),
+            },
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
@@ -10854,12 +10845,13 @@ private fun PrivacyToggle(
     Row(
         Modifier
             .fillMaxWidth()
+            // r76-25 (owner: "sub buttons gula full left theke start hobe
+            // jemon ta onno buttons gula ache"): the sub-row starts at the
+            // SAME left edge as every other row — it stays smaller and its
+            // content packs left (no weight), nothing else differs.
             .padding(
-                start = if (small) 34.dp else 14.dp,
-                // r76-23 (owner: "sub buttons gula left a soray daw full raw
-                // tai just button na"): the WHOLE sub-row shifts left — the
-                // end inset moves its switch off the main switches' column.
-                end = if (small) 28.dp else 14.dp,
+                start = 14.dp,
+                end = 14.dp,
                 top = if (small) 2.dp else 8.dp,
                 bottom = if (small) 2.dp else 8.dp,
             ),

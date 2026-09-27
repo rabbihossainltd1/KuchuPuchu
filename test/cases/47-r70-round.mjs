@@ -825,10 +825,6 @@ const main = (f) => read(`${ANDROID}/${f}`);
       group.split("AnimatedToggleSwitch(").length === 2 &&
       !chat.includes("import androidx.compose.material3.Switch") &&
       !settings.includes("import androidx.compose.material3.Switch") &&
-      chat.includes("end = if (small) 28.dp else 14.dp,") &&
-      chat.includes("remember(pendingEcho) {") &&
-      chat.includes("mine -> live && !pendingEcho") &&
-      chat.includes("remember(pendingEcho) { fxBorn && FxFlights.claim(fxKey) }") &&
       chat.includes(
         "if (!isPending)\n                CircularProgressIndicator(color = if (mine) AmberInk else Gold, modifier = Modifier.size(22.dp))",
       ) &&
@@ -839,30 +835,40 @@ const main = (f) => read(`${ANDROID}/${f}`);
 }
 
 {
-  // r76-24 (owner): the live-send echo is INVISIBLE until SENT (one arrival,
-  // one animation — no appear-then-hide-then-animate); privacy sub-rows pack
-  // icon+text+toggle ALL to the left; the gif echo carries its ORIGINAL
-  // dimensions (Noto 512x512, Tenor from the panel's decoded preview) into
-  // the row AND the worker's meta; the view-once mark hides while uploading.
+  // r76-25 (owner): arrivals must be INSTANT and the flight must SURVIVE the
+  // pending->server swap (global time-based FlightAnims, flight claimed at
+  // birth); sub-rows start at the SAME left edge as every other row; the gif
+  // echo keeps its true ratio; the once-mark stays hidden while uploading;
+  // the message channel always re-rings the user's picked tone (self-heal);
+  // and the list-refresh fallback never stacks a second card over a fresh
+  // FCM card.
   const chat = main("ChatScreen.kt");
-  const fx = main("ChatFx.kt");
+  const flight = main("SendFlight.kt");
+  const store = main("ScreenStore.kt");
+  const push = main("KpPush.kt");
+  const notify = main("KpNotify.kt");
   check(
-    "r76-24: invisible-until-sent send echo, left-packed sub-rows, true gif ratio, once-mark after send",
-    fx.includes(
-      "fun Modifier.fxSendHold(hold: Boolean): Modifier = this.graphicsLayer { if (hold) alpha = 0f }",
-    ) &&
-      chat.includes(
-        'val sendHold = mine && pendingEcho && !m.optBoolean("failed") && LiveArrivals.isLive(fxKey)',
-      ) &&
-      chat.split(".fxSendHold(sendHold)").length === 6 &&
+    "r76-25: instant animated arrivals that survive the swap, flush-left sub-rows, self-healing channel, no duplicate card",
+    flight.includes("object FlightAnims") &&
+      flight.includes("fun birth(key: String): Flight") &&
+      flight.includes("fun valueAt(f: Flight, durMs: Int): Float") &&
+      flight.includes("FastOutSlowInEasing.transform(t)") &&
+      flight.includes('key: String = ""') &&
+      chat.split("key = fxKey").length === 6 &&
+      !chat.includes("fxSendHold") &&
       chat.includes("Column(if (small) Modifier else Modifier.weight(1f))") &&
       chat.includes("if (small) Spacer(Modifier.width(10.dp))") &&
+      chat.includes("start = 14.dp,") &&
       chat.includes('payload.put("meta", JSONObject().put("w", gw).put("h", gh))') &&
       chat.includes('.put("mediaW", gw)') &&
-      chat.includes('.put("mediaH", gh)') &&
       chat.includes(
         "if (!pendingEcho)\n                    Box(\n                        Modifier\n                            .align(Alignment.Center)\n                            .size(52.dp),",
-      ),
+      ) &&
+      store.includes("fun markPushCard(convId: String)") &&
+      store.includes("< 30_000L") &&
+      push.includes("ScreenStore.markPushCard(convoId)") &&
+      notify.includes("mgr.getNotificationChannel(CHAT_CHANNEL)") &&
+      notify.includes("mgr.deleteNotificationChannel(CHAT_CHANNEL)"),
   );
 }
 

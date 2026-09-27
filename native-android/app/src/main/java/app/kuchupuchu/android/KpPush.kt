@@ -514,6 +514,9 @@ class KpPushService : FirebaseMessagingService() {
                 Bitmaps.ensureInit(this)
                 Bitmaps.fetchWithin(it, 3_500L, maxSide = if (android.os.Build.VERSION.SDK_INT >= 27) 720 else 400)
             }
+        // r76-25: tell the list-refresh fallback this convo just got its
+        // card — it must not stack a second (sealed-preview) one on top.
+        ScreenStore.markPushCard(convoId)
         KpNotify.message(
             this,
             data["fromName"] ?: data["from"] ?: "KuchuPuchu",

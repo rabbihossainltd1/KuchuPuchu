@@ -461,8 +461,23 @@ object ScreenStore {
         return isMuted(convId)
     }
 
+    // r76-25 (owner: "massage notification double ektai lock emoji arekta
+    // original massage notification"): the FCM handler records every card it
+    // posts; this list-refresh fallback then YIELDS for that conversation
+    // for a short window instead of stacking a second card (its preview can
+    // only be the sealed 🔒 line — exactly the duplicate the owner saw).
+    private val pushCardAt = HashMap<String, Long>()
+
+    fun markPushCard(convId: String) {
+        if (convId.isNotBlank()) pushCardAt[convId] = System.currentTimeMillis()
+    }
+
     fun shouldNotifyChat(convId: String, lastAt: String, unread: Int): Boolean {
         if (unread <= 0 || lastAt.isBlank()) return false
+        if (System.currentTimeMillis() - (pushCardAt[convId] ?: 0L) < 30_000L) {
+            lastNotifiedAt[convId] = lastAt
+            return false
+        }
         // Muted chats: no in-app alert either. (The push path checks the same
         // flag; before this, Mute only changed the bell icon and everything
         // still buzzed.) Hidden chats (round 31 item 26) are silent too.

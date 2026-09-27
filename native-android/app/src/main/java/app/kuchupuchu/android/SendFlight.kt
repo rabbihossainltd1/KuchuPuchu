@@ -1,6 +1,5 @@
 package app.kuchupuchu.android
 
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.runtime.Composable
@@ -20,7 +19,6 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import kotlin.math.PI
 import kotlin.math.sin
-import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -112,74 +110,66 @@ fun Modifier.fxFlyIn(
     active: Boolean,
     durMs: Int,
     isSent: Boolean = true,
+    key: String = "",
     onDone: () -> Unit = {},
 ): Modifier {
     val scale = fxAnimatorScale()
     val density = LocalDensity.current.density
-    val progress = remember { Animatable(if (active && scale > 0f) 0f else 1f) }
+    val dur = ((durMs * scale).toInt().coerceIn(300, 520)).coerceAtLeast(1)
+    // r76-25 (owner: "send hole off hoye jai instant" / "eto slow keno"):
+    // the flight is TIME-BASED and GLOBAL per message key. The pending echo
+    // starts it at birth (message appears INSTANTLY, animated — no waiting
+    // for the server), and when the echo swaps to the server row the item
+    // recomposes — a composition-held Animatable died there and froze the
+    // flight mid-air. Now every frame is computed from (now - goAt), so ANY
+    // composition that picks the row up continues the SAME flight, and the
+    // flight itself can never be killed by a swap.
+    val st =
+        remember(key) {
+            if (active && key.isNotBlank() && scale > 0f) FlightAnims.birth(key)
+            else if (key.isNotBlank()) FlightAnims.of(key)
+            else null
+        }
+    var v by remember(key) { mutableStateOf(if (st == null) 1f else FlightAnims.valueAt(st, dur)) }
     var seat by remember { mutableStateOf<Rect?>(null) }
-    var fired by remember { mutableStateOf(false) }
     var done by remember { mutableStateOf(false) }
-    var startAbs by remember { mutableStateOf(Offset.Zero) }
 
-    // r55 (owner: flight "same ache ager moto"): the seat MUST keep updating
-    // for the WHOLE flight - the send-time scroll moves the row while the
-    // bubble is in the air. The old gate (!fired) froze it at the first
-    // measurement, so the arc played against a stale seat and read as no
-    // flight at all.
     val measure = Modifier.onGloballyPositioned { c ->
-        if (active && !done) seat = c.boundsInWindow()
+        if (!done) seat = c.boundsInWindow()
     }
 
-    LaunchedEffect(active) {
-        if (!active || fired) return@LaunchedEffect
-        fired = true
-        if (scale <= 0f) {
-            progress.snapTo(1f)
-            onDone()
-            return@LaunchedEffect
+    LaunchedEffect(key) {
+        val f = st ?: return@LaunchedEffect
+        if (f.goAt < 0L) {
+            // r76-21 gate: the growth waits until the seat is fully inside
+            // the list viewport (600 ms cap) — the send scroll is a snap
+            // (r76-22), so this releases within a frame or two.
+            withTimeoutOrNull(600L) {
+                snapshotFlow {
+                    val s = seat
+                    val lb = FlightAnchors.listBounds
+                    s != null && (lb == null || s.bottom <= lb.bottom + 1f)
+                }.first { it }
+            }
+            if (f.goAt < 0L) f.goAt = android.os.SystemClock.uptimeMillis()
         }
-        val pill = FlightAnchors.composerBounds
-        if (pill != null && false) {
-            val s = snapshotFlow { seat }.filterNotNull().first()
-            val startY = pill.top - s.height
-            startAbs = Offset(s.left, startY)
+        // Tick to the end from wherever the global clock says we are.
+        while (true) {
+            val nv = FlightAnims.valueAt(f, dur)
+            v = nv
+            if (nv >= 1f) break
+            androidx.compose.runtime.withFrameNanos { }
         }
-        progress.snapTo(0f)
-        // r76-21 (owner: the cut is BACK — "animation er somoy abaro sei
-        // nicher dike right side a kata pore jai"): r76-19 moved the growth
-        // origin to the row's bottom corner so the ROW never clips itself —
-        // but the flight still started while the list was mid-scroll, so the
-        // VIEWPORT clipped the row's bottom corner (the very corner the sent
-        // bubble grows from). The growth now waits until the seat is fully
-        // inside the list viewport; the row is alpha-0 (invisible, no pop)
-        // while it waits, and a 600 ms cap means a stuck scroll can never
-        // hold the message invisible forever.
-        withTimeoutOrNull(600L) {
-            snapshotFlow {
-                val s = seat
-                val lb = FlightAnchors.listBounds
-                s != null && (lb == null || s.bottom <= lb.bottom + 1f)
-            }.first { it }
-        }
-        // r76-20 (owner: "animation ta smooth na" — jerky): the old spec
-        // fought itself — FlightEase's slow start read as a hesitate-then-
-        // rush, the 700 ms tail dragged, and the landing squash snapped the
-        // bubble the moment the flight ended. One decelerate curve instead:
-        // it rises right away and settles gently, 300-520 ms.
-        progress.animateTo(1f, androidx.compose.animation.core.tween((durMs * scale).toInt().coerceIn(300, 520), easing = FastOutSlowInEasing))
         done = true
-        onDone()
+        if (FlightAnims.markDone(key)) onDone()
     }
 
     return this
         .then(measure)
         .graphicsLayer {
-            val v = progress.value
-            val s = seat
-            if (s != null && false) {
-                val p0 = Offset(0f, startAbs.y - s.top)
-                val lift = sin(v * PI.toFloat()) * 8f * density
+            val v0 = v
+            if (false) {
+                val lift = sin(v0 * PI.toFloat()) * 8f * density
                 translationX = 0f
             }
             // r76-19 (owner: "emojis jokhon right side a nicher theke asche
@@ -194,9 +184,53 @@ fun Modifier.fxFlyIn(
             // reads as rising from the bottom-right (sent) / bottom-left
             // (received) corner.
             transformOrigin = if (isSent) TransformOrigin(1f, 1f) else TransformOrigin(0f, 1f)
-            val sc = if (active) 0.6f + 0.4f * v else 1f
+            val sc = 0.6f + 0.4f * v0
             scaleX = sc
             scaleY = sc
-            alpha = if (v < 0.35f) (v / 0.35f).coerceIn(0f, 1f) else 1f
+            alpha = if (v0 < 0.35f) (v0 / 0.35f).coerceIn(0f, 1f) else 1f
         }
+}
+
+/**
+ * r76-25: per-message flight state that outlives any composition. [birth] is
+ * claimed once (the pending echo), [of] lets the server row that REPLACES the
+ * echo find the same flight, and [valueAt] is the eased 0..1 progress derived
+ * from the wall clock — recomposition, recycling or a swap can never restart
+ * or freeze it.
+ */
+object FlightAnims {
+    class Flight(val bornAt: Long) {
+        @Volatile var goAt: Long = -1L
+    }
+
+    private val map =
+        java.util.Collections.synchronizedMap(
+            object : java.util.LinkedHashMap<String, Flight>(64, 0.75f, false) {
+                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Flight>?): Boolean = size > 500
+            },
+        )
+    private val doneKeys =
+        java.util.Collections.synchronizedMap(
+            object : java.util.LinkedHashMap<String, Boolean>(64, 0.75f, false) {
+                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean = size > 500
+            },
+        )
+
+    fun birth(key: String): Flight = synchronized(map) { map.getOrPut(key) { Flight(android.os.SystemClock.uptimeMillis()) } }
+
+    fun of(key: String): Flight? = synchronized(map) { map[key] }
+
+    fun markDone(key: String): Boolean =
+        synchronized(doneKeys) {
+            if (doneKeys.containsKey(key)) return false
+            doneKeys[key] = true
+            return true
+        }
+
+    fun valueAt(f: Flight, durMs: Int): Float {
+        val go = f.goAt
+        if (go < 0L) return 0f
+        val t = ((android.os.SystemClock.uptimeMillis() - go).toFloat() / durMs).coerceIn(0f, 1f)
+        return FastOutSlowInEasing.transform(t)
+    }
 }

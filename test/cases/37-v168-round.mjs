@@ -210,8 +210,9 @@ check(
     // animation; the emoji glyph keeps its own live-birth predicate (fxEmoji).
     fx7.includes("object FxFlights") &&
     fx7.includes("fun claim(key: String): Boolean") &&
-    // r76-23: keyed on pendingEcho — an own flight starts at SENT.
-    chat.includes("val fxFresh = remember(pendingEcho) { fxBorn && FxFlights.claim(fxKey) }") &&
+    // r76-25: back to birth-claim (r67-3); the swap-survival now lives in
+    // fxFlyIn's global time-based FlightAnims.
+    chat.includes("val fxFresh = remember { fxBorn && FxFlights.claim(fxKey) }") &&
     (chat.includes('m.optString("senderId") == "kp_ai_bot" -> false') ||
       chat.includes('if (m.optString("senderId") == "kp_ai_bot") false')) &&
     chat.includes("FxArrivals.armed = false") &&
@@ -246,11 +247,11 @@ check(
   fx8.includes("object FlightAnchors") &&
     fx8.includes("fun Modifier.fxComposerAnchor()") &&
     fx8.includes("fun Modifier.fxFlyIn(") &&
-    fx8.includes("startAbs = Offset(s.left, startY)") &&
+    // r76-25: the dead arc scaffolding (startAbs / p0 / the old snapshotFlow)
+    // was deleted with the Animatable rewrite — the flight is time-based now.
     fx8.includes("translationX = 0f") &&
-    fx8.includes("val lift = sin(v * PI.toFloat()) * 8f * density") &&
-    fx8.includes("snapshotFlow { seat }.filterNotNull().first()") &&
-    fx8.includes("val p0 = Offset(0f, startAbs.y - s.top)") &&
+    fx8.includes("val lift = sin(v0 * PI.toFloat()) * 8f * density") &&
+    fx8.includes("object FlightAnims") &&
     // r76-19 (owner: "emojis ... nicher theke kichu ongsho kata pore
     // jacche"): the flight no longer TRANSLATES the row out of the viewport
     // (the old +68/+84 offsets clipped the bubble's own bottom/right on the
@@ -282,7 +283,7 @@ check(
     chat.includes(".fxComposerAnchor()") &&
     chat.includes("FxArrivals.markSeen(id)") &&
     chat.includes(
-      '.fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (kind == "FILE" && fileLooksVoice(m)) 720 else 700, isSent = mine)',
+      '.fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (kind == "FILE" && fileLooksVoice(m)) 720 else 700, isSent = mine, key = fxKey)',
     ) &&
     // r46 item 6: the landing + shine + ripple ride the BUBBLE box, never
     // the full-width row (the light swept the whole chat before).
@@ -349,7 +350,9 @@ check(
 );
 check(
   "r55 item 3: the flight seat stays live for the WHOLE flight (gate is !done, set only after animateTo) - the stale-seat freeze that made v179/v180 fly invisible is gone",
-  fx8.includes("if (active && !done) seat = c.boundsInWindow()") &&
+  // r76-25: the gate is still !done — done is set only after the tick loop
+  // reaches v=1.
+  fx8.includes("if (!done) seat = c.boundsInWindow()") &&
     fx8.includes("done = true") &&
     !fx8.includes("if (active && !fired) seat"),
 );
