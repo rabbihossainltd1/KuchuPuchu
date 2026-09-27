@@ -91,7 +91,7 @@ const pkg = readFileSync(
 /* the round's own bookkeeping */
 check(
   "r76-8: versionCode 225 / versionName 3.9.148 (mic permanent in overlay — press-then-slide fixed; once icon 1px left; release policy still > 215)",
-  /versionCode\s*=\s*241\b/.test(pkg) && /versionName\s*=\s*"3\.9\.164"/.test(pkg),
+  /versionCode\s*=\s*242\b/.test(pkg) && /versionName\s*=\s*"3\.9\.165"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */
