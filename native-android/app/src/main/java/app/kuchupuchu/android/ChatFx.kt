@@ -440,7 +440,6 @@ fun Modifier.fxPadlockSnap(trigger: Any?): Modifier {
  * - Live RECEIVED messages animate in from the bottom-left (-44dp X, +18dp Y -> 0f).
  * - Chat history (scrolling or loading older): NO side animation, quiet and stable with gentle fade.
  */
-@Composable
 /**
  * r76-24 (owner: "animation hobar agei chat a agei chole asche tarpor abar
  * hide hoye animation hoye asche"): a live send's echo is INVISIBLE while it
@@ -450,6 +449,7 @@ fun Modifier.fxPadlockSnap(trigger: Any?): Modifier {
 @Composable
 fun Modifier.fxSendHold(hold: Boolean): Modifier = this.graphicsLayer { if (hold) alpha = 0f }
 
+@Composable
 fun Modifier.fxSideSlide(
     active: Boolean,
     isSent: Boolean,
