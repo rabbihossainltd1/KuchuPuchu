@@ -1158,6 +1158,17 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ---------- r77-8: exactly ONE animation per emoji send ---------- */
+{
+  const chat = main("ChatScreen.kt");
+  check(
+    'r77-8 (owner: "emojis send korle first time animate hobe just ekbar, eita kortei onek session failed korche ... amar moner moto hoini"): every failed mode he lists came from the ack-armed double animation - the glyph re-playing at the server swap (appears, hides, re-animates) and the body clipping mid-flight. Emoji rows ride the one-motion flight now: armed at the echo\'s BIRTH (r77-1), keyed by clientId so the echo->server swap adds nothing (r77-6, the same LazyColumn key in pending and messages), and the glyph itself renders static (r76-18), so one send = one animation, never two',
+    chat.includes("if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)") &&
+      chat.includes('val fxKey = m.optString("clientId").ifBlank { m.optString("id") }') &&
+      chat.includes("val fxEmoji = false"),
+  );
+}
+
 /* ---------- r77-3: the hero is the ONLY copy; the exit lands on the live seat ---------- */
 {
   const viewer = main("MediaViewer.kt");
