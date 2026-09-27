@@ -22,6 +22,7 @@ import kotlin.math.PI
 import kotlin.math.sin
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Where the composer pill (typing bar) is on screen, in WINDOW coordinates.
@@ -30,6 +31,13 @@ import kotlinx.coroutines.flow.first
  */
 object FlightAnchors {
     @Volatile var composerBounds: Rect? = null
+
+    // r76-21 (owner: "animation er somoy abaro sei nicher dike right side a
+    // kata pore jai"): the chat list's own viewport, in window coordinates.
+    // A flight must not start growing its row until the row sits fully
+    // INSIDE this rect — anything below its bottom edge is clipped by the
+    // list, which is exactly the cut the owner keeps seeing.
+    @Volatile var listBounds: Rect? = null
     // r76-15 (owner: "attach panel close korle mic upore theke jay"): snapshot
     // STATE — the window overlay reads this during composition, so every
     // layout move (IME / inline panel glide) repositions the mic live. As a
@@ -138,6 +146,22 @@ fun Modifier.fxFlyIn(
             startAbs = Offset(s.left, startY)
         }
         progress.snapTo(0f)
+        // r76-21 (owner: the cut is BACK — "animation er somoy abaro sei
+        // nicher dike right side a kata pore jai"): r76-19 moved the growth
+        // origin to the row's bottom corner so the ROW never clips itself —
+        // but the flight still started while the list was mid-scroll, so the
+        // VIEWPORT clipped the row's bottom corner (the very corner the sent
+        // bubble grows from). The growth now waits until the seat is fully
+        // inside the list viewport; the row is alpha-0 (invisible, no pop)
+        // while it waits, and a 600 ms cap means a stuck scroll can never
+        // hold the message invisible forever.
+        withTimeoutOrNull(600L) {
+            snapshotFlow {
+                val s = seat
+                val lb = FlightAnchors.listBounds
+                s != null && (lb == null || s.bottom <= lb.bottom + 1f)
+            }.first { it }
+        }
         // r76-20 (owner: "animation ta smooth na" — jerky): the old spec
         // fought itself — FlightEase's slow start read as a hesitate-then-
         // rush, the 700 ms tail dragged, and the landing squash snapped the

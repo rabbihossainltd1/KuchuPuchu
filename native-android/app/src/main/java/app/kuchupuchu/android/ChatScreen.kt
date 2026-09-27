@@ -3886,7 +3886,11 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize(),
+                // r76-21: the flight gate needs the viewport rect — see
+                // FlightAnchors.listBounds.
+                modifier =
+                    Modifier.fillMaxSize()
+                        .onGloballyPositioned { FlightAnchors.listBounds = it.boundsInWindow() },
                 // N2: a slight breath between rows — bubbles used to sit
                 // flush on the previous row's stamp line.
                 verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.Bottom),

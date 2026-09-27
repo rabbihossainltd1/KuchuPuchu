@@ -258,6 +258,16 @@ check(
     fx8.includes(
       "transformOrigin = if (isSent) TransformOrigin(1f, 1f) else TransformOrigin(0f, 1f)",
     ) &&
+    // r76-21 (owner: the cut is BACK - "animation er somoy abaro sei nicher
+    // dike right side a kata pore jai"): r76-19 stopped the ROW clipping
+    // itself, but the growth still began while the LIST was mid-scroll, so
+    // the VIEWPORT clipped the seat's bottom corner. The flight now waits
+    // (capped at 600 ms) until the seat is fully inside the list bounds the
+    // LazyColumn records, and the chat screen must record those bounds.
+    fx8.includes("FlightAnchors.listBounds") &&
+    fx8.includes("withTimeoutOrNull(600L)") &&
+    fx8.includes("s.bottom <= lb.bottom + 1f") &&
+    chat.includes("FlightAnchors.listBounds = it.boundsInWindow()") &&
     !fx8.includes("bottomOffset") &&
     chat.includes(".fxComposerAnchor()") &&
     chat.includes("FxArrivals.markSeen(id)") &&
