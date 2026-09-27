@@ -1008,7 +1008,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
     "r76-29: the ack arms the flight (deterministic 0.5 s, swap-proof), 150dp sub-switch column, my gifs render from the cached CDN url, hero starts on the tile with no platform dim and reverses on close, pill slimmer, backup auto by default",
     flight.includes("f.goAt = android.os.SystemClock.uptimeMillis() + delayMs") &&
       flight.includes("if (f.goAt > android.os.SystemClock.uptimeMillis()) {") &&
-      chat.includes("if (mine && !pendingEcho && fxBorn) FlightAnims.armIn(fxKey, 500L)") &&
+      // r77-1/r77-6 superseded the ack-arm: the arm now lands at the echo's
+      // birth with 0 wait (see the r77 crash/fix block at the bottom).
+      chat.includes("if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)") &&
       chat.includes("Column(if (small) Modifier.width(150.dp) else Modifier.weight(1f)) {") &&
       // (r76-30 reverted the sender-side CDN detour - the R2 copy won.)
       chat.includes("hostView.getLocationOnScreen(loc)") &&
@@ -1066,6 +1068,19 @@ const main = (f) => read(`${ANDROID}/${f}`);
       ) &&
       chat.includes("var idx = -1") &&
       chat.includes("no iterator ever walks the live snapshot"),
+  );
+}
+
+/* ---------- r77-1/r77-6: instant entrance at send; sending and sent are ONE ---------- */
+{
+  const chat = main("ChatScreen.kt");
+  const flight = main("SendFlight.kt");
+  check(
+    'r77-1/r77-6 (owner: "item onek slow chat a paste hocche, instant animation diye asche na" + "send sending sent alada na ek kore daw, zero gap, alada kono animation effect kichui na"): a mine row\'s flight arms at the echo\'s BIRTH with no wait - the lift-off IS the entrance, the ack does nothing at all (first arm wins), and the echo->server swap shares one time-based flight keyed by clientId, so the swap is a silent seat swap with no second effect',
+    chat.includes("if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)") &&
+      !chat.includes("!pendingEcho && fxBorn) FlightAnims.armIn(fxKey, 500L") &&
+      flight.includes("if (f.goAt >= 0L) return false") &&
+      chat.includes('val fxKey = m.optString("clientId").ifBlank { m.optString("id") }'),
   );
 }
 

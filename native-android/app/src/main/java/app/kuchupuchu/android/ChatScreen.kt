@@ -7373,7 +7373,15 @@ private fun MessageRow(
     // the send-ack - arm the flight here, deterministically (idempotent; the
     // echo's coroutine only waits for the arm, so the swap can never lose
     // it). The flight itself starts 500 ms after this point.
-    if (mine && !pendingEcho && fxBorn) FlightAnims.armIn(fxKey, 500L)
+    // r77-1/r77-6 (owner: "item onek slow chat a paste hocche ... instant
+    // animation diye asche na" + "send sending sent ... ek kore daw zero gap,
+    // alada kono animation effect kichui na"): the flight arms AT THE ECHO'S
+    // BIRTH with no wait - the bubble lifts off the composer on the tap's own
+    // frame and the flight IS the entrance. Nothing marks the ack: the server
+    // row finds the same fxKey flight (time-based, global - r76-25) mid-air
+    // or done, the first arm always wins, and the sending->sent swap is a
+    // silent seat swap. ONE motion per send, never two.
+    if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)
     // v205 + v207 (unchanged by r67-3): the emoji glyph animates when the row
     // is a live birth AND is no longer a sending echo - so the emoji plays at
     // the moment the message becomes sent, while the flight above belongs to
