@@ -1124,6 +1124,23 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ---------- r77-10: privacy lands inside a poll tick, socket or no socket ---------- */
+{
+  const chat = main("ChatScreen.kt");
+  const worker = read("src/worker/index.ts");
+  check(
+    'r77-10 (owner: "screenshot block on kori tobe opponent taw screenshot nite parche - app reopen na kora porjonto privacy apply hoi na, shob privacy tei same problem"): the messages poll carries the conversation\'s privacy truth (same rule/defaults as the detail payload), the freshness marker SEALS it (a flip busts `unchanged`), and the chat re-reads its detail the moment any field drifts - Guard and the save gates move within one tick instead of after a reopen. Behavior live-proven in 08-change-markers (baseline flags, unchanged tick, flip busts marker, new truth arrives)',
+    worker.includes("let priv: Record<string, boolean> = {};") &&
+      worker.includes("typingKind,\n        priv,\n      ]),") &&
+      worker.includes("      marker,\n      priv,\n") &&
+      chat.includes("val priv: JSONObject?,") &&
+      chat.includes('priv = data.optJSONObject("priv"),') &&
+      chat.includes('pv.optBoolean("peerShotOk", true)') &&
+      chat.includes('pr != null && pv.has("meSave") &&') &&
+      chat.includes("if (drifted) {"),
+  );
+}
+
 /* ---------- r77-3: the hero is the ONLY copy; the exit lands on the live seat ---------- */
 {
   const viewer = main("MediaViewer.kt");

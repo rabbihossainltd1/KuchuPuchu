@@ -205,6 +205,50 @@ async function mk() {
   check("sticker -> >16 char id rejected", r2.status >= 400, `${r2.status}`);
 }
 
+// ---- r77-10: the messages poll carries the chat privacy truth, marker-sealed ----
+{
+  const k = await mk();
+  const me = await k.reg("pa@x.com", "pa");
+  const ob = await k.reg("pb@x.com", "pb");
+  const cid = (await k.call("POST", "/api/conversations", { userId: ob.user.id }, me.token)).json
+    .conversation.id;
+  // Baseline poll: the privacy object rides along with the convFrom defaults
+  // (identity: priv_allow_shot NULL + public profile => peerShotOk true;
+  // priv_allow_rec NULL => peerRecOk false).
+  const p1 = await k.call("GET", `/api/conversations/${cid}/messages`, null, ob.token);
+  const marker = p1.json.marker;
+  check(
+    'r77-10 (owner: "screenshot block on kori tobe opponent taw screenshot nite parche - app reopen na kora porjonto privacy apply hoi na, shob privacy tei same problem"): the poll payload carries peerSave/peerShotOk/peerRecOk, my sheet\'s five flags and peerPrivate with the exact convFrom defaults',
+    p1.json.priv?.peerSave === true &&
+      p1.json.priv?.peerShotOk === true &&
+      p1.json.priv?.peerRecOk === false &&
+      p1.json.priv?.meSave === true &&
+      p1.json.priv?.meAllowShot === true &&
+      p1.json.priv?.meAllowRec === false &&
+      p1.json.priv?.peerPrivate === false,
+  );
+  // An unchanged tick answers unchanged:true (nothing cut the privacy fields
+  // out of the marker - the flip below must bust it).
+  const p2 = await k.call(
+    "GET",
+    `/api/conversations/${cid}/messages?marker=${marker}`,
+    null,
+    ob.token,
+  );
+  check("r77-10: the plain tick is still `unchanged`", p2.json.unchanged === true);
+  await k.call("POST", `/api/conversations/${cid}/privacy`, { allowShot: false }, me.token);
+  const p3 = await k.call(
+    "GET",
+    `/api/conversations/${cid}/messages?marker=${marker}`,
+    null,
+    ob.token,
+  );
+  check(
+    "r77-10: a privacy flip busts the same-marker short-circuit within one poll tick and the peer sees the new truth (peerShotOk=false) - no app reopen needed, socket or no socket",
+    p3.json.unchanged !== true && p3.json.priv?.peerShotOk === false,
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`\n--- ${lines.length - broken} ok / ${broken} broken ---`);

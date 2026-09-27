@@ -203,6 +203,8 @@ private class MsgPage(
     /** §39: the cursor for one page back, and whether anything older exists. */
     val oldest: JSONObject?,
     val hasMore: Boolean,
+    /** r77-10: the chat's privacy truth rides the poll (marker-sealed). */
+    val priv: JSONObject?,
 )
 
 /**
@@ -807,12 +809,47 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 typingKind = data.optString("typingKind").takeIf { it.isNotBlank() },
                                 oldest = data.optJSONObject("oldest"),
                                 hasMore = data.optBoolean("hasMore"),
+                                priv = data.optJSONObject("priv"),
                             )
                         }
                     }
                         ?: return@launch
                 val fresh = parsed.items
                 msgsMarker = parsed.marker
+                // r77-10 (owner: "screenshot block on kori tobe opponent taw
+                // screenshot nite parche - app reopen na kora porjonto privacy
+                // apply hoi na, shob privacy tei same problem"): the room event
+                // only reaches an open chat while the socket is healthy; this
+                // poll runs every second no matter what, and the worker sealed
+                // these fields into the page marker. On ANY drift re-read the
+                // conversation now - the Allow/save guards and private gates
+                // apply within a tick instead of after a reopen.
+                parsed.priv?.let { pv ->
+                    val cur = conv.value
+                    val pr = cur?.optJSONObject("privacy")
+                    val other = cur?.optJSONObject("other")
+                    val drifted =
+                        cur != null &&
+                            (pv.optBoolean("peerShotOk", true) != cur.optBoolean("peerShotOk", true) ||
+                                pv.optBoolean("peerRecOk", true) != cur.optBoolean("peerRecOk", true) ||
+                                pv.optBoolean("peerSave", true) != cur.optBoolean("peerSave", true) ||
+                                pv.optBoolean("privateGroup", false) != cur.optBoolean("privateGroup", false) ||
+                                pv.optBoolean("peerPrivate", false) != (other?.optJSONObject("user") ?: other ?: JSONObject()).optBoolean("privateProfile", false) ||
+                                // Groups carry only privateGroup in this
+                                // payload — never compare absent fields, or a
+                                // NULL-defaulted group member would drift on
+                                // every single tick and hammer refreshMeta.
+                                (pr != null && pv.has("meSave") &&
+                                    (pv.optBoolean("meShot", false) != pr.optBoolean("shot", false) ||
+                                        pv.optBoolean("meRec", false) != pr.optBoolean("rec", false) ||
+                                        pv.optBoolean("meSave", true) != pr.optBoolean("save", true) ||
+                                        pv.optBoolean("meAllowShot", true) != pr.optBoolean("allowShot", true) ||
+                                        pv.optBoolean("meAllowRec", false) != pr.optBoolean("allowRec", false))))
+                    if (drifted) {
+                        Cache.bust("/api/conversations/$convId")
+                        refreshMeta()
+                    }
+                }
                 // Live read receipts: the sender's ticks turn blue without
                 // reopening the chat.
                 parsed.readAt?.let { otherReadAt = it }

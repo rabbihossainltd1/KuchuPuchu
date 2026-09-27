@@ -8511,15 +8511,61 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // 25 s image gen outlives the 6 s typing lease, and the app binds the
     // kind to its own generating state, not the clock.
     const typingKind = !typingIsStale ? (typingRow?.kind ?? null) : null;
+    // r77-10 (owner: "screenshot block on kori tobe opponent taw screenshot
+    // nite parche - app reopen na kora porjonto privacy apply hoi na, shob
+    // privacy tei same problem"): an open chat learns a privacy flip from the
+    // room event, but a phone whose room socket is down never re-reads the
+    // detail until reopen - the poll runs unconditionally every second, so it
+    // now ALSO carries the same privacy truth convFrom computes (identical
+    // NULL/profile defaults), and the marker seals it: a flip busts
+    // `unchanged` and lands within a tick, socket or no socket.
+    let priv: Record<string, boolean> = {};
+    if (conv.kind === "GROUP") {
+      priv = { privateGroup: Number(conv.private_group ?? 0) === 1 };
+    } else {
+      const privRows = await all<{
+        user_id: string;
+        priv_shot: number | null;
+        priv_rec: number | null;
+        priv_save: number | null;
+        priv_allow_shot: number | null;
+        priv_allow_rec: number | null;
+        private_profile: number | null;
+      }>(
+        db,
+        `SELECT m.user_id, m.priv_shot, m.priv_rec, m.priv_save, m.priv_allow_shot, m.priv_allow_rec, u.private_profile
+           FROM members m JOIN users u ON u.id = m.user_id
+          WHERE m.conv_id = ?`,
+        convId,
+      );
+      const meRow = privRows.find((r) => r.user_id === uid) ?? null;
+      const otherRow = privRows.find((r) => r.user_id !== uid) ?? null;
+      const myPrivate = Number(meRow?.private_profile ?? 0) === 1;
+      const peerPrivate = Number(otherRow?.private_profile ?? 0) === 1;
+      priv = {
+        peerSave: otherRow ? Number(otherRow.priv_save ?? (peerPrivate ? 0 : 1)) === 1 : true,
+        peerShotOk: otherRow
+          ? Number(otherRow.priv_allow_shot ?? (peerPrivate ? 0 : 1)) === 1
+          : true,
+        peerRecOk: otherRow ? Number(otherRow.priv_allow_rec ?? 0) === 1 : true,
+        meShot: Number(meRow?.priv_shot ?? 0) === 1,
+        meRec: Number(meRow?.priv_rec ?? 0) === 1,
+        meSave: Number(meRow?.priv_save ?? (myPrivate ? 0 : 1)) === 1,
+        meAllowShot: Number(meRow?.priv_allow_shot ?? (myPrivate ? 0 : 1)) === 1,
+        meAllowRec: Number(meRow?.priv_allow_rec ?? 0) === 1,
+        peerPrivate,
+      };
+    }
     // Freshness marker: page contents (id/text/edited/delivery per row) +
-    // read + typing, so every field the client consumes participates in the
-    // check - including repeat edits of the same row.
+    // read + typing + privacy (r77-10), so every field the client consumes
+    // participates in the check - including repeat edits of the same row.
     const marker = hashSig(
       JSON.stringify([
         items.map((m) => [m.id, m.body, m.edited, m.deliveredAt, m.viewedAt]),
         readAt,
         typingAt,
         typingKind,
+        priv,
       ]),
     );
     const clientMarker = url.searchParams.get("marker");
@@ -8530,6 +8576,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       typingAt,
       typingKind,
       marker,
+      priv,
       // The next cursor back. `kp_rowid` stays here, deliberately NOT inside the
       // items: an internal rowid has no business in a message payload (the client
       // has no use for it, and it would advertise insertion order of every row).
