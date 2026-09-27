@@ -1673,7 +1673,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             // (its bottom cut for a beat) and r76-21's gate turned that beat into an
             // invisible gap. Snapped, the row is born in its seat and its ONE flight
             // plays at once - no cut, no gap.
-            if (total > 0) runCatching { listState.snapToItem(total - 1) }
+            if (total > 0) runCatching { listState.scrollToItem(total - 1) }
         }
         // Owner round 11: tap sound on the send itself…
         lastTypingPing = 0L
@@ -1801,7 +1801,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         // (its bottom cut for a beat) and r76-21's gate turned that beat into an
         // invisible gap. Snapped, the row is born in its seat and its ONE flight
         // plays at once - no cut, no gap.
-        scope.launch { runCatching { listState.snapToItem(msgs.size + pending.size - 1) } }
+        scope.launch { runCatching { listState.scrollToItem(msgs.size + pending.size - 1) } }
         // r76-20 (owner item 14): a gif is a sticker-panel send — its tone.
         runCatching { KpSounds.stickerSend(ctx) }
         scope.launch {
@@ -1960,7 +1960,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         // (its bottom cut for a beat) and r76-21's gate turned that beat into an
         // invisible gap. Snapped, the row is born in its seat and its ONE flight
         // plays at once - no cut, no gap.
-        scope.launch { runCatching { listState.snapToItem(msgs.size + pending.size - 1) } }
+        scope.launch { runCatching { listState.scrollToItem(msgs.size + pending.size - 1) } }
         scope.launch {
             runCatching { KpSounds.send(ctx) }
             var shotW = 0
@@ -2184,7 +2184,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         // (its bottom cut for a beat) and r76-21's gate turned that beat into an
         // invisible gap. Snapped, the row is born in its seat and its ONE flight
         // plays at once - no cut, no gap.
-        scope.launch { runCatching { listState.snapToItem(msgs.size + pending.size - 1) } }
+        scope.launch { runCatching { listState.scrollToItem(msgs.size + pending.size - 1) } }
         runCatching { KpSounds.send(ctx) }
         // Owner round 32 (item 34): the upload + POST run on Uploads' own
         // scope — this screen only awaits the outcome for its bubble. They
@@ -2310,7 +2310,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         // (its bottom cut for a beat) and r76-21's gate turned that beat into an
         // invisible gap. Snapped, the row is born in its seat and its ONE flight
         // plays at once - no cut, no gap.
-        scope.launch { runCatching { listState.snapToItem(msgs.size + pending.size - 1) } }
+        scope.launch { runCatching { listState.scrollToItem(msgs.size + pending.size - 1) } }
         scope.launch {
             runCatching { KpSounds.send(ctx) }
             // Owner round 33 (item 3): the recording is a file already — the
@@ -2426,7 +2426,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             // (its bottom cut for a beat) and r76-21's gate turned that beat into an
             // invisible gap. Snapped, the row is born in its seat and its ONE flight
             // plays at once - no cut, no gap.
-            scope.launch { runCatching { listState.snapToItem(msgs.size + pending.size - 1) } }
+            scope.launch { runCatching { listState.scrollToItem(msgs.size + pending.size - 1) } }
             scope.launch {
                 val file = runCatching { job.bake(ctx) }.getOrNull()
                 if (file == null) {
@@ -10836,7 +10836,6 @@ private fun PrivacyToggle(
         Switch(
             checked = checked,
             enabled = enabled,
-            modifier = if (small) Modifier.scale(0.72f) else Modifier,
             onCheckedChange = { on ->
                 haptics.toggle(on)
                 onChange(on)
@@ -10846,7 +10845,9 @@ private fun PrivacyToggle(
                 checkedTrackColor = ActionBlue,
                 checkedBorderColor = ActionBlue,
             ),
-            modifier = Modifier.scale(0.85f),
+            // r76-22: sub-options get the smaller toggle (0.85 was the
+            // standing size for every privacy switch).
+            modifier = Modifier.scale(if (small) 0.62f else 0.85f),
         )
     }
 }

@@ -5083,12 +5083,12 @@ const convBetween = (db, a, b) =>
   check(
     "r32-48: no send path awaits a list scroll — sendImage / sendVoice / sendText launch the jump-to-bottom on a separate coroutine wrapped in runCatching, the upload coroutine never contains the scroll call, and the grid batch decodes photos sequentially in tick order via readAndSendImage",
     sendImageBody.includes(
-      "scope.launch { runCatching { listState.snapToItem(msgs.size + pending.size - 1) } }",
+      "scope.launch { runCatching { listState.scrollToItem(msgs.size + pending.size - 1) } }",
     ) &&
       sendVoiceBody.includes(
-        "scope.launch { runCatching { listState.snapToItem(msgs.size + pending.size - 1) } }",
+        "scope.launch { runCatching { listState.scrollToItem(msgs.size + pending.size - 1) } }",
       ) &&
-      sendTextBody.includes("if (total > 0) runCatching { listState.snapToItem(total - 1) }") &&
+      sendTextBody.includes("if (total > 0) runCatching { listState.scrollToItem(total - 1) }") &&
       // the upload coroutine starts with the sound, never with a scroll
       sendImageBody.includes(
         "scope.launch {\n            runCatching { KpSounds.send(ctx) }\n            var shotW = 0",
@@ -7492,7 +7492,7 @@ const convBetween = (db, a, b) =>
         // the refusal pass runs BEFORE the marker GET (an "unchanged" page used to skip it)
         chat33.indexOf("fun reconcileRefused() {") < chat33.indexOf("fun refreshMessages(") &&
         /scope\.launch \{\n\s+try \{\n\s+reconcileRefused\(\)/.test(chat33) &&
-        sendText33.includes("if (total > 0) runCatching { listState.snapToItem(total - 1) }") &&
+        sendText33.includes("if (total > 0) runCatching { listState.scrollToItem(total - 1) }") &&
         sendText33.includes("if (!alive.get()) return@send false") &&
         sendText33.includes("outcome.onSuccess { row -> paintSent(row) }") &&
         sendText33.includes("Drafts.clear(convId)") &&

@@ -671,7 +671,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       // indented under their Allow switch, and one short line of text.
       chat.includes("Needs Photos access to spot them") &&
       chat.split("small = true,").length === 3 &&
-      chat.includes("Modifier.scale(0.72f)"),
+      chat.includes("Modifier.scale(if (small) 0.62f else 0.85f)"),
   );
   check(
     'r73-18b (owner: "screenshot chat er baire nileo alert jai"): the watch follows the ACTIVITY, not the composition — [pause] tears every registration down when the screen loses focus, [resume] re-arms it, and arming always starts from a FRESH watermark, so a screenshot taken in another app can never be attributed to this chat',

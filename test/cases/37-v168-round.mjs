@@ -272,7 +272,9 @@ check(
     // SEND-time scrolls SNAP (six sites) — gliding slid the fresh row up
     // from under the viewport and the gate turned that beat into an
     // invisible gap. Received rows (live socket) still glide.
-    chat.split("listState.snapToItem").length === 7 &&
+    chat.split("scope.launch { runCatching { listState.scrollToItem(msgs.size + pending.size - 1) } }")
+      .length === 6 &&
+    chat.includes("if (total > 0) runCatching { listState.scrollToItem(total - 1) }") &&
     !chat.includes("listState.animateScrollToItem(msgs.size + pending.size - 1)") &&
     !fx8.includes("bottomOffset") &&
     chat.includes(".fxComposerAnchor()") &&
@@ -292,7 +294,7 @@ check(
     !chat.includes("onFlightLanded") &&
     // r76-22: the send-time jump is a SNAP now (see the r76-22 pin above).
     chat.includes(
-      "scope.launch { runCatching { listState.snapToItem(msgs.size + pending.size - 1) } }",
+      "scope.launch { runCatching { listState.scrollToItem(msgs.size + pending.size - 1) } }",
     ) &&
     chat.includes("var donor: JSONObject? = null") &&
     chat.includes('r54 (owner: "see more ekhono removed ache")') &&
