@@ -598,8 +598,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes('label = "Allow Screen Record"') &&
       chat.includes("if (allowShot)") &&
       chat.includes("if (allowRec)") &&
-      chat.includes("Alert me when they screenshot this chat") &&
-      chat.includes("Alert me when they record this chat") &&
+      // r76-30 (owner: "alert er details instructions text ogula remove
+      // koro"): the two alert rows are label-only now.
+      chat.split('sub = "",').length === 3 &&
+      !chat.includes("Alert me when they screenshot this chat") &&
       // r76-22 (owner: "short 1 line a rakho"): every sub-line is one short
       // sentence now.
       chat.includes("They can save the media I send here") &&
@@ -609,7 +611,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       // everywhere. r76-20 (owner item 3): the RECORDING row lost its
       // "Android 15 or newer" floor too — below 15 the saved-recording file
       // is read from the Screen recordings folder, so it is live everywhere.
-      chat.includes("Needs Videos access to spot them") &&
+      !chat.includes("Needs Videos access to spot them") &&
       !chat.includes("Alerts need Android 15 or newer") &&
       chat.includes("folderWatch = KpCapture.folderPermissions().isNotEmpty(),") &&
       chat.includes("folderGranted = KpCapture.folderGranted(ctx),"),
@@ -669,7 +671,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes("var capturePermNonce by remember { mutableStateOf(0) }") &&
       // r76-22: the alert rows are SUB-options — small row, small toggle,
       // indented under their Allow switch, and one short line of text.
-      chat.includes("Needs Photos access to spot them") &&
+      !chat.includes("Needs Photos access to spot them") &&
       chat.split("small = true,").length === 3 &&
       chat.includes("Modifier.scale(if (small) 0.62f else 0.85f)"),
   );
@@ -966,7 +968,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
       flight.includes(
         "withTimeoutOrNull(60_000L) { snapshotFlow { f.goAt >= 0L }.first { it } }",
       ) &&
-      flight.includes("active && !sent -> 1f") &&
+      // r76-30: the wait is INVISIBLE now - the flight is the entrance.
+      flight.includes("else -> 0f") &&
       chat.split("sent = !mine || !pendingEcho, key = fxKey").length === 6 &&
       chat.includes("Column(if (small) Modifier.width(150.dp) else Modifier.weight(1f)) {") &&
       chat.includes("val catalog = TenorGifs.gifs.firstOrNull { it.url == url }") &&
@@ -977,7 +980,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
       viewer.includes("heroFrom: androidx.compose.ui.geometry.Rect? = null,") &&
       viewer.includes("val heroSeat = remember { heroFrom }") &&
       viewer.includes("hero.animateTo(1f, tween(320") &&
-      viewer.includes("scaleX = androidx.compose.ui.util.lerp(h.width / sw, 1f, t)") &&
+      // r76-30: uniform scale now.
+      viewer.includes("scaleX = androidx.compose.ui.util.lerp(s0, 1f, t)") &&
       chat.includes("hostView.getLocationOnScreen(loc)") &&
       chat.includes("heroFrom = PhotoHero.take(),") &&
       chat.includes("PhotoHero.lastId = null") &&
@@ -1006,8 +1010,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       flight.includes("if (f.goAt > android.os.SystemClock.uptimeMillis()) {") &&
       chat.includes("if (mine && !pendingEcho && fxBorn) FlightAnims.armIn(fxKey, 500L)") &&
       chat.includes("Column(if (small) Modifier.width(150.dp) else Modifier.weight(1f)) {") &&
-      chat.includes('if (src.startsWith("http")) return src') &&
-      chat.includes('.put("fetchUrl", url)') &&
+      // (r76-30 reverted the sender-side CDN detour - the R2 copy won.)
       chat.includes("hostView.getLocationOnScreen(loc)") &&
       worker.includes("...(fetchedSrc ? { src: fetchedSrc } : {}),") &&
       viewer.includes("w.setDimAmount(0f)") &&
@@ -1018,6 +1021,28 @@ const main = (f) => read(`${ANDROID}/${f}`);
       status.includes(".padding(vertical = 4.dp)") &&
       e2.includes("return@runCatching backupLocal(ctx)") &&
       e2.includes("if (remote.isBlank()) return@runCatching backupLocal(ctx)"),
+  );
+}
+
+/* ---------- r76-30: the flight IS the entrance, alert rows bare, ratio-safe hero, back un-pauses status ---------- */
+{
+  const flight = main("SendFlight.kt");
+  const chat = main("ChatScreen.kt");
+  const viewer = main("MediaViewer.kt");
+  const status = main("StatusScreens.kt");
+  check(
+    "r76-30: a mine row is INVISIBLE until its armed flight (no message in the chat before the animation), the two alert rows carry no instruction text, photoUrlOf is back to the R2 copy, the hero scales uniformly (ratio holds on close), BACK while the reply field is focused releases it so the video status resumes",
+    flight.includes("if (v != 0f) v = 0f") &&
+      !flight.includes("active && !sent -> 1f") &&
+      !flight.includes("if (v != 1f) v = 1f") &&
+      chat.split('sub = "",').length === 3 &&
+      chat.includes("if (sub.isNotBlank()) Text(sub") &&
+      chat.includes("internal fun photoUrlOf(m: JSONObject): String? =") &&
+      !chat.includes("if (src.startsWith") &&
+      viewer.includes("val s0 = maxOf(h.width / sw, h.height / sh)") &&
+      viewer.includes("scaleX = androidx.compose.ui.util.lerp(s0, 1f, t)") &&
+      status.includes("BackHandler(enabled = replyFocused)") &&
+      status.includes("replyKeyboard?.hide()"),
   );
 }
 

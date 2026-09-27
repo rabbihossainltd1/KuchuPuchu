@@ -141,9 +141,10 @@ fun Modifier.fxFlyIn(
             when {
                 st == null -> 1f
                 st.goAt >= 0L -> FlightAnims.valueAt(st, dur)
-                // r76-28: a mine row waiting for its ack shows FULL SIZE -
-                // the message is there; the flight is a post-send celebration.
-                active && !sent -> 1f
+                // r76-30 (owner: "regression - animation er agei chat a
+                // message emoji chole jacche"): the flight IS the entrance -
+                // a mine row stays invisible in its seat until the ack-armed
+                // moment, then flies up from the composer into the chat.
                 else -> 0f
             },
         )
@@ -178,12 +179,12 @@ fun Modifier.fxFlyIn(
             if (f.goAt < 0L) f.goAt = android.os.SystemClock.uptimeMillis()
         }
         // Tick to the end from wherever the global clock says we are. A
-        // future goAt (the armed 0.5 s wait) holds the row at FULL SIZE -
-        // the message is readable the whole time; the flight is a
-        // celebration that starts on the dot.
+        // future goAt (the armed 0.5 s wait) holds the row INVISIBLE - the
+        // message must NOT sit in the chat before its animation; the flight
+        // itself carries it in, on the dot.
         while (true) {
             if (f.goAt > android.os.SystemClock.uptimeMillis()) {
-                if (v != 1f) v = 1f
+                if (v != 0f) v = 0f
                 androidx.compose.runtime.withFrameNanos { }
                 continue
             }

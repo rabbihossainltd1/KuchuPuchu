@@ -8003,7 +8003,7 @@ const convBetween = (db, a, b) =>
       "r33-17: media reply card — quoteKind / quoteText name a photo / video / voice / document (caption kept), QuoteThumb draws the photo (photoUrlOf), the video's cached frame or a mic / file glyph at 34 dp and nothing for a view-once; the composer bar and the bubble quote both carry it beside a 34 dp stripe",
       chat.includes("internal fun quoteKind(m: JSONObject): String {") &&
         chat.includes("internal fun quoteText(m: JSONObject): String {") &&
-        chat.includes("internal fun photoUrlOf(m: JSONObject): String? {") &&
+        chat.includes("internal fun photoUrlOf(m: JSONObject): String? =") &&
         thumb.includes("if (kind.isBlank() || isViewOnce(m)) return") &&
         thumb.includes('"Photo" -> KpNetImage(photoUrlOf(m), "Photo", Modifier.fillMaxSize())') &&
         thumb.includes("VideoThumbs.get(key) ?: VideoThumbs.readThumb(key)") &&

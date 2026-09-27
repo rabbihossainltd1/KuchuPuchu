@@ -503,8 +503,15 @@ fun KpPhotoViewer(
                             if (h != null && t < 1f && size.width > 0f && size.height > 0f) {
                                 val sw = size.width
                                 val sh = size.height
-                                scaleX = androidx.compose.ui.util.lerp(h.width / sw, 1f, t)
-                                scaleY = androidx.compose.ui.util.lerp(h.height / sh, 1f, t)
+                                // r76-30 (owner: "photo closing ta ratio te
+                                // problem"): scaleX / scaleY lerped to
+                                // DIFFERENT factors, so the picture squashed
+                                // into the tile's shape on the way out. One
+                                // UNIFORM factor (cover) - the ratio holds
+                                // for the whole hero, both directions.
+                                val s0 = maxOf(h.width / sw, h.height / sh)
+                                scaleX = androidx.compose.ui.util.lerp(s0, 1f, t)
+                                scaleY = androidx.compose.ui.util.lerp(s0, 1f, t)
                                 translationX = androidx.compose.ui.util.lerp(h.center.x - sw / 2f, 0f, t)
                                 translationY = androidx.compose.ui.util.lerp(h.center.y - sh / 2f, 0f, t)
                             }

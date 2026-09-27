@@ -538,6 +538,16 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
     }
     val ctx = LocalContext.current
     val focusManager = LocalFocusManager.current
+    // r76-30 (owner: "video status ... type kore abar back korle play hoi na
+    // stuck hoye thake"): the BACK key with the reply field focused only
+    // FOLDED THE KEYBOARD - the field kept its focus, so replyFocused stayed
+    // true and the clip sat paused forever. Back now releases the field (and
+    // hides the keyboard), which is what un-pauses the clock and the clip.
+    val replyKeyboard = androidx.compose.ui.platform.SoftwareKeyboardController.current
+    androidx.activity.compose.BackHandler(enabled = replyFocused) {
+        replyKeyboard?.hide()
+        focusManager.clearFocus()
+    }
 
     // Dark screen → status bar icons must be white while viewing, and back to
     // dark-on-light when this screen goes away.
@@ -689,8 +699,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
         // r76-28 (owner: "reply dile status resume hoi na stuck hoye thake"):
         // the flag alone never flipped back - releasing the FIELD's real
         // focus is what un-pauses the progress clock.
-        focusManager.clearFocus()
-        // The keyboard MUST fold after send — focus release alone left it up.
+        replyKeyboard?.hide()
         focusManager.clearFocus()
         runCatching { KpSounds.send(ctx) }
         scope.launch {

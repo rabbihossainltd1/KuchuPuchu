@@ -1820,8 +1820,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("createdAt", java.time.Instant.now().toString())
                 .put("mediaW", gw)
                 .put("mediaH", gh)
-                // r76-29: the echo renders from the CDN url - instant, cached.
-                .put("fetchUrl", url)
                 .also { if (replyId != null) it.put("replyTo", replyId) },
         )
 // r76-22 (owner: "sent hole ekhono 0.1 seconds halka kete jai"): SNAP,
@@ -6834,23 +6832,18 @@ internal fun quoteText(m: JSONObject): String {
 
 /** The picture behind a photo message — mediaUrl, an inline data URL while
  *  pending, or the file key as an /api/files path. */
-internal fun photoUrlOf(m: JSONObject): String? {
-    // r76-29 (owner: "fixed but preview ta slow keno?"): MY OWN gif renders
-    // from the ORIGINAL CDN url - the sticker panel already decoded it, so
-    // Coil serves it from cache in a frame instead of the bubble re-fetching
-    // the R2 copy through the worker. The R2 object stays the authoritative
-    // copy (history, forwards, the recipient's phone).
-    if (m.optString("senderId") == Store.myId()) {
-        val src = m.optJSONObject("meta")?.optString("src").orEmpty().ifBlank { m.optString("fetchUrl") }
-        if (src.startsWith("http")) return src
-    }
-    return m.optText("kpLocalUrl").takeIf { it.isNotBlank() }
+// r76-30 (owner: "not fixed + 20x slow hoiche aro"): the r76-29 detour to
+// the ORIGINAL Tenor url made the sender's own gif slower, not faster - the
+// CDN is far from here and the panel's cache did not carry over. Back to the
+// R2 copy for everyone; the flight's 0.5 s hidden window is when the bubble
+// downloads it, so the gif is on screen the moment it flies in.
+internal fun photoUrlOf(m: JSONObject): String? =
+    m.optText("kpLocalUrl").takeIf { it.isNotBlank() }
         ?: m.optText("mediaUrl").takeIf { it.isNotBlank() }
         ?: m.optText("fileKey").takeIf { it.isNotBlank() }?.let { key ->
             if (key.startsWith("data:") || key.startsWith("http") || key.startsWith("/")) key
             else "/api/files/$key"
         }
-}
 
 /** Owner round 33 (item 17): the small content card beside a quote — the
  *  photo itself, the video's cached frame under a play glyph, a mic for a
@@ -10841,9 +10834,9 @@ private fun ChatPrivacySheet(
             PrivacyToggle(
                 icon = Icons.Filled.Notifications,
                 label = "Screenshot alert",
-                sub =
-                    if (folderWatch && !folderGranted) "Needs Photos access to spot them"
-                    else "Alert me when they screenshot this chat",
+                // r76-30 (owner: "alert er details instructions text ogula
+                // remove koro"): the label says it all - no sub-line.
+                sub = "",
                 checked = shot,
                 enabled = true,
                 onChange = onShot,
@@ -10865,9 +10858,7 @@ private fun ChatPrivacySheet(
             PrivacyToggle(
                 icon = Icons.Filled.Notifications,
                 label = "Screen record alert",
-                sub =
-                    if (folderWatch && !folderGranted) "Needs Videos access to spot them"
-                    else "Alert me when they record this chat",
+                sub = "",
                 checked = rec,
                 enabled = true,
                 onChange = onRec,
@@ -10931,7 +10922,7 @@ private fun PrivacyToggle(
                 fontSize = if (small) 13.sp else 15.sp,
                 fontWeight = if (small) FontWeight.Normal else FontWeight.Medium,
             )
-            Text(sub, color = Muted, fontSize = if (small) 11.sp else 12.sp)
+            if (sub.isNotBlank()) Text(sub, color = Muted, fontSize = if (small) 11.sp else 12.sp)
         }
         // r76-23 (owner: "shob buttons toggle switch same thakbe ... just
         // animation ta add Hobe"): the owner's animated toggle, app-wide.
