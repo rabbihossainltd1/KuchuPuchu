@@ -802,6 +802,42 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+{
+  // r76-23 (owner): "shob buttons toggle switch same thakbe ... just
+  // animation ta add Hobe" — his AnimatedToggleSwitch (blue wipe + spinning
+  // knob) is THE switch at every site; the privacy sub-rows shift left as
+  // WHOLE rows; an OWN row flies only when it BECOMES sent (the sending echo
+  // is static — no animation to cut mid-send); a pending gif shows exactly
+  // ONE progress ring; the view-once send ring rides the normal centered
+  // scrim system.
+  const chat = main("ChatScreen.kt");
+  const settings = main("SettingsScreen.kt");
+  const group = main("GroupInfoScreen.kt");
+  const toggle = main("AnimatedToggleSwitch.kt");
+  check(
+    "r76-23: the owner's animated toggle is app-wide, sub-rows shift whole, own flights start at SENT, one gif ring, view-once ring centered",
+    toggle.includes("fun AnimatedToggleSwitch(") &&
+      toggle.includes("Color(0xFFD8DAE0)") &&
+      toggle.includes("Color(0xFF3D72F6)") &&
+      toggle.includes("knobRotation.animateTo") &&
+      chat.split("AnimatedToggleSwitch(").length === 2 &&
+      settings.split("AnimatedToggleSwitch(").length === 3 &&
+      group.split("AnimatedToggleSwitch(").length === 2 &&
+      !chat.includes("import androidx.compose.material3.Switch") &&
+      !settings.includes("import androidx.compose.material3.Switch") &&
+      chat.includes("end = if (small) 28.dp else 14.dp,") &&
+      chat.includes("remember(pendingEcho) {") &&
+      chat.includes("mine -> live && !pendingEcho") &&
+      chat.includes("remember(pendingEcho) { fxBorn && FxFlights.claim(fxKey) }") &&
+      chat.includes(
+        "if (!isPending)\n                CircularProgressIndicator(color = if (mine) AmberInk else Gold, modifier = Modifier.size(22.dp))",
+      ) &&
+      chat.includes(
+        "Box(Modifier.matchParentSize().background(Color(0x59000000)), contentAlignment = Alignment.Center) {",
+      ),
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`r70-round: ${lines.length - broken} ok / ${broken} broken`);

@@ -167,15 +167,22 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes('val fxKey = m.optString("clientId").ifBlank { m.optString("id") }'),
   );
   check(
+    // r76-23 (owner: "sending er somoy animation hoi, send hole off hoye jai
+    // instant"): the claim is still ONE per key, but the remember is keyed
+    // on pendingEcho — an OWN row claims its flight at the moment it BECOMES
+    // sent, so the sending echo stays static (nothing to cut mid-send).
     "r67-3: that claim IS the arrival animation (no per-composition re-decision)",
-    chat.includes("val fxFresh = remember { fxBorn && FxFlights.claim(fxKey) }"),
+    chat.includes("val fxFresh = remember(pendingEcho) { fxBorn && FxFlights.claim(fxKey) }"),
   );
   check(
-    "r67-3: the SENDING echo is eligible now — the old `!pendingEcho` exclusion is gone from the birth predicate",
-    !chat.includes("val liveBorn = !pendingEcho &&") &&
+    // r76-23: the owner REVERSED r67-3's "echo is eligible" for OWN rows —
+    // the flight belongs to the SENT moment, not the sending phase. Received
+    // rows are unchanged.
+    "r76-23: an own row flies only when it becomes SENT — the sending echo is static again",
+    chat.includes("remember(pendingEcho) {") &&
       chat.includes("val fxBorn =") &&
       chat.includes(
-        'mine -> live\n                else -> live || FxArrivals.mark(m.optString("id")) != null',
+        'mine -> live && !pendingEcho\n                else -> live || FxArrivals.mark(m.optString("id")) != null',
       ),
   );
   check(

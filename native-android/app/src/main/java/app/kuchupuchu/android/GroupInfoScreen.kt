@@ -38,8 +38,6 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -524,19 +522,14 @@ fun GroupSettingsScreen(nav: NavController, convId: String) {
                 Icon(Icons.Filled.Lock, "Private group", tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(12.dp))
                 Text("Private group", fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.weight(1f))
-                Switch(
+                // r76-23: the owner's animated toggle, app-wide.
+                AnimatedToggleSwitch(
                     checked = privateGroup,
                     onCheckedChange = {
                         haptics.toggle(it)
                         setPrivate(it)
                     },
                     enabled = isAdmin && !busy && c != null,
-                    colors =
-                        SwitchDefaults.colors(
-                            checkedThumbColor = ActionBlueInk,
-                            checkedTrackColor = ActionBlue,
-                            checkedBorderColor = ActionBlue,
-                        ),
                     modifier = Modifier.scale(0.85f),
                 )
             }

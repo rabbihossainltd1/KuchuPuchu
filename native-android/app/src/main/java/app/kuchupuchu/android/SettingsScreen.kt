@@ -62,7 +62,6 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Switch
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -137,13 +136,6 @@ private fun SettingRow(
     }
 }
 
-@Composable
-private fun kpSwitchColors() =
-    androidx.compose.material3.SwitchDefaults.colors(
-        checkedThumbColor = ActionBlueInk,
-        checkedTrackColor = ActionBlue,
-        checkedBorderColor = ActionBlue,
-    )
 
 @Composable
 private fun ToggleRow(icon: ImageVector, label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
@@ -158,13 +150,13 @@ private fun ToggleRow(icon: ImageVector, label: String, checked: Boolean, onChan
         Icon(icon, label, tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(12.dp))
         Text(label, fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.weight(1f))
-        Switch(
+        // r76-23: the owner's animated toggle, app-wide.
+        AnimatedToggleSwitch(
             checked = checked,
             onCheckedChange = { on ->
                 haptics.toggle(on)
                 onChange(on)
             },
-            colors = kpSwitchColors(),
             modifier = Modifier.scale(0.85f),
         )
     }
@@ -665,15 +657,14 @@ fun AppSettingsScreen(nav: NavController) {
                 Icon(Icons.Filled.BugReport, "Crash reports", tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(12.dp))
                 Text("Crash reports", fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                Switch(
+                // r76-23: the owner's animated toggle, app-wide.
+                AnimatedToggleSwitch(
                     checked = crashOn,
                     onCheckedChange = { on ->
                         haptics.toggle(on)
                         crashOn = on
                         KpCrash.setEnabled(ctx, on)
                     },
-                    // Owner round 22: the toggle rides the blue accent.
-                    colors = kpSwitchColors(),
                     modifier = Modifier.scale(0.85f),
                 )
             }

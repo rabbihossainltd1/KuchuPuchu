@@ -100,7 +100,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -7286,8 +7285,14 @@ private fun MessageRow(
     //             painted server row share that key, so the row flies in at
     //             birth (still sending) and the swap only takes the seat.
     val fxKey = m.optString("clientId").ifBlank { m.optString("id") }
+    // r76-23 (owner: "sending er somoy animation hoi, send hole off hoye
+    // jai instant ... send sending sent er vitor kono alada system hobe
+    // na"): an OWN row flies exactly ONCE — at the moment it BECOMES SENT.
+    // The sending echo is static (fully painted, nothing to cut); the
+    // remember is keyed on pendingEcho so the flip to sent re-evaluates and
+    // claims the flight then, not during the send.
     val fxBorn =
-        remember {
+        remember(pendingEcho) {
             // r50 / r58 (owner: "history scrolling er somoy o animation keno hocche eita"):
             // the flight is for LIVE arrivals only - history, loadOlder, or reopen
             // never fly; they get the soft fade instead.
@@ -7297,11 +7302,11 @@ private fun MessageRow(
             when {
                 !isRecent -> false
                 m.optString("senderId") == "kp_ai_bot" -> false
-                mine -> live
+                mine -> live && !pendingEcho
                 else -> live || FxArrivals.mark(m.optString("id")) != null
             }
         }
-    val fxFresh = remember { fxBorn && FxFlights.claim(fxKey) } && fxScaleOf(ctx) > 0f
+    val fxFresh = remember(pendingEcho) { fxBorn && FxFlights.claim(fxKey) } && fxScaleOf(ctx) > 0f
     // v205 + v207 (unchanged by r67-3): the emoji glyph animates when the row
     // is a live birth AND is no longer a sending echo - so the emoji plays at
     // the moment the message becomes sent, while the flight above belongs to
@@ -9056,18 +9061,20 @@ private fun ViewOnceRow(
                     CenteredOnceIcon(48.dp)
                 }
                 if (pendingEcho) {
-                    // An upload in flight: the determinate ring under the mark.
-                    Box(Modifier.matchParentSize().padding(bottom = 14.dp), contentAlignment = Alignment.BottomCenter) {
+                    // r76-23 (owner: "view once ... loading progress ta ...
+                    // normal photo sending progress jemon temoni same system
+                    // a rakho"): the SAME system as a normal photo send —
+                    // dark scrim + centered ring, not a bottom-hanging one.
+                    Box(Modifier.matchParentSize().background(Color(0x59000000)), contentAlignment = Alignment.Center) {
                         if (upFrac != null) {
                             CircularProgressIndicator(
                                 progress = { upFrac },
                                 color = Color.White,
                                 strokeWidth = 3.dp,
-                                trackColor = Color.White.copy(alpha = 0.22f),
-                                modifier = Modifier.size(30.dp),
+                                modifier = Modifier.size(34.dp),
                             )
                         } else {
-                            CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp, modifier = Modifier.size(30.dp))
+                            CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp, modifier = Modifier.size(34.dp))
                         }
                     }
                 }
@@ -10061,7 +10068,12 @@ private fun ImageBubble(m: JSONObject, mine: Boolean, isPending: Boolean = false
         contentAlignment = Alignment.Center,
     ) {
         if (url.isNullOrBlank()) {
-            CircularProgressIndicator(color = if (mine) AmberInk else Gold, modifier = Modifier.size(22.dp))
+            // r76-23 (owner: "gif send korar por double sending progress"):
+            // a pending row (a gif has no bytes on this phone yet) has no
+            // url — its ring belongs to the send overlay below, so this
+            // second spinner must not join it.
+            if (!isPending)
+                CircularProgressIndicator(color = if (mine) AmberInk else Gold, modifier = Modifier.size(22.dp))
         } else if (dataBmp != null) {
             if (ratio <= 0f && dataBmp.height > 0) {
                 ratio = ImageRatios.put(url, dataBmp.width.toFloat() / dataBmp.height.toFloat())
@@ -10811,7 +10823,10 @@ private fun PrivacyToggle(
             .fillMaxWidth()
             .padding(
                 start = if (small) 34.dp else 14.dp,
-                end = 14.dp,
+                // r76-23 (owner: "sub buttons gula left a soray daw full raw
+                // tai just button na"): the WHOLE sub-row shifts left — the
+                // end inset moves its switch off the main switches' column.
+                end = if (small) 28.dp else 14.dp,
                 top = if (small) 2.dp else 8.dp,
                 bottom = if (small) 2.dp else 8.dp,
             ),
@@ -10833,21 +10848,18 @@ private fun PrivacyToggle(
             )
             Text(sub, color = Muted, fontSize = if (small) 11.sp else 12.sp)
         }
-        Switch(
+        // r76-23 (owner: "shob buttons toggle switch same thakbe ... just
+        // animation ta add Hobe"): the owner's animated toggle, app-wide.
+        AnimatedToggleSwitch(
             checked = checked,
-            enabled = enabled,
             onCheckedChange = { on ->
                 haptics.toggle(on)
                 onChange(on)
             },
-            colors = androidx.compose.material3.SwitchDefaults.colors(
-                checkedThumbColor = ActionBlueInk,
-                checkedTrackColor = ActionBlue,
-                checkedBorderColor = ActionBlue,
-            ),
             // r76-22: sub-options get the smaller toggle (0.85 was the
             // standing size for every privacy switch).
             modifier = Modifier.scale(if (small) 0.62f else 0.85f),
+            enabled = enabled,
         )
     }
 }

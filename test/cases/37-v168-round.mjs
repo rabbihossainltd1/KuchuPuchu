@@ -210,7 +210,8 @@ check(
     // animation; the emoji glyph keeps its own live-birth predicate (fxEmoji).
     fx7.includes("object FxFlights") &&
     fx7.includes("fun claim(key: String): Boolean") &&
-    chat.includes("val fxFresh = remember { fxBorn && FxFlights.claim(fxKey) }") &&
+    // r76-23: keyed on pendingEcho — an own flight starts at SENT.
+    chat.includes("val fxFresh = remember(pendingEcho) { fxBorn && FxFlights.claim(fxKey) }") &&
     (chat.includes('m.optString("senderId") == "kp_ai_bot" -> false') ||
       chat.includes('if (m.optString("senderId") == "kp_ai_bot") false')) &&
     chat.includes("FxArrivals.armed = false") &&
