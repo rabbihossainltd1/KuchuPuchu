@@ -9716,7 +9716,8 @@ const convBetween = (db, a, b) =>
           mv.includes("rememberPagerState(initialPage = startIndex.coerceIn(pages.indices))") &&
           mv.includes("userScrollEnabled = scale <= 1.01f,") &&
           mv.includes("${pager.currentPage + 1} / ${pages.size}") &&
-          mv.includes("val pageUrl = pages[pager.currentPage]") &&
+          // r76-26: a view-once page saves from the bytes the viewer holds.
+          mv.includes("val pageUrl = oncePages.getOrElse(pager.currentPage)") &&
           chat.includes("viewerPhotos = all") &&
           chat.includes("viewerStart = all.indexOfFirst") &&
           chat.includes("onPageChanged = { viewerAt = it },") &&

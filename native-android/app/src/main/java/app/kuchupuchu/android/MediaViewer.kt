@@ -59,6 +59,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -217,6 +218,23 @@ fun KpPhotoViewer(
     var confirmDelete by remember { mutableStateOf(false) }
     // Owner round 34 (item 6): one page per photo; zoom resets on each flip.
     val pages = urls.ifEmpty { listOf(url) }
+    // r76-26 (owner: "ami owner, ami view once media save korte gele error
+    // dekhay"): a once page's bytes are a one-shot fetch - the on-screen
+    // fetch SPENDS the opening, so Save's second download always came back
+    // 410 ("already opened") and toasted an error. The viewer now performs
+    // that single fetch itself and keeps the bytes in memory: the page
+    // renders from them (as a data URI) and Save writes those same bytes.
+    // The server-side spend still happens exactly once, at this fetch.
+    val oncePages = remember(pages, once) { mutableStateListOf<String>().also { it.addAll(pages) } }
+    if (once) {
+        LaunchedEffect(pages) {
+            pages.forEachIndexed { i, u ->
+                if (u.startsWith("data:")) return@forEachIndexed
+                val bytes = withContext(Dispatchers.IO) { runCatching { Api.download(u) }.getOrNull() } ?: return@forEachIndexed
+                oncePages[i] = "data:image/jpeg;base64," + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            }
+        }
+    }
     val pager = rememberPagerState(initialPage = startIndex.coerceIn(pages.indices)) { pages.size }
     LaunchedEffect(pager.currentPage) {
         scale = 1f
@@ -226,7 +244,9 @@ fun KpPhotoViewer(
     }
     fun savePhoto() {
         if (saving) return
-        val pageUrl = pages[pager.currentPage]
+        // r76-26: a once page saves from the bytes the viewer already holds -
+        // its single fetch was spent the moment the picture came on screen.
+        val pageUrl = oncePages.getOrElse(pager.currentPage) { pages.getOrElse(pager.currentPage) { return } }
         scope.launch {
             saving = true
             val bytes =
@@ -392,7 +412,7 @@ fun KpPhotoViewer(
                     userScrollEnabled = scale <= 1.01f,
                 ) { page ->
                     KpNetImage(
-                        pages[page],
+                        oncePages.getOrElse(page) { pages[page] },
                         title,
                         Modifier
                             .fillMaxSize()

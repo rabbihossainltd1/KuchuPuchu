@@ -10864,11 +10864,13 @@ private fun PrivacyToggle(
             modifier = Modifier.size(if (small) 16.dp else 20.dp),
         )
         Spacer(Modifier.width(if (small) 8.dp else 12.dp))
-        // r76-24 (owner: "sub options full system tai mane icon text button
-        // shob left jabe"): a sub-row packs ALL of it to the left — no weight
-        // stretch, so the toggle sits right after the text, not at the right
-        // edge under the main switches.
-        Column(if (small) Modifier else Modifier.weight(1f)) {
+        // r76-26 (owner: "Screenshot alert er switch ar screen record alert
+        // er switch ekta age arekta pore ache ... ek line a thakbe"): with the
+        // text left-packed the toggle rode at the TEXT’s width, so the two
+        // sub-switches sat at different x. The text column takes the row
+        // again — both toggles line up at the right edge with each other —
+        // while the row itself still starts flush-left (r76-25 stands).
+        Column(Modifier.weight(1f)) {
             Text(
                 label,
                 color = Ink,
@@ -10877,7 +10879,6 @@ private fun PrivacyToggle(
             )
             Text(sub, color = Muted, fontSize = if (small) 11.sp else 12.sp)
         }
-        if (small) Spacer(Modifier.width(10.dp))
         // r76-23 (owner: "shob buttons toggle switch same thakbe ... just
         // animation ta add Hobe"): the owner's animated toggle, app-wide.
         AnimatedToggleSwitch(

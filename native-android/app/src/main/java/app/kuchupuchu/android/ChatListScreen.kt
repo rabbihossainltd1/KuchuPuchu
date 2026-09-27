@@ -319,6 +319,10 @@ fun ChatListScreen(nav: NavController) {
     }
 
     Box(Modifier.fillMaxSize().background(Cream)) {
+        // r76-26 (owner: "onno phone a login korle purono message gulate lock"):
+        // a locked key backup waits on the server — ask for its passphrase so
+        // the sealed history opens on this phone instead of showing locks.
+        E2eeRestoreGate()
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             /* ---------- top bar ---------- */
             // Owner round 32 (item 12): while chats are ticked the bar shows
@@ -1282,6 +1286,9 @@ internal fun friendlyPreview(raw: String): String {
     // Owner round 32 (item 17): the worker's view-once preview passes through.
     // r71-19b: a view-once VOICE note passes through the same way.
     if (t == "Photo · View once" || t == "Video · View once") return t
+    // r76-26 (owner: "gif push a Photo lekha ase"): the worker's new GIF word
+    // passes through, and an old .gif file name reads as GIF - not Photo.
+    if (t == "GIF" || t == "GIF · View once") return t
     if (t == "Voice message · View once") return t
     // r71-20: a view-once TEXT reads the same way in the list and in the push.
     if (t == "Message · View once") return t
@@ -1292,6 +1299,7 @@ internal fun friendlyPreview(raw: String): String {
         lower.startsWith("voice_") || lower.startsWith("voice ") -> "Voice message"
         lower == "video" || lower == "🎬 video" -> "Video"
         lower == "document" || lower == "📄 document" -> "Document"
+        fileLike && lower.endsWith(".gif") -> "GIF"
         fileLike && (photoExts.any { lower.endsWith(it) } || lower.startsWith("photo_")) -> "Photo"
         fileLike && videoExts.any { lower.endsWith(it) } -> "Video"
         fileLike && audioExts.any { lower.endsWith(it) } -> "Voice message"

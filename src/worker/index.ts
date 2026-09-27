@@ -11769,6 +11769,11 @@ function previewOf(row: MsgRow): string {
       // only a Document keeps its file name (the bubble draws it as a file row).
       const type = String(meta.type || "");
       if (meta.document !== true) {
+        // r76-26 (owner: "ami jokhon gif pathai ... opponent er notification
+        // a Photo lekha ase ... GIF dekhabe"): a GIF moves - it is not a still
+        // photo - so the push (and every preview built from this word) says
+        // GIF. Must stay above the generic image/ branch.
+        if (type === "image/gif") return `GIF${once}`;
         if (type.startsWith("image/")) return `Photo${once}`;
         if (type.startsWith("video/")) return `Video${once}`;
         if (type.startsWith("audio/")) return `Voice message${once}`;

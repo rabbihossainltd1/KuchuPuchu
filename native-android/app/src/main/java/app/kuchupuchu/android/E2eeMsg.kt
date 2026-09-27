@@ -43,7 +43,9 @@ import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.KeyAgreement
 import javax.crypto.Mac
+import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
@@ -82,6 +84,16 @@ internal object E2eeMsg {
 
     /** r76-12: bumped when a roaming identity lands — open chats re-unseal. */
     var restoredNonce by mutableStateOf(0)
+
+    /**
+     * r76-26: a passphrase-protected (KP2.) backup was found on the server
+     * while this install had no identity — the restore dialog collects the
+     * passphrase and calls [tryRestore]; until then the app runs on a fresh
+     * pair and old rows stay locked.
+     */
+    @Volatile
+    var pendingRestore: String? = null
+        private set
 
     private val publication = E2eePublicationGate()
 
@@ -283,11 +295,6 @@ internal object E2eeMsg {
 
     // ---------- r76-12: roaming identity (owner: history on a new phone) ----------
 
-    private fun encodeBackup(priv: String, pub: String): String =
-        Base64.getEncoder()
-            .encodeToString(
-                JSONObject().put("p", priv).put("u", pub).toString().toByteArray(Charsets.UTF_8),
-            )
 
     /** Restore the backed-up pair when we have none; back ours up when the
      *  server lacks one. Runs on the caller's IO thread (ensurePublished). */
@@ -298,6 +305,16 @@ internal object E2eeMsg {
             val pub = prefs.getString(KEY_PUB, null).orEmpty()
             val remote = Api.request("/api/e2ee/backup", "GET", null).optText("backup")
             if (priv.isBlank() || pub.isBlank()) {
+                if (remote.startsWith(V2)) {
+                    // r76-26 (owner: "logout kore app delete kore abar install
+                    // korle ... purono message gulate lock emoji dekhai"): the
+                    // backup is passphrase-locked, so it cannot open silently.
+                    // Hold it for the restore dialog; mint a working pair now
+                    // so sending keeps going, and NEVER overwrite the remote.
+                    pendingRestore = remote
+                    identity(ctx)
+                    return@runCatching false
+                }
                 if (remote.isNotBlank()) {
                     val j = JSONObject(String(Base64.getDecoder().decode(remote), Charsets.UTF_8))
                     val rp = j.optText("p")
@@ -309,23 +326,105 @@ internal object E2eeMsg {
                         return@runCatching true
                     }
                 }
-                // First device ever: mint, then back up for the next phone.
+                // r76-26: first device ever mints its pair; the backup only
+                // exists once the owner sets a passphrase (privacy sheet, the
+                // WhatsApp-style choice) — the plaintext server upload is
+                // retired. KP1 blobs uploaded before this round still restore
+                // silently above, so nobody loses an existing backup.
                 identity(ctx)
-                return@runCatching backupLocal(ctx)
+                return@runCatching false
             }
-            if (remote.isBlank()) return@runCatching backupLocal(ctx)
             true
         }.getOrDefault(false)
 
-    private fun backupLocal(ctx: Context): Boolean =
+    // ---------- r76-26: passphrase-locked backup (owner chose WhatsApp-style) ----------
+    //
+    // The KP2. blob is AES-256-GCM over the same {p,u} JSON, with the key
+    // stretched from the owner's passphrase (PBKDF2-HMAC-SHA256, random
+    // 16-byte salt, 200k rounds). The server stores ciphertext it cannot
+    // read; a new phone proves the passphrase to unlock its own history.
+
+    private const val V2 = "KP2."
+    private const val KDF_ITERS = 200_000
+
+    private fun kdfKey(pass: String, salt: ByteArray): SecretKeySpec {
+        val spec = PBEKeySpec(pass.toCharArray(), salt, KDF_ITERS, 256)
+        return SecretKeySpec(SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded, "AES")
+    }
+
+    /** Pure: seal the identity pair under a passphrase. JVM-tested. */
+    fun packBackup(priv: String, pub: String, pass: String): String {
+        val rnd = SecureRandom()
+        val salt = ByteArray(16).also { rnd.nextBytes(it) }
+        val iv = ByteArray(12).also { rnd.nextBytes(it) }
+        val c = Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(Cipher.ENCRYPT_MODE, kdfKey(pass, salt), GCMParameterSpec(128, iv))
+        // Plain "priv\npub" bytes (both sides are newline-free base64) — no
+        // JSON wrapper, so the pure core stays JVM-testable without org.json.
+        val ct = c.doFinal("$priv\n$pub".toByteArray(Charsets.UTF_8))
+        val b64 = Base64.getEncoder()
+        return V2 + b64.encodeToString(salt) + "." + b64.encodeToString(iv) + "." + b64.encodeToString(ct)
+    }
+
+    /** Pure: null when the passphrase is wrong or the blob is not KP2. */
+    fun unpackBackup(blob: String, pass: String): Pair<String, String>? {
+        if (!blob.startsWith(V2)) return null
+        return runCatching {
+            val parts = blob.removePrefix(V2).split(".")
+            if (parts.size != 3) return null
+            val b64 = Base64.getDecoder()
+            val c = Cipher.getInstance("AES/GCM/NoPadding")
+            c.init(Cipher.DECRYPT_MODE, kdfKey(pass, b64.decode(parts[0])), GCMParameterSpec(128, b64.decode(parts[1])))
+            val plain = String(c.doFinal(b64.decode(parts[2])), Charsets.UTF_8)
+            val cut = plain.indexOf('\n')
+            if (cut <= 0) return null
+            val p = plain.substring(0, cut)
+            val u = plain.substring(cut + 1)
+            if (parsePriv(p) != null && parsePub(u) != null) p to u else null
+        }.getOrNull()
+    }
+
+    /** The restore dialog's answer: unlock, adopt, republish. IO thread. */
+    fun tryRestore(ctx: Context, pass: String): Boolean =
         runCatching {
-            val prefs = ctx.getSharedPreferences(PREFS, 0)
-            val priv = prefs.getString(KEY_PRIV, null).orEmpty()
-            val pub = prefs.getString(KEY_PUB, null).orEmpty()
-            if (priv.isBlank() || pub.isBlank()) return@runCatching false
-            Api.request("/api/e2ee/backup", "PUT", JSONObject().put("backup", encodeBackup(priv, pub)))
+            val blob = pendingRestore ?: return false
+            val (p, u) = unpackBackup(blob, pass) ?: return false
+            ctx.getSharedPreferences(PREFS, 0).edit().putString(KEY_PRIV, p).putString(KEY_PUB, u).apply()
+            identityCache = p to u
+            pendingRestore = null
+            restoredNonce++
+            publication.reset()
+            val pub = Api.request("/api/me", "GET", null).optJSONObject("user")?.optText("e2eePublicKey")
+            if (pub != u) Api.patch("/api/me", JSONObject().put("e2eePublicKey", u))
             true
         }.getOrDefault(false)
+
+    /** The privacy sheet: what the server holds right now ("" = none). */
+    suspend fun remoteBackup(): String =
+        withContext(Dispatchers.IO) {
+            runCatching { Api.request("/api/e2ee/backup", "GET", null).optText("backup") }.getOrDefault("")
+        }
+
+    /** The privacy sheet: (re)lock the CURRENT identity under a passphrase. */
+    suspend fun uploadLockedBackup(ctx: Context, pass: String): Boolean =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val (p, u) = identity(ctx)
+                Api.request("/api/e2ee/backup", "PUT", JSONObject().put("backup", packBackup(p, u, pass)))
+                pendingRestore = null
+                true
+            }.getOrDefault(false)
+        }
+
+    /** The privacy sheet: drop the server copy (history stays device-only). */
+    suspend fun deleteBackup(): Boolean =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                Api.request("/api/e2ee/backup", "PUT", JSONObject().put("backup", ""))
+                pendingRestore = null
+                true
+            }.getOrDefault(false)
+        }
 
     /**
      * The final transport guard covers outbox, schedules, forwards, external

@@ -856,8 +856,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
       flight.includes('key: String = ""') &&
       chat.split("key = fxKey").length === 6 &&
       !chat.includes("fxSendHold") &&
-      chat.includes("Column(if (small) Modifier else Modifier.weight(1f))") &&
-      chat.includes("if (small) Spacer(Modifier.width(10.dp))") &&
+      chat.includes("Column(Modifier.weight(1f))") &&
+      !chat.includes("if (small) Spacer(Modifier.width(10.dp))") &&
       chat.includes("start = 14.dp,") &&
       chat.includes('payload.put("meta", JSONObject().put("w", gw).put("h", gh))') &&
       chat.includes('.put("mediaW", gw)') &&
@@ -869,6 +869,44 @@ const main = (f) => read(`${ANDROID}/${f}`);
       push.includes("ScreenStore.markPushCard(convoId)") &&
       notify.includes("mgr.getNotificationChannel(CHAT_CHANNEL)") &&
       notify.includes("mgr.deleteNotificationChannel(CHAT_CHANNEL)"),
+  );
+}
+
+/* ---------- r76-26: the owner's seven (sticker verified, six shipped) ---------- */
+{
+  const chat = main("ChatScreen.kt");
+  const list = main("ChatListScreen.kt");
+  const viewer = main("MediaViewer.kt");
+  const chatFx = main("ChatFx.kt");
+  const e2 = main("E2eeMsg.kt");
+  const backup = main("E2eeBackup.kt");
+  const settings = main("SettingsScreen.kt");
+  const worker = read("src/worker/index.ts");
+  check(
+    "r76-26: sub-switches aligned, GIF says GIF, once-media saves from held bytes, cached animator scale, passphrase-locked key backup",
+    chat.includes("Column(Modifier.weight(1f))") &&
+      !chat.includes("if (small) Spacer(Modifier.width(10.dp))") &&
+      worker.includes('if (type === "image/gif") return `GIF${once}`;') &&
+      worker.includes('if (type.startsWith("image/")) return `Photo${once}`;') &&
+      list.includes('fileLike && lower.endsWith(".gif") -> "GIF"') &&
+      list.includes('if (t == "GIF" || t == "GIF \u00b7 View once") return t') &&
+      viewer.includes("val oncePages = remember(pages, once)") &&
+      viewer.includes("oncePages.getOrElse(pager.currentPage)") &&
+      viewer.includes("oncePages.getOrElse(page) { pages[page] }") &&
+      chatFx.includes("private var fxScaleCache = 1f") &&
+      chatFx.includes("now - fxScaleAt < 2_000L") &&
+      e2.includes('private const val V2 = "KP2."') &&
+      e2.includes("fun packBackup(priv: String, pub: String, pass: String): String") &&
+      e2.includes("fun unpackBackup(blob: String, pass: String)") &&
+      e2.includes("fun tryRestore(ctx: Context, pass: String): Boolean") &&
+      e2.includes("pendingRestore = remote") &&
+      e2.includes("PBKDF2WithHmacSHA256") &&
+      !e2.includes("backupLocal") &&
+      backup.includes("fun KeyBackupSheet(onClose: () -> Unit)") &&
+      backup.includes("fun E2eeRestoreGate()") &&
+      backup.includes("Wrong passphrase \u2014 try again") &&
+      settings.includes('SettingRow(Icons.Filled.Key, "Message key backup"') &&
+      list.includes("E2eeRestoreGate()"),
   );
 }
 

@@ -134,4 +134,50 @@ class E2eeMsgTest {
         assertNull(E2eeMsg.parsePub("not::base64::keys"))
         assertNull(E2eeMsg.parsePub(priv)) // a private key is not a public one
     }
+
+    // r76-26 (owner: "logout kore app delete kore abar install korle ... lock
+    // emoji dekhai"; WhatsApp-style passphrase, the owner's pick): the backup
+    // blob seals the identity under the passphrase — the right passphrase
+    // opens it, a wrong one gets nothing, and a legacy plaintext blob is not
+    // a KP2 blob.
+    @Test
+    fun `passphrase backup seals and opens the identity`() {
+        val kp = E2eeMsg.newKeyPair()
+        val priv = E2eeMsg.privB64(kp.private)
+        val pub = E2eeMsg.pubB64(kp.public)
+        val blob = E2eeMsg.packBackup(priv, pub, "amar-pass-123")
+        assertTrue(blob.startsWith("KP2."))
+        assertFalse(blob.contains(priv)) // the server sees ciphertext only
+        assertFalse(blob.contains(pub))
+        val back = E2eeMsg.unpackBackup(blob, "amar-pass-123")
+        assertNotNull(back)
+        assertEquals(priv, back!!.first)
+        assertEquals(pub, back.second)
+    }
+
+    @Test
+    fun `passphrase backup rejects a wrong passphrase and a legacy blob`() {
+        val kp = E2eeMsg.newKeyPair()
+        val priv = E2eeMsg.privB64(kp.private)
+        val pub = E2eeMsg.pubB64(kp.public)
+        val blob = E2eeMsg.packBackup(priv, pub, "right-horse")
+        assertNull(E2eeMsg.unpackBackup(blob, "wrong-horse"))
+        assertNull(E2eeMsg.unpackBackup(blob, ""))
+        // A tampered blob fails the GCM tag; a pre-r76-26 plaintext blob is
+        // not KP2 and never opens through the passphrase path.
+        assertNull(E2eeMsg.unpackBackup(blob.dropLast(2) + "AA", "right-horse"))
+        val legacy = java.util.Base64.getEncoder().encodeToString("{\"p\":\"x\",\"u\":\"y\"}".toByteArray())
+        assertNull(E2eeMsg.unpackBackup(legacy, "right-horse"))
+    }
+
+    @Test
+    fun `passphrase backup salt is random — two packs of one identity differ`() {
+        val kp = E2eeMsg.newKeyPair()
+        val priv = E2eeMsg.privB64(kp.private)
+        val pub = E2eeMsg.pubB64(kp.public)
+        val one = E2eeMsg.packBackup(priv, pub, "same-pass")
+        val two = E2eeMsg.packBackup(priv, pub, "same-pass")
+        assertNotEquals(one, two)
+        assertEquals(priv, E2eeMsg.unpackBackup(two, "same-pass")!!.first)
+    }
 }

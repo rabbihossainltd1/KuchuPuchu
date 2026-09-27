@@ -59,6 +59,7 @@ import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -297,6 +298,18 @@ fun PrivacySettingsScreen(nav: NavController) {
     var busy by remember { mutableStateOf(false) }
     // Owner round 35 (item 3): hoisted — the row shows it, the sheet picks it.
     var isoLevel by remember { mutableStateOf(VoiceIsolation.getLevel(ctx)) }
+    // r76-26: the row's one-line proof + the sheet it opens.
+    var keyBackup by remember { mutableStateOf(false) }
+    val backupState = remember { mutableStateOf("…") }
+    LaunchedEffect(keyBackup) {
+        val b = E2eeMsg.remoteBackup()
+        backupState.value =
+            when {
+                b.startsWith("KP2.") -> "On"
+                b.isNotBlank() -> "Set a passphrase"
+                else -> "Off"
+            }
+    }
 
     LaunchedEffect(Unit) {
         runCatching {
@@ -385,6 +398,13 @@ fun PrivacySettingsScreen(nav: NavController) {
             }
         }
         Spacer(Modifier.height(12.dp))
+        // r76-26 (owner: "onno phone a login korle purono message gulate lock
+        // emoji dekhai"): the passphrase-locked key backup — without it a
+        // reinstall starts a new identity and the sealed history stays shut.
+        SectionCard {
+            SettingRow(Icons.Filled.Key, "Message key backup", backupState.value) { keyBackup = true }
+        }
+        Spacer(Modifier.height(12.dp))
         // Owner round 32 (item 7): the people this account blocked — unblock
         // lives here; Block itself is only in a profile's ⋮ sheet.
         SectionCard {
@@ -392,6 +412,8 @@ fun PrivacySettingsScreen(nav: NavController) {
         }
         Spacer(Modifier.height(32.dp))
     }
+
+    if (keyBackup) KeyBackupSheet(onClose = { keyBackup = false })
 
     picker?.let { field ->
         // Owner round 35 (item 3): isolation strength picks like a privacy

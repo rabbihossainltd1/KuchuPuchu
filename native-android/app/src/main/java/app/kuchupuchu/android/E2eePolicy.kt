@@ -29,6 +29,12 @@ internal object E2eeSendPolicy {
 internal class E2eePublicationGate {
     private var publishedSession = ""
 
+    /** r76-26: adopting a restored identity invalidates the last publication — the next app-entry tick republishes the restored public key. */
+    @Synchronized
+    fun reset() {
+        publishedSession = ""
+    }
+
     @Synchronized
     fun ensure(session: String, current: () -> Boolean, publish: () -> Boolean): Boolean {
         if (session.isBlank() || !current()) return false

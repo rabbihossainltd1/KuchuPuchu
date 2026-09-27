@@ -39,14 +39,36 @@ import androidx.compose.ui.text.buildAnnotatedString
 import kotlin.math.PI
 import kotlin.math.sin
 
-/** Plain (non-composable) animator-scale read for queue decisions. */
-fun fxScaleOf(ctx: android.content.Context): Float = runCatching {
-    android.provider.Settings.Global.getFloat(
-        ctx.contentResolver,
-        android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
-        1f,
-    )
-}.getOrDefault(1f)
+/**
+ * Plain (non-composable) animator-scale read for queue decisions.
+ *
+ * r76-26 (owner: "app ta aro smooth fast koro ... kothao jeno laggy na
+ * lage"): this is a Settings GLOBAL binder call, and it used to run on every
+ * composition of every chat row that animates - hundreds of binder hops while
+ * a long list settles. The value is now cached process-wide for 2s: long
+ * enough to collapse the per-frame chatter, short enough that flipping the
+ * developer-options animation scale still lands almost immediately.
+ */
+@Volatile
+private var fxScaleCache = 1f
+
+@Volatile
+private var fxScaleAt = -10_000L
+
+fun fxScaleOf(ctx: android.content.Context): Float {
+    val now = android.os.SystemClock.uptimeMillis()
+    if (now - fxScaleAt < 2_000L) return fxScaleCache
+    val v = runCatching {
+        android.provider.Settings.Global.getFloat(
+            ctx.contentResolver,
+            android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f,
+        )
+    }.getOrDefault(1f)
+    fxScaleCache = v
+    fxScaleAt = now
+    return v
+}
 
 /** The system animator scale; 0 means "remove animations" - skip to the end. */
 @Composable
