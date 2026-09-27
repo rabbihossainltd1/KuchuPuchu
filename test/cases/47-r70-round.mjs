@@ -719,10 +719,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes('b.endsWith("started a screen recording of this chat") -> "rec"') &&
       // r73-18c: the alert is a single small line of red text on the wallpaper.
       !chat.includes("Icons.Filled.Videocam else Icons.Filled.VisibilityOff") &&
-      // r76-20 (owner item 14): the fresh alert buzzes AND plays the pack's
-      // capture tone — the reject moved inside a block.
-      chat.includes("if (fresh) {") &&
-      chat.includes("KpSounds.captureAlert(capCtx)"),
+      // r77-2 superseded the r76-20 ring+buzz: the alert is SILENT everywhere
+      // (chat-only) — see the r77-2 block at the bottom.
+      !chat.includes("KpSounds.captureAlert(") &&
+      chat.includes('r77-2 (owner: "kono notification sound ba notification e thakbe na'),
   );
   check(
     "r71-18: the save permission is enforced where media is opened — their switch withholds MY save (photo viewer, gallery, clip, document) and never my own media",
@@ -763,7 +763,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       worker.includes("peerRecOk: solo ? otherAllowRec : true,"),
   );
   check(
-    "r71-18: worker — the capture route alerts only the members whose OWN switch is on, folds a burst into one row per 20 s, writes a real SYSTEM chip and pushes it message-shaped (so a closed app still hears)",
+    "r71-18: worker — the capture route alerts only the members whose OWN switch is on, folds a burst into one row per 20 s, writes a real SYSTEM chip; r77-2: and NOTHING pushes (the alert is chat-only now)",
     worker.includes("path.match(/^\\/api\\/conversations\\/([^/]+)\\/capture$/)") &&
       worker.includes(
         'kind === "rec" ? Number(m.priv_rec ?? 0) === 1 : Number(m.priv_shot ?? 0) === 1',
@@ -772,8 +772,12 @@ const main = (f) => read(`${ANDROID}/${f}`);
       // the two phrases, separately: prettier may re-wrap the ternary line.
       worker.includes('"started a screen recording of this chat"') &&
       worker.includes('"took a screenshot of this chat"') &&
-      worker.includes('kind === "rec" ? "Screen recording alert" : "Screenshot alert"') &&
-      worker.includes('channel: "kp_messages_v2",'),
+      !worker
+        .slice(
+          worker.indexOf("/capture$/"),
+          worker.indexOf("afterMessageChanged(env, db, convId, { id: mid"),
+        )
+        .includes("pushMessageUnlessHidden"),
   );
 }
 
@@ -1081,6 +1085,24 @@ const main = (f) => read(`${ANDROID}/${f}`);
       !chat.includes("!pendingEcho && fxBorn) FlightAnims.armIn(fxKey, 500L") &&
       flight.includes("if (f.goAt >= 0L) return false") &&
       chat.includes('val fxKey = m.optString("clientId").ifBlank { m.optString("id") }'),
+  );
+}
+
+/* ---------- r77-2: capture alerts are chat-only ---------- */
+{
+  const chat = main("ChatScreen.kt");
+  const feel = main("Feel.kt");
+  const worker = read("src/worker/index.ts");
+  const cap = worker.slice(
+    worker.indexOf("/capture$/"),
+    worker.indexOf("afterMessageChanged(env, db, convId, { id: mid"),
+  );
+  check(
+    'r77-2 (owner: "chat screenshot screen record alert a kono notification sound ba notification e thakbe na just chat a dekhabe"): the capture route pushes NOTHING, the alert row plays no tone and buzzes no buzz - the alert exists only as the small text line in the chat',
+    !cap.includes("pushMessageUnlessHidden") &&
+      cap.includes('r77-2 (owner: "kono notification sound ba notification e thakbe na just') &&
+      !chat.includes("KpSounds.captureAlert(") &&
+      !feel.includes("captureAlert"),
   );
 }
 

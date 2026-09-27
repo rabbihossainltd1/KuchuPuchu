@@ -7834,34 +7834,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       return json({ ok: true, alerted: 0, throttled: true });
     }
     const mid = await systemMessage(db, convId, `${me.display_name} ${phrase}`);
-    // The push is shaped like a message push on purpose: the alert has a real
-    // row behind it (mid), so tapping the card opens the chat on the chip —
-    // and the app's own rich card can draw it while the app is alive.
-    for (const m of listeners) {
-      ctx.waitUntil(
-        pushMessageUnlessHidden(
-          env,
-          db,
-          m.user_id,
-          convId,
-          {
-            type: "message",
-            convoId: convId,
-            mid,
-            kind: conv.kind,
-            fromName: me.display_name,
-            body: `${me.display_name} ${phrase}`,
-            kp_chat: convId,
-            muted: "0",
-          },
-          {
-            title: kind === "rec" ? "Screen recording alert" : "Screenshot alert",
-            body: `${me.display_name} ${phrase}`,
-            channel: "kp_messages_v2",
-          },
-        ),
-      );
-    }
+    // r77-2 (owner: "kono notification sound ba notification e thakbe na just
+    // chat a dekhabe"): NO push for a capture alert — the row + the room
+    // frame below are the whole delivery, so the alert lives only inside the
+    // chat (nothing in the shade, no sound), exactly as asked.
     ctx.waitUntil(
       afterMessageChanged(env, db, convId, { id: mid, senderId: "", kind: "SYSTEM", alert: kind }),
     );

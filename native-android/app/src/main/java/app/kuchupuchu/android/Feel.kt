@@ -130,7 +130,6 @@ object KpSounds {
     private var typingId = 0
     private var voiceStartId = 0
     private var voiceLockId = 0
-    private var captureAlertId = 0
     private var blockedSendId = 0
     private var blockedCallId = 0
 
@@ -164,7 +163,6 @@ object KpSounds {
         typingId = pool!!.load(ctx, R.raw.kp_typing, 1)
         voiceStartId = pool!!.load(ctx, R.raw.kp_voice_start, 1)
         voiceLockId = pool!!.load(ctx, R.raw.kp_voice_lock, 1)
-        captureAlertId = pool!!.load(ctx, R.raw.kp_capture_alert, 1)
         blockedSendId = pool!!.load(ctx, R.raw.kp_blocked_send, 1)
         blockedCallId = pool!!.load(ctx, R.raw.kp_blocked_call, 1)
     }
@@ -185,7 +183,6 @@ object KpSounds {
     fun typing(ctx: Context) = play(ctx, typingId, 0.5f * MSG_VOLUME_TRIM)
     fun voiceStart(ctx: Context) = play(ctx, voiceStartId, 0.7f)
     fun voiceLock(ctx: Context) = play(ctx, voiceLockId, 0.7f)
-    fun captureAlert(ctx: Context) = play(ctx, captureAlertId, 0.8f)
     fun blockedSend(ctx: Context) = play(ctx, blockedSendId, 0.8f)
     fun blockedCall(ctx: Context) = play(ctx, blockedCallId, 0.8f)
 

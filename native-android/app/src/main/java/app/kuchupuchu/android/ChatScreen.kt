@@ -7435,23 +7435,10 @@ private fun MessageRow(
     // and it buzzes once when it lands while I am looking at this chat.
     val captureAlert = captureAlertOf(m)
     if (captureAlert != null) {
-        val h = rememberHaptics()
-        // r76-20: the context is captured OUTSIDE the effect — a @Composable
-        // getter cannot be called from the coroutine.
-        val capCtx = androidx.compose.ui.platform.LocalContext.current
-        LaunchedEffect(m.optString("id")) {
-            val fresh = runCatching {
-                java.time.Duration.between(
-                    java.time.Instant.parse(m.optString("createdAt")),
-                    java.time.Instant.now(),
-                ).seconds < 60
-            }.getOrDefault(false)
-            // r76-20 (owner item 14): the alert buzzes AND rings its own tone.
-            if (fresh) {
-                h.reject()
-                runCatching { KpSounds.captureAlert(capCtx) }
-            }
-        }
+        // r77-2 (owner: "kono notification sound ba notification e thakbe na
+        // just chat a dekhabe"): the alert is SILENT everywhere now — no
+        // tone, no buzz (the r76-20 ring+buzz is gone), no push (worker side);
+        // it exists only as this small text line in the chat.
         // r73-18c (owner: "alert eto boro kore ekdom choto kore jabe background
         // border thakbe na just text"): the alert is one small line of red text
         // on the wallpaper — no chip, no border, no icon.
