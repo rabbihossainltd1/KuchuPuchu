@@ -447,6 +447,7 @@ fun Modifier.fxPadlockSnap(trigger: Any?): Modifier {
  * is sending — the row holds its seat silently and its ONE flight begins the
  * moment the row becomes SENT. No static pre-appearance, no re-hide, no cut.
  */
+@Composable
 fun Modifier.fxSendHold(hold: Boolean): Modifier = this.graphicsLayer { if (hold) alpha = 0f }
 
 fun Modifier.fxSideSlide(
