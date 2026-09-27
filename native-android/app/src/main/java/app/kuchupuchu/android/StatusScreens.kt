@@ -1189,7 +1189,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                             .padding(start = 12.dp, end = 4.dp, top = 12.dp, bottom = 12.dp)
                             .clip(RoundedCornerShape(22.dp))
                             .background(Color(0x33FFFFFF))
-                            .padding(start = 14.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
+                            .padding(start = 14.dp, end = 2.dp, top = 1.dp, bottom = 1.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         BasicTextField(
@@ -1201,7 +1201,9 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                             ),
                             modifier = Modifier
                                 .weight(1f)
-                                .padding(vertical = 8.dp)
+                                // r76-29 (owner: "composer pill ekhono chikon
+                                // hobe"): down to a hair of breathing room.
+                                .padding(vertical = 4.dp)
                                 .onFocusChanged { replyFocused = it.isFocused },
                             decorationBox = { inner ->
                                 if (reply.isEmpty()) {

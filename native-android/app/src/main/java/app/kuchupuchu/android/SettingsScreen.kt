@@ -305,8 +305,8 @@ fun PrivacySettingsScreen(nav: NavController) {
         val b = E2eeMsg.remoteBackup()
         backupState.value =
             when {
-                b.startsWith("KP2.") -> "On"
-                b.isNotBlank() -> "Set a passphrase"
+                b.startsWith("KP2.") -> "On (locked)"
+                b.isNotBlank() -> "On (auto)"
                 else -> "Off"
             }
     }

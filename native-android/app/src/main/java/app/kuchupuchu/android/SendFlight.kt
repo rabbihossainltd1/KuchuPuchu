@@ -169,18 +169,24 @@ fun Modifier.fxFlyIn(
                     s != null && (lb == null || s.bottom <= lb.bottom + 1f)
                 }.first { it }
             }
-            // r76-28: the ack wait - a mine row's flight starts 500 ms AFTER
-            // the pending echo becomes the server row. The key is stable
-            // across the swap (both rows carry the clientId), so this same
-            // coroutine sees the flip and no flight is ever restarted or lost.
-            if (!sentNow.value) {
-                snapshotFlow { sentNow.value }.first { it }
-                kotlinx.coroutines.delay(500L)
+            // r76-29: a mine row's flight is ARMED by the send-ack
+            // (FlightAnims.armIn sets goAt = ack + 500 ms) - this coroutine
+            // only waits for the arm, so it survives however the row swaps.
+            if (!sentNow.value && f.goAt < 0L) {
+                withTimeoutOrNull(60_000L) { snapshotFlow { f.goAt >= 0L }.first { it } }
             }
             if (f.goAt < 0L) f.goAt = android.os.SystemClock.uptimeMillis()
         }
-        // Tick to the end from wherever the global clock says we are.
+        // Tick to the end from wherever the global clock says we are. A
+        // future goAt (the armed 0.5 s wait) holds the row at FULL SIZE -
+        // the message is readable the whole time; the flight is a
+        // celebration that starts on the dot.
         while (true) {
+            if (f.goAt > android.os.SystemClock.uptimeMillis()) {
+                if (v != 1f) v = 1f
+                androidx.compose.runtime.withFrameNanos { }
+                continue
+            }
             val nv = FlightAnims.valueAt(f, dur)
             v = nv
             if (nv >= 1f) break
@@ -243,6 +249,24 @@ object FlightAnims {
         )
 
     fun birth(key: String): Flight = synchronized(map) { map.getOrPut(key) { Flight(android.os.SystemClock.uptimeMillis()) } }
+
+    /**
+     * r76-29 (owner: "not fixed"): the send-ack arms a mine row's flight -
+     * goAt lands delayMs in the FUTURE, and valueAt() holds 0 until the clock
+     * reaches it. Arming here (not inside the composition) makes the 0.5 s
+     * post-send animation deterministic: the echo and the server row live in
+     * DIFFERENT LazyColumn items blocks, so the waiting coroutine could die at
+     * the swap and the flight never started. Idempotent - the first arm wins.
+     */
+    fun armIn(key: String, delayMs: Long): Boolean {
+        if (key.isBlank()) return false
+        synchronized(map) {
+            val f = map.getOrPut(key) { Flight(android.os.SystemClock.uptimeMillis()) }
+            if (f.goAt >= 0L) return false
+            f.goAt = android.os.SystemClock.uptimeMillis() + delayMs
+            return true
+        }
+    }
 
     fun of(key: String): Flight? = synchronized(map) { map[key] }
 

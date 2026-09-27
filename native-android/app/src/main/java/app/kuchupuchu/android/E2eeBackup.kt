@@ -61,8 +61,8 @@ fun KeyBackupSheet(onClose: () -> Unit) {
             when {
                 remote == null -> "Checking…"
                 remote!!.startsWith("KP2.") -> "On — locked with your passphrase"
-                remote!!.isNotBlank() -> "On — upgrading needs a passphrase"
-                else -> "Off"
+                remote!!.isNotBlank() -> "On (automatic) — set a passphrase to lock it"
+                else -> "Setting up…"
             },
             color = Muted,
             fontSize = 12.5.sp,

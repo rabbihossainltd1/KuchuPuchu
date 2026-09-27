@@ -901,7 +901,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
       e2.includes("fun tryRestore(ctx: Context, pass: String): Boolean") &&
       e2.includes("pendingRestore = remote") &&
       e2.includes("PBKDF2WithHmacSHA256") &&
-      !e2.includes("backupLocal") &&
+      // r76-29: the automatic (KP1) upload is back - the passphrase is now an
+      // UPGRADE on top of it, not a replacement.
+      e2.includes("private fun backupLocal(ctx: Context): Boolean =") &&
       backup.includes("fun KeyBackupSheet(onClose: () -> Unit)") &&
       backup.includes("fun E2eeRestoreGate()") &&
       backup.includes("Wrong passphrase \u2014 try again") &&
@@ -960,11 +962,13 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     "r76-28: flights fire 0.5 s after the ack, sub-switches same-x leftish, gifs ship real ratios, photo opens as a hero from its tile, status reply slims + resumes, presence goes realtime",
     flight.includes("sent: Boolean = true,") &&
-      flight.includes("snapshotFlow { sentNow.value }.first { it }") &&
-      flight.includes("kotlinx.coroutines.delay(500L)") &&
+      flight.includes("fun armIn(key: String, delayMs: Long): Boolean {") &&
+      flight.includes(
+        "withTimeoutOrNull(60_000L) { snapshotFlow { f.goAt >= 0L }.first { it } }",
+      ) &&
       flight.includes("active && !sent -> 1f") &&
       chat.split("sent = !mine || !pendingEcho, key = fxKey").length === 6 &&
-      chat.includes("Column(Modifier.weight(if (small) 0.55f else 1f)) {") &&
+      chat.includes("Column(if (small) Modifier.width(150.dp) else Modifier.weight(1f)) {") &&
       chat.includes("val catalog = TenorGifs.gifs.firstOrNull { it.url == url }") &&
       chat.includes("gw = catalog.w") &&
       stickers.includes("val w: Int, val h: Int)") &&
@@ -974,19 +978,46 @@ const main = (f) => read(`${ANDROID}/${f}`);
       viewer.includes("val heroSeat = remember { heroFrom }") &&
       viewer.includes("hero.animateTo(1f, tween(320") &&
       viewer.includes("scaleX = androidx.compose.ui.util.lerp(h.width / sw, 1f, t)") &&
-      chat.includes(
-        'PhotoHero.set(m.optString("id").ifBlank { m.optString("clientId") }, c.boundsInWindow())',
-      ) &&
+      chat.includes("hostView.getLocationOnScreen(loc)") &&
       chat.includes("heroFrom = PhotoHero.take(),") &&
       chat.includes("PhotoHero.lastId = null") &&
       status.includes("focusManager.clearFocus()") &&
-      status.includes(".padding(start = 14.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),") &&
-      status.includes(".padding(vertical = 8.dp)") &&
+      status.includes(".padding(start = 14.dp, end = 2.dp, top = 1.dp, bottom = 1.dp),") &&
+      status.includes(".padding(vertical = 4.dp)") &&
       worker.includes('type: "presence",') &&
       worker.includes(
         "async function requireUser(db: D1Database, request: Request, env?: Env, ctx?: ExecutionContext) {",
       ) &&
       list.includes('"presence" -> refresh()'),
+  );
+}
+
+/* ---------- r76-29: the owner's second retest - deterministic flight, hero v2, auto backup ---------- */
+{
+  const flight = main("SendFlight.kt");
+  const chat = main("ChatScreen.kt");
+  const viewer = main("MediaViewer.kt");
+  const status = main("StatusScreens.kt");
+  const e2 = main("E2eeMsg.kt");
+  const worker = read("src/worker/index.ts");
+  check(
+    "r76-29: the ack arms the flight (deterministic 0.5 s, swap-proof), 150dp sub-switch column, my gifs render from the cached CDN url, hero starts on the tile with no platform dim and reverses on close, pill slimmer, backup auto by default",
+    flight.includes("f.goAt = android.os.SystemClock.uptimeMillis() + delayMs") &&
+      flight.includes("if (f.goAt > android.os.SystemClock.uptimeMillis()) {") &&
+      chat.includes("if (mine && !pendingEcho && fxBorn) FlightAnims.armIn(fxKey, 500L)") &&
+      chat.includes("Column(if (small) Modifier.width(150.dp) else Modifier.weight(1f)) {") &&
+      chat.includes('if (src.startsWith("http")) return src') &&
+      chat.includes('.put("fetchUrl", url)') &&
+      chat.includes("hostView.getLocationOnScreen(loc)") &&
+      worker.includes("...(fetchedSrc ? { src: fetchedSrc } : {}),") &&
+      viewer.includes("w.setDimAmount(0f)") &&
+      viewer.includes("val dismiss: () -> Unit = {") &&
+      viewer.includes("hero.animateTo(0f, tween(260") &&
+      viewer.includes("onDismissRequest = dismiss,") &&
+      viewer.includes("alpha = dim * hero.value") &&
+      status.includes(".padding(vertical = 4.dp)") &&
+      e2.includes("return@runCatching backupLocal(ctx)") &&
+      e2.includes("if (remote.isBlank()) return@runCatching backupLocal(ctx)"),
   );
 }
 

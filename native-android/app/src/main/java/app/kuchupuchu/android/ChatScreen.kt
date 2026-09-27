@@ -1820,6 +1820,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("createdAt", java.time.Instant.now().toString())
                 .put("mediaW", gw)
                 .put("mediaH", gh)
+                // r76-29: the echo renders from the CDN url - instant, cached.
+                .put("fetchUrl", url)
                 .also { if (replyId != null) it.put("replyTo", replyId) },
         )
 // r76-22 (owner: "sent hole ekhono 0.1 seconds halka kete jai"): SNAP,
@@ -6832,13 +6834,23 @@ internal fun quoteText(m: JSONObject): String {
 
 /** The picture behind a photo message — mediaUrl, an inline data URL while
  *  pending, or the file key as an /api/files path. */
-internal fun photoUrlOf(m: JSONObject): String? =
-    m.optText("kpLocalUrl").takeIf { it.isNotBlank() }
+internal fun photoUrlOf(m: JSONObject): String? {
+    // r76-29 (owner: "fixed but preview ta slow keno?"): MY OWN gif renders
+    // from the ORIGINAL CDN url - the sticker panel already decoded it, so
+    // Coil serves it from cache in a frame instead of the bubble re-fetching
+    // the R2 copy through the worker. The R2 object stays the authoritative
+    // copy (history, forwards, the recipient's phone).
+    if (m.optString("senderId") == Store.myId()) {
+        val src = m.optJSONObject("meta")?.optString("src").orEmpty().ifBlank { m.optString("fetchUrl") }
+        if (src.startsWith("http")) return src
+    }
+    return m.optText("kpLocalUrl").takeIf { it.isNotBlank() }
         ?: m.optText("mediaUrl").takeIf { it.isNotBlank() }
         ?: m.optText("fileKey").takeIf { it.isNotBlank() }?.let { key ->
             if (key.startsWith("data:") || key.startsWith("http") || key.startsWith("/")) key
             else "/api/files/$key"
         }
+}
 
 /** Owner round 33 (item 17): the small content card beside a quote — the
  *  photo itself, the video's cached frame under a play glyph, a mic for a
@@ -7349,6 +7361,12 @@ private fun MessageRow(
             }
         }
     val fxFresh = remember { fxBorn && FxFlights.claim(fxKey) } && fxScaleOf(ctx) > 0f
+    // r76-29 (owner: "send korar por first time animates hoi na ... 0.5
+    // seconds por auto animate hobe"): the SERVER row's first composition is
+    // the send-ack - arm the flight here, deterministically (idempotent; the
+    // echo's coroutine only waits for the arm, so the swap can never lose
+    // it). The flight itself starts 500 ms after this point.
+    if (mine && !pendingEcho && fxBorn) FlightAnims.armIn(fxKey, 500L)
     // v205 + v207 (unchanged by r67-3): the emoji glyph animates when the row
     // is a live birth AND is no longer a sending echo - so the emoji plays at
     // the moment the message becomes sent, while the flight above belongs to
@@ -9225,6 +9243,9 @@ private fun ImageMessageRow(
     // r71-21: a double tap on this bubble drops the heart reaction.
     onDoubleTapHeart: (JSONObject) -> Unit = {},
 ) {
+    // r76-29: the viewer is its OWN fullscreen window - the tile's seat is
+    // stored in SCREEN pixels so the hero starts exactly on the tile.
+    val hostView = androidx.compose.ui.platform.LocalView.current
     val haptics = rememberHaptics()
     // Owner round 21: the photo reply-swipe sound plays from the row.
     val ctx = LocalContext.current
@@ -9289,9 +9310,17 @@ private fun ImageMessageRow(
                     )
                 }
                 .onGloballyPositioned { c ->
-                    // r76-28: remember this tile's seat - the photo viewer
-                    // opens FROM here (hero) instead of popping.
-                    PhotoHero.set(m.optString("id").ifBlank { m.optString("clientId") }, c.boundsInWindow())
+                    // r76-28/29: remember this tile's seat in SCREEN pixels -
+                    // the viewer window starts at the screen's top-left, so a
+                    // window-relative seat landed a status bar too high and
+                    // the hero read as "fullscreen first, animate after".
+                    val b = c.boundsInWindow()
+                    val loc = IntArray(2)
+                    hostView.getLocationOnScreen(loc)
+                    PhotoHero.set(
+                        m.optString("id").ifBlank { m.optString("clientId") },
+                        androidx.compose.ui.geometry.Rect(b.left + loc[0], b.top + loc[1], b.right + loc[0], b.bottom + loc[1]),
+                    )
                 }
                 .combinedClickable(
                     onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
@@ -10892,12 +10921,10 @@ private fun PrivacyToggle(
             modifier = Modifier.size(if (small) 16.dp else 20.dp),
         )
         Spacer(Modifier.width(if (small) 8.dp else 12.dp))
-        // r76-28 (owner: "abar agei jaigay niye gecho switch eita arektu bam
-        // dike niye ai 2 tai same eksathe"): the two sub-switches must sit at
-        // the SAME x AND left of the right edge - so the sub-row's text takes
-        // a fixed FRACTION of the row (not all of it) and both toggles land
-        // right after it. Main rows keep the full stretch.
-        Column(Modifier.weight(if (small) 0.55f else 1f)) {
+        // r76-29 (owner: "not fixed"): a fixed 150dp text column - not a
+        // fraction - so the two sub-switches land at the EXACT same x, left
+        // of centre, on every screen width. Main rows keep the full stretch.
+        Column(if (small) Modifier.width(150.dp) else Modifier.weight(1f)) {
             Text(
                 label,
                 color = Ink,

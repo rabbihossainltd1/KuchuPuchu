@@ -235,6 +235,24 @@ fun KpPhotoViewer(
     LaunchedEffect(Unit) {
         if (heroSeat != null) hero.animateTo(1f, tween(320, easing = androidx.compose.animation.core.FastOutSlowInEasing))
     }
+    // r76-29 (owner: "photo theke ber hole animation ta reverse hoi na"):
+    // leaving plays the hero BACKWARDS - the picture shrinks into the tile it
+    // came from and only then does the window go.
+    var closing by remember { mutableStateOf(false) }
+    val heroScope = rememberCoroutineScope()
+    val dismiss: () -> Unit = {
+        if (closing) {
+            // already on its way out
+        } else if (heroSeat != null) {
+            closing = true
+            heroScope.launch {
+                hero.animateTo(0f, tween(260, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+                onClose()
+            }
+        } else {
+            onClose()
+        }
+    }
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var scale by remember { mutableFloatStateOf(1f) }
@@ -321,7 +339,7 @@ fun KpPhotoViewer(
         }
     }
     Dialog(
-        onDismissRequest = onClose,
+        onDismissRequest = dismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
         // Owner round 31 item 21: a private person's picture — the viewer's
@@ -333,6 +351,11 @@ fun KpPhotoViewer(
         SideEffect {
             dialogWindow?.let { w ->
                 WindowCompat.getInsetsController(w, w.decorView).isAppearanceLightStatusBars = false
+                // r76-29 (owner: "photo te click korle agei Fullscreen hoye
+                // tarpo ... animate hoye ashe"): the PLATFORM dim is what
+                // slammed a dark fullscreen up before the picture moved. Off -
+                // the viewer's own background fades in with the hero instead.
+                w.setDimAmount(0f)
             }
         }
         val dim = (1f - abs(drag.value) / 900f).coerceIn(0.35f, 1f)
@@ -345,7 +368,7 @@ fun KpPhotoViewer(
             Modifier
                 .fillMaxSize()
                 .then(if (heroSeat == null) Modifier.kpPopIn() else Modifier)
-                .background(Color.Black.copy(alpha = dim * if (heroSeat == null) 1f else hero.value.coerceIn(0.2f, 1f))),
+                .background(Color.Black.copy(alpha = dim * hero.value)),
         ) {
             Box(
                 Modifier
@@ -407,7 +430,7 @@ fun KpPhotoViewer(
                             }
                             if (dismissing) {
                                 if (abs(dragLocal) > size.height * 0.16f) {
-                                    onClose()
+                                    dismiss()
                                 } else {
                                     scope.launch { drag.animateTo(0f) }
                                 }
@@ -531,7 +554,7 @@ fun KpPhotoViewer(
                         .padding(horizontal = 4.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(onClick = onClose) {
+                    IconButton(onClick = dismiss) {
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Color.White, modifier = Modifier.size(28.dp))
                     }
                     Column(Modifier.weight(1f)) {

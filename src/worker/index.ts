@@ -8689,6 +8689,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // allowlisted CDN, stores it in the bucket, and it rides the normal
     // fileKey path from there. No bytes ever touch the sender's phone.
     let fetchedKey: string | null = null;
+    // r76-29 (owner: "gif ... preview ta slow keno?"): the CDN url the bytes
+    // came from - stored in meta so the SENDER's own bubble can render from
+    // its already-warm Coil cache instead of round-tripping the R2 copy.
+    let fetchedSrc = "";
     if (kind === "FILE" && !declaredKey && !imageData && typeof body.fetchUrl === "string") {
       if (!env.MEDIA) fail(501, "File storage is not configured yet.");
       rateLimit(`gif:${uid}`, 30, 60);
@@ -8705,6 +8709,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       if (gifBytes.byteLength === 0 || gifBytes.byteLength > 8_000_000)
         fail(413, "GIF too large.", "GIF_SIZE");
       fetchedKey = `gif/${uid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.gif`;
+      fetchedSrc = gifUrl;
       await env.MEDIA.put(fetchedKey, gifBytes, { httpMetadata: { contentType: "image/gif" } });
     }
     const fileKey = declaredKey ?? fetchedKey;
@@ -8804,6 +8809,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           }
         : {}),
       ...(Object.keys(dims).length ? dims : {}),
+      ...(fetchedSrc ? { src: fetchedSrc } : {}),
       ...(album && !viewOnce ? { album } : {}),
       ...(viewOnce ? { viewOnce: true } : {}),
       ...(await statusQuote(db, kind, incomingMeta)),

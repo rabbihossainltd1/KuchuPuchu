@@ -326,14 +326,33 @@ internal object E2eeMsg {
                         return@runCatching true
                     }
                 }
-                // r76-26: first device ever mints its pair; the backup only
-                // exists once the owner sets a passphrase (privacy sheet, the
-                // WhatsApp-style choice) — the plaintext server upload is
-                // retired. KP1 blobs uploaded before this round still restore
-                // silently above, so nobody loses an existing backup.
+                // r76-29 (owner: "eita ki auto hobe naki amay kono key setup
+                // korte hobe?"): AUTO. The first device mints its pair and
+                // backs it up right away - nothing to set up, and a reinstall
+                // / new phone restores silently. Setting a passphrase in the
+                // privacy sheet UPGRADES the same backup to a locked KP2 blob
+                // (the server then holds ciphertext it cannot read).
                 identity(ctx)
-                return@runCatching false
+                return@runCatching backupLocal(ctx)
             }
+            if (remote.isBlank()) return@runCatching backupLocal(ctx)
+            true
+        }.getOrDefault(false)
+
+    /** The automatic (KP1) backup: the pair the server keeps for the next phone. */
+    private fun encodeBackup(priv: String, pub: String): String =
+        Base64.getEncoder()
+            .encodeToString(
+                JSONObject().put("p", priv).put("u", pub).toString().toByteArray(Charsets.UTF_8),
+            )
+
+    private fun backupLocal(ctx: Context): Boolean =
+        runCatching {
+            val prefs = ctx.getSharedPreferences(PREFS, 0)
+            val priv = prefs.getString(KEY_PRIV, null).orEmpty()
+            val pub = prefs.getString(KEY_PUB, null).orEmpty()
+            if (priv.isBlank() || pub.isBlank()) return@runCatching false
+            Api.request("/api/e2ee/backup", "PUT", JSONObject().put("backup", encodeBackup(priv, pub)))
             true
         }.getOrDefault(false)
 
