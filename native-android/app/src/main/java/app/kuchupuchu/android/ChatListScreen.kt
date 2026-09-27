@@ -236,6 +236,10 @@ fun ChatListScreen(nav: NavController) {
         val removeListener = KpSocket.onEvent { ev ->
             when (ev.optString("type")) {
                 "hello" -> refresh()
+                // r76-28 (owner: "online green dot ... realtime ... thik
+                // koro"): a peer's phone just came online - the green dot
+                // lands in a second, not at the next 8-10 s poll.
+                "presence" -> refresh()
                 "conv" -> {
                     refresh()
                     // Owner round 15: realtime list — don't wait for the full

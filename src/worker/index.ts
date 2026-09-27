@@ -3524,7 +3524,7 @@ function bearerToken(request: Request): string {
   return header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
 }
 
-async function requireUser(db: D1Database, request: Request) {
+async function requireUser(db: D1Database, request: Request, env?: Env, ctx?: ExecutionContext) {
   // Owner round 32 (item 18): the cron replays a parked message through the
   // ordinary send route as its author. The marker is honoured ONLY on the
   // worker's own internal origin — a client request never carries this host,
@@ -3586,6 +3586,34 @@ async function requireUser(db: D1Database, request: Request) {
       );
     await db.batch(stmts);
     row.last_active_at = iso;
+    // r76-28 (owner: "online green dot ... eita realtime ba ... check kore
+    // thik koro"): this flip IS the moment the dot should light up on every
+    // solo peer's phone - push it now instead of letting their 8-10 s poll
+    // find it. Rare by design: the stamp only runs once per online window,
+    // and the peers' refetch still applies their own privacy rules.
+    if (env && ctx) {
+      ctx.waitUntil(
+        (async () => {
+          const peers = await all<{ id: string }>(
+            db,
+            `SELECT DISTINCT m2.user_id AS id
+               FROM members m1
+               JOIN conversations c ON c.id = m1.conv_id AND c.kind = 'SOLO'
+               JOIN members m2 ON m2.conv_id = c.id AND m2.user_id <> m1.user_id
+              WHERE m1.user_id = ?
+              LIMIT 200`,
+            row.id,
+          );
+          for (const peer of peers) {
+            await broadcastRoomEvent(env, `user:${peer.id}`, {
+              type: "presence",
+              userId: row.id,
+              online: true,
+            });
+          }
+        })().catch(() => {}),
+      );
+    }
   }
   return row;
 }
@@ -5984,7 +6012,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   /* ---------- authenticated ---------- */
 
-  const me = await requireUser(db, request);
+  const me = await requireUser(db, request, env, ctx);
   const uid = me.id;
 
   // §37 token refresh, in the only shape that is safe with a single opaque bearer:

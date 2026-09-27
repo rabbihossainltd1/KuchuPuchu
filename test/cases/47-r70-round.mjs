@@ -921,9 +921,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     "r76-27: hard pops learned to fade (viewer/composer/editor), quote bar rises, rows travel and fade out, badge springs, dot fades, top bar crossfades; saves/unlocks tick",
     ui.includes("fun Modifier.kpPopIn(zoom: Boolean = true): Modifier") &&
-      viewer.includes(
-        "Box(Modifier.fillMaxSize().kpPopIn().background(Color.Black.copy(alpha = dim))) {",
-      ) &&
+      viewer.includes(".then(if (heroSeat == null) Modifier.kpPopIn() else Modifier)") &&
       viewer.includes("if (!dismissBuzz && abs(dragLocal) > size.height * 0.16f) {") &&
       viewer.includes("savedPill = true") &&
       viewer.includes('"Saved to Pictures/KuchuPuchu",') &&
@@ -947,6 +945,48 @@ const main = (f) => read(`${ANDROID}/${f}`);
         "enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(300)) + androidx.compose.animation.scaleIn(),",
       ) &&
       (backup.match(/haptics\.confirm\(\)/g) || []).length === 2,
+  );
+}
+
+/* ---------- r76-28: the owner's retest feedback ---------- */
+{
+  const flight = main("SendFlight.kt");
+  const chat = main("ChatScreen.kt");
+  const viewer = main("MediaViewer.kt");
+  const status = main("StatusScreens.kt");
+  const stickers = main("StickerSheet.kt");
+  const list = main("ChatListScreen.kt");
+  const worker = read("src/worker/index.ts");
+  check(
+    "r76-28: flights fire 0.5 s after the ack, sub-switches same-x leftish, gifs ship real ratios, photo opens as a hero from its tile, status reply slims + resumes, presence goes realtime",
+    flight.includes("sent: Boolean = true,") &&
+      flight.includes("snapshotFlow { sentNow.value }.first { it }") &&
+      flight.includes("kotlinx.coroutines.delay(500L)") &&
+      flight.includes("active && !sent -> 1f") &&
+      chat.split("sent = !mine || !pendingEcho, key = fxKey").length === 6 &&
+      chat.includes("Column(Modifier.weight(if (small) 0.55f else 1f)) {") &&
+      chat.includes("val catalog = TenorGifs.gifs.firstOrNull { it.url == url }") &&
+      chat.includes("gw = catalog.w") &&
+      stickers.includes("val w: Int, val h: Int)") &&
+      (stickers.match(/w = \d+, h = \d+\),/g) || []).length === 31 &&
+      viewer.includes("object PhotoHero {") &&
+      viewer.includes("heroFrom: androidx.compose.ui.geometry.Rect? = null,") &&
+      viewer.includes("val heroSeat = remember { heroFrom }") &&
+      viewer.includes("hero.animateTo(1f, tween(320") &&
+      viewer.includes("scaleX = androidx.compose.ui.util.lerp(h.width / sw, 1f, t)") &&
+      chat.includes(
+        'PhotoHero.set(m.optString("id").ifBlank { m.optString("clientId") }, c.boundsInWindow())',
+      ) &&
+      chat.includes("heroFrom = PhotoHero.take(),") &&
+      chat.includes("PhotoHero.lastId = null") &&
+      status.includes("focusManager.clearFocus()") &&
+      status.includes(".padding(start = 14.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),") &&
+      status.includes(".padding(vertical = 8.dp)") &&
+      worker.includes('type: "presence",') &&
+      worker.includes(
+        "async function requireUser(db: D1Database, request: Request, env?: Env, ctx?: ExecutionContext) {",
+      ) &&
+      list.includes('"presence" -> refresh()'),
   );
 }
 

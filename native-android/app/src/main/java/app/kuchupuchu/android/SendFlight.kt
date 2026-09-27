@@ -110,6 +110,12 @@ fun Modifier.fxFlyIn(
     active: Boolean,
     durMs: Int,
     isSent: Boolean = true,
+    // r76-28 (owner: "send korar por first time animates hoi na ... successfully
+    // send hobar por 0.5 seconds por auto animate hobe"): `sent` is the SERVER
+    // ack. A mine row is born fully visible (it appears instantly while
+    // pending) and its flight starts HALF A SECOND after the ack lands;
+    // received rows are born sent and start as before.
+    sent: Boolean = true,
     key: String = "",
     onDone: () -> Unit = {},
 ): Modifier {
@@ -130,7 +136,18 @@ fun Modifier.fxFlyIn(
             else if (key.isNotBlank()) FlightAnims.of(key)
             else null
         }
-    var v by remember(key) { mutableStateOf(if (st == null) 1f else FlightAnims.valueAt(st, dur)) }
+    var v by remember(key) {
+        mutableStateOf(
+            when {
+                st == null -> 1f
+                st.goAt >= 0L -> FlightAnims.valueAt(st, dur)
+                // r76-28: a mine row waiting for its ack shows FULL SIZE -
+                // the message is there; the flight is a post-send celebration.
+                active && !sent -> 1f
+                else -> 0f
+            },
+        )
+    }
     var seat by remember { mutableStateOf<Rect?>(null) }
     var done by remember { mutableStateOf(false) }
 
@@ -138,6 +155,7 @@ fun Modifier.fxFlyIn(
         if (!done) seat = c.boundsInWindow()
     }
 
+    val sentNow = androidx.compose.runtime.rememberUpdatedState(sent)
     LaunchedEffect(key) {
         val f = st ?: return@LaunchedEffect
         if (f.goAt < 0L) {
@@ -150,6 +168,14 @@ fun Modifier.fxFlyIn(
                     val lb = FlightAnchors.listBounds
                     s != null && (lb == null || s.bottom <= lb.bottom + 1f)
                 }.first { it }
+            }
+            // r76-28: the ack wait - a mine row's flight starts 500 ms AFTER
+            // the pending echo becomes the server row. The key is stable
+            // across the swap (both rows carry the clientId), so this same
+            // coroutine sees the flip and no flight is ever restarted or lost.
+            if (!sentNow.value) {
+                snapshotFlow { sentNow.value }.first { it }
+                kotlinx.coroutines.delay(500L)
             }
             if (f.goAt < 0L) f.goAt = android.os.SystemClock.uptimeMillis()
         }

@@ -508,6 +508,10 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
     var progress by remember { mutableStateOf(0f) }
     var reply by remember { mutableStateOf("") }
     var replyFocused by remember { mutableStateOf(false) }
+    // r76-28 (owner: "reply dile status resume hoi na stuck hoye thake"):
+    // sendReply must release the FIELD's real focus - the flag alone never
+    // flipped back, so the progress clock stayed paused forever.
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     var replyError by remember { mutableStateOf("") }
     var showViewers by remember { mutableStateOf(false) }
     var viewers by remember { mutableStateOf(listOf<JSONObject>()) }
@@ -686,6 +690,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
         reply = ""
         replyError = ""
         replyFocused = false
+        focusManager.clearFocus()
         // The keyboard MUST fold after send — focus release alone left it up.
         focusManager.clearFocus()
         runCatching { KpSounds.send(ctx) }
@@ -1178,10 +1183,14 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                             .fillMaxWidth()
                             .navigationBarsPadding()
                             .imePadding()
-                            .padding(12.dp)
-                            .clip(RoundedCornerShape(24.dp))
+                            // r76-28 (owner: "composer pill ta onek mota ar
+                            // send button arektu dan a jabe"): slimmer pill
+                            // (24dp radius, tighter insets) and the send sits
+                            // at the right edge instead of floating inward.
+                            .padding(start = 12.dp, end = 4.dp, top = 12.dp, bottom = 12.dp)
+                            .clip(RoundedCornerShape(22.dp))
                             .background(Color(0x33FFFFFF))
-                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                            .padding(start = 14.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         BasicTextField(
@@ -1193,7 +1202,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                             ),
                             modifier = Modifier
                                 .weight(1f)
-                                .padding(vertical = 12.dp)
+                                .padding(vertical = 8.dp)
                                 .onFocusChanged { replyFocused = it.isFocused },
                             decorationBox = { inner ->
                                 if (reply.isEmpty()) {

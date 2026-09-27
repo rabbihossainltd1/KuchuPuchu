@@ -105,6 +105,32 @@ import org.json.JSONObject
  */
 
 /** Message JSON → URL-safe nav argument (and back). */
+/**
+ * r76-28 (owner: "chat er jei position a media ache otay click korle oi
+ * position theke middle a eshe Fullscreen hobe smoothly"): the tapped photo
+ * tile's seat, keyed by message id. The viewer opens FROM it - a hero, not a
+ * hard pop. One-shot: [take] clears, so a recompose never replays the hero.
+ */
+object PhotoHero {
+    private val map =
+        java.util.Collections.synchronizedMap(
+            object : java.util.LinkedHashMap<String, androidx.compose.ui.geometry.Rect>(32, 0.75f, false) {
+                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, androidx.compose.ui.geometry.Rect>?): Boolean = size > 64
+            },
+        )
+    var lastId: String? = null
+
+    fun set(id: String, r: androidx.compose.ui.geometry.Rect) {
+        if (id.isNotBlank()) map[id] = r
+    }
+
+    fun take(): androidx.compose.ui.geometry.Rect? {
+        val id = lastId ?: return null
+        lastId = null
+        return map[id]
+    }
+}
+
 internal fun mediaArg(m: JSONObject): String =
     android.util.Base64.encodeToString(
         m.toString().toByteArray(),
@@ -199,7 +225,16 @@ fun KpPhotoViewer(
     // H3 (audit 2026-09-21): a view-once page is never cached anywhere —
     // Coil memory + disk caching is disabled for the whole viewer instance.
     once: Boolean = false,
+    // r76-28: the tapped tile's seat - the photo grows from it to fullscreen.
+    heroFrom: androidx.compose.ui.geometry.Rect? = null,
 ) {
+    // Snapshotted once - a later recompose (page flip, chrome) must never
+    // restart or cancel the opening.
+    val heroSeat = remember { heroFrom }
+    val hero = remember { Animatable(if (heroSeat == null) 1f else 0f) }
+    LaunchedEffect(Unit) {
+        if (heroSeat != null) hero.animateTo(1f, tween(320, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+    }
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var scale by remember { mutableFloatStateOf(1f) }
@@ -302,9 +337,16 @@ fun KpPhotoViewer(
         }
         val dim = (1f - abs(drag.value) / 900f).coerceIn(0.35f, 1f)
         val chromeAlpha by animateFloatAsState(if (chrome) 1f else 0f, tween(160), label = "photochrome")
-        // r76-27 (audit #1): the window fades in with a small zoom instead of
-        // slamming onto the glass.
-        Box(Modifier.fillMaxSize().kpPopIn().background(Color.Black.copy(alpha = dim))) {
+        // r76-27 (audit #1) / r76-28 (owner: "oi position theke middle a eshe
+        // Fullscreen hobe smoothly"): with a hero seat the picture itself
+        // grows from the tile to fullscreen (the dim rides along); without
+        // one the window falls back to the small fade+zoom.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .then(if (heroSeat == null) Modifier.kpPopIn() else Modifier)
+                .background(Color.Black.copy(alpha = dim * if (heroSeat == null) 1f else hero.value.coerceIn(0.2f, 1f))),
+        ) {
             Box(
                 Modifier
                     .fillMaxSize()
@@ -430,7 +472,20 @@ fun KpPhotoViewer(
                 // a zoomed photo holds the gesture (no accidental page flip).
                 HorizontalPager(
                     state = pager,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            val h = heroSeat
+                            val t = hero.value
+                            if (h != null && t < 1f && size.width > 0f && size.height > 0f) {
+                                val sw = size.width
+                                val sh = size.height
+                                scaleX = androidx.compose.ui.util.lerp(h.width / sw, 1f, t)
+                                scaleY = androidx.compose.ui.util.lerp(h.height / sh, 1f, t)
+                                translationX = androidx.compose.ui.util.lerp(h.center.x - sw / 2f, 0f, t)
+                                translationY = androidx.compose.ui.util.lerp(h.center.y - sh / 2f, 0f, t)
+                            }
+                        },
                     userScrollEnabled = scale <= 1.01f,
                 ) { page ->
                     KpNetImage(

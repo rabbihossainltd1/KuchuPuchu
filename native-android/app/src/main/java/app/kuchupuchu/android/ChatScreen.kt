@@ -1790,7 +1790,15 @@ fun ChatScreen(nav: NavController, convId: String) {
         val cachedRatio = ImageRatios.get(url)
         val gw: Int
         val gh: Int
-        if (cachedRatio > 0f && !url.contains("gstatic")) {
+        // r76-28 (owner: "original ratio te sending thik na kore"): a bundled
+        // Tenor gif carries its REAL pixel size in the catalog now - that is
+        // the source of truth. Noto/gstatic gifs are square by definition;
+        // anything else falls back to a decoded panel ratio, then to square.
+        val catalog = TenorGifs.gifs.firstOrNull { it.url == url }
+        if (catalog != null) {
+            gw = catalog.w
+            gh = catalog.h
+        } else if (cachedRatio > 0f && !url.contains("gstatic")) {
             gw = (cachedRatio * 512f).toInt().coerceIn(1, 20000)
             gh = 512
         } else {
@@ -4033,6 +4041,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 }
                             },
                             onOpenImage = { msg ->
+                                // r76-28: the tapped tile is the hero's seat.
+                                PhotoHero.lastId = msg.optString("id").ifBlank { msg.optString("clientId") }
                                 // Owner round 35 (item 5): a tapped photo
                                 // opens WITH its send-mates — swiping walks
                                 // the whole group from the tapped one. (A lone
@@ -5079,6 +5089,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                 onClose = { albumMsg = null },
                 onOpen = { photo ->
                     albumMsg = null
+                    // r76-28: the album sheet's tiles are not registered
+                    // seats - open plain rather than fly from a stale one.
+                    PhotoHero.lastId = null
                     val all = albumPhotos(m)
                     viewerPhotos = all
                     viewerStart = all.indexOfFirst { it.optString("id") == photo.optString("id") }.coerceAtLeast(0)
@@ -5099,6 +5112,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             KpPhotoViewer(
                 url = messageMediaUrl(m),
                 title = who,
+                heroFrom = PhotoHero.take(),
                 subtitle = if (once) "View once" else viewerStamp(m.optText("createdAt")),
                 once = once,
                 onClose = { viewerPhotos = emptyList() },
@@ -7450,7 +7464,7 @@ private fun MessageRow(
     // image uploads (picked as documents) get the same treatment.
     // Owner round 31 (item 29): photos sent together = one grouped bubble.
     if (m.has("kpAlbum")) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, key = fxKey)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
             AlbumMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenAlbum, onReply, onLongPress, theme, onDoubleTapHeart)
         }
         return
@@ -7460,7 +7474,7 @@ private fun MessageRow(
     // opens the media ONCE for the recipient; the opening deletes the row
     // for everyone, so there is no opened state left to render.
     if (isViewOnce(m)) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, key = fxKey)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
             // r71-20: a view-once TEXT is its own bubble (veiled, one tap to
             // reveal, five seconds, then gone for both) — the photo / video /
             // voice flavours keep the tile.
@@ -7473,7 +7487,7 @@ private fun MessageRow(
         return
     }
     if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, key = fxKey)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
             ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend, onDoubleTapHeart)
         }
         return
@@ -7481,7 +7495,7 @@ private fun MessageRow(
     // Owner round 20: videos render as a tappable video bubble and play
     // IN-APP (the system player could never stream these auth-only files).
     if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, key = fxKey)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
             VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend, onDoubleTapHeart)
         }
         return
@@ -7499,7 +7513,7 @@ private fun MessageRow(
             .fillMaxWidth()
             .padding(vertical = 2.dp)
             .fxSlotOpen(fxFresh)
-            .fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (kind == "FILE" && fileLooksVoice(m)) 720 else 700, isSent = mine, key = fxKey) {
+            .fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (kind == "FILE" && fileLooksVoice(m)) 720 else 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey) {
                 fxLanded = m.optString("id")
             },
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
@@ -9274,6 +9288,11 @@ private fun ImageMessageRow(
                         onDragCancel = { replyDrag = 0f },
                     )
                 }
+                .onGloballyPositioned { c ->
+                    // r76-28: remember this tile's seat - the photo viewer
+                    // opens FROM here (hero) instead of popping.
+                    PhotoHero.set(m.optString("id").ifBlank { m.optString("clientId") }, c.boundsInWindow())
+                }
                 .combinedClickable(
                     onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
                     onClick = {
@@ -10873,13 +10892,12 @@ private fun PrivacyToggle(
             modifier = Modifier.size(if (small) 16.dp else 20.dp),
         )
         Spacer(Modifier.width(if (small) 8.dp else 12.dp))
-        // r76-26 (owner: "Screenshot alert er switch ar screen record alert
-        // er switch ekta age arekta pore ache ... ek line a thakbe"): with the
-        // text left-packed the toggle rode at the TEXT’s width, so the two
-        // sub-switches sat at different x. The text column takes the row
-        // again — both toggles line up at the right edge with each other —
-        // while the row itself still starts flush-left (r76-25 stands).
-        Column(Modifier.weight(1f)) {
+        // r76-28 (owner: "abar agei jaigay niye gecho switch eita arektu bam
+        // dike niye ai 2 tai same eksathe"): the two sub-switches must sit at
+        // the SAME x AND left of the right edge - so the sub-row's text takes
+        // a fixed FRACTION of the row (not all of it) and both toggles land
+        // right after it. Main rows keep the full stretch.
+        Column(Modifier.weight(if (small) 0.55f else 1f)) {
             Text(
                 label,
                 color = Ink,

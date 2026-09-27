@@ -283,7 +283,7 @@ check(
     chat.includes(".fxComposerAnchor()") &&
     chat.includes("FxArrivals.markSeen(id)") &&
     chat.includes(
-      '.fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (kind == "FILE" && fileLooksVoice(m)) 720 else 700, isSent = mine, key = fxKey)',
+      '.fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (kind == "FILE" && fileLooksVoice(m)) 720 else 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)',
     ) &&
     // r46 item 6: the landing + shine + ripple ride the BUBBLE box, never
     // the full-width row (the light swept the whole chat before).
