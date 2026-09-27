@@ -1781,6 +1781,23 @@ fun ChatScreen(nav: NavController, convId: String) {
         val replyId = replyTo?.optString("id")?.takeIf { it.isNotBlank() }
         replyTo = null
         replyId?.let { payload.put("replyTo", it) }
+        // r76-24 (owner: "sending er somoy wrong ratio te sending loading hoi
+        // ba fake ratio te original tai na"): the echo AND the server row
+        // carry the gif's ORIGINAL dimensions from frame one — Noto's CDN
+        // gifs are 512x512 by definition, and a Tenor preview was already
+        // decoded in the panel, so ImageRatios knows its true shape. The
+        // worker stores meta.w/h (imageDims) and echoes mediaW/mediaH back.
+        val cachedRatio = ImageRatios.get(url)
+        val gw: Int
+        val gh: Int
+        if (cachedRatio > 0f && !url.contains("gstatic")) {
+            gw = (cachedRatio * 512f).toInt().coerceIn(1, 20000)
+            gh = 512
+        } else {
+            gw = 512
+            gh = 512
+        }
+        payload.put("meta", JSONObject().put("w", gw).put("h", gh))
         bornKeys.add(clientId)
         LiveArrivals.markLive(clientId)
         pending.add(
@@ -1793,6 +1810,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("fileType", "image/gif")
                 .put("body", "")
                 .put("createdAt", java.time.Instant.now().toString())
+                .put("mediaW", gw)
+                .put("mediaH", gh)
                 .also { if (replyId != null) it.put("replyTo", replyId) },
         )
 // r76-22 (owner: "sent hole ekhono 0.1 seconds halka kete jai"): SNAP,
@@ -7307,6 +7326,13 @@ private fun MessageRow(
             }
         }
     val fxFresh = remember(pendingEcho) { fxBorn && FxFlights.claim(fxKey) } && fxScaleOf(ctx) > 0f
+    // r76-24 (owner: "animation hobar agei chat a agei chole asche tarpor
+    // abar hide hoye animation hoye asche"): while a LIVE send is in flight
+    // to the server the row is invisible — it arrives ONCE, animated, at the
+    // SENT moment. A queued echo from an app restart (Outbox seed) is not a
+    // live send; it stays visible with its clock. A failed send must never
+    // stay hidden either.
+    val sendHold = mine && pendingEcho && !m.optBoolean("failed") && LiveArrivals.isLive(fxKey)
     // v205 + v207 (unchanged by r67-3): the emoji glyph animates when the row
     // is a live birth AND is no longer a sending echo - so the emoji plays at
     // the moment the message becomes sent, while the flight above belongs to
@@ -7422,7 +7448,7 @@ private fun MessageRow(
     // image uploads (picked as documents) get the same treatment.
     // Owner round 31 (item 29): photos sent together = one grouped bubble.
     if (m.has("kpAlbum")) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine).fxSendHold(sendHold)) {
             AlbumMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenAlbum, onReply, onLongPress, theme, onDoubleTapHeart)
         }
         return
@@ -7432,7 +7458,7 @@ private fun MessageRow(
     // opens the media ONCE for the recipient; the opening deletes the row
     // for everyone, so there is no opened state left to render.
     if (isViewOnce(m)) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine).fxSendHold(sendHold)) {
             // r71-20: a view-once TEXT is its own bubble (veiled, one tap to
             // reveal, five seconds, then gone for both) — the photo / video /
             // voice flavours keep the tile.
@@ -7445,7 +7471,7 @@ private fun MessageRow(
         return
     }
     if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine).fxSendHold(sendHold)) {
             ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend, onDoubleTapHeart)
         }
         return
@@ -7453,7 +7479,7 @@ private fun MessageRow(
     // Owner round 20: videos render as a tappable video bubble and play
     // IN-APP (the system player could never stream these auth-only files).
     if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine).fxSendHold(sendHold)) {
             VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend, onDoubleTapHeart)
         }
         return
@@ -7471,7 +7497,7 @@ private fun MessageRow(
             .fillMaxWidth()
             .padding(vertical = 2.dp)
             .fxSlotOpen(fxFresh)
-            .fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (kind == "FILE" && fileLooksVoice(m)) 720 else 700, isSent = mine) {
+            .fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (kind == "FILE" && fileLooksVoice(m)) 720 else 700, isSent = mine).fxSendHold(sendHold) {
                 fxLanded = m.optString("id")
             },
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
@@ -9052,14 +9078,19 @@ private fun ViewOnceRow(
                 // r62 (owner: "majher icon ta animate remove koro ... dim background remove koro"):
                 // dim background circle removed, icon animation removed (static crisp mark), galaxy sparkles behind.
                 // ViewOnceOneIcon(56.dp)
-                Box(
-                    Modifier
-                        .align(Alignment.Center)
-                        .size(52.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CenteredOnceIcon(48.dp)
-                }
+                // r76-24 (owner: "jokhon progress ba loading thakbe tokhon
+                // middle a once icon ta takhbe na load hoye send hobar por
+                // icon ta asbe"): while the upload runs, the tile is scrim +
+                // ring only — the once mark appears with the sent message.
+                if (!pendingEcho)
+                    Box(
+                        Modifier
+                            .align(Alignment.Center)
+                            .size(52.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CenteredOnceIcon(48.dp)
+                    }
                 if (pendingEcho) {
                     // r76-23 (owner: "view once ... loading progress ta ...
                     // normal photo sending progress jemon temoni same system
@@ -10839,7 +10870,11 @@ private fun PrivacyToggle(
             modifier = Modifier.size(if (small) 16.dp else 20.dp),
         )
         Spacer(Modifier.width(if (small) 8.dp else 12.dp))
-        Column(Modifier.weight(1f)) {
+        // r76-24 (owner: "sub options full system tai mane icon text button
+        // shob left jabe"): a sub-row packs ALL of it to the left — no weight
+        // stretch, so the toggle sits right after the text, not at the right
+        // edge under the main switches.
+        Column(if (small) Modifier else Modifier.weight(1f)) {
             Text(
                 label,
                 color = Ink,
@@ -10848,6 +10883,7 @@ private fun PrivacyToggle(
             )
             Text(sub, color = Muted, fontSize = if (small) 11.sp else 12.sp)
         }
+        if (small) Spacer(Modifier.width(10.dp))
         // r76-23 (owner: "shob buttons toggle switch same thakbe ... just
         // animation ta add Hobe"): the owner's animated toggle, app-wide.
         AnimatedToggleSwitch(

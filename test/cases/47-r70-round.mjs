@@ -838,6 +838,34 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+{
+  // r76-24 (owner): the live-send echo is INVISIBLE until SENT (one arrival,
+  // one animation — no appear-then-hide-then-animate); privacy sub-rows pack
+  // icon+text+toggle ALL to the left; the gif echo carries its ORIGINAL
+  // dimensions (Noto 512x512, Tenor from the panel's decoded preview) into
+  // the row AND the worker's meta; the view-once mark hides while uploading.
+  const chat = main("ChatScreen.kt");
+  const fx = main("ChatFx.kt");
+  check(
+    "r76-24: invisible-until-sent send echo, left-packed sub-rows, true gif ratio, once-mark after send",
+    fx.includes(
+      "fun Modifier.fxSendHold(hold: Boolean): Modifier = this.graphicsLayer { if (hold) alpha = 0f }",
+    ) &&
+      chat.includes(
+        'val sendHold = mine && pendingEcho && !m.optBoolean("failed") && LiveArrivals.isLive(fxKey)',
+      ) &&
+      chat.split(".fxSendHold(sendHold)").length === 6 &&
+      chat.includes("Column(if (small) Modifier else Modifier.weight(1f))") &&
+      chat.includes("if (small) Spacer(Modifier.width(10.dp))") &&
+      chat.includes('payload.put("meta", JSONObject().put("w", gw).put("h", gh))') &&
+      chat.includes('.put("mediaW", gw)') &&
+      chat.includes('.put("mediaH", gh)') &&
+      chat.includes(
+        "if (!pendingEcho)\n                    Box(\n                        Modifier\n                            .align(Alignment.Center)\n                            .size(52.dp),",
+      ),
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`r70-round: ${lines.length - broken} ok / ${broken} broken`);

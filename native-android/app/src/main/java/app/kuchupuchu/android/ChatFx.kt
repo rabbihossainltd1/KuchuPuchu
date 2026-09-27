@@ -441,6 +441,14 @@ fun Modifier.fxPadlockSnap(trigger: Any?): Modifier {
  * - Chat history (scrolling or loading older): NO side animation, quiet and stable with gentle fade.
  */
 @Composable
+/**
+ * r76-24 (owner: "animation hobar agei chat a agei chole asche tarpor abar
+ * hide hoye animation hoye asche"): a live send's echo is INVISIBLE while it
+ * is sending — the row holds its seat silently and its ONE flight begins the
+ * moment the row becomes SENT. No static pre-appearance, no re-hide, no cut.
+ */
+fun Modifier.fxSendHold(hold: Boolean): Modifier = this.graphicsLayer { if (hold) alpha = 0f }
+
 fun Modifier.fxSideSlide(
     active: Boolean,
     isSent: Boolean,
