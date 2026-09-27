@@ -1042,7 +1042,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
       viewer.includes("val s0 = maxOf(h.width / sw, h.height / sh)") &&
       viewer.includes("scaleX = androidx.compose.ui.util.lerp(s0, 1f, t)") &&
       status.includes("BackHandler(enabled = replyFocused)") &&
-      status.includes("replyKeyboard?.hide()"),
+      status.includes("foldReplyKeyboard()") &&
+      status.includes("hideSoftInputFromWindow(replyImeView.windowToken, 0)"),
   );
 }
 

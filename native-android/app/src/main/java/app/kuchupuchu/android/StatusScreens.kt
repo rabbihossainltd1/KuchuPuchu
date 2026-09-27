@@ -543,9 +543,14 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
     // FOLDED THE KEYBOARD - the field kept its focus, so replyFocused stayed
     // true and the clip sat paused forever. Back now releases the field (and
     // hides the keyboard), which is what un-pauses the clock and the clip.
-    val replyKeyboard = androidx.compose.ui.platform.SoftwareKeyboardController.current
+    val replyImeView = androidx.compose.ui.platform.LocalView.current
+    val foldReplyKeyboard: () -> Unit = {
+        (ctx.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+            as? android.view.inputmethod.InputMethodManager)
+            ?.hideSoftInputFromWindow(replyImeView.windowToken, 0)
+    }
     androidx.activity.compose.BackHandler(enabled = replyFocused) {
-        replyKeyboard?.hide()
+        foldReplyKeyboard()
         focusManager.clearFocus()
     }
 
@@ -699,7 +704,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
         // r76-28 (owner: "reply dile status resume hoi na stuck hoye thake"):
         // the flag alone never flipped back - releasing the FIELD's real
         // focus is what un-pauses the progress clock.
-        replyKeyboard?.hide()
+        foldReplyKeyboard()
         focusManager.clearFocus()
         runCatching { KpSounds.send(ctx) }
         scope.launch {
