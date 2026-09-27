@@ -181,6 +181,7 @@ internal fun PassphraseDialog(
 @Composable
 fun E2eeRestoreGate() {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     var pend by remember { mutableStateOf(E2eeMsg.pendingRestore) }
     var dismissed by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -202,13 +203,15 @@ fun E2eeRestoreGate() {
             onDone = { pass ->
                 busy = true
                 error = null
-                val ok = withContext(Dispatchers.IO) { E2eeMsg.tryRestore(ctx, pass) }
-                busy = false
-                if (ok) {
-                    pend = null
-                    android.widget.Toast.makeText(ctx, "Old messages unlocked", android.widget.Toast.LENGTH_SHORT).show()
-                } else {
-                    error = "Wrong passphrase — try again"
+                scope.launch {
+                    val ok = withContext(Dispatchers.IO) { E2eeMsg.tryRestore(ctx, pass) }
+                    busy = false
+                    if (ok) {
+                        pend = null
+                        android.widget.Toast.makeText(ctx, "Old messages unlocked", android.widget.Toast.LENGTH_SHORT).show()
+                    } else {
+                        error = "Wrong passphrase — try again"
+                    }
                 }
             },
         )
