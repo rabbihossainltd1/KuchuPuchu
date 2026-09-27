@@ -91,7 +91,11 @@ import com.airbnb.lottie.compose.rememberLottieComposition
  * - Smooth swipe via AnimatedContent
  */
 
-// r76-28 (owner: "shob koita gif er ratio same kore diye bolcho fix - original\n// ratio te sending thik na kore"): each entry now carries the GIF's REAL\n// pixel size (read off the files themselves) so a send ships the original\n// aspect instead of the old square fallback.\ndata class TenorGifItem(val id: String, val url: String, val preview: String, val tags: String, val w: Int, val h: Int)
+// r76-28 (owner: "shob koita gif er ratio same kore diye bolcho fix -
+// original ratio te sending thik na kore"): each entry now carries the
+// GIF's REAL pixel size (read off the files themselves) so a send ships
+// the original aspect instead of the old square fallback.
+data class TenorGifItem(val id: String, val url: String, val preview: String, val tags: String, val w: Int, val h: Int)
 
 object TenorGifs {
     val gifs = listOf(

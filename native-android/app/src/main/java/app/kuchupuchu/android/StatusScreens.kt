@@ -508,10 +508,6 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
     var progress by remember { mutableStateOf(0f) }
     var reply by remember { mutableStateOf("") }
     var replyFocused by remember { mutableStateOf(false) }
-    // r76-28 (owner: "reply dile status resume hoi na stuck hoye thake"):
-    // sendReply must release the FIELD's real focus - the flag alone never
-    // flipped back, so the progress clock stayed paused forever.
-    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     var replyError by remember { mutableStateOf("") }
     var showViewers by remember { mutableStateOf(false) }
     var viewers by remember { mutableStateOf(listOf<JSONObject>()) }
@@ -690,6 +686,9 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
         reply = ""
         replyError = ""
         replyFocused = false
+        // r76-28 (owner: "reply dile status resume hoi na stuck hoye thake"):
+        // the flag alone never flipped back - releasing the FIELD's real
+        // focus is what un-pauses the progress clock.
         focusManager.clearFocus()
         // The keyboard MUST fold after send — focus release alone left it up.
         focusManager.clearFocus()
