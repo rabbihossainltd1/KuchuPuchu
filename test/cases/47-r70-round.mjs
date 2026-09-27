@@ -1084,6 +1084,19 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ---------- r77-7: video-status reply - the FIRST back resumes the clip, any nav mode ---------- */
+{
+  const status = main("StatusScreens.kt");
+  check(
+    'r77-7 (owner: "video status a reply bar tap kore back koror media abar resume hoi na, extra back kora lage"): with button navigation the IME eats the first BACK, so the r76-30 BackHandler never fired and the clip sat paused until back #2 - an IME-collapse watcher now releases the reply focus the frame the keyboard folds, and the BackHandler flips the flag itself instead of waiting for onFocusChanged',
+    status.includes("val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)") &&
+      status.includes("LaunchedEffect(imeBottom) {") &&
+      status.includes("if (imeBottom == 0 && replyFocused) {") &&
+      status.includes("focusManager.clearFocus()\n        replyFocused = false") &&
+      status.includes("import androidx.compose.foundation.layout.ime\n"),
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`r70-round: ${lines.length - broken} ok / ${broken} broken`);

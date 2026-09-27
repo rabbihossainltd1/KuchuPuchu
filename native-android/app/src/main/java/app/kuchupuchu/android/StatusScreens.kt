@@ -8,11 +8,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -58,6 +60,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
@@ -550,8 +553,25 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
             ?.hideSoftInputFromWindow(replyImeView.windowToken, 0)
     }
     androidx.activity.compose.BackHandler(enabled = replyFocused) {
+        // r77-7: flip the state ourselves too - waiting for onFocusChanged
+        // alone was part of the "extra back" (see the IME watcher below).
         foldReplyKeyboard()
         focusManager.clearFocus()
+        replyFocused = false
+    }
+    // r77-7 (owner: "back korle media abar resume hoi na extra back kora
+    // lage"): with BUTTON navigation the IME EATS the first BACK - the
+    // BackHandler above never fires, the keyboard folds, and the field keeps
+    // its focus, so the clip sat paused until a second back. Watch the IME
+    // itself: the frame it collapses while the reply field still claims
+    // focus, release it. Gesture-nav devices already resumed inside the
+    // BackHandler, so this is a no-op there.
+    val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
+    LaunchedEffect(imeBottom) {
+        if (imeBottom == 0 && replyFocused) {
+            replyFocused = false
+            focusManager.clearFocus()
+        }
     }
 
     // Dark screen → status bar icons must be white while viewing, and back to
