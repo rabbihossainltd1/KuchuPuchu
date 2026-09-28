@@ -1774,8 +1774,9 @@ const convBetween = (db, a, b) =>
   );
   check(
     "r23 (retargeted r82-2): back from the video player KEEPS the chat position - the plain-saveable flag did NOT survive the covered-destination dispose on device (owner r82); the spot is now recorded into ScreenStore.chatReturnScroll before pushing the viewer and restored deterministically on return",
-    chat.includes("var didInitialScroll by rememberSaveable { mutableStateOf(returnScroll != null) }") &&
-      chat.includes("ScreenStore.chatReturnScroll.remove(convId)"),
+    chat.includes(
+      "var didInitialScroll by rememberSaveable { mutableStateOf(returnScroll != null) }",
+    ) && chat.includes("ScreenStore.chatReturnScroll.remove(convId)"),
   );
   check(
     "r23: mobile-data networking — faster connect failover (10s) + worker call relay 1.8s->0.7s",
