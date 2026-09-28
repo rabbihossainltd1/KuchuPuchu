@@ -1773,8 +1773,9 @@ const convBetween = (db, a, b) =>
       chat.includes("scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, out)"),
   );
   check(
-    "r23: back from the video player KEEPS the chat position (didInitialScroll survives navigation)",
-    chat.includes("var didInitialScroll by rememberSaveable { mutableStateOf(false) }"),
+    "r23 (retargeted r82-2): back from the video player KEEPS the chat position - the plain-saveable flag did NOT survive the covered-destination dispose on device (owner r82); the spot is now recorded into ScreenStore.chatReturnScroll before pushing the viewer and restored deterministically on return",
+    chat.includes("var didInitialScroll by rememberSaveable { mutableStateOf(returnScroll != null) }") &&
+      chat.includes("ScreenStore.chatReturnScroll.remove(convId)"),
   );
   check(
     "r23: mobile-data networking — faster connect failover (10s) + worker call relay 1.8s->0.7s",

@@ -53,6 +53,17 @@ object ScreenStore {
      * on a request that was already answered.
      */
     val loginApprovals = mutableMapOf<String, String>()
+
+    /**
+     * r82-2 (owner: "video open kore back korle chat a ekdom niche niye
+     * asche auto"): rememberSaveable bundles do not survive this NavHost's
+     * covered-destination dispose on device, so the chat records its scroll
+     * spot (firstVisibleItemIndex + pixel offset) just before pushing an
+     * in-app viewer route (video player / doc viewer / media editor) and
+     * restores it once on return. Consumed on read; process memory only, so
+     * nothing can go stale across an app restart.
+     */
+    val chatReturnScroll = java.util.HashMap<String, Pair<Int, Int>>()
     private var hiddenFile: File? = null
     private var dustFile: File? = null
 

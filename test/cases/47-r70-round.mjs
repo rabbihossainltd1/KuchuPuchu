@@ -1482,6 +1482,42 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ---------- r82 round (owner retest after r81): three alive-on-device bugs ---------- */
+{
+  const fx4 = main("ChatFx.kt");
+  const chat4 = main("ChatScreen.kt");
+  const list4 = main("ChatListScreen.kt");
+  const store4 = main("ScreenStore.kt");
+
+  check(
+    "r82-1 (owner: \"emojis right side theke asche done but first time animates hoi na\"): the r81 viewport gate could never release early - the seat LATCHED on the row's first layout, and LazyColumn precomposes appended rows below the viewport, so every send rode the full 600 ms timeout and the pending->server swap froze inside a second gate wait, eating the whole 380 ms window before a frame ticked. The seat now tracks LIVE until the flight is armed (fxFlyIn's pattern), and the gate runs only while the clock is unarmed, so an armed server row resumes on its first frame",
+    fx4.includes("if (st.goAt < 0L) seat = c.boundsInWindow()") &&
+      !fx4.includes("if (seat == null) seat = c.boundsInWindow()") &&
+      fx4.includes(
+        "LaunchedEffect(key) {\n        if (st.goAt < 0L) {\n            kotlinx.coroutines.withTimeoutOrNull(600L) {",
+      ),
+  );
+
+  check(
+    'r82-2 (owner: "video open kore back korle chat a ekdom niche niye asche auto ... baki media gulaw dekho"): the LazyListState saver + didInitialScroll saveable were BOTH shipped for this and still fail - the covered nav destination\'s save bundle does not survive the dispose on device. The chat now RECORDS its scroll spot into ScreenStore.chatReturnScroll before pushing ANY in-app viewer route (video player / doc viewer / media editor, all four exit points), and the return consumes the record and restores exactly that spot as the initial position; the newest-message jump is skipped because didInitialScroll seeds true when a record exists',
+    store4.includes("val chatReturnScroll = java.util.HashMap<String, Pair<Int, Int>>()") &&
+      chat4.includes("val markViewerReturn: () -> Unit = {") &&
+      (chat4.match(/markViewerReturn\(\)/g) || []).length >= 4 &&
+      chat4.includes("ScreenStore.chatReturnScroll.remove(convId)") &&
+      chat4.includes("mutableStateOf(returnScroll != null)") &&
+      chat4.includes(
+        "runCatching { listState.scrollToItem(returnScroll.first, returnScroll.second) }",
+      ),
+  );
+
+  check(
+    'r82-3 (owner: "nav bar a unread number ta ekdom baje vabe show hocche ... massage button er right corner a rekhe daw ar double number hole double line jeno na hoi"): the count no longer sits inline after the tab label (pill crush = the ugly wrap) - it is an overlay pinned to the Chats icon\'s top-right corner with zero width pressure, and maxLines=1 + softWrap=false hard-lock one line so a two-digit count can never stack',
+    list4.includes(".align(Alignment.TopEnd)") &&
+      list4.includes("offset(x = 9.dp, y = (-7).dp)") &&
+      list4.includes("lineHeight = 9.sp,"),
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`r70-round: ${lines.length - broken} ok / ${broken} broken`);

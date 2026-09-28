@@ -869,16 +869,57 @@ private fun TopTab(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
-        if (label == "Status") {
-            // WhatsApp-style status glyph (ring + dot), not a plain circle.
-            StatusGlyphIcon(tint, 19.dp)
-        } else {
-            Icon(
-                icon,
-                contentDescription = label,
-                tint = tint,
-                modifier = Modifier.size(19.dp),
-            )
+        Box {
+            if (label == "Status") {
+                // WhatsApp-style status glyph (ring + dot), not a plain circle.
+                StatusGlyphIcon(tint, 19.dp)
+            } else {
+                Icon(
+                    icon,
+                    contentDescription = label,
+                    tint = tint,
+                    modifier = Modifier.size(19.dp),
+                )
+            }
+            // r82-3 (owner: "nav bar a unread number ta ekdom baje vabe show
+            // hocche ... massage button er right corner a rekhe daw ar double
+            // number hole double line jeno na hoi"): the count used to sit
+            // INLINE after the label, stretching the pill and getting crushed
+            // into a two-line digit stack when the four tabs squeezed. It is
+            // an overlay pinned to the message icon's top-right corner now -
+            // zero width pressure, so a two-digit count can never wrap, and
+            // maxLines/softWrap hard-lock one line regardless.
+            if (badge > 0) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 9.dp, y = (-7).dp)
+                        .defaultMinSize(minWidth = 16.dp, minHeight = 16.dp)
+                        .clip(CircleShape)
+                        .background(ActionBlue)
+                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        if (badge > 99) "99+" else "$badge",
+                        color = ActionBlueInk,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        lineHeight = 9.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
+            } else if (dot) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 6.dp, y = (-5).dp)
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(Green),
+                )
+            }
         }
         Spacer(Modifier.width(6.dp))
         Text(
@@ -890,34 +931,6 @@ private fun TopTab(
             softWrap = false,
             overflow = TextOverflow.Clip,
         )
-        if (badge > 0) {
-            Spacer(Modifier.width(5.dp))
-            Box(
-                Modifier
-                    .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
-                    .clip(CircleShape)
-                    .background(ActionBlue)
-                    .padding(horizontal = 4.dp, vertical = 2.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    if (badge > 99) "99+" else "$badge",
-                    color = ActionBlueInk,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    lineHeight = 10.sp,
-                )
-            }
-        }
-        if (dot) {
-            Spacer(Modifier.width(5.dp))
-            Box(
-                Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(Green),
-            )
-        }
     }
 }
 

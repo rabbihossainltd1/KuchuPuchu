@@ -434,6 +434,19 @@ fun ChatScreen(nav: NavController, convId: String) {
     val listState = rememberSaveable(saver = androidx.compose.foundation.lazy.LazyListState.Saver) {
         androidx.compose.foundation.lazy.LazyListState(0, 0)
     }
+    // r82-2 (owner: "video open kore back korle chat a ekdom niche niye
+    // asche auto"): the LazyListState SAVER + the didInitialScroll saveable
+    // were both shipped for this exact bug and the owner still lands at the
+    // bottom on viewer-back — the covered destination's save bundle simply
+    // doesn't survive the dispose on his phone. Deterministic instead: the
+    // scroll spot is RECORDED here just before pushing an in-app viewer
+    // route (video player / doc viewer / media editor), and consumed +
+    // restored as the initial position when this screen comes back (see the
+    // didInitialScroll block below).
+    val markViewerReturn: () -> Unit = {
+        ScreenStore.chatReturnScroll[convId] =
+            listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+    }
     val player = remember { VoicePlayer() }
     var lastTopId by remember { mutableStateOf("") }
     // Freshness marker for this conversation message page (see refreshMessages).
@@ -1040,12 +1053,19 @@ fun ChatScreen(nav: NavController, convId: String) {
     }
 
     // Opening a chat ALWAYS lands on the newest message (instant, not animated,
-    // so it never lags behind a fast paint on a slow device).
-    // rememberSaveable, not remember: navigating to the video player pops
-    // this composable out of composition, and plain remember lost the flag —
-    // coming BACK re-ran the jump and the chat landed on the latest message
-    // instead of where the video was ("video play kore back korle").
-    var didInitialScroll by rememberSaveable { mutableStateOf(false) }
+    // so it never lags behind a fast paint on a slow device). r82-2 (owner:
+    // "video open kore back korle chat a ekdom niche niye asche auto"): the
+    // older saveable-flag trick was shipped for this and STILL fails on
+    // device - the covered nav entry's save bundle doesn't survive the
+    // composable dispose, the flag came back false, and this jump re-ran on
+    // viewer-back, yanking the chat to the newest message. Exit points now
+    // RECORD the spot via markViewerReturn() into ScreenStore.chatReturnScroll;
+    // coming back, we consume the record and restore exactly that spot as the
+    // initial position instead of running the newest-message jump. A fresh
+    // open from the chat list (no record) still snaps to the newest as before.
+    val returnScroll = remember { ScreenStore.chatReturnScroll.remove(convId) }
+    var returnRestored by remember { mutableStateOf(false) }
+    var didInitialScroll by rememberSaveable { mutableStateOf(returnScroll != null) }
     LaunchedEffect(msgs.size, pending.size) {
         if (!didInitialScroll && msgs.isNotEmpty()) {
             didInitialScroll = true
@@ -1055,6 +1075,12 @@ fun ChatScreen(nav: NavController, convId: String) {
             if (!listState.isScrollInProgress) {
                 listState.scrollToItem(msgs.size + pending.size - 1)
             }
+        }
+        // r82-2: restore the recorded spot once the items the spot points at
+        // exist (the page may refill in passes - cache first, network after).
+        if (returnScroll != null && !returnRestored && msgs.size + pending.size > returnScroll.first) {
+            returnRestored = true
+            runCatching { listState.scrollToItem(returnScroll.first, returnScroll.second) }
         }
     }
 
@@ -4147,12 +4173,14 @@ fun ChatScreen(nav: NavController, convId: String) {
                                         // r71-18: their Save permission for the
                                         // clips THEY send (mine always save).
                                         .also { if (!isMe && !peerSaveOk) it.put("kpNoSave", true) }
+                                markViewerReturn()
                                 nav.navigate("videoplayer/${mediaArg(arg)}")
                             },
                             // Owner round 32 (item 33): documents → the app's own viewer.
                             onOpenDoc = { msg ->
                                 val arg = JSONObject(msg.toString()).put("kpPrivate", privateChat)
                                     .also { if (msg.optString("senderId") != Store.myId() && !peerSaveOk) it.put("kpNoSave", true) }
+                                markViewerReturn()
                                 nav.navigate("docviewer/${mediaArg(arg)}")
                             },
                             revealChars = if (m.optString("id") == aiRevealId) aiRevealChars else null,
@@ -5025,6 +5053,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // selection is retired.
                     ScreenStore.editStageUri = item.uri.toString()
                     showAttach = false
+                    markViewerReturn()
                     nav.navigate("mediaedit/$convId/0/${statusPickArg(item)}")
                 },
                 onImagePicked = { uri -> handleImagePicked(uri) },
@@ -5250,6 +5279,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 } else {
                                     val uri = FilesUtil.cacheFile(ctx, "viewer-edit.jpg", bytes, "image/jpeg")
                                     ScreenStore.editTitle = title
+                                    markViewerReturn()
                                     nav.navigate("mediaedit/$convId/0/${statusPickArg(MediaItem(uri, false, 0, "", System.currentTimeMillis()))}")
                                 }
                             }

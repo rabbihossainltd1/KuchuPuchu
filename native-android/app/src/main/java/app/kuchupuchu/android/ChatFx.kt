@@ -283,16 +283,30 @@ fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 380, isSent
     //     static - there is also no external arm site for emoji rows any more.
     val st = remember(key) { FlightAnims.birth(key) }
     var v by remember(key) { mutableStateOf(FlightAnims.valueAt(st, ms)) }
+    // r82-1 (owner r82 #1: "first time animates hoi na" - STILL dead after
+    // r81): the r81 gate released only when `seat.bottom <= listBounds.bottom`,
+    // but the seat was LATCHED on the row's first ever layout, and LazyColumn
+    // precomposes an appended row BELOW the list viewport. So the test could
+    // never turn true and EVERY send rode the full 600 ms timeout: the flight
+    // clock then armed hundreds of ms late, the pending->server swap happened
+    // inside another gate wait, and on a slower phone the whole 380 ms window
+    // was consumed before a single frame ticked - the emoji painted settled,
+    // with no animation at all. The seat now tracks LIVE until the flight is
+    // armed (exactly like fxFlyIn's `if (!done)` reporter), and the gate only
+    // runs while the clock is unarmed, so an already-armed server row resumes
+    // ticking on its first frame instead of freezing behind the viewport test.
     var seat by remember(key) { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     LaunchedEffect(key) {
-        kotlinx.coroutines.withTimeoutOrNull(600L) {
-            androidx.compose.runtime.snapshotFlow {
-                val s = seat
-                val lb = FlightAnchors.listBounds
-                s != null && (lb == null || s.bottom <= lb.bottom + 1f)
-            }.first { it }
+        if (st.goAt < 0L) {
+            kotlinx.coroutines.withTimeoutOrNull(600L) {
+                androidx.compose.runtime.snapshotFlow {
+                    val s = seat
+                    val lb = FlightAnchors.listBounds
+                    s != null && (lb == null || s.bottom <= lb.bottom + 1f)
+                }.first { it }
+            }
+            if (st.goAt < 0L) st.goAt = android.os.SystemClock.uptimeMillis()
         }
-        if (st.goAt < 0L) st.goAt = android.os.SystemClock.uptimeMillis()
         while (true) {
             val nv = FlightAnims.valueAt(st, ms)
             v = nv
@@ -303,7 +317,7 @@ fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 380, isSent
     }
     return this
         .onGloballyPositioned { c ->
-            if (seat == null) seat = c.boundsInWindow()
+            if (st.goAt < 0L) seat = c.boundsInWindow()
         }
         .graphicsLayer {
             transformOrigin =
