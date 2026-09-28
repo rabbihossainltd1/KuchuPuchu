@@ -6572,7 +6572,10 @@ const convBetween = (db, a, b) =>
       viewer.includes("onShown: (() -> Unit)? = null,") &&
         viewer.includes("onLoaded = onShown,") &&
         kt("Ui.kt").includes("onLoaded: (() -> Unit)? = null,") &&
-        kt("Ui.kt").includes("onSuccess = onLoaded?.let { cb -> { _ -> cb() } },") &&
+        // r80-3: onLoaded is invoked inside the combined onSuccess lambda
+        // now (the same callback also deposits the decoded bitmap).
+        kt("Ui.kt").includes("onSuccess = { st ->") &&
+        kt("Ui.kt").includes("onLoaded?.invoke()") &&
         kt("Ui.kt").includes("LaunchedEffect(url) { onLoaded?.invoke() }") &&
         viewer.includes('val onceClip = m?.optBoolean("kpOnce") == true') &&
         viewer.includes(
@@ -9862,8 +9865,11 @@ const convBetween = (db, a, b) =>
       "N3r: v200 Noto — single emoji uses bundled Noto Lottie (assets/noto-emoji/*.json), one-shot on send then static, tap replays here AND on other side via emoji_fx frame, offline-first",
       emo.includes("fun emojiToCodepoint") &&
         emo.includes("fun NotoAnimatedEmoji") &&
-        emo.includes("rememberLottieComposition") &&
-        emo.includes("LottieCompositionSpec.Asset") &&
+        // r80-6: the spec-based async loader was replaced by a sync-seeded
+        // cache read - rememberLottieComposition was born null even on a warm
+        // cache (a frame of SYSTEM glyph, then the swap = the flicker).
+        emo.includes("LottieCompositionCache.getInstance().get(cacheKey)") &&
+        emo.includes("LottieCompositionFactory.fromAsset(appCtx, assetName)") &&
         emo.includes("noto-emoji") &&
         emo.includes("emojiFxReplays") &&
         // r70-4: the tap now carries the tapper's own screen state.

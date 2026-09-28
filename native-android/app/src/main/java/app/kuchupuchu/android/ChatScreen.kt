@@ -77,6 +77,7 @@ import androidx.compose.material.icons.filled.Mood
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.MoreVert
@@ -1261,6 +1262,15 @@ fun ChatScreen(nav: NavController, convId: String) {
                                     bornKeys.add(liveMsg.optString("clientId").ifBlank { liveMsg.optString("id") })
                                     LiveArrivals.markLive(liveMsg.optString("clientId").ifBlank { liveMsg.optString("id") })
                                     LiveArrivals.markLive(liveMsg.optString("id"))
+                                    // r80-8: a live emoji-only row's entrance
+                                    // clock must be ARMED before the row ever
+                                    // composes (the birth arm at MessageRow
+                                    // only fires for mine). Same gate as the
+                                    // row itself, so text rows are untouched.
+                                    if (liveMsg.optString("kind") == "TEXT" && emojiOnlyCount(liveMsg.optText("body")) > 0) {
+                                        FlightAnims.armIn(liveMsg.optString("clientId").ifBlank { liveMsg.optString("id") }, 0L)
+                                        FlightAnims.armIn(liveMsg.optString("id"), 0L)
+                                    }
                                     msgs.add(liveMsg)
                                     // Our own optimistic bubble from a previous send
                                     // that the server just confirmed.
@@ -7608,7 +7618,13 @@ private fun MessageRow(
                     // entrance painted the 66sp glyph CHOPPED at the list
                     // edge. Emoji rows take the un-clippable in-bounds
                     // grow+fade instead - exactly once per message.
-                    Modifier.fxEmojiEntrance(fxFresh, fxKey)
+                    // r80-8: gate on fxBorn (live+recent survives recomposition),
+                    // NOT the one-shot fxFresh claim - a transient first
+                    // composition (prefetch / swap churn) used to consume the
+                    // claim before the row was ever drawn, and the entrance
+                    // was gone forever. The clock inside is time-based, so a
+                    // churned row simply continues the SAME entrance.
+                    Modifier.fxEmojiEntrance(fxBorn, fxKey)
                 } else {
                     Modifier
                         .fxSlotOpen(fxFresh)
@@ -9882,6 +9898,17 @@ private fun AlbumTile(
                 contentDescription = "Photo",
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
+                onSuccess = { st ->
+                    // r80-3: deposit this tile's decoded pixels for the
+                    // viewer's first frame (its own request is 1200px - Coil
+                    // never serves the smaller decode, so the cache never
+                    // actually primed the open; the "late open" blank).
+                    runCatching {
+                        (st.result.drawable as? android.graphics.drawable.BitmapDrawable)
+                            ?.bitmap
+                            ?.let { PhotoHero.setBitmap(photoId, it) }
+                    }
+                },
             )
         }
         // Owner fix 4/5: album tiles mirror single photo — pending shows the same processing ring.
@@ -10278,6 +10305,19 @@ private fun ImageBubble(m: JSONObject, mine: Boolean, isPending: Boolean = false
             if (ratio <= 0f && dataBmp.height > 0) {
                 ratio = ImageRatios.put(url, dataBmp.width.toFloat() / dataBmp.height.toFloat())
             }
+            LaunchedEffect(dataBmp) {
+                // r80-3: deposit the preview pixels too, so opening MY just-
+                // sent photo (still a data:/file: preview) starts the flight
+                // on the real picture. View-once never deposits (H3).
+                if (!isViewOnce(m)) {
+                    runCatching {
+                        PhotoHero.setBitmap(
+                            m.optString("id").ifBlank { m.optString("clientId") },
+                            dataBmp.asAndroidBitmap(),
+                        )
+                    }
+                }
+            }
             Image(
                 dataBmp,
                 contentDescription = "Photo",
@@ -10302,6 +10342,20 @@ private fun ImageBubble(m: JSONObject, mine: Boolean, isPending: Boolean = false
                     val d = state.result.drawable
                     if (d.intrinsicWidth > 0 && d.intrinsicHeight > 0 && ratio <= 0f) {
                         ratio = ImageRatios.put(url, d.intrinsicWidth.toFloat() / d.intrinsicHeight.toFloat())
+                    }
+                    // r80-3: deposit the tile's decode for the viewer's first
+                    // frame (see AlbumTile). View-once never deposits (H3).
+                    if (!isViewOnce(m)) {
+                        runCatching {
+                            (d as? android.graphics.drawable.BitmapDrawable)
+                                ?.bitmap
+                                ?.let {
+                                    PhotoHero.setBitmap(
+                                        m.optString("id").ifBlank { m.optString("clientId") },
+                                        it,
+                                    )
+                                }
+                        }
                     }
                 },
             )

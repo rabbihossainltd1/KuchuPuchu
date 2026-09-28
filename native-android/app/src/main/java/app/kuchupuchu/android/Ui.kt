@@ -573,6 +573,17 @@ fun KpNetImage(
     // memory/disk cache — the opening is single-use and the bytes are gone
     // server-side the moment they are served.
     noCache: Boolean = false,
+    // r80-3 (owner: "click korle late kore open hoi, kono smooth animation
+    // nai"): the fullscreen viewer's first frames are only ever as fast as a
+    // Coil memory-cache hit - in a heavy chat the 1200px decodes evict each
+    // other, the cache MISSES on tap, and the viewer flies a BLANK black box
+    // while the network answers. The chat tile, however, holds that photo's
+    // exact pixels RIGHT NOW: it exports them ([onDecoded]) and the viewer
+    // paints them as the base layer ([placeholderBitmap]) the moment it opens,
+    // so the flight ALWAYS starts on the real picture and the full image
+    // crossfades over it when it lands. View-once never exports (H3).
+    placeholderBitmap: android.graphics.Bitmap? = null,
+    onDecoded: ((android.graphics.Bitmap) -> Unit)? = null,
 ) {
     if (url.isNullOrBlank()) return
     if (url.startsWith("data:")) {
@@ -585,21 +596,40 @@ fun KpNetImage(
     }
     val full = if (url.startsWith("http")) url else Api.BASE + url
     val ctx = LocalContext.current
-    AsyncImage(
-        // Bounded decode: the fullscreen viewer used to decode a 12MP photo
-        // whole (~48MB spike) — tap a photo in a heavy chat and the app died.
-        model =
-            ImageRequest.Builder(ctx).data(full).crossfade(true).size(1200).apply {
-                if (noCache) {
-                    memoryCachePolicy(CachePolicy.DISABLED)
-                    diskCachePolicy(CachePolicy.DISABLED)
+    androidx.compose.foundation.layout.Box(modifier) {
+        if (placeholderBitmap != null) {
+            Image(
+                bitmap = androidx.compose.ui.graphics.asImageBitmap(placeholderBitmap),
+                contentDescription = contentDescription,
+                modifier = Modifier.matchParentSize(),
+                contentScale = contentScale,
+            )
+        }
+        AsyncImage(
+            // Bounded decode: the fullscreen viewer used to decode a 12MP photo
+            // whole (~48MB spike) — tap a photo in a heavy chat and the app died.
+            model =
+                ImageRequest.Builder(ctx).data(full).crossfade(placeholderBitmap == null).size(1200).apply {
+                    if (noCache) {
+                        memoryCachePolicy(CachePolicy.DISABLED)
+                        diskCachePolicy(CachePolicy.DISABLED)
+                    }
+                }.build(),
+            contentDescription = contentDescription,
+            modifier = Modifier.matchParentSize(),
+            contentScale = contentScale,
+            onSuccess = { st ->
+                onLoaded?.invoke()
+                if (onDecoded != null) {
+                    runCatching {
+                        (st.result.drawable as? android.graphics.drawable.BitmapDrawable)
+                            ?.bitmap
+                            ?.let(onDecoded)
+                    }
                 }
-            }.build(),
-        contentDescription = contentDescription,
-        modifier = modifier,
-        contentScale = contentScale,
-        onSuccess = onLoaded?.let { cb -> { _ -> cb() } },
-    )
+            },
+        )
+    }
 }
 
 /** Solid gold pill button — the app's primary action. */

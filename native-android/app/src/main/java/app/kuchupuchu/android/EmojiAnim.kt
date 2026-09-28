@@ -31,9 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.airbnb.lottie.compose.LottieAnimation
-import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.rememberLottieAnimatable
-import com.airbnb.lottie.compose.rememberLottieComposition
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -195,15 +193,48 @@ internal fun NotoAnimatedEmoji(
     val codepoint = remember(emoji) { emojiToCodepoint(emoji) }
     val isBundled = remember(codepoint) { NotoBundled.isBundled(codepoint) }
 
-    val spec = remember(codepoint, isBundled) {
-        if (isBundled) {
-            LottieCompositionSpec.Asset("noto-emoji/$codepoint.json")
-        } else {
-            LottieCompositionSpec.Url("https://fonts.gstatic.com/s/e/notoemoji/latest/$codepoint/lottie.json")
+    val assetName = "noto-emoji/$codepoint.json"
+    val netUrl = "https://fonts.gstatic.com/s/e/notoemoji/latest/$codepoint/lottie.json"
+    // The EXACT identifier LottieCompositionFactory caches under (the
+    // factories default a null cacheKey to the asset name / the URL string) -
+    // r79's NotoEmojiWarm fills the cache under the same keys.
+    val cacheKey = if (isBundled) assetName else netUrl
+
+    // r80-6 (owner retest r79: "not fixed" - the flicker survived warming):
+    // rememberLottieComposition is ASYNC even on a warm cache - the state is
+    // born null and the loader lands a frame or two later. So every glyph
+    // painted the SYSTEM emoji first, then swapped the Noto frame in, and
+    // from the eye that swap IS the flicker; no amount of pre-warming fixes a
+    // null first state. The state now seeds SYNCHRONOUSLY from Lottie's cache
+    // at first composition, so a warm glyph's first pixel is already the real
+    // Noto frame - there is never a Text pass to swap away from. Cold misses
+    // keep the old Text fallback until the async load lands.
+    val appCtx = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    var composition by remember(codepoint) {
+        mutableStateOf<com.airbnb.lottie.LottieComposition?>(
+            if (codepoint.isBlank()) {
+                null
+            } else {
+                runCatching {
+                    com.airbnb.lottie.LottieCompositionCache.getInstance().get(cacheKey)
+                }.getOrNull()
+            },
+        )
+    }
+    LaunchedEffect(codepoint) {
+        if (composition != null || codepoint.isBlank()) return@LaunchedEffect
+        composition = kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+            val task =
+                if (isBundled) {
+                    com.airbnb.lottie.LottieCompositionFactory.fromAsset(appCtx, assetName)
+                } else {
+                    com.airbnb.lottie.LottieCompositionFactory.fromUrl(appCtx, netUrl)
+                }
+            task
+                .addListener { comp -> if (cont.isActive) cont.resumeWith(Result.success(comp)) }
+                .addFailureListener { if (cont.isActive) cont.resumeWith(Result.success(null)) }
         }
     }
-
-    val composition by rememberLottieComposition(spec)
     val animatable = rememberLottieAnimatable()
     var isPlaying by remember(emoji) { mutableStateOf(false) }
 
@@ -263,7 +294,11 @@ internal fun EmojiGlyphRow(
     // v206: animate only single emoji, not multiple
     val shouldAnimate = isSingle
     Row(
-        Modifier.fxPopIn(active && shouldAnimate).padding(start = 2.dp, end = 2.dp),
+        // r80-8: the birth pop belongs to the ROW (fxEmojiEntrance) - this
+        // glyph-row fxPopIn scaled the same birth a second time on a second
+        // clock, so the entrance read doubled / muddy. Tap replays are
+        // untouched (they ride replayKey, not this modifier).
+        Modifier.padding(start = 2.dp, end = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

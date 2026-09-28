@@ -1236,11 +1236,14 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     'r78-6/r78-8 (owner: "emoji send korle 0.2 seconds flicking kore halka kata pore abar thik hoi" + "first time animate hobe just ekbar"): the composer flight starts below the LazyColumn viewport, so a 66sp glyph painted CHOPPED at the list edge for ~30% of its entrance - emoji rows now take fxEmojiEntrance, one grow+fade fully inside the row\'s own bounds, clientId-keyed once-per-message, and every non-emoji row keeps its flight',
     fx.includes(
-      "fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 300): Modifier",
+      "fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 340): Modifier",
     ) &&
       fx.includes("FlightAnims.markDone(key)") &&
       fx.includes("androidx.compose.ui.graphics.TransformOrigin.Center") &&
-      chat.includes("Modifier.fxEmojiEntrance(fxFresh, fxKey)") &&
+      // r80-8: the gate is fxBorn now - the one-shot fxFresh claim could
+      // be consumed by a transient prefetch composition before the row was
+      // ever drawn, which is how both earlier entrances died on device.
+      chat.includes("Modifier.fxEmojiEntrance(fxBorn, fxKey)") &&
       chat.includes('kind == "TEXT" && emojiOnlyCount(m.optText("body")) > 0') &&
       chat.includes(
         '.fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (kind == "FILE" && fileLooksVoice(m)) 720 else 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)',
@@ -1316,9 +1319,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes(
         'if (liveMsg.optString("kind") == "TEXT") NotoEmojiWarm.preload(ctx, liveMsg.optText("body"))',
       ) &&
-      fx.includes("remember(key) { androidx.compose.animation.core.Animatable(0f) }") &&
-      fx.includes("LaunchedEffect(laidOut) {") &&
-      fx.includes(".onGloballyPositioned { laidOut = true }"),
+      fx.includes("val st = remember(key) { FlightAnims.birth(key) }") &&
+      fx.includes("if (st.goAt < 0L) st.goAt = android.os.SystemClock.uptimeMillis()") &&
+      fx.includes("androidx.compose.runtime.withFrameNanos { }") &&
+      anim.includes("com.airbnb.lottie.LottieCompositionCache.getInstance().get(cacheKey)"),
   );
 
   check(
@@ -1334,6 +1338,64 @@ const main = (f) => read(`${ANDROID}/${f}`);
       ) &&
       chat.includes(".graphicsLayer { alpha = PhotoHero.tileAlphaFor(photoId) }") &&
       chat.includes("PhotoHero.set(\n                    photoId,"),
+  );
+}
+
+/* ---------- r80 round (owner retest after r79): the certainty round ---------- */
+{
+  const media2 = main("MediaViewer.kt");
+  const chat2 = main("ChatScreen.kt");
+  const anim2 = main("EmojiAnim.kt");
+  const fx2 = main("ChatFx.kt");
+  const ui2 = main("Ui.kt");
+  const list2 = main("ChatListScreen.kt");
+
+  check(
+    'r80-6 (owner: "not fixed" - the flicker SURVIVED warming): rememberLottieComposition is async even on a warm cache, so every glyph was born composition==null, painted the SYSTEM emoji for a frame or two, then swapped the Noto frame in - and that swap IS the flicker. The glyph now seeds its composition state SYNCHRONOUSLY from LottieCompositionCache (the r79 warm fills it), and only runs the async loader on a true cold miss',
+    anim2.includes("com.airbnb.lottie.LottieCompositionCache.getInstance().get(cacheKey)") &&
+      anim2.includes("val cacheKey = if (isBundled) assetName else netUrl") &&
+      anim2.includes("kotlinx.coroutines.suspendCancellableCoroutine { cont ->") &&
+      !anim2.includes("rememberLottieComposition("),
+  );
+
+  check(
+    'r80-8 (owner: "not fixed" - no entrance, settles instantly): two clocks already died on device (r78 wall-clock eaten by first-frame jank, r79 layout-anchor never visible). The entrance now rides the ONE family of animation the owner demonstrably SEES: the row flight - time-based, GLOBAL per key (FlightAnims.birth + valueAt + the same withFrameNanos tick), gated on fxBorn (survives churn) with a self-arm fallback, armed at birth for mine and armed in fast-paint for emoji-only received rows; the old second birth animator (glyph-row fxPopIn) is gone so one message is one animation',
+    fx2.includes("val st = remember(key) { FlightAnims.birth(key) }") &&
+      fx2.includes("if (st.goAt < 0L) st.goAt = android.os.SystemClock.uptimeMillis()") &&
+      chat2.includes("Modifier.fxEmojiEntrance(fxBorn, fxKey)") &&
+      chat2.includes('emojiOnlyCount(liveMsg.optText("body")) > 0') &&
+      chat2.includes(
+        'FlightAnims.armIn(liveMsg.optString("clientId").ifBlank { liveMsg.optString("id") }, 0L)',
+      ) &&
+      anim2.includes("Modifier.padding(start = 2.dp, end = 2.dp),") &&
+      !anim2.includes("fxPopIn("),
+  );
+
+  check(
+    'r80-3a (owner: "click korle late kore open hoi, onek rudely hoi"): TWO device-real roots - (i) the open clock started at LaunchedEffect(Unit) while the new dialog window warmed and the pager was still unmeasured, so the grow half elapsed unseen and the size-guard let one fullscreen frame POP before the transform applied; the sprint now starts on the viewer FIRST REAL LAYOUT (openLaidOut latch) and pre-layout frames are invisible (alpha 0), so the first thing seen is the photo AT the tile and the full 320 ms plays',
+    media2.includes("var openLaidOut by remember { mutableStateOf(false) }") &&
+      media2.includes("LaunchedEffect(openLaidOut) {") &&
+      media2.includes(".onGloballyPositioned { openLaidOut = true }") &&
+      media2.includes("alpha = if (heroSeat != null && !openLaidOut) 0f else 1f"),
+  );
+
+  check(
+    'r80-3b (owner: "late open"): (ii) the tile decodes at 720/480px but the viewer asks 1200px and Coil never serves a SMALLER cached bitmap, so the tile never primed the viewer - most opens were a network/blank window. The tile now deposits its own decoded pixels into PhotoHero (bounded 24; view-once deposits nothing - H3), KpNetImage gained a placeholderBitmap base layer, and every viewer page paints the tile bitmap as its first frame so the flight always starts on the real picture and the full image crossfades/sharpens over it',
+    media2.includes("private val bitmaps =") &&
+      media2.includes("fun setBitmap(id: String, bmp: android.graphics.Bitmap)") &&
+      media2.includes("fun bitmapOf(id: String?): android.graphics.Bitmap?") &&
+      media2.includes(
+        "placeholderBitmap = if (once) null else PhotoHero.bitmapOf(heroPageId?.invoke(page))",
+      ) &&
+      ui2.includes("placeholderBitmap: android.graphics.Bitmap? = null") &&
+      ui2.includes("onDecoded: ((android.graphics.Bitmap) -> Unit)? = null") &&
+      chat2.includes("PhotoHero.setBitmap("),
+  );
+
+  check(
+    'r80-5 (owner: "system back ta full app i same hobe - kothaw jeno ekbare back na hoi, previous screen option a jai"): the nav root (main/ChatListScreen) was the ONE place a system back FINISHED the whole app - now back walks tabs to Chats first, then PARKS the app (moveTaskToBack, state survives), and it only fires when nothing above consumed the back; non-root routes keep popping to their previous screen via the NavHost',
+    list2.includes("MainActivity.current?.moveTaskToBack(true)") &&
+      list2.includes("androidx.activity.compose.BackHandler(enabled = !selecting) {"),
   );
 }
 

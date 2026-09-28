@@ -333,6 +333,22 @@ fun ChatListScreen(nav: NavController) {
             // the count, a close (X) and a ⋮ that reopens the SAME sheet.
             val selecting = tab == 0 && ListSelect.active
             androidx.activity.compose.BackHandler(enabled = selecting) { ListSelect.clear() }
+            // r80-5 (owner: "system back ta full app i same hobe - kothaw
+            // jeno ekbare back na hoi, previous screen option a jai"): "main"
+            // is the nav ROOT - a system back here used to FINISH the whole
+            // app from under the thumb (the single "ekbare" exit in the
+            // app). Non-root routes already pop to their previous screen via
+            // the NavHost; here back now walks to the Chats tab first, then
+            // PARKS the app (state survives, last chat kept) instead of
+            // killing it. Enabled only when nothing above consumed the back.
+            androidx.activity.compose.BackHandler(enabled = !selecting) {
+                if (tab != 0) {
+                    ListSelect.clear()
+                    tab = 0
+                } else {
+                    MainActivity.current?.moveTaskToBack(true)
+                }
+            }
             // Leaving the screen ends select mode — nobody returns to a stale
             // set of ticks.
             androidx.compose.runtime.DisposableEffect(Unit) { onDispose { ListSelect.clear() } }

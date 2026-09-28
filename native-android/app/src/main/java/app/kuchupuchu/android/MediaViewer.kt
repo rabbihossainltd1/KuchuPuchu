@@ -70,6 +70,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
@@ -134,6 +135,28 @@ object PhotoHero {
     // the hero fades OUT over the same span, so a one-pixel seat mismatch
     // reads as a soft blend instead of a duplicate.
     var heroCloseT by androidx.compose.runtime.mutableStateOf(0f) // 0 = not closing
+    // r80-3 (owner: "late kore open hoi, kono smooth animation nai"): the
+    // tile's OWN decoded pixels ride beside its seat. Coil's memory cache
+    // evicts 1200px decodes fast in a heavy chat, so the viewer used to fly
+    // a BLANK window while the network re-answered (that blank IS the
+    // "late open"). The viewer now paints these exact pixels as its first
+    // frame - the flight always starts on the real picture. View-once tiles
+    // never deposit (H3: no caching).
+    private val bitmaps =
+        java.util.Collections.synchronizedMap(
+            object : java.util.LinkedHashMap<String, android.graphics.Bitmap>(24, 0.75f, true) {
+                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, android.graphics.Bitmap>?): Boolean = size > 24
+            },
+        )
+
+    fun setBitmap(id: String, bmp: android.graphics.Bitmap) {
+        if (id.isBlank()) return
+        synchronized(bitmaps) { bitmaps[id] = bmp }
+    }
+
+    fun bitmapOf(id: String?): android.graphics.Bitmap? =
+        if (id.isNullOrBlank()) null else synchronized(bitmaps) { bitmaps[id] }
+
     fun tileAlphaFor(id: String?): Float {
         val out = outId
         if (id.isNullOrBlank() || out.isNullOrBlank() || out != id) return 1f
@@ -264,8 +287,22 @@ fun KpPhotoViewer(
     // restart or cancel the opening.
     val heroSeat = remember { heroFrom }
     val hero = remember { Animatable(if (heroSeat == null) 1f else 0f) }
-    LaunchedEffect(Unit) {
-        if (heroSeat != null) hero.animateTo(1f, tween(320, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+    // r80-3 (owner: "oi photo er position theke aste aste fullscreen hobe";
+    // retest: "kono smooth animation nai, click korle late kore open hoi,
+    // onek rudely hoi"): the flight used to clock from LaunchedEffect(Unit) -
+    // it STARTED while the new dialog window was still warming and while the
+    // pager had no size yet, so the first drawn frames were either warmed-up
+    // wall time (the grow half over before a pixel showed) or one fullscreen
+    // POP (the size-guard skipped the transform until layout, then the photo
+    // snapped down to the tile). The sprint now starts on the viewer's FIRST
+    // REAL LAYOUT, and every frame before that is invisible (alpha 0 on the
+    // outer box below): the first thing the eye sees is the photo AT the
+    // tile, and the whole 320 ms plays in front of it. Zero-lag, no pop.
+    var openLaidOut by remember { mutableStateOf(false) }
+    LaunchedEffect(openLaidOut) {
+        if (openLaidOut && heroSeat != null) {
+            hero.animateTo(1f, tween(320, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+        }
     }
     // r76-29 (owner: "photo theke ber hole animation ta reverse hoi na"):
     // leaving plays the hero BACKWARDS - the picture shrinks into the tile it
@@ -439,7 +476,13 @@ fun KpPhotoViewer(
         Box(
             Modifier
                 .fillMaxSize()
+                .onGloballyPositioned { openLaidOut = true }
                 .then(if (heroSeat == null) Modifier.kpPopIn() else Modifier)
+                .graphicsLayer {
+                    // r80-3: nothing renders until the first layout starts
+                    // the sprint - no warmed-up clock, no fullscreen pop.
+                    alpha = if (heroSeat != null && !openLaidOut) 0f else 1f
+                }
                 .background(Color.Black.copy(alpha = dim * hero.value)),
         ) {
             Box(
@@ -603,6 +646,12 @@ fun KpPhotoViewer(
                         },
                     userScrollEnabled = scale <= 1.01f,
                 ) { page ->
+                    // r80-3: base layer = the chat tile's own decoded pixels,
+                    // so the opening flight's first frame is ALWAYS the real
+                    // picture (never a black box on a cache miss); the full
+                    // image lands over it the moment it decodes. View-once
+                    // tiles deposit nothing (H3) - those pages behave as
+                    // before.
                     KpNetImage(
                         oncePages.getOrElse(page) { pages[page] },
                         title,
@@ -617,6 +666,7 @@ fun KpPhotoViewer(
                         ContentScale.Fit,
                         onLoaded = onShown,
                         noCache = once,
+                        placeholderBitmap = if (once) null else PhotoHero.bitmapOf(heroPageId?.invoke(page)),
                     )
                 }
             }

@@ -198,8 +198,9 @@ check(
     fx7.includes("fun Modifier.fxProgressLine") &&
     emo.includes("fun emojiToCodepoint") &&
     emo.includes("fun NotoAnimatedEmoji") &&
-    emo.includes("rememberLottieComposition") &&
-    emo.includes("LottieCompositionSpec.Asset") &&
+    // r80-6: sync-seeded cache load (see 32-bots note).
+    emo.includes("LottieCompositionCache.getInstance().get(cacheKey)") &&
+    emo.includes("LottieCompositionFactory.fromAsset(appCtx, assetName)") &&
     emo.includes("noto-emoji") &&
     emo.includes("emojiFxReplays") &&
     chat.includes("val fxFresh =") &&

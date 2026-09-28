@@ -259,36 +259,43 @@ fun Modifier.fxSlotOpen(active: Boolean, fromDp: Float = -30f, ms: Int = 480): M
  * first-arm-wins Flight), and the echo->server swap can never re-run it.
  */
 @Composable
-fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 300): Modifier {
+fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 340): Modifier {
     val scale = fxAnimatorScale()
-    if (!active || scale <= 0f) return this
-    // r79-8 (owner retest: "emoji first time animates hoi na"): the r78 clock
-    // ticked FROM THE ARM (wall time). Between the arm and the row's first
-    // pixels sit message composition + the glyph's own first raster, and that
-    // jank ate almost the whole 260 ms - the pop finished nearly off-screen,
-    // so it READ as "no entrance, appears instantly". The sprint now starts
-    // when the row is LAID OUT (perception time): the full grow+fade always
-    // plays in front of the owner, once per message (clientId-keyed - the
-    // echo->server swap keeps the remember, it can never replay).
-    val t = remember(key) { androidx.compose.animation.core.Animatable(0f) }
-    var laidOut by remember(key) { mutableStateOf(false) }
-    LaunchedEffect(laidOut) {
-        if (!laidOut) return@LaunchedEffect
-        t.animateTo(1f, tween(ms, easing = FastOutSlowInEasing))
+    if (!active || scale <= 0f || key.isBlank()) return this
+    // r80-8 (owner, 2nd retest: "not fixed"): two entrance clocks already
+    // died on his phone - the r78 wall-clock arm ate itself in the first
+    // frames' jank, and the r79 layout-anchored start never showed either.
+    // Exactly ONE entrance family has ever VISIBLY played on his device: the
+    // row flight (fxFlyIn) - TIME-BASED and GLOBAL per message key, surviving
+    // recomposition, the pending->server swap, and scroll recycling. This is
+    // the SAME clock and the SAME tick loop, only the curve differs (grow +
+    // fade in place, in-bounds - nothing can clip at the list edge).
+    // Arm sites: a mine row arms at birth (MessageRow), an emoji-only
+    // RECEIVED arrival arms in the fast-paint path; un-armed stragglers
+    // self-arm at first composition down below. valueAt pins 0 before the
+    // arm and 1 forever ~340 ms after it - exactly one entrance ever, never
+    // a replay on scroll-back (the clock is simply done).
+    val st = remember(key) { FlightAnims.birth(key) }
+    var v by remember(key) { mutableStateOf(FlightAnims.valueAt(st, ms)) }
+    LaunchedEffect(key) {
+        if (st.goAt < 0L) st.goAt = android.os.SystemClock.uptimeMillis()
+        while (true) {
+            val nv = FlightAnims.valueAt(st, ms)
+            v = nv
+            if (nv >= 1f) break
+            androidx.compose.runtime.withFrameNanos { }
+        }
         FlightAnims.markDone(key)
     }
-    val v = t.value
-    // Always return this modifier chain (never early-return `this` after the
-    // remembers exist - changing the modifier LAYOUT each frame is how tap /
-    // hold targets drift under a running animation).
+    // Constant modifier graph (identical node for every value of v) - the
+    // tap / hold handlers must not drift while the entrance runs.
     return this
-        .onGloballyPositioned { laidOut = true }
         .graphicsLayer {
-            val g = 0.55f + 0.45f * v
-            alpha = 0.25f + 0.75f * v
-            scaleX = g
-            scaleY = g
             transformOrigin = androidx.compose.ui.graphics.TransformOrigin.Center
+            val sc = 0.3f + 0.7f * v
+            scaleX = sc
+            scaleY = sc
+            alpha = if (v < 0.55f) (v / 0.55f).coerceIn(0f, 1f) else 1f
         }
 }
 
