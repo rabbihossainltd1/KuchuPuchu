@@ -283,27 +283,25 @@ fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 380, isSent
     //     static - there is also no external arm site for emoji rows any more.
     val st = remember(key) { FlightAnims.birth(key) }
     var v by remember(key) { mutableStateOf(FlightAnims.valueAt(st, ms)) }
-    // r82-1 (owner r82 #1: "first time animates hoi na" - STILL dead after
-    // r81): the r81 gate released only when `seat.bottom <= listBounds.bottom`,
-    // but the seat was LATCHED on the row's first ever layout, and LazyColumn
-    // precomposes an appended row BELOW the list viewport. So the test could
-    // never turn true and EVERY send rode the full 600 ms timeout: the flight
-    // clock then armed hundreds of ms late, the pending->server swap happened
-    // inside another gate wait, and on a slower phone the whole 380 ms window
-    // was consumed before a single frame ticked - the emoji painted settled,
-    // with no animation at all. The seat now tracks LIVE until the flight is
-    // armed (exactly like fxFlyIn's `if (!done)` reporter), and the gate only
-    // runs while the clock is unarmed, so an already-armed server row resumes
-    // ticking on its first frame instead of freezing behind the viewport test.
-    var seat by remember(key) { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    // r83-1 (owner r83 #1: "shob thik ache just animate hoi na first time" -
+    // STILL dead after r78's wait, r81's latched seat and r82's live seat):
+    // every one of those designs armed the clock from INSIDE a cancellable
+    // LaunchedEffect, so the arm lived at the mercy of composition churn, the
+    // pending->server swap and the frame clock - and on the owner's phone the
+    // FIRST send of a session always painted settled while later sends flew.
+    // The arm is now bound to the LAYOUT PASS itself: the very
+    // onGloballyPositioned report that puts the row's seat inside the list
+    // viewport sets the clock - the same device-proven signal fxFlyIn's live
+    // seat rides. Whatever composition is alive when the row is first laid
+    // out on screen arms it; there is no coroutine to cancel and no timeout
+    // to burn before the window. The tick loop only WAITS on the armed flag;
+    // the 600 ms fallback arm below covers a row that never becomes visible
+    // (it then paints settled, exactly like a text row).
+    var armed by remember(key) { mutableStateOf(false) }
     LaunchedEffect(key) {
         if (st.goAt < 0L) {
             kotlinx.coroutines.withTimeoutOrNull(600L) {
-                androidx.compose.runtime.snapshotFlow {
-                    val s = seat
-                    val lb = FlightAnchors.listBounds
-                    s != null && (lb == null || s.bottom <= lb.bottom + 1f)
-                }.first { it }
+                androidx.compose.runtime.snapshotFlow { armed }.first { it }
             }
             if (st.goAt < 0L) st.goAt = android.os.SystemClock.uptimeMillis()
         }
@@ -317,7 +315,14 @@ fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 380, isSent
     }
     return this
         .onGloballyPositioned { c ->
-            if (st.goAt < 0L) seat = c.boundsInWindow()
+            if (st.goAt < 0L) {
+                val b = c.boundsInWindow()
+                val lb = FlightAnchors.listBounds
+                if (lb == null || b.bottom <= lb.bottom + 1f) {
+                    st.goAt = android.os.SystemClock.uptimeMillis()
+                    armed = true
+                }
+            }
         }
         .graphicsLayer {
             transformOrigin =

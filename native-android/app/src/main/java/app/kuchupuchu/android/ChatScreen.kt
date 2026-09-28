@@ -3483,7 +3483,23 @@ fun ChatScreen(nav: NavController, convId: String) {
     LaunchedEffect(currentTailId) {
         if (currentTailId.isNotBlank() && didInitialScroll) {
             val total = msgs.size + pending.size
-            if (total > 0) {
+            // r83-2 (owner r83 #2: back from the video player STILL lands at
+            // the very bottom, instantly): this follow had no position guard.
+            // Returning from a viewer refills the page, the tail id goes
+            // "" -> last inside one frame, and this effect then yanked the
+            // freshly-restored spot (r82-2's record/restore runs EARLIER -
+            // declaration order) straight to the newest message. That is
+            // also why the LazyListState saver never helped on device: the
+            // restore was fine, THIS scroll overwrote it. The screen's
+            // no-yank rule (r24 / r47 / r53) applies now: follow only when
+            // the reader is actually at the tail - a send or a live arrival
+            // finds the layout still parked at the old bottom (last visible
+            // == total - 2 once the row is appended), while a viewer-return
+            // refill starts from the top of history. An empty layout means
+            // "unknown - do NOT scroll" (Round 24).
+            val info = listState.layoutInfo
+            val nearBottom = info.visibleItemsInfo.lastOrNull()?.index?.let { it >= total - 2 } ?: false
+            if (total > 0 && nearBottom) {
                 runCatching { listState.scrollToItem(total - 1) }
             }
         }
@@ -3802,7 +3818,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             KpSheetRow(Icons.Filled.PersonAdd, "Add Members") { menuOpen = false; showAddMembers = true }
                         }
                         if (!privateGroup) {
-                            KpSheetRow(Icons.Filled.PermMedia, "Group Media") { menuOpen = false; nav.navigate("chatmedia/$convId") }
+                            KpSheetRow(Icons.Filled.PermMedia, "Group Media") { menuOpen = false; markViewerReturn(); nav.navigate("chatmedia/$convId") }
                         }
                         KpSheetRow(Icons.Filled.Palette, "Theme") { menuOpen = false; showTheme = true }
                         KpSheetRow(Icons.Filled.Search, "Search") { menuOpen = false; showChatSearch = true }
@@ -3843,7 +3859,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         // in a chat, search means THIS conversation.
                         KpSheetRow(Icons.Filled.Search, "Search in chat") { menuOpen = false; showChatSearch = true }
                         if (!requestOpen) {
-                            KpSheetRow(Icons.Filled.PermMedia, "Media, links, and docs") { menuOpen = false; nav.navigate("chatmedia/$convId") }
+                            KpSheetRow(Icons.Filled.PermMedia, "Media, links, and docs") { menuOpen = false; markViewerReturn(); nav.navigate("chatmedia/$convId") }
                         }
                         KpSheetRow(Icons.Filled.NotificationsOff, if (muted) "Unmute…" else "Mute…", onClick = openMuteChooser)
                         KpSheetRow(Icons.Filled.Timer, "Disappearing messages") { menuOpen = false; showDisappear = true }

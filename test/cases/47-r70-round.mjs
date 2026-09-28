@@ -1430,11 +1430,11 @@ const main = (f) => read(`${ANDROID}/${f}`);
   const app3 = main("KpApp.kt");
 
   check(
-    'r81-6/8 (owner: "emojis left theke animate kore asche - normal massage jemon right er nicher theke" + "first time animates hoi na ekhono"): TWO device-true causes - (a) the entrance pivoted around the full-width ROW\'s center (= the screen\'s center), so a right-side bubble grew out of mid-screen and read as arriving from the LEFT; the pivot is the bubble corner now (1,1 mine / 0,1 theirs - the fxFlyIn geometry the owner calls normal). (b) any clock starting at composition expired off-screen (LazyColumn precomposes appended rows); the entrance now carries the r76-21 viewport gate fxFlyIn has (600 ms cap, seat inside listBounds) and SELF-ARMS only after it, and the birth-arm for emoji rows was removed',
+    'r81-6/8 (retargeted r83-1; owner: "emojis left theke animate kore asche - normal massage jemon right er nicher theke" + "first time animates hoi na ekhono"): TWO device-true causes - (a) the entrance pivoted around the full-width ROW\'s center (= the screen\'s center), so a right-side bubble grew out of mid-screen and read as arriving from the LEFT; the pivot is the bubble corner now (1,1 mine / 0,1 theirs - the fxFlyIn geometry the owner calls normal). (b) SUPERSEDED by r83-1: the coroutine-gated self-arm (r76-21 viewport gate, 600 ms cap) still left the FIRST send of a session settled on device, so the arm moved into the layout callback itself - the same seat-inside-listBounds test now runs inside onGloballyPositioned and sets the clock the moment the row is first laid out on screen (fx4 r83-1 pin); the birth-arm for emoji rows stays removed',
     fx3.includes(
       "fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 380, isSent: Boolean = true): Modifier",
     ) &&
-      fx3.includes("s != null && (lb == null || s.bottom <= lb.bottom + 1f)") &&
+      fx3.includes("if (lb == null || b.bottom <= lb.bottom + 1f) {") &&
       fx3.includes("androidx.compose.ui.graphics.TransformOrigin(1f, 1f)") &&
       fx3.includes("androidx.compose.ui.graphics.TransformOrigin(0f, 1f)") &&
       chat3.includes("Modifier.fxEmojiEntrance(fxBorn, fxKey, isSent = mine)") &&
@@ -1490,12 +1490,11 @@ const main = (f) => read(`${ANDROID}/${f}`);
   const store4 = main("ScreenStore.kt");
 
   check(
-    "r82-1 (owner: \"emojis right side theke asche done but first time animates hoi na\"): the r81 viewport gate could never release early - the seat LATCHED on the row's first layout, and LazyColumn precomposes appended rows below the viewport, so every send rode the full 600 ms timeout and the pending->server swap froze inside a second gate wait, eating the whole 380 ms window before a frame ticked. The seat now tracks LIVE until the flight is armed (fxFlyIn's pattern), and the gate runs only while the clock is unarmed, so an armed server row resumes on its first frame",
-    fx4.includes("if (st.goAt < 0L) seat = c.boundsInWindow()") &&
-      !fx4.includes("if (seat == null) seat = c.boundsInWindow()") &&
-      fx4.includes(
-        "LaunchedEffect(key) {\n        if (st.goAt < 0L) {\n            kotlinx.coroutines.withTimeoutOrNull(600L) {",
-      ),
+    'r83-1 (owner r83 #1: "shob thik ache just animate hoi na first time" - STILL dead after r78/r81/r82): every prior design armed the emoji flight from inside a cancellable LaunchedEffect, so the first send of a session painted settled on device while later sends flew. The arm is now bound to the layout pass itself - the onGloballyPositioned report that puts the seat inside the list viewport sets the clock (fxFlyIn\'s device-proven live-seat signal); the coroutine only waits on the armed flag and ticks, and a 600 ms fallback arm covers a row that never becomes visible',
+    fx4.includes("var armed by remember(key) { mutableStateOf(false) }") &&
+      fx4.includes("if (lb == null || b.bottom <= lb.bottom + 1f) {") &&
+      fx4.includes("snapshotFlow { armed }.first { it }") &&
+      !fx4.includes("var seat by remember(key) {"),
   );
 
   check(
@@ -1515,6 +1514,24 @@ const main = (f) => read(`${ANDROID}/${f}`);
     list4.includes(".align(Alignment.TopEnd)") &&
       list4.includes("offset(x = 9.dp, y = (-7).dp)") &&
       list4.includes("lineHeight = 9.sp,"),
+  );
+
+  check(
+    'r83-2 (owner r83 #2: back from the video player STILL lands at the very bottom instantly): the r58 tail-follow had no position guard - a viewer return refills the page, the tail id goes "" -> last in one frame, and the follow yanked the freshly-restored spot (r82-2 runs earlier by declaration order) to the newest message; that is also what defeated the LazyListState saver all along. The no-yank rule (r24/r47/r53) now applies: follow only when the reader is actually at the tail (a send / live arrival finds the layout still parked at the old bottom), and an empty layout means unknown - no scroll. The chatmedia gallery exits record the spot too now',
+    chat4.includes(
+      "LaunchedEffect(currentTailId) {\n        if (currentTailId.isNotBlank() && didInitialScroll) {",
+    ) &&
+      chat4.includes(
+        "val nearBottom = info.visibleItemsInfo.lastOrNull()?.index?.let { it >= total - 2 } ?: false",
+      ) &&
+      chat4.includes("if (total > 0 && nearBottom) {") &&
+      (chat4.match(/markViewerReturn\(\)/g) || []).length >= 6,
+  );
+
+  check(
+    "r83-3 (owner r83 #3: chat-list unread count \"border er middle a nai\"): Text's default includeFontPadding reserves blank space above the digits, so the count hung below the pill's middle; font padding off + a tight line box centers it (row badge and nav-tab badge both)",
+    (list4.match(/PlatformTextStyle\(includeFontPadding = false\)/g) || []).length >= 2 &&
+      list4.includes("lineHeight = 11.sp,"),
   );
 }
 

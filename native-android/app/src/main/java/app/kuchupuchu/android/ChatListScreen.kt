@@ -908,6 +908,7 @@ private fun TopTab(
                         lineHeight = 9.sp,
                         maxLines = 1,
                         softWrap = false,
+                        style = androidx.compose.ui.text.TextStyle(platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)),
                     )
                 }
             } else if (dot) {
@@ -1609,11 +1610,20 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                             .padding(horizontal = 6.dp),
                         contentAlignment = Alignment.Center,
                     ) {
+                        // r83-3 (owner: "unread number ta border er middle a
+                        // nai"): the digits hung below the pill's middle -
+                        // Text's default includeFontPadding reserves blank
+                        // space ABOVE the glyphs for accents. Font padding
+                        // off + a tight line box puts the count dead-centre.
                         Text(
                             if (unread > 99) "99+" else "$unread",
                             color = ActionBlueInk,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
+                            lineHeight = 11.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            style = androidx.compose.ui.text.TextStyle(platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)),
                         )
                     }
                     }
