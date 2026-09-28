@@ -498,3 +498,31 @@ Owner retest after r81, 3 items. Root causes (verified from code, multi-angle):
 3. **"nav bar a unread number ... massage button er right corner a ... double line jeno na hoi"**: badge moved from inline-after-label to an overlay at the Chats icon top-right corner (zero width pressure), maxLines=1 + softWrap=false -- two digits can never wrap.
 Ship: code 6bc01cf + format 74c53bf, CI SUCCESS on 74c53bf, APK kuchupuchu-3.9.175-r82.apk (252/3.9.175, sha1 ec7cff955fece...). Suite 47/47, 1931 assertions. Pin adds: 3 new r82 pins in 47-r70-round; r23 pin in 32-bots-verified RETARGETED (old literal `mutableStateOf(false)` replaced by r82-2 mechanism). CI failure lesson: prettier --check covers test/cases too -- format EVERY edited mjs before push (32-bots forgot => one wasted CI run).
 Ops: env restart wiped .git/config + GH_TOKEN + .gh-token again. Recovery: source /home/user/.env (GITHUB_PAT+GITHUB_REPO set), `git remote add origin https://x-access-token:$GITHUB_PAT@github.com/$GITHUB_REPO.git`. APK version check: manifest stores versionName in UTF-16 on this build config -- byte-search b'3.9.x' gives false MISSING; must check v.encode('utf-16le').
+
+## r83 round (shipped 66e4644, CI success, APK kuchupuchu-3.9.176-r83.apk 253/3.9.176)
+Owner: 1+2 not fixed, 3 fixed + new item (row unread count not centred in pill).
+- **#2 TRUE root cause found (r83-2)**: NOT state restoration at all - the r58
+  tail-follow `LaunchedEffect(currentTailId)` had NO position guard; on viewer
+  return the page refills, tail id goes ""->last in one frame, and it snapped
+  to `scrollToItem(total-1)` AFTER r82-2's restore (declaration order) - this
+  is what defeated the LazyListState saver AND the restore. Fix: nearBottom
+  gate (r24/r47/r53 rule; empty layout = unknown = no scroll). Photo viewer is
+  a Dialog (no refill) which is why it always worked. Also: chatmedia gallery
+  exits (⋮ Group Media / Media-links-docs) now markViewerReturn() too (6 call
+  sites total). LESSON: grep EVERY scroll site on a screen before blaming state
+  restoration - enumerate scrollToItem/animateScrollToItem/scrollBy and check
+  each one's guards.
+- **#1 (r83-1)**: arm moved OUT of the cancellable coroutine into the layout
+  callback - onGloballyPositioned runs the seat-inside-listBounds test itself
+  and sets st.goAt the moment the row is first laid out on screen (fxFlyIn's
+  live-seat signal, device-proven). Coroutine only waits on `armed` flag +
+  ticks (600ms fallback). Removed the seat var/snapshotFlow gate entirely.
+- **#3 (r83-3)**: includeFontPadding=false + lineHeight=11.sp/9.sp tight box on
+  row badge + nav badge (font padding reserved blank space above digits ->
+  count hung below centre).
+- Pins: r82-1 rewritten to r83-1; r81-6/8 RETARGETED (mechanism (b) superseded
+  - lesson AGAIN: mechanism pins must migrate on redesign); new r83-2/r83-3;
+  r82-2/r82-3/r23-retargeted unchanged. Suite 47/47, 1933 assertions.
+- Prettier reformats pin files -> python heredoc old-strings copied from
+  pre-prettier greps can mismatch; use small unique anchors with per-anchor
+  asserts instead of one big block replace.
