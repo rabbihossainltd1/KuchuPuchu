@@ -90,8 +90,8 @@ const pkg = readFileSync(
 
 /* the round's own bookkeeping */
 check(
-  "r80: versionCode 250 / versionName 3.9.173 (release latch advanced from r78's 248/3.9.171; policy stays: every ship raises it)",
-  /versionCode\s*=\s*250\b/.test(pkg) && /versionName\s*=\s*"3\.9\.173"/.test(pkg),
+  "r81: versionCode 251 / versionName 3.9.174 (release latch advanced from r78's 248/3.9.171; policy stays: every ship raises it)",
+  /versionCode\s*=\s*251\b/.test(pkg) && /versionName\s*=\s*"3\.9\.174"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */

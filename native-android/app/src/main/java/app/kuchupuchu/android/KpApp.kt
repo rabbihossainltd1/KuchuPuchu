@@ -289,7 +289,17 @@ fun KpApp() {
                     }
                 }
                 // Owner round 22: the in-app video player is its own screen.
-                composable("videoplayer/{b64}") { entry ->
+                // r81-3: the default horizontal SLIDE fights the hero flight
+                // (the whole screen drifted sideways while the clip grew) -
+                // the player's own hero owns the motion now; the route just
+                // fades.
+                composable(
+                    "videoplayer/{b64}",
+                    enterTransition = { fadeIn(tween(140)) },
+                    exitTransition = { fadeOut(tween(120)) },
+                    popEnterTransition = { fadeIn(tween(140)) },
+                    popExitTransition = { fadeOut(tween(140)) },
+                ) { entry ->
                     VideoPlayerScreen(nav, entry.arguments?.getString("b64") ?: "")
                 }
                 // Owner round 32 (item 33): documents open in the app's own viewer.

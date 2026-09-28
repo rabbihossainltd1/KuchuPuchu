@@ -983,7 +983,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
       viewer.includes("object PhotoHero {") &&
       viewer.includes("heroFrom: androidx.compose.ui.geometry.Rect? = null,") &&
       viewer.includes("val heroSeat = remember { heroFrom }") &&
-      viewer.includes("hero.animateTo(1f, tween(320") &&
+      // r81-3: emphasized open
+      viewer.includes(
+        "tween(400, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f))",
+      ) &&
       // r76-30: uniform scale now.
       viewer.includes("scaleX = androidx.compose.ui.util.lerp(s0, 1f, t)") &&
       chat.includes("hostView.getLocationOnScreen(loc)") &&
@@ -1014,14 +1017,21 @@ const main = (f) => read(`${ANDROID}/${f}`);
       flight.includes("if (f.goAt > android.os.SystemClock.uptimeMillis()) {") &&
       // r77-1/r77-6 superseded the ack-arm: the arm now lands at the echo's
       // birth with 0 wait (see the r77 crash/fix block at the bottom).
-      chat.includes("if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)") &&
+      // r81-8 emoji-only rows arrive unarmed now (self-arm after the
+      // viewport gate); the birth arm below stays for every other kind.
+      chat.includes(
+        'if (mine && fxBorn && !(kind == "TEXT" && emojiOnlyCount(m.optText("body")) > 0)) FlightAnims.armIn(fxKey, 0L)',
+      ) &&
       chat.includes("Column(if (small) Modifier.width(150.dp) else Modifier.weight(1f)) {") &&
       // (r76-30 reverted the sender-side CDN detour - the R2 copy won.)
       chat.includes("hostView.getLocationOnScreen(loc)") &&
       worker.includes("...(fetchedSrc ? { src: fetchedSrc } : {}),") &&
       viewer.includes("w.setDimAmount(0f)") &&
       viewer.includes("val dismiss: () -> Unit = {") &&
-      viewer.includes("hero.animateTo(0f, tween(260") &&
+      // r81-3: emphasized close
+      viewer.includes(
+        "tween(300, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f))",
+      ) &&
       viewer.includes("onDismissRequest = dismiss,") &&
       viewer.includes("alpha = dim * hero.value") &&
       status.includes(".padding(vertical = 4.dp)") &&
@@ -1081,7 +1091,11 @@ const main = (f) => read(`${ANDROID}/${f}`);
   const flight = main("SendFlight.kt");
   check(
     'r77-1/r77-6 (owner: "item onek slow chat a paste hocche, instant animation diye asche na" + "send sending sent alada na ek kore daw, zero gap, alada kono animation effect kichui na"): a mine row\'s flight arms at the echo\'s BIRTH with no wait - the lift-off IS the entrance, the ack does nothing at all (first arm wins), and the echo->server swap shares one time-based flight keyed by clientId, so the swap is a silent seat swap with no second effect',
-    chat.includes("if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)") &&
+    // r81-8 emoji-only rows arrive unarmed now (self-arm after the
+    // viewport gate); the birth arm below stays for every other kind.
+    chat.includes(
+      'if (mine && fxBorn && !(kind == "TEXT" && emojiOnlyCount(m.optText("body")) > 0)) FlightAnims.armIn(fxKey, 0L)',
+    ) &&
       !chat.includes("!pendingEcho && fxBorn) FlightAnims.armIn(fxKey, 500L") &&
       flight.includes("if (f.goAt >= 0L) return false") &&
       chat.includes('val fxKey = m.optString("clientId").ifBlank { m.optString("id") }'),
@@ -1163,7 +1177,11 @@ const main = (f) => read(`${ANDROID}/${f}`);
   const chat = main("ChatScreen.kt");
   check(
     'r77-8 (owner: "emojis send korle first time animate hobe just ekbar, eita kortei onek session failed korche ... amar moner moto hoini"): every failed mode he lists came from the ack-armed double animation - the glyph re-playing at the server swap (appears, hides, re-animates) and the body clipping mid-flight. Emoji rows ride the one-motion flight now: armed at the echo\'s BIRTH (r77-1), keyed by clientId so the echo->server swap adds nothing (r77-6, the same LazyColumn key in pending and messages), and the glyph itself renders static (r76-18), so one send = one animation, never two',
-    chat.includes("if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)") &&
+    // r81-8 emoji-only rows arrive unarmed now (self-arm after the
+    // viewport gate); the birth arm below stays for every other kind.
+    chat.includes(
+      'if (mine && fxBorn && !(kind == "TEXT" && emojiOnlyCount(m.optText("body")) > 0)) FlightAnims.armIn(fxKey, 0L)',
+    ) &&
       chat.includes('val fxKey = m.optString("clientId").ifBlank { m.optString("id") }') &&
       chat.includes("val fxEmoji = false"),
   );
@@ -1236,14 +1254,15 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     'r78-6/r78-8 (owner: "emoji send korle 0.2 seconds flicking kore halka kata pore abar thik hoi" + "first time animate hobe just ekbar"): the composer flight starts below the LazyColumn viewport, so a 66sp glyph painted CHOPPED at the list edge for ~30% of its entrance - emoji rows now take fxEmojiEntrance, one grow+fade fully inside the row\'s own bounds, clientId-keyed once-per-message, and every non-emoji row keeps its flight',
     fx.includes(
-      "fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 340): Modifier",
+      "fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 380, isSent: Boolean = true): Modifier",
     ) &&
       fx.includes("FlightAnims.markDone(key)") &&
-      fx.includes("androidx.compose.ui.graphics.TransformOrigin.Center") &&
+      // r81: corner pivot, not the full-row center
+      fx.includes("androidx.compose.ui.graphics.TransformOrigin(1f, 1f)") &&
       // r80-8: the gate is fxBorn now - the one-shot fxFresh claim could
       // be consumed by a transient prefetch composition before the row was
       // ever drawn, which is how both earlier entrances died on device.
-      chat.includes("Modifier.fxEmojiEntrance(fxBorn, fxKey)") &&
+      chat.includes("Modifier.fxEmojiEntrance(fxBorn, fxKey, isSent = mine)") &&
       chat.includes('kind == "TEXT" && emojiOnlyCount(m.optText("body")) > 0') &&
       chat.includes(
         '.fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (kind == "FILE" && fileLooksVoice(m)) 720 else 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)',
@@ -1362,10 +1381,14 @@ const main = (f) => read(`${ANDROID}/${f}`);
     'r80-8 (owner: "not fixed" - no entrance, settles instantly): two clocks already died on device (r78 wall-clock eaten by first-frame jank, r79 layout-anchor never visible). The entrance now rides the ONE family of animation the owner demonstrably SEES: the row flight - time-based, GLOBAL per key (FlightAnims.birth + valueAt + the same withFrameNanos tick), gated on fxBorn (survives churn) with a self-arm fallback, armed at birth for mine and armed in fast-paint for emoji-only received rows; the old second birth animator (glyph-row fxPopIn) is gone so one message is one animation',
     fx2.includes("val st = remember(key) { FlightAnims.birth(key) }") &&
       fx2.includes("if (st.goAt < 0L) st.goAt = android.os.SystemClock.uptimeMillis()") &&
-      chat2.includes("Modifier.fxEmojiEntrance(fxBorn, fxKey)") &&
-      chat2.includes('emojiOnlyCount(liveMsg.optText("body")) > 0') &&
+      chat2.includes("Modifier.fxEmojiEntrance(fxBorn, fxKey, isSent = mine)") &&
+      // r81-8: no external arm for received emoji (self-arm only)
+      !chat2.includes("FlightAnims.armIn(liveMsg") &&
+      // r81-8: external arming was REMOVED (r81) - the entrance self-arms
+      // only after the r76-21 viewport gate, or the clock ran out
+      // off-screen ("first time animates hoi na").
       chat2.includes(
-        'FlightAnims.armIn(liveMsg.optString("clientId").ifBlank { liveMsg.optString("id") }, 0L)',
+        '!(kind == "TEXT" && emojiOnlyCount(m.optText("body")) > 0)) FlightAnims.armIn',
       ) &&
       anim2.includes("Modifier.padding(start = 2.dp, end = 2.dp),") &&
       !anim2.includes("fxPopIn("),
@@ -1396,6 +1419,66 @@ const main = (f) => read(`${ANDROID}/${f}`);
     'r80-5 (owner: "system back ta full app i same hobe - kothaw jeno ekbare back na hoi, previous screen option a jai"): the nav root (main/ChatListScreen) was the ONE place a system back FINISHED the whole app - now back walks tabs to Chats first, then PARKS the app (moveTaskToBack, state survives), and it only fires when nothing above consumed the back; non-root routes keep popping to their previous screen via the NavHost',
     list2.includes("MainActivity.current?.moveTaskToBack(true)") &&
       list2.includes("androidx.activity.compose.BackHandler(enabled = !selecting) {"),
+  );
+}
+
+/* ---------- r81 round (owner retest after r80): geometry + smoothness ---------- */
+{
+  const media3 = main("MediaViewer.kt");
+  const chat3 = main("ChatScreen.kt");
+  const fx3 = main("ChatFx.kt");
+  const app3 = main("KpApp.kt");
+
+  check(
+    'r81-6/8 (owner: "emojis left theke animate kore asche - normal massage jemon right er nicher theke" + "first time animates hoi na ekhono"): TWO device-true causes - (a) the entrance pivoted around the full-width ROW\'s center (= the screen\'s center), so a right-side bubble grew out of mid-screen and read as arriving from the LEFT; the pivot is the bubble corner now (1,1 mine / 0,1 theirs - the fxFlyIn geometry the owner calls normal). (b) any clock starting at composition expired off-screen (LazyColumn precomposes appended rows); the entrance now carries the r76-21 viewport gate fxFlyIn has (600 ms cap, seat inside listBounds) and SELF-ARMS only after it, and the birth-arm for emoji rows was removed',
+    fx3.includes(
+      "fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 380, isSent: Boolean = true): Modifier",
+    ) &&
+      fx3.includes("s != null && (lb == null || s.bottom <= lb.bottom + 1f)") &&
+      fx3.includes("androidx.compose.ui.graphics.TransformOrigin(1f, 1f)") &&
+      fx3.includes("androidx.compose.ui.graphics.TransformOrigin(0f, 1f)") &&
+      chat3.includes("Modifier.fxEmojiEntrance(fxBorn, fxKey, isSent = mine)") &&
+      chat3.includes(
+        '!(kind == "TEXT" && emojiOnlyCount(m.optText("body")) > 0)) FlightAnims.armIn(fxKey, 0L)',
+      ),
+  );
+
+  check(
+    'r81-3a smoothness (owner: "animation ta smooth hobe"): the open/close flights traded the fast-out punch for the Material emphasized pair - decelerate (0.05,0.7,0.1,1) over 400 ms on the way in, accelerate (0.3,0,0.8,0.15) over 300 ms on the way out; the photo viewer and the video player share the same pair',
+    media3.includes(
+      "hero.animateTo(\n                1f,\n                tween(400, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f))",
+    ) &&
+      media3.includes(
+        "tween(300, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f))",
+      ),
+  );
+
+  check(
+    "r81-3b video (owner: \"video chat er all media same vabe open hobe\"): the player was a plain nav-route with the default horizontal slide fighting whatever motion played inside - it now owns the SAME hero as the photo viewer: the tapped tile deposits its poster + seat (VideoMessageRow), onOpenVideo hands the seat over (PhotoHero.lastId), VideoPlayerScreen takes it, hides the tile (outId), stays invisible until its first real layout, grows from the seat on the emphasized curve with the tile's poster as the base layer, cross-fades the tile in during the close's last 45% (heroCloseT), and both the system back and the top-bar back run the reverse flight before popping; the route transition is a quiet fade",
+    chat3.includes(
+      'PhotoHero.lastId = msg.optString("id").ifBlank { msg.optString("clientId") }\n                                // Owner round 31: the app\'s own player',
+    ) &&
+      chat3.includes('val vidId = m.optString("id").ifBlank { m.optString("clientId") }') &&
+      chat3.includes(".graphicsLayer { alpha = PhotoHero.tileAlphaFor(vidId) }") &&
+      media3.includes("val vidHeroSeat = remember { PhotoHero.take() }") &&
+      media3.includes("var vidHeroLaidOut by remember { mutableStateOf(false) }") &&
+      media3.includes("val vidPoster = remember(vidHeroId) { PhotoHero.bitmapOf(vidHeroId) }") &&
+      media3.includes(
+        "BackHandler(enabled = vidHeroSeat != null && !vidClosing) { dismissVid() }",
+      ) &&
+      media3.includes("PhotoHero.heroCloseT = if (vidClosing) v else 0f") &&
+      app3.includes(
+        '"videoplayer/{b64}",\n                    enterTransition = { fadeIn(tween(140)) }',
+      ),
+  );
+
+  check(
+    'r81-3c view-once (owner: "ounce view o"): the once-card was a busy galaxy card with NO hero wiring at all - photo cards now report their seat and honour the hero hide/cross-fade exactly like a normal tile, so the view-once viewer grows out of the card the same way (voice once-cards stay cards)',
+    chat3.includes('val onceId = m.optString("id").ifBlank { m.optString("clientId") }') &&
+      chat3.includes(
+        ".graphicsLayer { alpha = if (voice) 1f else PhotoHero.tileAlphaFor(onceId) }",
+      ) &&
+      chat3.includes("PhotoHero.set(\n                                onceId,"),
   );
 }
 

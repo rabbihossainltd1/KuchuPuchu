@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
@@ -258,25 +259,37 @@ fun Modifier.fxSlotOpen(active: Boolean, fromDp: Float = -30f, ms: Int = 480): M
  * first-arm-wins Flight), and the echo->server swap can never re-run it.
  */
 @Composable
-fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 340): Modifier {
+fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 380, isSent: Boolean = true): Modifier {
     val scale = fxAnimatorScale()
     if (!active || scale <= 0f || key.isBlank()) return this
-    // r80-8 (owner, 2nd retest: "not fixed"): two entrance clocks already
-    // died on his phone - the r78 wall-clock arm ate itself in the first
-    // frames' jank, and the r79 layout-anchored start never showed either.
-    // Exactly ONE entrance family has ever VISIBLY played on his device: the
-    // row flight (fxFlyIn) - TIME-BASED and GLOBAL per message key, surviving
-    // recomposition, the pending->server swap, and scroll recycling. This is
-    // the SAME clock and the SAME tick loop, only the curve differs (grow +
-    // fade in place, in-bounds - nothing can clip at the list edge).
-    // Arm sites: a mine row arms at birth (MessageRow), an emoji-only
-    // RECEIVED arrival arms in the fast-paint path; un-armed stragglers
-    // self-arm at first composition down below. valueAt pins 0 before the
-    // arm and 1 forever ~340 ms after it - exactly one entrance ever, never
-    // a replay on scroll-back (the clock is simply done).
+    // r81-6/8 (owner retest r80: "emojis left theke animate kore asche ...
+    // normal massage jemon right er nicher theke ashe temon hobe" + "first
+    // time animates hoi na ekhono"):
+    //  a) LEFT-vs-RIGHT: the entrance sat on the full-width Row and its pivot
+    //     was the ROW's center = the screen's center, so a right-side bubble
+    //     grew out of the middle of the screen and read as arriving from the
+    //     left. The pivot is the bubble's own corner now - bottom-right for
+    //     mine, bottom-left for theirs - the exact geometry of the row flight
+    //     (fxFlyIn), which is the animation the owner calls "normal".
+    //  b) FIRST-TIME invisible: the flight family carries the r76-21 viewport
+    //     gate for a reason - LazyColumn precomposes appended rows off-screen,
+    //     so any clock that starts at composition/birth finishes before the
+    //     row is ever on screen. This entrance now waits (same 600 ms cap,
+    //     same seat-vs-listBounds test) and ARMS ITSELF only once the seat is
+    //     inside the viewport. Once ever: when the flight's clock is done,
+    //     valueAt pins 1 forever, so later recomposes/scrolled re-entries are
+    //     static - there is also no external arm site for emoji rows any more.
     val st = remember(key) { FlightAnims.birth(key) }
     var v by remember(key) { mutableStateOf(FlightAnims.valueAt(st, ms)) }
+    var seat by remember(key) { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     LaunchedEffect(key) {
+        kotlinx.coroutines.withTimeoutOrNull(600L) {
+            androidx.compose.runtime.snapshotFlow {
+                val s = seat
+                val lb = FlightAnchors.listBounds
+                s != null && (lb == null || s.bottom <= lb.bottom + 1f)
+            }.first { it }
+        }
         if (st.goAt < 0L) st.goAt = android.os.SystemClock.uptimeMillis()
         while (true) {
             val nv = FlightAnims.valueAt(st, ms)
@@ -286,15 +299,21 @@ fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 340): Modif
         }
         FlightAnims.markDone(key)
     }
-    // Constant modifier graph (identical node for every value of v) - the
-    // tap / hold handlers must not drift while the entrance runs.
     return this
+        .onGloballyPositioned { c ->
+            if (seat == null) seat = c.boundsInWindow()
+        }
         .graphicsLayer {
-            transformOrigin = androidx.compose.ui.graphics.TransformOrigin.Center
-            val sc = 0.3f + 0.7f * v
+            transformOrigin =
+                if (isSent) {
+                    androidx.compose.ui.graphics.TransformOrigin(1f, 1f)
+                } else {
+                    androidx.compose.ui.graphics.TransformOrigin(0f, 1f)
+                }
+            val sc = 0.55f + 0.45f * v
             scaleX = sc
             scaleY = sc
-            alpha = if (v < 0.55f) (v / 0.55f).coerceIn(0f, 1f) else 1f
+            alpha = if (v < 0.4f) (v / 0.4f).coerceIn(0f, 1f) else 1f
         }
 }
 

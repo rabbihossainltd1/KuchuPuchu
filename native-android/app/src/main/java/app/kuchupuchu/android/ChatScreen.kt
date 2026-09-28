@@ -1262,15 +1262,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                                     bornKeys.add(liveMsg.optString("clientId").ifBlank { liveMsg.optString("id") })
                                     LiveArrivals.markLive(liveMsg.optString("clientId").ifBlank { liveMsg.optString("id") })
                                     LiveArrivals.markLive(liveMsg.optString("id"))
-                                    // r80-8: a live emoji-only row's entrance
-                                    // clock must be ARMED before the row ever
-                                    // composes (the birth arm at MessageRow
-                                    // only fires for mine). Same gate as the
-                                    // row itself, so text rows are untouched.
-                                    if (liveMsg.optString("kind") == "TEXT" && emojiOnlyCount(liveMsg.optText("body")) > 0) {
-                                        FlightAnims.armIn(liveMsg.optString("clientId").ifBlank { liveMsg.optString("id") }, 0L)
-                                        FlightAnims.armIn(liveMsg.optString("id"), 0L)
-                                    }
+
                                     msgs.add(liveMsg)
                                     // Our own optimistic bubble from a previous send
                                     // that the server just confirmed.
@@ -4135,6 +4127,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                             },
                             onOpenAlbum = { msg -> albumMsg = msg },
                             onOpenVideo = { msg ->
+                                // r81-3 (owner: "video chat er all media same
+                                // vabe open hobe"): the tapped video tile is
+                                // the hero's seat, exactly like photos.
+                                PhotoHero.lastId = msg.optString("id").ifBlank { msg.optString("clientId") }
                                 // Owner round 31: the app's own player (MediaViewer.kt);
                                 // the sender rides along as the screen title.
                                 val who =
@@ -7456,7 +7452,11 @@ private fun MessageRow(
     // row finds the same fxKey flight (time-based, global - r76-25) mid-air
     // or done, the first arm always wins, and the sending->sent swap is a
     // silent seat swap. ONE motion per send, never two.
-    if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)
+    if (mine && fxBorn && !(kind == "TEXT" && emojiOnlyCount(m.optText("body")) > 0)) FlightAnims.armIn(fxKey, 0L)
+    // r81-8: emoji-only rows deliberately do NOT arm here - fxEmojiEntrance
+    // self-arms only after its seat is inside the list viewport (r76-21
+    // gate), otherwise an armed-at-composition clock runs out before the row
+    // is on screen (the "first time animates hoi na").
     // v205 + v207 (unchanged by r67-3): the emoji glyph animates when the row
     // is a live birth AND is no longer a sending echo - so the emoji plays at
     // the moment the message becomes sent, while the flight above belongs to
@@ -7624,7 +7624,7 @@ private fun MessageRow(
                     // claim before the row was ever drawn, and the entrance
                     // was gone forever. The clock inside is time-based, so a
                     // churned row simply continues the SAME entrance.
-                    Modifier.fxEmojiEntrance(fxBorn, fxKey)
+                    Modifier.fxEmojiEntrance(fxBorn, fxKey, isSent = mine)
                 } else {
                     Modifier
                         .fxSlotOpen(fxFresh)
@@ -8441,7 +8441,19 @@ private fun VideoMessageRow(
         // correctly on the first frame, without re-decoding (round 23).
         value?.let { VideoThumbs.put(cacheKey, it, w0, h0, ms0) }
     }
+    // r81-3: the tile's OWN thumb is what the player opens on (never a black
+    // window) - deposit it beside the seat, view-once excepted (H3).
+    LaunchedEffect(thumb, poster) {
+        if (!isViewOnce(m)) {
+            (thumb ?: poster)?.let {
+                PhotoHero.setBitmap(m.optString("id").ifBlank { m.optString("clientId") }, it)
+            }
+        }
+    }
     // Owner round 22: photos-style reply drag on videos too.
+    // r81-3: hero identity + host view for the seat above.
+    val vidId = m.optString("id").ifBlank { m.optString("clientId") }
+    val vidHostView = androidx.compose.ui.platform.LocalView.current
     var replyDrag by remember { mutableStateOf(0f) }
     val replyOffset by animateFloatAsState(replyDrag, spring(stiffness = 1400f), label = "vidreplydrag")
     val replyThreshold = with(LocalDensity.current) { 36.dp.toPx() }
@@ -8461,6 +8473,24 @@ private fun VideoMessageRow(
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
                 .clip(RoundedCornerShape(12.dp))
                 .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
+                .onGloballyPositioned { c ->
+                    // r81-3: this tile is the player's hero seat (same screen-
+                    // pixel formula as the photo tile), and it honours the
+                    // hero hide/cross-fade while the player flies it.
+                    val b = c.boundsInWindow()
+                    val loc = IntArray(2)
+                    vidHostView.getLocationOnScreen(loc)
+                    PhotoHero.set(
+                        vidId,
+                        androidx.compose.ui.geometry.Rect(
+                            b.left + loc[0],
+                            b.top + loc[1],
+                            b.right + loc[0],
+                            b.bottom + loc[1],
+                        ),
+                    )
+                }
+                .graphicsLayer { alpha = PhotoHero.tileAlphaFor(vidId) }
                 .background(Color(0xFF0B1220))
                 .border(1.dp, if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444), RoundedCornerShape(12.dp))
                 .pointerInput(m.optString("id")) {
@@ -8950,6 +8980,11 @@ private fun ViewOnceRow(
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
+    // r81-3 (owner: "ounce view o same vabe open hobe"): the once-card is a
+    // hero seat too - the viewer grows out of it and it hides/cross-fades
+    // exactly like a normal photo tile (voice once-cards stay cards).
+    val onceId = m.optString("id").ifBlank { m.optString("clientId") }
+    val onceHostView = LocalView.current
     val video = fileLooksVideo(m)
     // r71-19b: the voice flavour — a view-once voice note is a card, not a
     // blurred photo: play, listen once, gone.
@@ -9051,6 +9086,23 @@ private fun ViewOnceRow(
                 Modifier
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
                     .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
+                    .onGloballyPositioned { c ->
+                        if (!voice) {
+                            val b = c.boundsInWindow()
+                            val loc = IntArray(2)
+                            onceHostView.getLocationOnScreen(loc)
+                            PhotoHero.set(
+                                onceId,
+                                androidx.compose.ui.geometry.Rect(
+                                    b.left + loc[0],
+                                    b.top + loc[1],
+                                    b.right + loc[0],
+                                    b.bottom + loc[1],
+                                ),
+                            )
+                        }
+                    }
+                    .graphicsLayer { alpha = if (voice) 1f else PhotoHero.tileAlphaFor(onceId) }
                     // r60 (owner: "view once media er size kom koro"):
                     // v165: .widthIn(max = 168.dp) .widthIn(min = 132.dp)
                     // Modifier.heightIn(max = 220.dp).aspectRatio(boxRatio)

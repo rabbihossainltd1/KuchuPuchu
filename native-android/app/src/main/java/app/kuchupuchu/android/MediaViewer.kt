@@ -73,6 +73,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -301,7 +304,13 @@ fun KpPhotoViewer(
     var openLaidOut by remember { mutableStateOf(false) }
     LaunchedEffect(openLaidOut) {
         if (openLaidOut && heroSeat != null) {
-            hero.animateTo(1f, tween(320, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+            // r81-3 (owner: "animation ta smooth hobe"): the Material
+            // emphasized curve - a longer, gentler glide instead of the
+            // fast-out punch. Decelerate-emphasized open.
+            hero.animateTo(
+                1f,
+                tween(400, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)),
+            )
         }
     }
     // r76-29 (owner: "photo theke ber hole animation ta reverse hoi na"):
@@ -323,7 +332,11 @@ fun KpPhotoViewer(
         } else if (heroSeat != null) {
             closing = true
             heroScope.launch {
-                hero.animateTo(0f, tween(260, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+                // r81-3: emphasized-accelerate reverse, matching the open.
+                hero.animateTo(
+                    0f,
+                    tween(300, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)),
+                )
                 // r77-3: the landed hero sits exactly on the live seat, fully
                 // opaque. Bring the tile back and commit ONE frame while that
                 // still covers it, THEN detach the window - zero gap, no
@@ -819,6 +832,18 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
     val haptics = rememberHaptics()
     val ctx = LocalContext.current
     val m = remember(b64) { mediaArgDecode(b64) }
+    // r81-3 (owner: "video chat er all media same vabe open hobe, ounce view
+    // o"): the player flies out of the tapped tile with the SAME hero the
+    // photo viewer uses - invisible until the first real layout, then the
+    // clip grows from the tile's seat on the same emphasized curve, and the
+    // tile's own poster pixels are the base layer from frame one (never a
+    // black window). Close plays the flight backwards, tile cross-fading in.
+    val vidHeroId = remember { m?.optString("id")?.ifBlank { m.optString("clientId") } ?: "" }
+    val vidHeroSeat = remember { PhotoHero.take() }
+    val vidHero = remember { Animatable(if (vidHeroSeat == null) 1f else 0f) }
+    var vidHeroLaidOut by remember { mutableStateOf(false) }
+    var vidClosing by remember { mutableStateOf(false) }
+    val vidPoster = remember(vidHeroId) { PhotoHero.bitmapOf(vidHeroId) }
     val accent = playerAccent()
     val window = MainActivity.current?.window
     DisposableEffect(Unit) {
@@ -872,6 +897,49 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
     var saved by remember { mutableStateOf(false) }
     var savingClip by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    LaunchedEffect(vidHeroLaidOut) {
+        if (vidHeroLaidOut && vidHeroSeat != null) {
+            vidHero.animateTo(
+                1f,
+                tween(400, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)),
+            )
+        }
+    }
+    LaunchedEffect(Unit) { if (vidHeroId.isNotBlank()) PhotoHero.outId = vidHeroId }
+    // r81-3: publish the close progress - the chat tile cross-fades in over
+    // the flight's last 45% exactly like the photo viewer (tileAlphaFor).
+    LaunchedEffect(vidClosing) {
+        androidx.compose.runtime.snapshotFlow { vidHero.value }.collect { v ->
+            PhotoHero.heroCloseT = if (vidClosing) v else 0f
+        }
+    }
+    DisposableEffect(vidHeroId) {
+        onDispose {
+            if (PhotoHero.outId == vidHeroId) {
+                PhotoHero.outId = null
+                PhotoHero.heroCloseT = 0f
+            }
+        }
+    }
+    val dismissVid: () -> Unit = dismissVid@{
+        if (vidClosing) return@dismissVid
+        if (vidHeroSeat == null) {
+            nav.popBackStack()
+            return@dismissVid
+        }
+        vidClosing = true
+        scope.launch {
+            vidHero.animateTo(
+                0f,
+                tween(300, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)),
+            )
+            PhotoHero.outId = null
+            androidx.compose.runtime.withFrameNanos { }
+            PhotoHero.heroCloseT = 0f
+            nav.popBackStack()
+        }
+    }
+    BackHandler(enabled = vidHeroSeat != null && !vidClosing) { dismissVid() }
     // v165 (owner: "photo va video zoom korar jonno double tap korle rudely
     // zoom hocche … smoothly zoom hoi"): the clip zooms under a double tap the
     // way the photo does — same 2.5x, same spring, same walk there instead of
@@ -1058,6 +1126,24 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
     Box(
         Modifier
             .fillMaxSize()
+            .onGloballyPositioned { vidHeroLaidOut = true }
+            .graphicsLayer {
+                val t = vidHero.value
+                alpha =
+                    when {
+                        vidHeroSeat != null && !vidHeroLaidOut -> 0f
+                        vidClosing && t < 0.45f -> (t / 0.45f).coerceIn(0f, 1f)
+                        else -> 1f
+                    }
+                if (vidHeroSeat != null && t < 1f && size.width > 0f && size.height > 0f) {
+                    val h = vidHeroSeat
+                    val s0 = maxOf(h.width / size.width, h.height / size.height)
+                    scaleX = androidx.compose.ui.util.lerp(s0, 1f, t)
+                    scaleY = androidx.compose.ui.util.lerp(s0, 1f, t)
+                    translationX = androidx.compose.ui.util.lerp(h.center.x - size.width / 2f, 0f, t)
+                    translationY = androidx.compose.ui.util.lerp(h.center.y - size.height / 2f, 0f, t)
+                }
+            }
             .background(Color.Black)
             .pointerInput(Unit) {
                 detectTapGestures(
@@ -1101,6 +1187,17 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
                 )
             },
     ) {
+        // r81-3: the tile's own poster pixels are the first thing on screen -
+        // the open flight starts on the real frame even while the decoder /
+        // network has nothing yet; the live surface draws over it.
+        if (vidPoster != null) {
+            Image(
+                bitmap = vidPoster.asImageBitmap(),
+                contentDescription = title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit,
+            )
+        }
         when {
             m == null || dest == null || state == -1 -> {
                 Text(
@@ -1188,7 +1285,7 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
                     .padding(horizontal = 4.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { nav.popBackStack() }) {
+                IconButton(onClick = dismissVid) {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Color.White, modifier = Modifier.size(28.dp))
                 }
                 Column(Modifier.weight(1f)) {
