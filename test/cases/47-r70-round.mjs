@@ -1184,7 +1184,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
       viewer.includes("androidx.compose.runtime.withFrameNanos { }") &&
       chat.includes('heroPageId = { i -> viewerPhotos.getOrNull(i)?.optString("id") ?: "" }') &&
       chat.includes(
-        'alpha = if (PhotoHero.outId != null && PhotoHero.outId == m.optString("id").ifBlank { m.optString("clientId") }) 0f else 1f',
+        // r79-3: the hide/fade lives in PhotoHero.tileAlphaFor now (the
+        // cross-fade handoff) - the formula moved, the gate did not.
+        'alpha = PhotoHero.tileAlphaFor(m.optString("id").ifBlank { m.optString("clientId") })',
       ),
   );
 }
@@ -1234,7 +1236,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     'r78-6/r78-8 (owner: "emoji send korle 0.2 seconds flicking kore halka kata pore abar thik hoi" + "first time animate hobe just ekbar"): the composer flight starts below the LazyColumn viewport, so a 66sp glyph painted CHOPPED at the list edge for ~30% of its entrance - emoji rows now take fxEmojiEntrance, one grow+fade fully inside the row\'s own bounds, clientId-keyed once-per-message, and every non-emoji row keeps its flight',
     fx.includes(
-      "fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 260): Modifier",
+      "fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 300): Modifier",
     ) &&
       fx.includes("FlightAnims.markDone(key)") &&
       fx.includes("androidx.compose.ui.graphics.TransformOrigin.Center") &&
@@ -1282,6 +1284,56 @@ const main = (f) => read(`${ANDROID}/${f}`);
       callNotify.includes(
         "private val ringBirthHandler = android.os.Handler(android.os.Looper.getMainLooper())",
       ),
+  );
+}
+
+/* ---------- r79 round (owner retest after r78): deeper root causes ---------- */
+{
+  const media = main("MediaViewer.kt");
+  const chat = main("ChatScreen.kt");
+  const fx = main("ChatFx.kt");
+  const store = main("ScreenStore.kt");
+  const edit = main("MediaEditScreen.kt");
+  const anim = main("EmojiAnim.kt");
+
+  check(
+    'r79-5 (owner: "attach panel a i thakche but selected media selected thakche na"): the mediaedit nav route kills the chat composition below it, so the r78 in-remember batch died on every detour and the reopened panel was empty - the batch now lives in ScreenStore keyed by conversation (same clear sites), and the no-edit back paths on the staged pencil trip return to the panel like Discard does',
+    store.includes("private val attachSelMap =") &&
+      store.includes("fun attachPanelSel(convId: String)") &&
+      chat.includes("val attachSel = remember { ScreenStore.attachPanelSel(convId) }") &&
+      edit.includes(
+        "BackHandler(enabled = !hasEdits && !cropping && !showDiscard && ScreenStore.editStageUri != null) {",
+      ) &&
+      edit.includes("if (ScreenStore.editStageUri != null) ScreenStore.reopenAttach = true"),
+  );
+
+  check(
+    'r79-6/r79-8 root cause (owner: "ekhono halka flicking kore" + "first time animates hoi na"): every glyph is a LOTTIE - uncached first use painted the SYSTEM glyph, then swapped the Noto frame in ~100-300 ms later (the flicker), and that parse jank ate the birth animation window (no entrance). NotoEmojiWarm preloads the composition at draft / send / live-arrival, and fxEmojiEntrance now clocks from the row\'s FIRST LAYOUT (perception time), never from the arm',
+    anim.includes("internal object NotoEmojiWarm {") &&
+      anim.includes("fun preload(ctx: android.content.Context, body: String)") &&
+      chat.includes("NotoEmojiWarm.preload(ctx, v)") &&
+      chat.includes('if (kind == "TEXT") NotoEmojiWarm.preload(ctx, body)') &&
+      chat.includes(
+        'if (liveMsg.optString("kind") == "TEXT") NotoEmojiWarm.preload(ctx, liveMsg.optText("body"))',
+      ) &&
+      fx.includes("remember(key) { androidx.compose.animation.core.Animatable(0f) }") &&
+      fx.includes("LaunchedEffect(laidOut) {") &&
+      fx.includes(".onGloballyPositioned { laidOut = true }"),
+  );
+
+  check(
+    'r79-3 (owner: "close a photo age thekei thakche + overlap + position a na"): the hidden-tile handoff snapped released at the very END of the close flight - any window-level seat disagreement flashed the photo twice. The handoff is now a CROSS-FADE over the close\'s last 45% (hero opacity down, tile opacity up on the same progress), album tiles gained the seat report + hide wiring they never had (they opened with no entrance and closed to nothing before)',
+    media.includes("var heroCloseT by androidx.compose.runtime.mutableStateOf(0f)") &&
+      media.includes("fun tileAlphaFor(id: String?): Float") &&
+      media.includes("return if (t >= 0.45f) 0f else ((0.45f - t) / 0.45f).coerceIn(0f, 1f)") &&
+      media.includes("PhotoHero.heroCloseT = if (closing) v else 0f") &&
+      media.includes("alpha = if (closing && t < 0.45f) (t / 0.45f).coerceIn(0f, 1f) else 1f") &&
+      chat.includes("alpha = PhotoHero.tileAlphaFor(") &&
+      chat.includes(
+        'val photoId = photo.optString("id").ifBlank { photo.optString("clientId") }',
+      ) &&
+      chat.includes(".graphicsLayer { alpha = PhotoHero.tileAlphaFor(photoId) }") &&
+      chat.includes("PhotoHero.set(\n                    photoId,"),
   );
 }
 

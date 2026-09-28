@@ -473,7 +473,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Attach-panel (gallery grid) selection, hoisted here so the COMPOSER's
     // mic turns into SEND while the panel has picks (WhatsApp behaviour) —
     // the panel itself no longer carries its own send button.
-    val attachSel = remember { mutableStateListOf<MediaItem>() }
+    // r79-5 (owner: "selected media selected thakche na"): lives in
+    // ScreenStore - the mediaedit nav route disposes this composable, and a
+    // plain remember lost the ticks on return.
+    val attachSel = remember { ScreenStore.attachPanelSel(convId) }
     // r66: outside actions cannot silently discard or abandon selected media.
     val attachExit = remember { AttachmentExitGate() }
     var showDeselect by remember { mutableStateOf(false) }
@@ -1151,6 +1154,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                             // r64 E2EE: open the live envelope before anything
                             // touches the row (fast paint, sounds, scroll).
                             val liveMsg = unseal(rawMsg)
+                            // r79-6/8: warm the incoming glyph's Lottie before
+                            // its row paints - peer emojis flickered the same
+                            // way ours did on uncached first use.
+                            if (liveMsg.optString("kind") == "TEXT") NotoEmojiWarm.preload(ctx, liveMsg.optText("body"))
                             // Owner round 22/28: the in-chat receive sound (his
                             // pack) only for a bubble SOMEONE ELSE sent. The
                             // echo of our own send used to play it on every
@@ -1690,6 +1697,9 @@ fun ChatScreen(nav: NavController, convId: String) {
 
     fun sendText(body: String, kind: String = "TEXT", once: Boolean = false) {
         if (body.isBlank()) return
+        // r79-6/8: warm the glyph's Lottie before the echo is born (the
+        // typing hook already warmed it; this covers paste-and-send).
+        if (kind == "TEXT") NotoEmojiWarm.preload(ctx, body)
         val clientId = "c_${java.util.UUID.randomUUID()}"
         // r64 E2EE: the PAYLOAD carries the sealed envelope (TEXT only —
         // stickers are local ids, never sealed); the pending echo below keeps
@@ -4877,6 +4887,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             onInput = { v -> requestAttachExit {
                 input = v
                 Drafts.set(convId, v)
+                // r79-6/8: the glyph is a Lottie - warm it while it's still
+                // draft text, so the posed row swaps nothing in later.
+                if (v.isNotEmpty()) NotoEmojiWarm.preload(ctx, v)
                 // Typing means the user wants the keyboard, not the panel.
                 if (v.isNotBlank() && (showAttach || showStickers)) {
                     showAttach = false
@@ -9397,7 +9410,10 @@ private fun ImageMessageRow(
                     // flies this tile's hero, the tile itself is NOT a second
                     // copy - the hero is the only render of this photo. The
                     // seat keeps updating above, so the exit lands on it.
-                    alpha = if (PhotoHero.outId != null && PhotoHero.outId == m.optString("id").ifBlank { m.optString("clientId") }) 0f else 1f
+                    // r79-3: the handoff is a cross-fade now (the last 45% of
+                    // the close), so a hair of seat mismatch blends instead of
+                    // flashing a second photo.
+                    alpha = PhotoHero.tileAlphaFor(m.optString("id").ifBlank { m.optString("clientId") })
                 }
                 .combinedClickable(
                     onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
@@ -9820,7 +9836,33 @@ private fun AlbumTile(
     isPending: Boolean = false,
 ) {
     val url = messageMediaUrl(photo)
-    Box(modifier.background(Color(0x22000000)), contentAlignment = Alignment.Center) {
+    // r79-3 (owner: group bubble theke photo open/close-e hero thik na):
+    // album tiles report their seat and honour the hero hide, like the
+    // single-photo tile - before this only THAT tile did, so an album photo
+    // opened with no entrance and its close flew from / to nothing (the
+    // "age thekei thakche" duplicate on group bubbles).
+    val photoId = photo.optString("id").ifBlank { photo.optString("clientId") }
+    val hostView = androidx.compose.ui.platform.LocalView.current
+    Box(
+        modifier
+            .onGloballyPositioned { c ->
+                val b = c.boundsInWindow()
+                val loc = IntArray(2)
+                hostView.getLocationOnScreen(loc)
+                PhotoHero.set(
+                    photoId,
+                    androidx.compose.ui.geometry.Rect(
+                        b.left + loc[0],
+                        b.top + loc[1],
+                        b.right + loc[0],
+                        b.bottom + loc[1],
+                    ),
+                )
+            }
+            .graphicsLayer { alpha = PhotoHero.tileAlphaFor(photoId) }
+            .background(Color(0x22000000)),
+        contentAlignment = Alignment.Center,
+    ) {
         if (url.startsWith("data:") || url.startsWith("file://")) {
             val bmp = rememberBitmap(url, 600)
             if (bmp != null) {

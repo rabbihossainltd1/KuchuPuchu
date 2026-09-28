@@ -349,6 +349,18 @@ object ScreenStore {
      *  ekbare ber hobe na attach panel ei thakbe"). */
     var reopenAttach = false
 
+    // r79-5 (owner retest: "attach panel a i thakche but selected media
+    // selected thakche na"): the mediaedit detour is a nav ROUTE, and pushing
+    // it kills the chat composition below - every plain `remember` there died
+    // (the r78 selection lived in one), so the panel re-opened EMPTY. The
+    // batch now belongs to ScreenStore, keyed by conversation, so any route
+    // detour and return finds the ticks exactly where they were. Cleared
+    // from the same sites that always cleared it (send, explicit dismiss).
+    private val attachSelMap =
+        HashMap<String, androidx.compose.runtime.snapshots.SnapshotStateList<MediaItem>>()
+    fun attachPanelSel(convId: String): androidx.compose.runtime.snapshots.SnapshotStateList<MediaItem> =
+        attachSelMap.getOrPut(convId) { androidx.compose.runtime.mutableStateListOf() }
+
 
     /** Bumped on FCM so an open chat refreshes immediately. */
     var poke by mutableStateOf(0)

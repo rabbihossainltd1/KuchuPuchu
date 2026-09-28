@@ -258,30 +258,37 @@ fun Modifier.fxSlotOpen(active: Boolean, fromDp: Float = -30f, ms: Int = 480): M
  * first-arm-wins Flight), and the echo->server swap can never re-run it.
  */
 @Composable
-fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 260): Modifier {
+fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 300): Modifier {
     val scale = fxAnimatorScale()
-    val f = FlightAnims.of(key)
-    if (!active || scale <= 0f || f == null || f.goAt < 0L) return this
-    var v by remember(key) { mutableStateOf(FlightAnims.valueAt(f, ms)) }
-    LaunchedEffect(key) {
-        while (true) {
-            val now = FlightAnims.valueAt(f, ms)
-            v = now
-            if (now >= 1f) {
-                FlightAnims.markDone(key)
-                break
-            }
-            androidx.compose.runtime.withFrameNanos { }
+    if (!active || scale <= 0f) return this
+    // r79-8 (owner retest: "emoji first time animates hoi na"): the r78 clock
+    // ticked FROM THE ARM (wall time). Between the arm and the row's first
+    // pixels sit message composition + the glyph's own first raster, and that
+    // jank ate almost the whole 260 ms - the pop finished nearly off-screen,
+    // so it READ as "no entrance, appears instantly". The sprint now starts
+    // when the row is LAID OUT (perception time): the full grow+fade always
+    // plays in front of the owner, once per message (clientId-keyed - the
+    // echo->server swap keeps the remember, it can never replay).
+    val t = remember(key) { androidx.compose.animation.core.Animatable(0f) }
+    var laidOut by remember(key) { mutableStateOf(false) }
+    LaunchedEffect(laidOut) {
+        if (!laidOut) return@LaunchedEffect
+        t.animateTo(1f, tween(ms, easing = FastOutSlowInEasing))
+        FlightAnims.markDone(key)
+    }
+    val v = t.value
+    // Always return this modifier chain (never early-return `this` after the
+    // remembers exist - changing the modifier LAYOUT each frame is how tap /
+    // hold targets drift under a running animation).
+    return this
+        .onGloballyPositioned { laidOut = true }
+        .graphicsLayer {
+            val g = 0.55f + 0.45f * v
+            alpha = 0.25f + 0.75f * v
+            scaleX = g
+            scaleY = g
+            transformOrigin = androidx.compose.ui.graphics.TransformOrigin.Center
         }
-    }
-    if (v >= 1f) return this
-    return graphicsLayer {
-        alpha = 0.25f + 0.75f * v
-        val g = 0.55f + 0.45f * v
-        scaleX = g
-        scaleY = g
-        transformOrigin = androidx.compose.ui.graphics.TransformOrigin.Center
-    }
 }
 
 /* -------------------------------------------------------- the send flight */

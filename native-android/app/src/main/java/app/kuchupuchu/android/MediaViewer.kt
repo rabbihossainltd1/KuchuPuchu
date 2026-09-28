@@ -125,6 +125,23 @@ object PhotoHero {
     // the tap's frame to the landing's.
     var outId: String? by androidx.compose.runtime.mutableStateOf(null)
 
+    // r79-3 (owner: "closing a photo age thekei thakche chat a, otar upore
+    // overlap korche, taw sothik position a na"): the old handoff snapped the
+    // tile from hidden to shown only at the very end - if the two windows
+    // (activity tile vs dialog hero) disagreed by even a frame or a pixel the
+    // owner saw the photo TWICE, offset. The flight's progress is public now
+    // while closing: the tile cross-fades IN over the flight's last 45% as
+    // the hero fades OUT over the same span, so a one-pixel seat mismatch
+    // reads as a soft blend instead of a duplicate.
+    var heroCloseT by androidx.compose.runtime.mutableStateOf(0f) // 0 = not closing
+    fun tileAlphaFor(id: String?): Float {
+        val out = outId
+        if (id.isNullOrBlank() || out.isNullOrBlank() || out != id) return 1f
+        val t = heroCloseT
+        if (t <= 0f) return 0f // viewer open, not closing: fully hidden
+        return if (t >= 0.45f) 0f else ((0.45f - t) / 0.45f).coerceIn(0f, 1f)
+    }
+
     // r77-3: the tile reports its seat on every layout, so the map always
     // knows where it sits NOW (rows move while the viewer is open - the old
     // snapshot is what landed the exit hero mid-air, "zero gap na").
@@ -255,6 +272,14 @@ fun KpPhotoViewer(
     // came from and only then does the window go.
     var closing by remember { mutableStateOf(false) }
     val heroScope = rememberCoroutineScope()
+    // r79-3: publish the flight progress while closing - the chat tile and
+    // this window cross-fade through the same span (see tileAlphaFor and the
+    // hero alpha in the pager's graphicsLayer).
+    LaunchedEffect(closing, heroSeat != null) {
+        androidx.compose.runtime.snapshotFlow { hero.value }.collect { v ->
+            PhotoHero.heroCloseT = if (closing) v else 0f
+        }
+    }
     val dismiss: () -> Unit = {
         if (closing) {
             // already on its way out
@@ -268,6 +293,7 @@ fun KpPhotoViewer(
                 // blank frame, no duplicate at the handoff.
                 PhotoHero.outId = null
                 androidx.compose.runtime.withFrameNanos { }
+                PhotoHero.heroCloseT = 0f
                 onClose()
             }
         } else {
@@ -554,6 +580,11 @@ fun KpPhotoViewer(
                                     heroSeat
                                 }
                             val t = hero.value
+                            // r79-3: during the close's last 45% the hero
+                            // fades OUT in the exact span the chat tile fades
+                            // IN - a seat that disagrees by a hair no longer
+                            // flashes a second copy below the landing photo.
+                            alpha = if (closing && t < 0.45f) (t / 0.45f).coerceIn(0f, 1f) else 1f
                             if (h != null && t < 1f && size.width > 0f && size.height > 0f) {
                                 val sw = size.width
                                 val sh = size.height

@@ -718,6 +718,16 @@ private fun MediaEditItemScreen(
     // unbaked edits asks first. Dismiss drops the edit and exits; Not now
     // closes the sheet and stays on the canvas.
     BackHandler(enabled = hasEdits && !cropping && !showDiscard) { showDiscard = true }
+    // r79-5 (owner: edit r por back dile ager selection nai): a PENCIL trip
+    // came from the attach panel with a batch still ticked - a no-edit back
+    // used to just pop and the panel closed on the chat-side old state. The
+    // system back now returns to the panel (ticks kept) exactly like the
+    // Discard sheet's Dismiss does. Only staged trips - an editor opened
+    // from the gallery / camera / status backtracks as before.
+    BackHandler(enabled = !hasEdits && !cropping && !showDiscard && ScreenStore.editStageUri != null) {
+        ScreenStore.reopenAttach = true
+        nav.popBackStack()
+    }
 
     fun rotateTap() {
         exitCrop()
@@ -1905,7 +1915,16 @@ private fun MediaEditItemScreen(
                     .padding(horizontal = 4.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { if (cropping) exitCrop() else if (hasEdits) showDiscard = true else nav.popBackStack() }, modifier = Modifier.size(36.dp)) {
+                IconButton(onClick = {
+                    if (cropping) exitCrop()
+                    else if (hasEdits) showDiscard = true
+                    else {
+                        // r79-5: staged-from-the-panel trips return to the
+                        // panel with the batch still ticked (system back too).
+                        if (ScreenStore.editStageUri != null) ScreenStore.reopenAttach = true
+                        nav.popBackStack()
+                    }
+                }, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Filled.Close, "Close", tint = Color.White, modifier = Modifier.size(20.dp))
                 }
                 // v170 (owner: "done button left side a thakbe"): Done rides

@@ -96,6 +96,49 @@ internal object NotoBundled {
     fun isBundled(codepoint: String): Boolean = set.contains(codepoint)
 }
 
+/**
+ * r79-6/r79-8 (owner: "emoji sent hobar por ekhono halka flicking kore" +
+ * "first time animates hoi na"): every glyph is a Lottie - until its JSON
+ * parses, the box falls back to the SYSTEM glyph and ~100-300 ms in the Noto
+ * frame swaps in, which is the flicker; and the blast of that parse ate the
+ * birth animation's window, which is why nothing animated. The load now
+ * starts the moment the emoji exists in the draft / send / arrival path, so
+ * the row is BORN with the real Noto frame already warm in Lottie's cache -
+ * no fallback pass, no swap, nothing to wait on.
+ */
+internal object NotoEmojiWarm {
+    // The parse is idempotent on Lottie's side; this set only keeps the log
+    // of what we already paid for (an unlimited stream of unique glyphs is
+    // not a realistic input, but the set stays cheap anyway).
+    private val warmed = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    fun preload(ctx: android.content.Context, body: String) {
+        if (body.isEmpty()) return
+        // Cheap guard first: bitmap emoji detection is off-topic here - warm
+        // only strings that hold at least one extended-plane codepoint.
+        var hasEmoji = false
+        for (cp in body.codePoints()) {
+            if (cp > 0x2500) { hasEmoji = true; break }
+        }
+        if (!hasEmoji) return
+        val app = ctx.applicationContext
+        for (ch in splitEmojiClusters(body)) {
+            val code = emojiToCodepoint(ch)
+            if (code.isBlank() || !warmed.add(code)) continue
+            runCatching {
+                if (NotoBundled.isBundled(code)) {
+                    com.airbnb.lottie.LottieCompositionFactory.fromAsset(app, "noto-emoji/$code.json")
+                } else {
+                    com.airbnb.lottie.LottieCompositionFactory.fromUrl(
+                        app,
+                        "https://fonts.gstatic.com/s/e/notoemoji/latest/$code/lottie.json",
+                    )
+                }
+            }
+        }
+    }
+}
+
 internal fun emojiToCodepoint(emoji: String): String {
     if (emoji.isEmpty()) return ""
     val cps = mutableListOf<String>()
