@@ -9868,7 +9868,7 @@ const convBetween = (db, a, b) =>
         // r80-6: the spec-based async loader was replaced by a sync-seeded
         // cache read - rememberLottieComposition was born null even on a warm
         // cache (a frame of SYSTEM glyph, then the swap = the flicker).
-        emo.includes("LottieCompositionCache.getInstance().get(cacheKey)") &&
+        emo.includes("NotoEmojiWarm.peek(cacheKey)") &&
         emo.includes("LottieCompositionFactory.fromAsset(appCtx, assetName)") &&
         emo.includes("noto-emoji") &&
         emo.includes("emojiFxReplays") &&

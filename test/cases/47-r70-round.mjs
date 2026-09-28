@@ -1322,7 +1322,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       fx.includes("val st = remember(key) { FlightAnims.birth(key) }") &&
       fx.includes("if (st.goAt < 0L) st.goAt = android.os.SystemClock.uptimeMillis()") &&
       fx.includes("androidx.compose.runtime.withFrameNanos { }") &&
-      anim.includes("com.airbnb.lottie.model.LottieCompositionCache.getInstance().get(cacheKey)"),
+      anim.includes("NotoEmojiWarm.peek(cacheKey)"),
   );
 
   check(
@@ -1352,7 +1352,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
 
   check(
     'r80-6 (owner: "not fixed" - the flicker SURVIVED warming): rememberLottieComposition is async even on a warm cache, so every glyph was born composition==null, painted the SYSTEM emoji for a frame or two, then swapped the Noto frame in - and that swap IS the flicker. The glyph now seeds its composition state SYNCHRONOUSLY from LottieCompositionCache (the r79 warm fills it), and only runs the async loader on a true cold miss',
-    anim2.includes("com.airbnb.lottie.model.LottieCompositionCache.getInstance().get(cacheKey)") &&
+    anim2.includes("NotoEmojiWarm.peek(cacheKey)") &&
       anim2.includes("val cacheKey = if (isBundled) assetName else netUrl") &&
       anim2.includes("kotlinx.coroutines.suspendCancellableCoroutine { cont ->") &&
       !anim2.includes("rememberLottieComposition("),

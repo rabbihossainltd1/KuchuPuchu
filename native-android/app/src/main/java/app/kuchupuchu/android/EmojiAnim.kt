@@ -105,10 +105,32 @@ internal object NotoBundled {
  * no fallback pass, no swap, nothing to wait on.
  */
 internal object NotoEmojiWarm {
-    // The parse is idempotent on Lottie's side; this set only keeps the log
-    // of what we already paid for (an unlimited stream of unique glyphs is
-    // not a realistic input, but the set stays cheap anyway).
+    // r80-6 (second pass): the r79 warm filled LOTTIE-INTERNAL cache, and the
+    // r80 glyph seeded itself from it - but that cache is @RestrictTo(LIBRARY)
+    // - internal to Lottie, and its eviction policy is theirs. Our own map
+    // holds the parsed compositions instead (bounded, ours, lint-clean), and
+    // the warm parses with the PUBLIC Sync factories on a small pool so a
+    // glyph's first composition can read the frame synchronously (the whole
+    // point: zero frames on the system-emoji fallback).
     private val warmed = java.util.Collections.synchronizedSet(HashSet<String>())
+    private val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
+    private val comps =
+        java.util.Collections.synchronizedMap(
+            object :
+                java.util.LinkedHashMap<String, com.airbnb.lottie.LottieComposition>(96, 0.75f, true) {
+                override fun removeEldestEntry(
+                    eldest: MutableMap.MutableEntry<String, com.airbnb.lottie.LottieComposition>?,
+                ): Boolean = size > 96
+            },
+        )
+
+    fun peek(cacheKey: String): com.airbnb.lottie.LottieComposition? =
+        synchronized(comps) { comps[cacheKey] }
+
+    fun store(cacheKey: String, comp: com.airbnb.lottie.LottieComposition) {
+        synchronized(comps) { comps[cacheKey] = comp }
+        warmed.add(cacheKey.removePrefix("noto-emoji/").removeSuffix(".json"))
+    }
 
     fun preload(ctx: android.content.Context, body: String) {
         if (body.isEmpty()) return
@@ -123,14 +145,19 @@ internal object NotoEmojiWarm {
         for (ch in splitEmojiClusters(body)) {
             val code = emojiToCodepoint(ch)
             if (code.isBlank() || !warmed.add(code)) continue
-            runCatching {
-                if (NotoBundled.isBundled(code)) {
-                    com.airbnb.lottie.LottieCompositionFactory.fromAsset(app, "noto-emoji/$code.json")
-                } else {
-                    com.airbnb.lottie.LottieCompositionFactory.fromUrl(
-                        app,
-                        "https://fonts.gstatic.com/s/e/notoemoji/latest/$code/lottie.json",
-                    )
+            val bundled = NotoBundled.isBundled(code)
+            pool.execute {
+                runCatching {
+                    val res =
+                        if (bundled) {
+                            com.airbnb.lottie.LottieCompositionFactory.fromAssetSync(app, "noto-emoji/$code.json")
+                        } else {
+                            com.airbnb.lottie.LottieCompositionFactory.fromUrlSync(
+                                app,
+                                "https://fonts.gstatic.com/s/e/notoemoji/latest/$code/lottie.json",
+                            )
+                        }
+                    res.value?.let { store(if (bundled) "noto-emoji/$code.json" else "https://fonts.gstatic.com/s/e/notoemoji/latest/$code/lottie.json", it) }
                 }
             }
         }
@@ -212,13 +239,7 @@ internal fun NotoAnimatedEmoji(
     val appCtx = androidx.compose.ui.platform.LocalContext.current.applicationContext
     var composition by remember(codepoint) {
         mutableStateOf<com.airbnb.lottie.LottieComposition?>(
-            if (codepoint.isBlank()) {
-                null
-            } else {
-                runCatching {
-                    com.airbnb.lottie.model.LottieCompositionCache.getInstance().get(cacheKey)
-                }.getOrNull()
-            },
+            if (codepoint.isBlank()) null else NotoEmojiWarm.peek(cacheKey),
         )
     }
     LaunchedEffect(codepoint) {
@@ -231,7 +252,10 @@ internal fun NotoAnimatedEmoji(
                     com.airbnb.lottie.LottieCompositionFactory.fromUrl(appCtx, netUrl)
                 }
             task
-                .addListener { comp -> if (cont.isActive) cont.resumeWith(Result.success(comp)) }
+                .addListener { comp ->
+                    NotoEmojiWarm.store(cacheKey, comp)
+                    if (cont.isActive) cont.resumeWith(Result.success(comp))
+                }
                 .addFailureListener { if (cont.isActive) cont.resumeWith(Result.success(null)) }
         }
     }

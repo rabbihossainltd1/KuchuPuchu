@@ -199,7 +199,7 @@ check(
     emo.includes("fun emojiToCodepoint") &&
     emo.includes("fun NotoAnimatedEmoji") &&
     // r80-6: sync-seeded cache load (see 32-bots note).
-    emo.includes("LottieCompositionCache.getInstance().get(cacheKey)") &&
+    emo.includes("NotoEmojiWarm.peek(cacheKey)") &&
     emo.includes("LottieCompositionFactory.fromAsset(appCtx, assetName)") &&
     emo.includes("noto-emoji") &&
     emo.includes("emojiFxReplays") &&
