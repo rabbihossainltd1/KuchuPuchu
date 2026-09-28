@@ -599,7 +599,7 @@ fun KpNetImage(
     androidx.compose.foundation.layout.Box(modifier) {
         if (placeholderBitmap != null) {
             Image(
-                bitmap = androidx.compose.ui.graphics.asImageBitmap(placeholderBitmap),
+                bitmap = placeholderBitmap.asImageBitmap(),
                 contentDescription = contentDescription,
                 modifier = Modifier.matchParentSize(),
                 contentScale = contentScale,

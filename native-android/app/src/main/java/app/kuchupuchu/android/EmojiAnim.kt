@@ -216,7 +216,7 @@ internal fun NotoAnimatedEmoji(
                 null
             } else {
                 runCatching {
-                    com.airbnb.lottie.LottieCompositionCache.getInstance().get(cacheKey)
+                    com.airbnb.lottie.model.LottieCompositionCache.getInstance().get(cacheKey)
                 }.getOrNull()
             },
         )
