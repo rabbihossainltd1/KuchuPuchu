@@ -318,10 +318,11 @@ internal fun EmojiGlyphRow(
     // v206: animate only single emoji, not multiple
     val shouldAnimate = isSingle
     Row(
-        // r80-8: the birth pop belongs to the ROW (fxEmojiEntrance) - this
-        // glyph-row fxPopIn scaled the same birth a second time on a second
-        // clock, so the entrance read doubled / muddy. Tap replays are
-        // untouched (they ride replayKey, not this modifier).
+        // r80-8 (updated r85-1): the birth pop belongs to the ROW - the row
+        // flight (fxSlotOpen + fxFlyIn) is the ONE entrance a message plays,
+        // emoji rows included. This glyph-row fxPopIn scaled the same birth a
+        // second time on a second clock, so the entrance read doubled / muddy.
+        // Tap replays are untouched (they ride replayKey, not this modifier).
         Modifier.padding(start = 2.dp, end = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
