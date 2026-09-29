@@ -291,30 +291,36 @@ internal fun NotoAnimatedEmoji(
     }
     val animatable = rememberLottieAnimatable()
     var isPlaying by remember(emoji) { mutableStateOf(false) }
-    // r87-1: the birth dance rides the GLOBAL clock - the pending->server
-    // swap resumes the same frame instead of restarting the pass.
-    var liveT by remember(liveDanceKey) { mutableStateOf(1f) }
-    LaunchedEffect(composition, liveDanceKey) {
-        val key = liveDanceKey ?: return@LaunchedEffect
-        val comp = composition ?: return@LaunchedEffect
-        EmojiDance.begin(key)
-        val durMs = (comp.duration * 1000f).toInt().coerceAtLeast(1)
-        while (true) {
-            val p = EmojiDance.progress(key, durMs)
-            liveT = p
-            if (p >= 1f) break
-            androidx.compose.runtime.withFrameNanos { }
-        }
-    }
-
     LaunchedEffect(composition, replayKey) {
-        if (composition != null && replayKey > 0) {
+        val comp = composition ?: return@LaunchedEffect
+        // r88-1 (owner r88 #1: "first time animates hoi na ... tap korleo
+        // animate hoi na majhe majhe hoi"): r87 drove the birth through a
+        // separate wall-clock render loop whose branch SHADOWED the tap
+        // replay for the whole (seconds-long) birth window - a tap inside
+        // the window looked dead - and a 0-duration composition ended the
+        // birth before a frame ever showed. ONE driver now: the birth dance
+        // and the tap replay are the SAME animatable pass (the library's
+        // own frame clock, the machinery a tap has always used on device).
+        // A live birth starts at the GLOBAL clock's current frame
+        // (EmojiDance): the echo's glyph starts the clock exactly once, and
+        // the server row that takes the seat resumes at the same
+        // wall-clock frame - the pending->server swap is invisible, sending
+        // to sent with zero gap. A tap always restarts from 0 and shows
+        // immediately.
+        if (liveDanceKey != null && replayKey == 0) {
+            EmojiDance.begin(liveDanceKey)
+            val durMs = if (comp.duration > 0f) (comp.duration * 1000f).toInt() else 1_200
+            val resume = EmojiDance.progress(liveDanceKey, durMs)
+            if (resume < 1f) {
+                isPlaying = true
+                animatable.animate(composition = comp, iterations = 1, initialProgress = resume)
+                isPlaying = false
+            }
+            return@LaunchedEffect
+        }
+        if (replayKey > 0) {
             isPlaying = true
-            animatable.animate(
-                composition = composition,
-                iterations = 1,
-                initialProgress = 0f,
-            )
+            animatable.animate(composition = comp, iterations = 1, initialProgress = 0f)
             isPlaying = false
         }
     }
@@ -323,30 +329,21 @@ internal fun NotoAnimatedEmoji(
         modifier = modifier.size(sizeSp.dp),
         contentAlignment = Alignment.Center,
     ) {
+        // r88-1: ONE render path - the library animator's progress (the
+        // birth dance and the tap replay both feed it).
         if (composition != null) {
-            when {
-                // r87-1: the live birth dance (global clock, swap-proof).
-                liveT < 1f -> {
-                    LottieAnimation(
-                        composition = composition,
-                        progress = { liveT },
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-                isPlaying -> {
-                    LottieAnimation(
-                        composition = composition,
-                        progress = { animatable.progress },
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-                else -> {
-                    LottieAnimation(
-                        composition = composition,
-                        progress = { 1f },
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
+            if (isPlaying) {
+                LottieAnimation(
+                    composition = composition,
+                    progress = { animatable.progress },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                LottieAnimation(
+                    composition = composition,
+                    progress = { 1f },
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
         } else {
             Text(

@@ -309,7 +309,7 @@ fun KpPhotoViewer(
             // fast-out punch. Decelerate-emphasized open.
             hero.animateTo(
                 1f,
-                tween(300, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)),
+                tween(460, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)),
             )
         }
     }
@@ -335,7 +335,7 @@ fun KpPhotoViewer(
                 // r81-3: emphasized-accelerate reverse, matching the open.
                 hero.animateTo(
                     0f,
-                    tween(260, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)),
+                    tween(400, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)),
                 )
                 // r77-3: the landed hero sits exactly on the live seat, fully
                 // opaque. Bring the tile back and commit ONE frame while that
@@ -651,10 +651,31 @@ fun KpPhotoViewer(
                                 // UNIFORM factor (cover) - the ratio holds
                                 // for the whole hero, both directions.
                                 val s0 = maxOf(h.width / sw, h.height / sh)
-                                scaleX = androidx.compose.ui.util.lerp(s0, 1f, t)
-                                scaleY = androidx.compose.ui.util.lerp(s0, 1f, t)
-                                translationX = androidx.compose.ui.util.lerp(h.center.x - sw / 2f, 0f, t)
-                                translationY = androidx.compose.ui.util.lerp(h.center.y - sh / 2f, 0f, t)
+                                // r88-2 (owner r88 #2: "sundor kore asbe
+                                // first middle a then Fullscreen hobe aste
+                                // aste - hotath korei halka animation er
+                                // sathe rudely open hobe na"): TWO segments -
+                                // the picture leaves the tile and arrives at
+                                // the screen's CENTRE at 58% size, then grows
+                                // on to fullscreen, each segment on its own
+                                // emphasized curve. Never one rude snap, and
+                                // the uniform scale keeps the ratio (r76-30).
+                                val sMid = 0.58f
+                                if (t <= 0.55f) {
+                                    val u =
+                                        androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
+                                            .transform(t / 0.55f)
+                                    scaleX = androidx.compose.ui.util.lerp(s0, sMid, u)
+                                    scaleY = scaleX
+                                    translationX = androidx.compose.ui.util.lerp(h.center.x - sw / 2f, 0f, u)
+                                    translationY = androidx.compose.ui.util.lerp(h.center.y - sh / 2f, 0f, u)
+                                } else {
+                                    val v =
+                                        androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
+                                            .transform((t - 0.55f) / 0.45f)
+                                    scaleX = androidx.compose.ui.util.lerp(sMid, 1f, v)
+                                    scaleY = scaleX
+                                }
                             }
                         },
                     userScrollEnabled = scale <= 1.01f,
@@ -937,7 +958,7 @@ fun VideoPlayerScreen(nav: NavController, b64: String, overlayClose: (() -> Unit
         if (vidHeroLaidOut && vidHeroSeat != null) {
             vidHero.animateTo(
                 1f,
-                tween(300, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)),
+                tween(460, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)),
             )
         }
     }
@@ -970,7 +991,7 @@ fun VideoPlayerScreen(nav: NavController, b64: String, overlayClose: (() -> Unit
         scope.launch {
             vidHero.animateTo(
                 0f,
-                tween(260, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)),
+                tween(400, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)),
             )
             PhotoHero.outId = null
             androidx.compose.runtime.withFrameNanos { }
@@ -1177,10 +1198,24 @@ fun VideoPlayerScreen(nav: NavController, b64: String, overlayClose: (() -> Unit
                 if (vidHeroSeat != null && t < 1f && size.width > 0f && size.height > 0f) {
                     val h = vidHeroSeat
                     val s0 = maxOf(h.width / size.width, h.height / size.height)
-                    scaleX = androidx.compose.ui.util.lerp(s0, 1f, t)
-                    scaleY = androidx.compose.ui.util.lerp(s0, 1f, t)
-                    translationX = androidx.compose.ui.util.lerp(h.center.x - size.width / 2f, 0f, t)
-                    translationY = androidx.compose.ui.util.lerp(h.center.y - size.height / 2f, 0f, t)
+                    // r88-2: the same two-segment flight as the photo viewer
+                    // - tile -> CENTRE at 58% -> fullscreen, never a snap.
+                    val sMid = 0.58f
+                    if (t <= 0.55f) {
+                        val u =
+                            androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
+                                .transform(t / 0.55f)
+                        scaleX = androidx.compose.ui.util.lerp(s0, sMid, u)
+                        scaleY = scaleX
+                        translationX = androidx.compose.ui.util.lerp(h.center.x - size.width / 2f, 0f, u)
+                        translationY = androidx.compose.ui.util.lerp(h.center.y - size.height / 2f, 0f, u)
+                    } else {
+                        val v =
+                            androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
+                                .transform((t - 0.55f) / 0.45f)
+                        scaleX = androidx.compose.ui.util.lerp(sMid, 1f, v)
+                        scaleY = scaleX
+                    }
                 }
             }
             // r85-2: the backdrop fades WITH the hero (photo viewer rule) -
