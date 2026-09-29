@@ -631,3 +631,30 @@ APK (old ones deleted; keep it clean every round).
 - Pins: r67-3 (42-r67) + r77-8 (47-r70) `val fxEmoji = false` -> `fxBorn`
   (retargeted narratives); r84-4 pin literal -> the r86-4 backstop form; new
   r86-1/r86-4 pins. Suite 47/47, 1944 assertions.
+
+## r87 round (shipped 377f667, CI success, APK kuchupuchu-3.9.180-r87.apk 257/3.9.180)
+Owner retest r86: 1 almost fixed (dance plays during sending but STOPS and
+RE-ANIMATES at the sent swap - "send sending sent zero gap" wanted), 2 photo/
+video fine but animation abrupt ("hotath open hoi hotath close hoi") - smooth,
+all chat medias incl. once-view same animation.
+- **#1 (r87-1)**: the r86 dance was PER-COMPOSITION (replayKey seed) - the
+  pending echo and the server row are two compositions, so the swap restarted
+  the Lottie from 0 (freeze + re-dance). New EmojiDance (EmojiAnim.kt): GLOBAL
+  time-based clock per message key, FlightAnims pattern. Echo's glyph begins
+  (idempotent); server row renders at the CURRENT wall-clock frame - the swap
+  is invisible. Key chain: MessageRow fxKey (clientId-first) -> EmojiGlyphRow
+  danceKey param -> NotoEmojiGlyph -> NotoAnimatedEmoji liveDanceKey (null for
+  non-live/multi). Cold glyph: clock starts when composition lands. Taps keep
+  local replay (replayKey seed back to 0). NotoAnimatedEmoji render = when {
+  liveT < 1f -> global-dance frame; isPlaying -> tap replay; else -> final
+  frame }. durationMs = comp.duration*1000.
+- **#2 (r87-2)**: hero flights 180 -> 300ms open / 220 -> 260ms close (same
+  emphasized curves) - 180 read as a snap after the r84/r85 speed hunt. Photo
+  viewer + video overlay + once-photo pages share KpPhotoViewer/VideoPlayer
+  literals so ALL chat medias get the identical flight.
+- Pins: r86-1 RETARGETED to r87-1 (global clock; the replayKey-seed literal
+  died); r71-21 call-site regex updated for the new `, danceKey = fxKey)`
+  tail (call-site-shape pins break on signature additions - grep the call
+  regex when changing call args); r76-28/r76-29/r81-3a/r84-6/r85-4 duration
+  literals 180->300 / 220->260; 42-r67 r67-3 narrative updated; new r87-1 +
+  r87-2 pins. Suite 47/47, 1946 assertions.
