@@ -766,7 +766,10 @@ private fun MediaEditItemScreen(
         val turn = rotation
         val box = cropBox?.takeIf { !it.isFull() }
         android.widget.Toast.makeText(ctx, "Sharing status…", android.widget.Toast.LENGTH_SHORT).show()
+        // r89-4: back-without-sharing returns to the picker now, so a REAL
+        // share pops the editor AND the picker in one call.
         nav.popBackStack()
+        nav.popBackStack("statuspick", true)
         ScreenStore.appScope.launch {
             try {
                 if (pickedIsVideo && vSource != null) {

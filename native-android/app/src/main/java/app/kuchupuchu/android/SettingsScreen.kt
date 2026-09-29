@@ -586,7 +586,11 @@ fun AppearanceSettingsScreen(nav: NavController) {
         SoundTypePickerScreen(
             onClose = { showSoundType = false },
             onPick = { kind ->
-                showSoundType = false
+                // r89-4 (owner r89 #4: "call ringingtone select kore back
+                // korle direct appearance a niye jai but sounds screen a
+                // thakbar kotha"): the sounds screen STAYS under the ringtone
+                // picker - back from the picker returns to Sounds, not to
+                // Appearance.
                 soundKind = kind
                 showRingPicker = true
             },

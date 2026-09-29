@@ -4507,8 +4507,10 @@ const convBetween = (db, a, b) =>
           ) &&
           pick.includes("columns = GridCells.Fixed(4),") &&
           pick.includes('ScreenStore.editTitle = "Status"') &&
-          pick.includes('nav.navigate("mediaedit/status/0/" + statusPickArg(item)) {') &&
-          pick.includes('popUpTo("statuspick") { inclusive = true }') &&
+          pick.includes('nav.navigate("mediaedit/status/0/" + statusPickArg(item))') &&
+          // r89-4: the picker STAYS in the back stack (back = previous
+          // screen); a real share pops it via sendStatus.
+          !pick.includes('popUpTo("statuspick")') &&
           pick.includes("internal fun statusPickArg(item: MediaItem): String =") &&
           pick.includes(
             "internal fun statusPickDecode(arg: String): Pair<android.net.Uri, Boolean>? =",
@@ -8591,7 +8593,7 @@ const convBetween = (db, a, b) =>
     check(
       "r37-2: status is one screen — the picker opens the editor in status mode, Done posts (bake + upload + refresh), the crop tool commits the box on exit with photo overlays hopping boxes and video overlays remapping at bake, every send path carries the box, the share screen + round-trip are gone",
       pick7.includes('ScreenStore.editTitle = "Status"') &&
-        pick7.includes('nav.navigate("mediaedit/status/0/" + statusPickArg(item)) {') &&
+        pick7.includes('nav.navigate("mediaedit/status/0/" + statusPickArg(item))') &&
         edit7.includes("if (statusMode) {") &&
         edit7.includes("sendStatus()") &&
         edit7.includes("fun sendStatus() {") &&

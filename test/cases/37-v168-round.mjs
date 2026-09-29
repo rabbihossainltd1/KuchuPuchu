@@ -219,7 +219,7 @@ check(
     chat.includes("FxArrivals.armed = false") &&
     chat.includes("if (msgs.isNotEmpty()) FxArrivals.armed = true") &&
     chat.includes(".fxSlotOpen(fxFresh)") &&
-    chat.includes("fxLetterSpans(full, fxFresh)") &&
+    chat.includes("fxLetterSpans(full, fxFresh && !mine)") &&
     (chat.includes('EmojiGlyphRow(m.optText("body").trim(), 66f, fxEmoji, m.optString("id"))') ||
       chat.includes('EmojiGlyphRow(m.optText("body").trim(), 66f, fxEmoji, m.optString("id"),') ||
       chat.includes('EmojiGlyphRow(m.optText("body").trim(), 66f, fxFresh, m.optString("id"))') ||

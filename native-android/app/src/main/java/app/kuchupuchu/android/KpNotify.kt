@@ -100,6 +100,33 @@ object KpNotify {
                     enableVibration(true)
                 },
         )
+        // r89-3 (owner r89 #3: "amay keo massage send korle call ringtone 7
+        // ta play hoi, ami massage tone onno ta set kore rakhleo"): on several
+        // OEM ROMs a channel deleted and recreated under the SAME id keeps
+        // its ORIGINAL sound (the tombstone) - the r76-25 recreate never
+        // actually changed the tone on those phones, so messages kept playing
+        // whatever the channel was first born with (an old call-style ring
+        // that trings ~7 times). The message card now rides a PER-TONE
+        // channel id: every tone pick gets a channel born with its own sound,
+        // nothing to unfreeze. Siblings are swept; kp_messages_v2 stays as
+        // the fallback the FCM payload names when the system draws the card.
+        val toneChannel = toneChannelFor(ctx)
+        for (i in SoundPrefs.notifRes.indices) {
+            if ("kp_msg_t$i" != toneChannel) runCatching { mgr.deleteNotificationChannel("kp_msg_t$i") }
+        }
+        mgr.createNotificationChannel(
+            NotificationChannel(toneChannel, "Messages", NotificationManager.IMPORTANCE_HIGH)
+                .apply {
+                    description = "New chat messages"
+                    setSound(
+                        android.net.Uri.parse(
+                            "android.resource://" + ctx.packageName + "/" + SoundPrefs.notificationRingRes(ctx),
+                        ),
+                        attrs,
+                    )
+                    enableVibration(true)
+                },
+        )
         mgr.createNotificationChannel(
             NotificationChannel(SILENT_CHANNEL, "Muted chats", NotificationManager.IMPORTANCE_DEFAULT)
                 .apply {
@@ -184,7 +211,12 @@ object KpNotify {
         return out
     }
 
-    /** Owner round 21: the messages channel must re-ring when the user
+    /** r89-3: the channel id a message card rides - one per notification
+     *  tone pick, so no OEM tombstone can keep a stale sound alive. */
+    private fun toneChannelFor(ctx: Context): String = "kp_msg_t${SoundPrefs.notifIndex(ctx)}"
+
+    /** Owner round 21 (r89-3: superseded by the per-tone ids above — kept for
+     *  the fallback channel): the messages channel must re-ring when the user
      *  changes the notification tone — channel settings freeze at creation,
      *  so the old channel is deleted and recreated with the new sound. */
     fun rebuildMessageChannel(ctx: Context) {
@@ -285,7 +317,7 @@ object KpNotify {
                 ).build()
             }
         val n =
-            NotificationCompat.Builder(ctx, if (muted) SILENT_CHANNEL else CHAT_CHANNEL)
+            NotificationCompat.Builder(ctx, if (muted) SILENT_CHANNEL else toneChannelFor(ctx))
                 .setSmallIcon(R.mipmap.ic_stat_kp)
                 // Round brand logo as the large icon: without it the shade
                 // showed the bare square status glyph next to bot messages,
@@ -342,8 +374,7 @@ object KpNotify {
         // visible in the shade. This was part of "message notification
         // jacche na" — messages WERE posted, some launchers just never
         // surfaced them.
-        val summary =
-            NotificationCompat.Builder(ctx, CHAT_CHANNEL)
+        val summary = NotificationCompat.Builder(ctx, toneChannelFor(ctx))
                 .setSmallIcon(R.mipmap.ic_stat_kp)
                 .setLargeIcon(roundLogo(ctx))
                 .setContentTitle("KuchuPuchu")
@@ -507,8 +538,7 @@ object KpNotify {
     // per call keeps that one gate in one place.
     @SuppressLint("MissingPermission")
     fun replySent(ctx: Context, convoId: String, text: String, cardId: Int) {
-        val n =
-            NotificationCompat.Builder(ctx, CHAT_CHANNEL)
+        val n = NotificationCompat.Builder(ctx, toneChannelFor(ctx))
                 .setSmallIcon(R.mipmap.ic_stat_kp)
                 .setContentTitle("Sent")
                 .setContentText(text.take(80))

@@ -8059,7 +8059,10 @@ private fun MessageRow(
                                     )
                                 } else {
                                     Text(
-                                        fxLetterSpans(full, fxFresh),
+                                        // r89-5 (owner r89 #5: "word by word
+                                        // animation just massage receive er
+                                        // jonno thakbe send er jonno na").
+                                        fxLetterSpans(full, fxFresh && !mine),
                                         fontSize = 14.5.sp,
                                         lineHeight = 19.sp,
                                         color = bodyInk,

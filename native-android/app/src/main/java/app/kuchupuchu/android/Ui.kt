@@ -594,7 +594,11 @@ fun KpNetImage(
         }
         return
     }
-    val full = if (url.startsWith("http")) url else Api.BASE + url
+    // r89-2 (owner r89 #2: "fake fade effect add korecho - exactly oi media
+    // tai aste aste middle a ashe fullscreen a hobe"): the media page itself
+    // NEVER fades in - no crossfade, on any path. The tile's own pixels paint
+    // as the base layer and the full decode hard-swaps under the hero flight.
+        val full = if (url.startsWith("http")) url else Api.BASE + url
     val ctx = LocalContext.current
     androidx.compose.foundation.layout.Box(modifier) {
         if (placeholderBitmap != null) {
@@ -609,7 +613,7 @@ fun KpNetImage(
             // Bounded decode: the fullscreen viewer used to decode a 12MP photo
             // whole (~48MB spike) — tap a photo in a heavy chat and the app died.
             model =
-                ImageRequest.Builder(ctx).data(full).crossfade(placeholderBitmap == null).size(1200).apply {
+                ImageRequest.Builder(ctx).data(full).crossfade(false).size(1200).apply {
                     if (noCache) {
                         memoryCachePolicy(CachePolicy.DISABLED)
                         diskCachePolicy(CachePolicy.DISABLED)

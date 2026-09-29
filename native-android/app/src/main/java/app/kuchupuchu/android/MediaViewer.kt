@@ -636,11 +636,11 @@ fun KpPhotoViewer(
                                     heroSeat
                                 }
                             val t = hero.value
-                            // r79-3: during the close's last 45% the hero
-                            // fades OUT in the exact span the chat tile fades
-                            // IN - a seat that disagrees by a hair no longer
-                            // flashes a second copy below the landing photo.
-                            alpha = if (closing && t < 0.45f) (t / 0.45f).coerceIn(0f, 1f) else 1f
+                            // r89-2 (owner r89 #2): the close is the PURE
+                            // reverse flight - the hero itself never fades
+                            // out. The chat tile cross-fades in UNDERNEATH
+                            // (tileAlphaFor, invisible while the hero covers
+                            // it) which still guards the r79-3 duplicate.
                             if (h != null && t < 1f && size.width > 0f && size.height > 0f) {
                                 val sw = size.width
                                 val sh = size.height
@@ -1189,12 +1189,10 @@ fun VideoPlayerScreen(nav: NavController, b64: String, overlayClose: (() -> Unit
             .onGloballyPositioned { vidHeroLaidOut = true }
             .graphicsLayer {
                 val t = vidHero.value
-                alpha =
-                    when {
-                        vidHeroSeat != null && !vidHeroLaidOut -> 0f
-                        vidClosing && t < 0.45f -> (t / 0.45f).coerceIn(0f, 1f)
-                        else -> 1f
-                    }
+                // r89-2: the close is the PURE reverse flight - the player
+                // itself never fades out (the chat tile cross-fades
+                // underneath, invisible while the player covers it).
+                alpha = if (vidHeroSeat != null && !vidHeroLaidOut) 0f else 1f
                 if (vidHeroSeat != null && t < 1f && size.width > 0f && size.height > 0f) {
                     val h = vidHeroSeat
                     val s0 = maxOf(h.width / size.width, h.height / size.height)

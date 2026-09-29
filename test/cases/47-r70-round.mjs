@@ -1344,7 +1344,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
       media.includes("fun tileAlphaFor(id: String?): Float") &&
       media.includes("return if (t >= 0.45f) 0f else ((0.45f - t) / 0.45f).coerceIn(0f, 1f)") &&
       media.includes("PhotoHero.heroCloseT = if (closing) v else 0f") &&
-      media.includes("alpha = if (closing && t < 0.45f) (t / 0.45f).coerceIn(0f, 1f) else 1f") &&
+      // r89-2: the hero itself no longer fades on close (pure reverse
+      // flight); the cross-fade survives on the TILE side only.
+      !media.includes("alpha = if (closing && t < 0.45f)") &&
       chat.includes("alpha = PhotoHero.tileAlphaFor(") &&
       chat.includes(
         'val photoId = photo.optString("id").ifBlank { photo.optString("clientId") }',
@@ -1472,6 +1474,11 @@ const main = (f) => read(`${ANDROID}/${f}`);
 {
   const fx4 = main("ChatFx.kt");
   const media4 = main("MediaViewer.kt");
+  const ui4 = main("Ui.kt");
+  const notify4 = main("KpNotify.kt");
+  const pick4 = main("StatusPickScreen.kt");
+  const edit4 = main("MediaEditScreen.kt");
+  const settings4 = main("SettingsScreen.kt");
   const anim4 = main("EmojiAnim.kt");
   const voice4 = main("VoiceNote.kt");
   const worker4 = read("src/worker/index.ts");
@@ -1665,6 +1672,36 @@ const main = (f) => read(`${ANDROID}/${f}`);
           /tween\(460, easing = androidx\.compose\.animation\.core\.CubicBezierEasing\(0\.05f, 0\.7f, 0\.1f, 1f\)\)/g,
         ) || []
       ).length === 2,
+  );
+  check(
+    'r89-2 (owner r89 #2: "exactly oi media tai aste aste middle a ashe fullscreen a hobe ... fake fade effect add korecho"): the media page itself never fades - KpNetImage crossfade(false) on every path (the tile pixels are the base layer and the full decode hard-swaps under the flight), and the CLOSE is the pure reverse two-segment flight: neither the photo pager nor the video player fades its hero out any more (the chat tile cross-fades underneath, invisible while the hero covers it - the r79-3 duplicate guard survives on the tile side)',
+    ui4.includes(".crossfade(false)") &&
+      !media4.includes("alpha = if (closing && t < 0.45f)") &&
+      !media4.includes("vidClosing && t < 0.45f") &&
+      (media4.match(/lerp\(s0, sMid, u\)/g) || []).length === 2,
+  );
+
+  check(
+    'r89-3 (owner r89 #3: "amay keo massage send korle call ringtone 7 ta play hoi, ami massage tone onno ta set kore rakhleo"): on several OEM ROMs a channel deleted and recreated under the SAME id keeps its ORIGINAL sound (the tombstone) - the r76-25 recreate never changed the tone on those phones, so messages kept playing the channel\'s birth sound (an old call-style ring that trings ~7 times). Message cards now ride a PER-TONE channel id (kp_msg_t<index>, siblings swept) and kp_messages_v2 stays as the FCM fallback the system payload names',
+    notify4.includes(
+      'private fun toneChannelFor(ctx: Context): String = "kp_msg_t${SoundPrefs.notifIndex(ctx)}"',
+    ) &&
+      notify4.includes("for (i in SoundPrefs.notifRes.indices) {") &&
+      notify4.includes("if (muted) SILENT_CHANNEL else toneChannelFor(ctx)"),
+  );
+
+  check(
+    "r89-4 (owner r89 #4: system back = the PREVIOUS screen, everywhere): (a) the status media picker stays in the back stack - back from the editor without sharing returns to the picker (the popUpTo-inclusive that destroyed it is gone), and a real share pops editor+picker together; (b) Settings > Appearance > Sounds keeps the sounds screen under the ringtone picker - back from the picker returns to Sounds, not Appearance",
+    !pick4.includes('popUpTo("statuspick")') &&
+      edit4.includes('nav.popBackStack("statuspick", true)') &&
+      settings4.includes("soundKind = kind\n                showRingPicker = true") &&
+      !settings4.includes("onPick = { kind ->\n                showSoundType = false"),
+  );
+
+  check(
+    'r89-5 (owner r89 #5: "word by word animation just massage receive er jonno thakbe send er jonno na"): the letter-by-letter reveal gates on !mine - a sent message (pending echo AND the server row that replaces it) paints whole at once; only a RECEIVED message types itself in',
+    chat4.includes("fxLetterSpans(full, fxFresh && !mine)") &&
+      !chat4.includes("fxLetterSpans(full, fxFresh),"),
   );
 
   check(

@@ -182,9 +182,14 @@ fun StatusPickScreen(nav: NavController) {
                             // Owner round 37 (item 2): one tap = straight into
                             // the editor in status mode (no share screen).
                             ScreenStore.editTitle = "Status"
-                            nav.navigate("mediaedit/status/0/" + statusPickArg(item)) {
-                                popUpTo("statuspick") { inclusive = true }
-                            }
+                            // r89-4 (owner r89 #4: "share na korei back korle
+                            // direct ber kore dei, media select option a
+                            // thake na"): the picker STAYS in the back stack -
+                            // back from the editor without sharing returns
+                            // HERE (the previous screen), never out of the
+                            // flow. A real share pops the picker too
+                            // (sendStatus).
+                            nav.navigate("mediaedit/status/0/" + statusPickArg(item))
                         },
                     )
                 }
