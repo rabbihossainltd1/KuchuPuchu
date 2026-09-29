@@ -526,3 +526,47 @@ Owner: 1+2 not fixed, 3 fixed + new item (row unread count not centred in pill).
 - Prettier reformats pin files -> python heredoc old-strings copied from
   pre-prettier greps can mismatch; use small unique anchors with per-anchor
   asserts instead of one big block replace.
+
+## r84 round (shipped dc32fc6, CI success, APK kuchupuchu-3.9.177-r84.apk 254/3.9.177)
+Owner retest r83: 1 not fixed (4th failure), 2 fixed opening but close shows
+black (chat invisible, "photo er moto"), + 4 new items. All six shipped:
+- **#1 emoji first-send (r84-1)**: the ONE constant across r78/r81/r82/r83 was
+  the 600ms cap on the visibility wait - on the first send of a session the
+  list is still settling (page fill + newest snap + ime glide) and the row can
+  pass the cap OFF-SCREEN; the fallback armed there and burned the window.
+  Cap removed (wait is cancellable on dispose); layout callback only FLAGS
+  visibility (`armed = true`); clock starts only after the GLYPH is in hand:
+  new EmojiGlyphWarm (EmojiAnim.kt) - NotoEmojiWarm.store marks readiness
+  without a composition (send-time preload = no wait at all), the glyph
+  composable marks on composition landing, entrance waits via glyphReady
+  lambda (1.2s cap for never-seen emoji needing network). Multi-glyph rows
+  never wait.
+- **#2 video close black (r84-2)**: ROOT CAUSE - the player was a NAV ROUTE;
+  while a route is on top the chat destination is NOT composed, so the close
+  flight played against the nav host's black container (photo viewer is a
+  Dialog = chat alive behind). From the chat the player now rides an
+  in-compose Dialog: KpVideoOverlay (MediaViewer.kt) wraps VideoPlayerScreen
+  with new param overlayClose; closePlayer() replaces the 3 popBackStack
+  sites; ChatScreen onOpenVideo sets videoOverlayArg instead of navigating
+  (markViewerReturn call REMOVED there - chat never disposes, position
+  survives alone; count now 5). ChatMediaScreen keeps the route.
+- **#3 voice hold late (r84-3)**: MediaRecorder prepare()+start() ran ON MAIN
+  before recording=true (50-150ms dead time). Now UI + tone flip instantly,
+  VoiceNote.start runs on Dispatchers.IO, session guard (voiceSession++) in
+  finishRecording + VoiceNote.discard() (@Synchronized start/stop/discard)
+  for a hold ending mid-spin-up.
+- **#4 delivered tick (r84-4, worker)**: N4 REVERSED by owner rule - the tray
+  card IS delivery. pushMessageToMember: `const pushed = await pushToUser(...)`;
+  `if (live > 0 || pushed)` stamps delivered_at (gated on meta.changes>0) +
+  room "delivered" frame + pokeUserReceipt to the sender.
+- **#5 ringing (r84-5, worker)**: calls.reached_at (new column, tolerant
+  ALTER) stamped when FCM accepts the 1:1 ring push; callFrom's other.online
+  = onlineNow(other) || reached_at != null (CallScreens' otherOnline drives
+  "Ringing…" vs "Calling…").
+- **#6 open speed (r84-6)**: hero flights 400/300 -> 280/220ms (photo+video,
+  same emphasized curves) + video open lost the route push (r84-2).
+- Pins: 4 emoji pins RETARGETED (r78-6/8, r80-8, r81-6/8, r83-1 - signature,
+  call-site x3 vars, brace literal x2); 32-bots VideoPlayerScreen signature
+  literal updated; 6 new r84 pins (needs anim4/media4/voice4/worker4 reads).
+  Suite 47/47, 1939 assertions. NOTE: pin literals exist under MULTIPLE read
+  vars (chat/chat2/chat3) - grep the literal itself, not one var's includes.
