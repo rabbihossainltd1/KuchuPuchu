@@ -1364,6 +1364,11 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // is what the tapper's screen was when the reaction was
                     // tapped (older clients send no body, so it defaults true).
                     if (ev.optString("conversationId") == convId &&
+                        // r90-1 (owner r90 #1: "tap korle double animate
+                        // hoi"): the room echo reaches the tapper's own
+                        // socket too - skip OUR tap (the local replay already
+                        // played); only the other side mirrors.
+                        ev.optString("senderId") != Store.myId() &&
                         ev.optBoolean("fromChat", true) &&
                         Store.foreground &&
                         EmojiFxPolicy.mirrorsOnScreen(Store.route, convId) &&
@@ -3103,6 +3108,69 @@ fun ChatScreen(nav: NavController, convId: String) {
             }.firstOrNull() ?: rawTitle
     // Owner round 31: groups carry their own picture (avatarRef "g:<id>@vN").
     val avatarUrl = if (isGroup) c?.optIso("avatarUrl") else c?.optJSONObject("other")?.optIso("avatarUrl")
+    // r90-5 (owner r90 #5: "onno app a jemon screenshot ba copied image paste
+    // kora jai amar app a o same kore daw"): a clipboard that holds a picture
+    // (a copied screenshot / image) opens the media editor in CHAT mode -
+    // exactly the single-photo pick from the attach panel: copy the picture,
+    // come back to the chat (or copy from a split screen) and the editor is
+    // up with it - edit, Send. A clip is consumed once (ScreenStore) and only
+    // while it is fresh (10 minutes); text clips are ignored entirely.
+    val clipboardMgr = remember { ctx.getSystemService(android.content.ClipboardManager::class.java) }
+    fun consumeClipboardImage() {
+        val clip = runCatching { clipboardMgr?.primaryClip }.getOrNull() ?: return
+        if (clip.itemCount == 0) return
+        val desc = clip.description
+        var imageMime: String? = null
+        for (i in 0 until desc.mimeTypeCount) {
+            val mm = desc.getMimeTypeAt(i)
+            if (mm.startsWith("image/")) {
+                imageMime = mm
+                break
+            }
+        }
+        val mime = imageMime ?: return
+        val uri = runCatching { clip.getItemAt(0).uri }.getOrNull() ?: return
+        val stamp = if (android.os.Build.VERSION.SDK_INT >= 26) desc.timestamp else 0L
+        if (stamp > 0L && System.currentTimeMillis() - stamp > 600_000L) return
+        val clipKey = "$stamp|$uri"
+        if (ScreenStore.lastPasteClipKey == clipKey) return
+        ScreenStore.lastPasteClipKey = clipKey
+        scope.launch {
+            val bytes =
+                withContext(Dispatchers.IO) {
+                    runCatching { ctx.contentResolver.openInputStream(uri)?.use { s -> s.readBytes() } }.getOrNull()
+                }
+            if (bytes == null || bytes.isEmpty()) return@launch
+            val ext = when {
+                mime.contains("png") -> "png"
+                mime.contains("webp") -> "webp"
+                else -> "jpg"
+            }
+            val fileUri = FilesUtil.cacheFile(ctx, "paste.$ext", bytes, mime)
+            ScreenStore.editTitle = title
+            markViewerReturn()
+            nav.navigate("mediaedit/$convId/0/${statusPickArg(MediaItem(fileUri, false, 0, "", System.currentTimeMillis()))}")
+        }
+    }
+    DisposableEffect(convId) {
+        val clipListener = android.content.ClipboardManager.OnPrimaryClipChangedListener {
+            android.os.Handler(android.os.Looper.getMainLooper()).post { consumeClipboardImage() }
+        }
+        runCatching { clipboardMgr?.addPrimaryClipChangedListener(clipListener) }
+        val lifecycleObs = object : androidx.lifecycle.LifecycleEventObserver {
+            override fun onStateChanged(
+                owner: androidx.lifecycle.LifecycleOwner,
+                event: androidx.lifecycle.Lifecycle.Event,
+            ) {
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) consumeClipboardImage()
+            }
+        }
+        MainActivity.current?.lifecycle?.addObserver(lifecycleObs)
+        onDispose {
+            runCatching { clipboardMgr?.removePrimaryClipChangedListener(clipListener) }
+            MainActivity.current?.lifecycle?.removeObserver(lifecycleObs)
+        }
+    }
     // The ref is what makes the header paint without re-fetching: pass it too.
     val avatarRef = if (isGroup) c?.optIso("avatarRef") else c?.optJSONObject("other")?.optIso("avatarRef")
     // r69: the mute's two halves for this chat — the header glyph, the hidden
@@ -7497,7 +7565,11 @@ private fun MessageRow(
     //             (clientId, else the server id). The pending echo and the
     //             painted server row share that key, so the row flies in at
     //             birth (still sending) and the swap only takes the seat.
-    val fxKey = m.optString("clientId").ifBlank { m.optString("id") }
+    // r90-1 (owner r90 #1: "emojis double animate hoi sending a"): the row's
+    // dance key is FROZEN at its first composition - the pending -> server
+    // swap can never mint a second EmojiDance clock, so a birth pass can
+    // never restart from zero on a living row.
+    val fxKey = remember { m.optString("clientId").ifBlank { m.optString("id") } }
     // r76-25 (owner: "eto slow keno emojis massage chat aste?"): back to
     // r67-3 — the flight belongs to the row's BIRTH, so the message appears
     // INSTANTLY when sent. What killed r67-3 for the owner was the flight
@@ -8059,10 +8131,12 @@ private fun MessageRow(
                                     )
                                 } else {
                                     Text(
-                                        // r89-5 (owner r89 #5: "word by word
-                                        // animation just massage receive er
-                                        // jonno thakbe send er jonno na").
-                                        fxLetterSpans(full, fxFresh && !mine),
+                                        // r90-4 (owner r90 #4: "massage
+                                        // sending receive a light effect ta
+                                        // remove koro"): the letter-by-letter
+                                        // reveal is gone - a message paints
+                                        // whole at once, sent or received.
+                                        full,
                                         fontSize = 14.5.sp,
                                         lineHeight = 19.sp,
                                         color = bodyInk,

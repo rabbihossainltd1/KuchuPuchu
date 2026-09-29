@@ -9933,6 +9933,13 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         conversationId: row.conv_id,
         mid: row.id,
         fromChat,
+        // r90-1 (owner r90 #1: "emojis double animate hoi ... tap korle
+        // double animate hoi"): the room echo reaches the tapper's own socket
+        // too - the frame now names who tapped, so a phone can skip its OWN
+        // tap (the local replay already played) and only the other side
+        // mirrors. An older build that never reads this field keeps the
+        // behaviour it had.
+        senderId: uid,
         at: nowIso(),
       }),
     );

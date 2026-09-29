@@ -164,7 +164,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
     fx.includes("object FxFlights") &&
       fx.includes("fun claim(key: String): Boolean") &&
       fx.includes("if (claimed.containsKey(key)) return false") &&
-      chat.includes('val fxKey = m.optString("clientId").ifBlank { m.optString("id") }'),
+      chat.includes(
+        'val fxKey = remember { m.optString("clientId").ifBlank { m.optString("id") } }',
+      ),
   );
   check(
     // r76-25 (owner: "eto slow keno emojis massage chat aste?"): back to the

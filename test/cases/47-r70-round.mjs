@@ -986,12 +986,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
       viewer.includes("object PhotoHero {") &&
       viewer.includes("heroFrom: androidx.compose.ui.geometry.Rect? = null,") &&
       viewer.includes("val heroSeat = remember { heroFrom }") &&
-      // r81-3: emphasized open
-      viewer.includes(
-        "tween(460, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f))",
-      ) &&
+      // r90-2: one linear pass now
+      viewer.includes("tween(320, easing = androidx.compose.animation.core.LinearEasing)") &&
       // r76-30: uniform scale now.
-      viewer.includes("scaleX = androidx.compose.ui.util.lerp(s0, sMid, u)") &&
+      viewer.includes("scaleX = androidx.compose.ui.util.lerp(s0, 1f, t)") &&
       chat.includes("hostView.getLocationOnScreen(loc)") &&
       chat.includes("heroFrom = PhotoHero.take(),") &&
       chat.includes("PhotoHero.lastId = null") &&
@@ -1029,10 +1027,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
       worker.includes("...(fetchedSrc ? { src: fetchedSrc } : {}),") &&
       viewer.includes("w.setDimAmount(0f)") &&
       viewer.includes("val dismiss: () -> Unit = {") &&
-      // r81-3: emphasized close
-      viewer.includes(
-        "tween(400, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f))",
-      ) &&
+      // r90-2: linear close now
+      viewer.includes("tween(320, easing = androidx.compose.animation.core.LinearEasing)") &&
       viewer.includes("onDismissRequest = dismiss,") &&
       viewer.includes("alpha = dim * hero.value") &&
       status.includes(".padding(vertical = 4.dp)") &&
@@ -1057,7 +1053,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes("internal fun photoUrlOf(m: JSONObject): String? =") &&
       !chat.includes("if (src.startsWith") &&
       viewer.includes("val s0 = maxOf(h.width / sw, h.height / sh)") &&
-      viewer.includes("scaleX = androidx.compose.ui.util.lerp(s0, sMid, u)") &&
+      viewer.includes("scaleX = androidx.compose.ui.util.lerp(s0, 1f, t)") &&
       status.includes("BackHandler(enabled = replyFocused)") &&
       status.includes("foldReplyKeyboard()") &&
       status.includes("hideSoftInputFromWindow(replyImeView.windowToken, 0)"),
@@ -1097,7 +1093,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
     chat.includes("if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)") &&
       !chat.includes("!pendingEcho && fxBorn) FlightAnims.armIn(fxKey, 500L") &&
       flight.includes("if (f.goAt >= 0L) return false") &&
-      chat.includes('val fxKey = m.optString("clientId").ifBlank { m.optString("id") }'),
+      chat.includes(
+        'val fxKey = remember { m.optString("clientId").ifBlank { m.optString("id") } }',
+      ),
   );
 }
 
@@ -1179,7 +1177,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
     // r81-8 emoji-only rows arrive unarmed now (self-arm after the
     // viewport gate); the birth arm below stays for every other kind.
     chat.includes("if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)") &&
-      chat.includes('val fxKey = m.optString("clientId").ifBlank { m.optString("id") }') &&
+      chat.includes(
+        'val fxKey = remember { m.optString("clientId").ifBlank { m.optString("id") } }',
+      ) &&
       chat.includes("val fxEmoji = fxBorn"),
   );
 }
@@ -1432,13 +1432,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
-    'r81-3a smoothness (owner: "animation ta smooth hobe"): the open/close flights traded the fast-out punch for the Material emphasized pair - decelerate (0.05,0.7,0.1,1) over 400 ms on the way in, accelerate (0.3,0,0.8,0.15) over 300 ms on the way out; the photo viewer and the video player share the same pair',
+    'r81-3a smoothness (owner: "animation ta smooth hobe"): the open/close flights traded the fast-out punch for the Material emphasized pair - decelerate (0.05,0.7,0.1,1) over 400 ms on the way in, accelerate (0.3,0,0.8,0.15) over 300 ms on the way out; the photo viewer and the video player share the same pair (r90-2 supersedes: ONE linear 320 ms pass each way)',
     media3.includes(
-      "hero.animateTo(\n                1f,\n                tween(460, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f))",
-    ) &&
-      media3.includes(
-        "tween(400, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f))",
-      ),
+      "hero.animateTo(\n                1f,\n                tween(320, easing = androidx.compose.animation.core.LinearEasing)",
+    ) && media3.includes("tween(320, easing = androidx.compose.animation.core.LinearEasing)"),
   );
 
   check(
@@ -1563,16 +1560,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
 
   check(
     "r84-6 (owner r84 #6: \"photo open korle late open hoi video o same super fast hobe\"): the hero open/close flights shortened to the same emphasized curves over 280 ms in and 220 ms out (was 400/300) - the open's first frame was already the tile's own pixels (r80-3), so the remaining latency was the flight length itself",
-    (
-      media4.match(
-        /tween\(460, easing = androidx\.compose\.animation\.core\.CubicBezierEasing\(0\.05f, 0\.7f, 0\.1f, 1f\)\)/g,
-      ) || []
-    ).length === 2 &&
-      (
-        media4.match(
-          /tween\(400, easing = androidx\.compose\.animation\.core\.CubicBezierEasing\(0\.3f, 0f, 0\.8f, 0\.15f\)\)/g,
-        ) || []
-      ).length === 2 &&
+    (media4.match(/tween\(320, easing = androidx\.compose\.animation\.core\.LinearEasing\)/g) || [])
+      .length === 4 &&
       !media4.includes(
         "tween(300, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f))",
       ) &&
@@ -1597,11 +1586,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
 
   check(
     'r85-4 (owner r85 #6: "super fast hoini instant"): the hero OPEN flight shortened again - 280 ms to 180 ms (same emphasized decelerate curve) on both the photo viewer and the video overlay; close keeps its 220 ms',
-    (
-      media4.match(
-        /tween\(460, easing = androidx\.compose\.animation\.core\.CubicBezierEasing\(0\.05f, 0\.7f, 0\.1f, 1f\)\)/g,
-      ) || []
-    ).length === 2,
+    (media4.match(/tween\(320, easing = androidx\.compose\.animation\.core\.LinearEasing\)/g) || [])
+      .length === 4,
   );
   check(
     'r87-1 (retargeted r88-1; owner r87 #1: "sending er somoy hoi thik ache but sent hobar por abar reanimate keno ... send sending sent zero gap"): the birth dance is GLOBAL and TIME-BASED per message key - EmojiDance (begin idempotent, progress off the wall clock), the same swap-proof pattern the row flights ride. The pending echo starts the clock the moment its glyph composition is in hand; the server row that takes the seat keys on the SAME stable fxKey (clientId-first, handed down EmojiGlyphRow danceKey -> NotoEmojiGlyph -> NotoAnimatedEmoji liveDanceKey) and renders at the CURRENT global frame - no restart, no freeze, no second pass. A cold glyph starts the clock the moment its composition lands; taps keep the local replay (replayKey seeds 0 now); history rows never dance',
@@ -1618,17 +1604,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
-    'r87-2 (superseded by r88-2; owner r87 #2: "animation ta smooth koro hotath open hoi hotath close hoi smooth na ... once view soho chat a all medias same animation hobe"): the 180 ms open read as a snap (the r84-r85 speed hunt overshot); the flights moved to 460 ms in / 400 ms out and r88-2 made the path TWO-segment (tile -> centre at 58% -> fullscreen). The photo viewer, the video overlay and the view-once photo pages share the one composable, so every chat media (once included) plays the identical flight',
-    (
-      media4.match(
-        /tween\(460, easing = androidx\.compose\.animation\.core\.CubicBezierEasing\(0\.05f, 0\.7f, 0\.1f, 1f\)\)/g,
-      ) || []
-    ).length === 2 &&
-      (
-        media4.match(
-          /tween\(400, easing = androidx\.compose\.animation\.core\.CubicBezierEasing\(0\.3f, 0f, 0\.8f, 0\.15f\)\)/g,
-        ) || []
-      ).length === 2 &&
+    'r87-2 (superseded by r88-2; owner r87 #2: "animation ta smooth koro hotath open hoi hotath close hoi smooth na ... once view soho chat a all medias same animation hobe"): the 180 ms open read as a snap (the r84-r85 speed hunt overshot); the flights moved to 460 ms in / 400 ms out and r88-2 made the path TWO-segment (tile -> centre at 58% -> fullscreen) - r90-2 supersedes both: ONE linear 320 ms pass each way. The photo viewer, the video overlay and the view-once photo pages share the one composable, so every chat media (once included) plays the identical flight',
+    (media4.match(/tween\(320, easing = androidx\.compose\.animation\.core\.LinearEasing\)/g) || [])
+      .length === 4 &&
       !media4.includes(
         "tween(180, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f))",
       ),
@@ -1663,22 +1641,23 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
-    'r88-2 (owner r88 #2: "sundor kore asbe first middle a then Fullscreen hobe aste aste - hotath korei halka animation er sathe rudely open hobe na"): the hero is a TWO-SEGMENT flight - the picture leaves the tile and arrives at the screen\'s CENTRE at 58% size, then grows on to fullscreen, each segment on its own emphasized curve (uniform scale, the ratio holds - r76-30). 460 ms in / 400 ms out. The photo viewer, the video overlay and the view-once photo pages share the same literals, so every chat media (once included) plays the identical flight',
-    (media4.match(/lerp\(s0, sMid, u\)/g) || []).length === 2 &&
-      (media4.match(/lerp\(sMid, 1f, v\)/g) || []).length === 2 &&
-      media4.includes("val sMid = 0.58f") &&
+    'r90-2 (owner r90 #2: "middle theke zoom in hocche Only ar middle a fast asche Fullscreen hocche slow but shob time speed same Hobe closing o fast same koro ar smoothly shob shortcut na"): the two-segment hop is GONE - the hero is ONE continuous linear flight (position and scale travel together at the same constant speed, tile -> fullscreen, uniform scale so the ratio holds - r76-30), and the close is the same 320 ms pass played backwards at the same speed. The photo viewer and the video overlay share the literals, so every chat media (once included) plays the identical flight',
+    !media4.includes("sMid") &&
+      !media4.includes("tween(460") &&
+      !media4.includes("tween(400") &&
+      (media4.match(/lerp\(s0, 1f, t\)/g) || []).length === 2 &&
+      (media4.match(/lerp\(h\.center\.x - sw \/ 2f, 0f, t\)/g) || []).length === 1 &&
+      (media4.match(/lerp\(h\.center\.x - size\.width \/ 2f, 0f, t\)/g) || []).length === 1 &&
       (
-        media4.match(
-          /tween\(460, easing = androidx\.compose\.animation\.core\.CubicBezierEasing\(0\.05f, 0\.7f, 0\.1f, 1f\)\)/g,
-        ) || []
-      ).length === 2,
+        media4.match(/tween\(320, easing = androidx\.compose\.animation\.core\.LinearEasing\)/g) ||
+        []
+      ).length === 4,
   );
   check(
-    'r89-2 (owner r89 #2: "exactly oi media tai aste aste middle a ashe fullscreen a hobe ... fake fade effect add korecho"): the media page itself never fades - KpNetImage crossfade(false) on every path (the tile pixels are the base layer and the full decode hard-swaps under the flight), and the CLOSE is the pure reverse two-segment flight: neither the photo pager nor the video player fades its hero out any more (the chat tile cross-fades underneath, invisible while the hero covers it - the r79-3 duplicate guard survives on the tile side)',
+    'r89-2 (owner r89 #2: "exactly oi media tai aste aste middle a ashe fullscreen a hobe ... fake fade effect add korecho"): the media page itself never fades - KpNetImage crossfade(false) on every path (the tile pixels are the base layer and the full decode hard-swaps under the flight), and the CLOSE is the pure reverse flight (r90-2 made it one linear pass): neither the photo pager nor the video player fades its hero out any more (the chat tile cross-fades underneath, invisible while the hero covers it - the r79-3 duplicate guard survives on the tile side)',
     ui4.includes(".crossfade(false)") &&
       !media4.includes("alpha = if (closing && t < 0.45f)") &&
-      !media4.includes("vidClosing && t < 0.45f") &&
-      (media4.match(/lerp\(s0, sMid, u\)/g) || []).length === 2,
+      !media4.includes("vidClosing && t < 0.45f"),
   );
 
   check(
@@ -1699,9 +1678,33 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
-    'r89-5 (owner r89 #5: "word by word animation just massage receive er jonno thakbe send er jonno na"): the letter-by-letter reveal gates on !mine - a sent message (pending echo AND the server row that replaces it) paints whole at once; only a RECEIVED message types itself in',
-    chat4.includes("fxLetterSpans(full, fxFresh && !mine)") &&
-      !chat4.includes("fxLetterSpans(full, fxFresh),"),
+    'r90-4 (owner r90 #4: "massage sending receive a light effect ta remove koro"): the letter-by-letter reveal is GONE - no fxLetterSpans call on the bubble any more (a message paints whole at once, sent or received) and the helper itself is deleted from ChatFx; the row flight (fxFlyIn / fxFresh) is a different effect and stays',
+    !chat4.includes("fxLetterSpans") &&
+      !fx4.includes("fun fxLetterSpans") &&
+      chat4.includes("r90-4") &&
+      chat4.includes("val fxFresh = remember { fxBorn && FxFlights.claim(fxKey) }"),
+  );
+
+  check(
+    "r90-1 (owner r90 #1: \"emojis double animate hoi sending a abar chat er emojis a tap korle double animate hoi\"): the tap double was the room echo - the tapper's own /fx frame came back and the phone mirrored its own tap as a SECOND pass. The frame now carries senderId and the handler skips its own; the send double is the same family - the row's dance key is FROZEN at first composition (remember), so a pending->server swap can never mint a second EmojiDance clock and a birth pass never restarts from zero. The r88-1 single driver itself is untouched",
+    worker4.includes("senderId: uid,") &&
+      chat4.includes('ev.optString("senderId") != Store.myId()') &&
+      chat4.includes(
+        'val fxKey = remember { m.optString("clientId").ifBlank { m.optString("id") } }',
+      ) &&
+      anim4.includes("EmojiDance.begin(liveDanceKey)"),
+  );
+
+  check(
+    'r90-5 (owner r90 #5: "onno app a jemon screenshot ba copied image paste kora jai amar app a o same kore daw ... same temon kore daw"): a clipboard image (copied screenshot / picture) opens the media editor in CHAT mode exactly like a single-photo pick from the attach panel - the chat watches the clipboard (a clip listener while the screen lives + ON_RESUME for the copy-then-switch flow), caches the bytes via FilesUtil.cacheFile and navigates mediaedit/$convId/0/... with statusPickArg (MediaItem); a clip is consumed once (ScreenStore.lastPasteClipKey) and only while fresh (10 minutes)',
+    chat4.includes("OnPrimaryClipChangedListener") &&
+      chat4.includes("Lifecycle.Event.ON_RESUME") &&
+      chat4.includes("consumeClipboardImage()") &&
+      chat4.includes(
+        'nav.navigate("mediaedit/$convId/0/${statusPickArg(MediaItem(fileUri, false, 0, "", System.currentTimeMillis()))}")',
+      ) &&
+      chat4.includes('FilesUtil.cacheFile(ctx, "paste.$ext", bytes, mime)') &&
+      store4.includes("var lastPasteClipKey: String? = null"),
   );
 
   check(

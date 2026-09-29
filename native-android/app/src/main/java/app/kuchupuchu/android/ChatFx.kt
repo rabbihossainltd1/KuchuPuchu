@@ -31,11 +31,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -524,40 +521,6 @@ fun Modifier.fxHistoryUnfurl(
         } else {
             translationY = 0f
             alpha = 1f
-        }
-    }
-}
-
-/* ------------------------------------------------------ letter-by-letter */
-
-/**
- * The received TEXT reveal: the full body is laid out once (its real size is
- * reserved from the first frame) and letters fade / spring in with an 18 ms
- * stagger - per-character alpha spans, so line breaks never move.
- */
-@Composable
-fun fxLetterSpans(text: String, active: Boolean): AnnotatedString {
-    val scale = fxAnimatorScale()
-    var revealed by remember { mutableStateOf(if (active && scale > 0f) 0 else text.length) }
-    LaunchedEffect(active, text) {
-        if (!active || scale <= 0f) {
-            revealed = text.length
-            return@LaunchedEffect
-        }
-        revealed = 0
-        var i = 0
-        while (i < text.length) {
-            kotlinx.coroutines.delay(18)
-            i++
-            revealed = i
-        }
-    }
-    return buildAnnotatedString {
-        if (revealed >= text.length) {
-            append(text)
-        } else {
-            append(text)
-            addStyle(SpanStyle(color = Color(0x00000000)), revealed, text.length)
         }
     }
 }

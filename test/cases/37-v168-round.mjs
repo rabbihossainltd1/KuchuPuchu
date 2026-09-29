@@ -179,7 +179,7 @@ check(
 const fx7 = kt("ChatFx.kt");
 const emo = kt("EmojiAnim.kt");
 check(
-  "v200 item 2 (Noto): ChatFx keeps slot/letter/blur/landing/shine/pop/progress + FxArrivals, but old custom emoji registry is gone (now Noto Lottie). EmojiAnim.kt hosts NotoAnimatedEmoji + emojiToCodepoint + Lottie asset",
+  "v200 item 2 (Noto): ChatFx keeps slot/blur/landing/shine/pop/progress + FxArrivals (the letter reveal is deleted - r90-4, the owner removed the send/receive light effect), but old custom emoji registry is gone (now Noto Lottie). EmojiAnim.kt hosts NotoAnimatedEmoji + emojiToCodepoint + Lottie asset",
   !fx7.includes("object EmojiAnimationRegistry") &&
     !fx7.includes("enum class EmojiFx") &&
     !fx7.includes("data class EmojiAnim(") &&
@@ -187,7 +187,7 @@ check(
     fx7.includes("Noto animated emoji") &&
     fx7.includes("object FxArrivals") &&
     fx7.includes("fun Modifier.fxSlotOpen") &&
-    fx7.includes("fun fxLetterSpans") &&
+    !fx7.includes("fun fxLetterSpans") &&
     fx7.includes("fun fxAnimatorScale") &&
     fx7.includes("fun fxScaleOf") &&
     fx7.includes("ANIMATOR_DURATION_SCALE") &&
@@ -219,7 +219,7 @@ check(
     chat.includes("FxArrivals.armed = false") &&
     chat.includes("if (msgs.isNotEmpty()) FxArrivals.armed = true") &&
     chat.includes(".fxSlotOpen(fxFresh)") &&
-    chat.includes("fxLetterSpans(full, fxFresh && !mine)") &&
+    !chat.includes("fxLetterSpans") &&
     (chat.includes('EmojiGlyphRow(m.optText("body").trim(), 66f, fxEmoji, m.optString("id"))') ||
       chat.includes('EmojiGlyphRow(m.optText("body").trim(), 66f, fxEmoji, m.optString("id"),') ||
       chat.includes('EmojiGlyphRow(m.optText("body").trim(), 66f, fxFresh, m.optString("id"))') ||

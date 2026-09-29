@@ -92,8 +92,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes("showAttach || showStickers || showSchedule || showScheduled ||") &&
       chat.includes("showChatSearch || showDisappear || showTheme || showDeselect ||") &&
       chat.includes("editing != null || forwarding") &&
-      // the gate itself, in that order: conv, fromChat, foreground, route, covers
-      /if \(ev\.optString\("conversationId"\) == convId &&[\s\S]{0,400}?mirrorsOnScreen\(Store\.route, convId\) &&[\s\S]{0,200}?!threadCovered\(\)[\s\S]{0,40}?\) \{/.test(
+      // the gate itself, in that order: conv, senderId-skip (r90-1), fromChat,
+      // foreground, route, covers
+      /if \(ev\.optString\("conversationId"\) == convId &&[\s\S]{0,700}?mirrorsOnScreen\(Store\.route, convId\) &&[\s\S]{0,200}?!threadCovered\(\)[\s\S]{0,40}?\) \{/.test(
         chat,
       ) &&
       // and the covers really are composed by this screen (a nav route would

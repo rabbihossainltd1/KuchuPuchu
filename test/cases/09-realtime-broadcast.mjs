@@ -485,6 +485,14 @@ async function mk(withDo, pokeSent = 0) {
     tapBare.status === 200 && !!bare && bare.body.fromChat === true,
     JSON.stringify(bare?.body),
   );
+  k.broadcasts.length = 0;
+  const tapOwn = await k.call("POST", `/api/messages/${m}/fx`, { onChat: true }, b.token);
+  const ownFrame = k.broadcasts.find((x) => x.body.type === "emoji_fx");
+  check(
+    'r90-1 (owner r90 #1: "emojis double animate hoi ... tap korle double animate hoi"): the frame carries the tapper\'s own id (senderId) — the tapping phone skips its own echo instead of replaying the dance a second time',
+    tapOwn.status === 200 && !!ownFrame && ownFrame.body.senderId === b.user.id,
+    JSON.stringify(ownFrame?.body),
+  );
 }
 
 console.log(lines.join("\n"));

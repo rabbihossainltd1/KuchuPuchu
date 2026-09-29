@@ -360,6 +360,9 @@ object ScreenStore {
      *  ekbare ber hobe na attach panel ei thakbe"). */
     var reopenAttach = false
 
+    /** r90-5: the last clipboard image this device consumed into the editor. */
+    var lastPasteClipKey: String? = null
+
     // r79-5 (owner retest: "attach panel a i thakche but selected media
     // selected thakche na"): the mediaedit detour is a nav ROUTE, and pushing
     // it kills the chat composition below - every plain `remember` there died
