@@ -3122,7 +3122,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         val desc = clip.description
         var imageMime: String? = null
         for (i in 0 until desc.mimeTypeCount) {
-            val mm = desc.getMimeTypeAt(i)
+            val mm = desc.getMimeType(i)
             if (mm.startsWith("image/")) {
                 imageMime = mm
                 break
