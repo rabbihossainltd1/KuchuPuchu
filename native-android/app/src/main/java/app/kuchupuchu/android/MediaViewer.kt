@@ -309,7 +309,7 @@ fun KpPhotoViewer(
             // fast-out punch. Decelerate-emphasized open.
             hero.animateTo(
                 1f,
-                tween(280, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)),
+                tween(180, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)),
             )
         }
     }
@@ -845,6 +845,20 @@ fun KpVideoOverlay(nav: NavController, arg: String, onClose: () -> Unit) {
         onDismissRequest = onClose,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
+        // r85-2 (owner r85 #2: "ekhon full black background na tobe dim
+        // black mone hocche"): the dialog's PLATFORM dim was the leftover
+        // grey-black behind the fading player. Off - exactly the photo
+        // viewer's rule (its own background fades with the hero instead, and
+        // the player below now does the same).
+        val dialogWindow = (androidx.compose.ui.platform.LocalView.current.parent
+            as? androidx.compose.ui.window.DialogWindowProvider)
+            ?.window
+        androidx.compose.runtime.SideEffect {
+            dialogWindow?.let { w ->
+                w.setDimAmount(0f)
+                androidx.core.view.WindowCompat.getInsetsController(w, w.decorView).isAppearanceLightStatusBars = false
+            }
+        }
         VideoPlayerScreen(nav, arg, overlayClose = onClose)
     }
 }
@@ -923,7 +937,7 @@ fun VideoPlayerScreen(nav: NavController, b64: String, overlayClose: (() -> Unit
         if (vidHeroLaidOut && vidHeroSeat != null) {
             vidHero.animateTo(
                 1f,
-                tween(280, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)),
+                tween(180, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)),
             )
         }
     }
@@ -1169,7 +1183,10 @@ fun VideoPlayerScreen(nav: NavController, b64: String, overlayClose: (() -> Unit
                     translationY = androidx.compose.ui.util.lerp(h.center.y - size.height / 2f, 0f, t)
                 }
             }
-            .background(Color.Black)
+            // r85-2: the backdrop fades WITH the hero (photo viewer rule) -
+            // open brings the black up as the clip grows, close drains it
+            // back out over the live chat instead of leaving a dim slab.
+            .background(Color.Black.copy(alpha = if (vidHeroSeat != null) vidHero.value else 1f))
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = { chrome = !chrome },

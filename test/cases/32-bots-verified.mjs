@@ -9908,7 +9908,7 @@ const convBetween = (db, a, b) =>
       );
     }
     check(
-      "r33-11b: chat — the attach and sticker panels pop up (Box(Modifier.popUp())); a cancelled recording bumps voiceBinNonce and the bar STAYS for 900 ms (r75-9 swallow: the small dustbin sits where the clock was, the mic glyph flies into its open mouth straight down, the lid shuts) before the pill returns",
+      "r33-11b: chat — the attach and sticker panels pop up (Box(Modifier.popUp())); a cancelled recording bumps voiceBinNonce and the bar STAYS for 420 ms (r75-9 swallow / r85-3: the small dustbin sits where the clock was, the mic glyph flies into its open mouth straight down, the lid shuts - twice as fast as the old 900 ms amble) before the pill returns",
       (chat.match(/Box\(Modifier\.popUp\(\)/g) || []).length === 2 &&
         chat.includes("attachPanelBounds[0] = it.boundsInWindow()") &&
         chat.includes("var voiceBinNonce by remember { mutableStateOf(0) }") &&
@@ -9917,9 +9917,7 @@ const convBetween = (db, a, b) =>
         ) &&
         chat.includes("voiceBinNonce = voiceBinNonce,") &&
         chat.includes("    voiceBinNonce: Int = 0,") &&
-        chat.includes(
-          "            binPlaying = true\n            swallowT.snapTo(0f)\n            swallowT.animateTo(1f, tween(900, easing = LinearEasing))\n            binPlaying = false",
-        ) &&
+        chat.includes("swallowT.animateTo(1f, tween(420, easing = LinearEasing))") &&
         chat.includes("        if (binPlaying && !recording) {") &&
         chat.includes("internal fun SmallDustbin(") &&
         chat.includes("private fun RecorderFloatOverlay(") &&

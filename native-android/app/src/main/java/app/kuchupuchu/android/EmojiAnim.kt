@@ -129,12 +129,7 @@ internal object NotoEmojiWarm {
 
     fun store(cacheKey: String, comp: com.airbnb.lottie.LottieComposition) {
         synchronized(comps) { comps[cacheKey] = comp }
-        val code = cacheKey.removePrefix("noto-emoji/").removeSuffix(".json")
-        warmed.add(code)
-        // r84-1: the send-time preloader marks readiness WITHOUT any
-        // composition - the entrance must not wait on a glyph we already
-        // hold. (Compose snapshot state; safe to write from this pool.)
-        EmojiGlyphWarm.mark(code)
+        warmed.add(cacheKey.removePrefix("noto-emoji/").removeSuffix(".json"))
     }
 
     fun preload(ctx: android.content.Context, body: String) {
@@ -166,28 +161,6 @@ internal object NotoEmojiWarm {
                 }
             }
         }
-    }
-}
-
-/**
- * r84-1 (owner r84 #1: "emoji ekhono first time animates hoi na"): the
- * readiness signal an emoji row's entrance waits on - the Lottie composition
- * for the row's single glyph is in hand (warm cache or loaded). The entrance
- * must not spend its window on the system-emoji fallback and then swap.
- */
-internal object EmojiGlyphWarm {
-    var ready: Set<String> by androidx.compose.runtime.mutableStateOf(emptySet())
-        private set
-
-    fun mark(codepoint: String) {
-        if (codepoint.isNotBlank()) ready = ready + codepoint
-    }
-
-    /** A multi-glyph row never waits; a single-glyph row waits for its glyph. */
-    fun isReady(body: String): Boolean {
-        val clusters = splitEmojiClusters(body)
-        if (clusters.size != 1) return true
-        return emojiToCodepoint(clusters[0]) in ready
     }
 }
 
@@ -285,11 +258,6 @@ internal fun NotoAnimatedEmoji(
                 }
                 .addFailureListener { if (cont.isActive) cont.resumeWith(Result.success(null)) }
         }
-    }
-    // r84-1: publish readiness - the emoji row's entrance waits on this
-    // (fxEmojiEntrance's glyphReady) so its window plays on the REAL glyph.
-    androidx.compose.runtime.LaunchedEffect(composition) {
-        if (composition != null) EmojiGlyphWarm.mark(codepoint)
     }
     val animatable = rememberLottieAnimatable()
     var isPlaying by remember(emoji) { mutableStateOf(false) }

@@ -5524,7 +5524,10 @@ private fun Composer(
         if (voiceBinNonce > 0) {
             binPlaying = true
             swallowT.snapTo(0f)
-            swallowT.animateTo(1f, tween(900, easing = LinearEasing))
+            // r85-3 (owner r85 #3: "voice cancel animation ta fast koto
+            // ekhon slow ache"): 900 ms linear read as a lazy amble - the
+            // swallow (flyer + lid) now spends 420 ms end to end.
+            swallowT.animateTo(1f, tween(420, easing = LinearEasing))
             binPlaying = false
         }
     }
@@ -7530,11 +7533,11 @@ private fun MessageRow(
     // row finds the same fxKey flight (time-based, global - r76-25) mid-air
     // or done, the first arm always wins, and the sending->sent swap is a
     // silent seat swap. ONE motion per send, never two.
-    if (mine && fxBorn && !(kind == "TEXT" && emojiOnlyCount(m.optText("body")) > 0)) FlightAnims.armIn(fxKey, 0L)
-    // r81-8: emoji-only rows deliberately do NOT arm here - fxEmojiEntrance
-    // self-arms only after its seat is inside the list viewport (r76-21
-    // gate), otherwise an armed-at-composition clock runs out before the row
-    // is on screen (the "first time animates hoi na").
+    // r85-1: EVERY mine row arms here, emoji-only included - a birth-armed
+    // row enters fxFlyIn with goAt already set, skips the visibility gate
+    // and ticks from its first frame (the exact reason text bubbles always
+    // animated on the first send of a session).
+    if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)
     // v205 + v207 (unchanged by r67-3): the emoji glyph animates when the row
     // is a live birth AND is no longer a sending echo - so the emoji plays at
     // the moment the message becomes sent, while the flight above belongs to
@@ -7686,30 +7689,24 @@ private fun MessageRow(
             .fillMaxWidth()
             .padding(vertical = 2.dp)
             .then(
-                // (emojiOnly is declared below the Row, so the check here
-                // recomputes it inline - same helper, same body.)
-                if (kind == "TEXT" && emojiOnlyCount(m.optText("body")) > 0) {
-                    // r78-6/r78-8 (owner: "0.2 seconds flicking kore halka
-                    // kata pore abar thik hoi" + "first time animate hobe just
-                    // ekbar"): an emoji glyph IS the row - the composer flight
-                    // starts below the list viewport, so the first ~30% of the
-                    // entrance painted the 66sp glyph CHOPPED at the list
-                    // edge. Emoji rows take the un-clippable in-bounds
-                    // grow+fade instead - exactly once per message.
-                    // r80-8: gate on fxBorn (live+recent survives recomposition),
-                    // NOT the one-shot fxFresh claim - a transient first
-                    // composition (prefetch / swap churn) used to consume the
-                    // claim before the row was ever drawn, and the entrance
-                    // was gone forever. The clock inside is time-based, so a
-                    // churned row simply continues the SAME entrance.
-                    Modifier.fxEmojiEntrance(fxBorn, fxKey, isSent = mine, glyphReady = { EmojiGlyphWarm.isReady(m.optText("body")) })
-                } else {
-                    Modifier
-                        .fxSlotOpen(fxFresh)
-                        .fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (kind == "FILE" && fileLooksVoice(m)) 720 else 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey) {
-                            fxLanded = m.optString("id")
-                        }
-                },
+                // r85-1 (owner r85 #1 - FIFTH round, "not fixed"): the bespoke
+                // emoji entrances (r78 in-bounds grow, r81 corner pivot, r83
+                // layout-arm, r84 glyph-ready) all lost the FIRST send of a
+                // session on device - while text bubbles on the very same
+                // first send always flew. The difference was never the glyph:
+                // a mine row armed at BIRTH (the armIn just above) enters
+                // fxFlyIn with goAt already set, so the visibility gate is
+                // skipped entirely and the flight ticks from its first frame.
+                // Every custom entrance sat INSIDE that gate. Emoji-only rows
+                // ride the exact text flight now - same corner pivot (r76-19:
+                // it grows out of the seat's own corner and nothing leaves the
+                // row's bounds, so the r78 clip cannot come back), one flight
+                // per key, swap-safe.
+                Modifier
+                    .fxSlotOpen(fxFresh)
+                    .fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (kind == "FILE" && fileLooksVoice(m)) 720 else 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey) {
+                        fxLanded = m.optString("id")
+                    },
             ),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {

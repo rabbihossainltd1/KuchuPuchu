@@ -29,13 +29,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.flow.first
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -248,117 +245,6 @@ fun Modifier.fxSlotOpen(active: Boolean, fromDp: Float = -30f, ms: Int = 480): M
     // by the viewport during the whole entrance. The slot now only FADES —
     // all movement lives in fxFlyIn, which never leaves the row's bounds.
     return graphicsLayer { alpha = v }
-}
-
-/**
- * r78-6/r78-8 (owner: "emoji send korle 0.2 seconds flicking kore halka kata
- * pore" + "emojis send korle first time animate hobe just ekbar"): an emoji
- * row IS its glyph - there is no bubble to hide the composer flight's start,
- * and that flight begins its travel below the LazyColumn viewport, so the
- * first ~30% of the entrance drew a glyph chopped by the list edge. An emoji
- * row takes THIS instead: one grow+fade entirely inside its own bounds, so
- * nothing can clip it - exactly once per message (clientId-keyed, the
- * first-arm-wins Flight), and the echo->server swap can never re-run it.
- */
-@Composable
-fun Modifier.fxEmojiEntrance(
-    active: Boolean,
-    key: String,
-    ms: Int = 380,
-    isSent: Boolean = true,
-    // r84-1: the glyph readiness signal the clock waits on (see below).
-    glyphReady: () -> Boolean = { true },
-): Modifier {
-    val scale = fxAnimatorScale()
-    if (!active || scale <= 0f || key.isBlank()) return this
-    // r81-6/8 (owner retest r80: "emojis left theke animate kore asche ...
-    // normal massage jemon right er nicher theke ashe temon hobe" + "first
-    // time animates hoi na ekhono"):
-    //  a) LEFT-vs-RIGHT: the entrance sat on the full-width Row and its pivot
-    //     was the ROW's center = the screen's center, so a right-side bubble
-    //     grew out of the middle of the screen and read as arriving from the
-    //     left. The pivot is the bubble's own corner now - bottom-right for
-    //     mine, bottom-left for theirs - the exact geometry of the row flight
-    //     (fxFlyIn), which is the animation the owner calls "normal".
-    //  b) FIRST-TIME invisible: the flight family carries the r76-21 viewport
-    //     gate for a reason - LazyColumn precomposes appended rows off-screen,
-    //     so any clock that starts at composition/birth finishes before the
-    //     row is ever on screen. This entrance now waits (same 600 ms cap,
-    //     same seat-vs-listBounds test) and ARMS ITSELF only once the seat is
-    //     inside the viewport. Once ever: when the flight's clock is done,
-    //     valueAt pins 1 forever, so later recomposes/scrolled re-entries are
-    //     static - there is also no external arm site for emoji rows any more.
-    val st = remember(key) { FlightAnims.birth(key) }
-    var v by remember(key) { mutableStateOf(FlightAnims.valueAt(st, ms)) }
-    // r83-1 (owner r83 #1: "shob thik ache just animate hoi na first time" -
-    // STILL dead after r78's wait, r81's latched seat and r82's live seat):
-    // every one of those designs armed the clock from INSIDE a cancellable
-    // LaunchedEffect, so the arm lived at the mercy of composition churn, the
-    // pending->server swap and the frame clock - and on the owner's phone the
-    // FIRST send of a session always painted settled while later sends flew.
-    // The arm is now bound to the LAYOUT PASS itself: the very
-    // onGloballyPositioned report that puts the row's seat inside the list
-    // viewport sets the clock - the same device-proven signal fxFlyIn's live
-    // seat rides. Whatever composition is alive when the row is first laid
-    // out on screen arms it; there is no coroutine to cancel and no timeout
-    // to burn before the window. The tick loop only WAITS on the armed flag;
-    // the 600 ms fallback arm below covers a row that never becomes visible
-    // (it then paints settled, exactly like a text row).
-    var armed by remember(key) { mutableStateOf(false) }
-    LaunchedEffect(key) {
-        if (st.goAt < 0L) {
-            // r84-1 (owner r84 #1 - STILL dead after r78/r81/r82/r83): every
-            // one of those rounds also carried a 600 ms CAP on this wait, and
-            // the cap is the piece that survived them all. On the FIRST send
-            // of a session the list is still settling (initial page fill,
-            // newest snap, keyboard glide) and the row can take longer than
-            // the cap to reach the viewport - the fallback then started the
-            // clock while the row was still OFF SCREEN, and the whole 380 ms
-            // window was spent before a single visible frame. The visibility
-            // wait is UNCAPPED now (the effect is cancelled the moment the
-            // row leaves composition, so nothing leaks), and the clock starts
-            // only after the GLYPH is in hand too: an emoji row IS its glyph,
-            // and a cold Lottie made the entrance play on the system fallback
-            // and swap mid-flight. The glyph wait keeps a 1.2 s cap - a
-            // never-seen emoji may need the network; past the cap the
-            // entrance plays on the fallback exactly as before.
-            androidx.compose.runtime.snapshotFlow { armed }.first { it }
-            kotlinx.coroutines.withTimeoutOrNull(1_200L) {
-                androidx.compose.runtime.snapshotFlow { glyphReady() }.first { it }
-            }
-            if (st.goAt < 0L) st.goAt = android.os.SystemClock.uptimeMillis()
-        }
-        while (true) {
-            val nv = FlightAnims.valueAt(st, ms)
-            v = nv
-            if (nv >= 1f) break
-            androidx.compose.runtime.withFrameNanos { }
-        }
-        FlightAnims.markDone(key)
-    }
-    return this
-        .onGloballyPositioned { c ->
-            // r84-1: the callback only FLAGS visibility - the clock itself
-            // is set by the coroutine above, after the glyph wait, so no path
-            // can burn the window off screen.
-            if (st.goAt < 0L) {
-                val b = c.boundsInWindow()
-                val lb = FlightAnchors.listBounds
-                if (lb == null || b.bottom <= lb.bottom + 1f) armed = true
-            }
-        }
-        .graphicsLayer {
-            transformOrigin =
-                if (isSent) {
-                    androidx.compose.ui.graphics.TransformOrigin(1f, 1f)
-                } else {
-                    androidx.compose.ui.graphics.TransformOrigin(0f, 1f)
-                }
-            val sc = 0.55f + 0.45f * v
-            scaleX = sc
-            scaleY = sc
-            alpha = if (v < 0.4f) (v / 0.4f).coerceIn(0f, 1f) else 1f
-        }
 }
 
 /* -------------------------------------------------------- the send flight */
