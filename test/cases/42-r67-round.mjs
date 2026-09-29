@@ -182,8 +182,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
       ),
   );
   check(
-    "r67-3: v205/v207 survive — the emoji glyph plays on a live birth that is no longer a sending echo",
-    chat.includes("val fxEmoji = false") &&
+    "r67-3: v205/v207 survive (retargeted r86-1) — the emoji glyph DANCES on a live birth: six entrance-flight rounds (r78-r85) misread the ask, the owner's r78-4 words were about the glyph itself; fxEmoji rides fxBorn so a live single glyph plays its own Lottie exactly once (tap-replay machinery), history stays static",
+    chat.includes("val fxEmoji = fxBorn") &&
+      !chat.includes("val fxEmoji = false") &&
       (
         chat.match(
           /EmojiGlyphRow\((?:st, 56f|m\.optText\("body"\)\.trim\(\), (?:40|66)f), fxEmoji,/g,

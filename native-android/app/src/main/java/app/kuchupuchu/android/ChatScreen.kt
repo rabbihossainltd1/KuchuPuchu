@@ -7538,14 +7538,20 @@ private fun MessageRow(
     // and ticks from its first frame (the exact reason text bubbles always
     // animated on the first send of a session).
     if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)
-    // v205 + v207 (unchanged by r67-3): the emoji glyph animates when the row
-    // is a live birth AND is no longer a sending echo - so the emoji plays at
-    // the moment the message becomes sent, while the flight above belongs to
-    // the arrival and never replays.
-    // r76-18 (owner: "emoji sent hobar por zoom in animation remove kor ...
-    // asbar animation er por ar kono effect na"): the glyph is STATIC — the
-    // arrival flight is the only animation a row ever plays.
-    val fxEmoji = false
+    // r86-1 (owner r86 #1 - SIXTH round on "first time animates hoi na"):
+    // five entrance-flight redesigns (r78/r81/r82/r83/r84/r85) chased the
+    // ROW flight while the owner's r78-4 words were about the GLYPH all
+    // along - "emojis send korle first time animate hobe just ekbar". The
+    // emoji now DANCES ONCE on a live birth, on the tap-replay machinery
+    // that is proven on his phone every day (r67-4): fxEmoji rides fxBorn
+    // into EmojiGlyphRow, a live single glyph seeds replayKey = 1, and the
+    // Lottie plays its own frames exactly once. A warm glyph dances at
+    // once; a cold glyph dances the MOMENT its composition lands (the
+    // effect keys on composition, so it fires on arrival) - no send can
+    // ever read as "no animation". History / reopen rows stay static
+    // (fxBorn false), and the r76-18 zoom (a second SCALE effect) stays
+    // gone - this is the emoji's own motion, not a bubble effect.
+    val fxEmoji = fxBorn
     // Owner round 15: the night theme's other-bubble is dark in BOTH app
     // themes — its text needs a light ink or it vanishes in light mode.
     // Owner round 20: the DARK-BLUE default chat has dark bubbles on both

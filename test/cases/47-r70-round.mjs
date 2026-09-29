@@ -1177,7 +1177,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
     // viewport gate); the birth arm below stays for every other kind.
     chat.includes("if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)") &&
       chat.includes('val fxKey = m.optString("clientId").ifBlank { m.optString("id") }') &&
-      chat.includes("val fxEmoji = false"),
+      chat.includes("val fxEmoji = fxBorn"),
   );
 }
 
@@ -1538,7 +1538,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
 
   check(
     'r84-4 (owner r84 #4: "opponent all open na korle double tick hoi na mane user background a notification peleo delivered dekhai na"): delivered_at was only stamped by the recipient\'s OWN activity (socket connect / list poll / chat open) - a backgrounded phone with a tray card left the sender on one tick. FCM ACCEPTING the message push now stamps the row delivered at the same moment the live-socket path does, and the sender is told at once (room "delivered" frame + list poke, gated on a real NULL->set flip)',
-    worker4.includes("if (live > 0 || pushed) {") &&
+    worker4.includes("if ((live > 0 || pushed) && !stamped) await stampDelivered();") &&
       worker4.includes("const pushed = await pushToUser(") &&
       worker4.includes("ctx.waitUntil(pokeUserReceipt(env, uid, convId, at));"),
   );
@@ -1592,6 +1592,22 @@ const main = (f) => read(`${ANDROID}/${f}`);
         /tween\(180, easing = androidx\.compose\.animation\.core\.CubicBezierEasing\(0\.05f, 0\.7f, 0\.1f, 1f\)\)/g,
       ) || []
     ).length === 2,
+  );
+  check(
+    'r86-1 (owner r86 #1 - SIXTH round on "first time animates hoi na"): the five entrance-flight redesigns chased the ROW flight while the owner\'s r78-4 words ("send korle first time animate hobe just ekbar") were about the GLYPH. The emoji now DANCES ONCE on a live birth via the tap-replay machinery proven on device: fxEmoji rides fxBorn into EmojiGlyphRow and a live single glyph seeds replayKey = 1 - warm glyphs dance at once, a cold glyph dances the moment its composition lands, so no send can ever read as "no animation". History/reopen stays static; the r76-18 second-scale zoom stays gone',
+    chat4.includes("val fxEmoji = fxBorn") &&
+      !chat4.includes("val fxEmoji = false") &&
+      anim4.includes("mutableStateOf(if (active && animScale > 0f && isSingle) 1 else 0)"),
+  );
+
+  check(
+    "r86-4 (owner r86 #4: delivered tick \"aro fast possible hole kore daw\"): the stamp left FCM's roundtrip critical path - a recipient with any registered device is stamped the moment the send loop reaches them (the tray card is delivery, r84-4's rule), the sender is told at once, and FCM's own acceptance only backstops the no-device case",
+    worker4.includes("const stampDelivered = async () => {") &&
+      worker4.includes(
+        "(SELECT EXISTS(SELECT 1 FROM devices WHERE devices.user_id = members.user_id)) AS has_device",
+      ) &&
+      worker4.includes("if (hasDevice) {") &&
+      worker4.includes("if ((live > 0 || pushed) && !stamped) await stampDelivered();"),
   );
 
   check(

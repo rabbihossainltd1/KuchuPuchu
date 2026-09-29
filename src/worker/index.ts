@@ -3771,11 +3771,13 @@ async function membersOf(db: D1Database, convId: string) {
     hidden: number | null;
     last_active: string | null;
     priv_messages: string | null;
+    has_device: number;
   }>(
     db,
     `SELECT user_id, muted, muted_msg, hidden,
             (SELECT last_active_at FROM users WHERE id = members.user_id) AS last_active,
-            (SELECT priv_messages FROM users WHERE id = members.user_id) AS priv_messages
+            (SELECT priv_messages FROM users WHERE id = members.user_id) AS priv_messages,
+            (SELECT EXISTS(SELECT 1 FROM devices WHERE devices.user_id = members.user_id)) AS has_device
        FROM members WHERE conv_id = ?`,
     convId,
   );
@@ -9052,6 +9054,41 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       // From the phone this reads exactly as "background e message push ashe
       // na": FCM accepts and 200s what the worker fires, so nothing looks
       // wrong server-side, but the sends themselves were racing teardown.
+      // r86-4 (owner r86 #4: delivered tick "aro fast possible hole kore
+      // daw"): the stamp no longer sits behind FCM's roundtrip. A recipient
+      // with any registered device gets the tray card in essentially every
+      // case, so the tick flips the moment the send loop reaches them; FCM's
+      // own acceptance only backstops a recipient with no device row at all.
+      const stampDelivered = async () => {
+        const at = nowIso();
+        const changed = await run(
+          db,
+          "UPDATE messages SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL",
+          at,
+          mid,
+        );
+        if (changed > 0) {
+          ctx.waitUntil(
+            broadcastRoomEvent(env, convId, {
+              type: "delivered",
+              conversationId: convId,
+              messageIds: [mid],
+              senderIds: [uid],
+              at,
+            }),
+          );
+          ctx.waitUntil(pokeUserReceipt(env, uid, convId, at));
+        }
+      };
+      // r86-4: the device flag rode the membersOf read (a correlated EXISTS
+      // on idx_devices_user) - ZERO extra D1 round trips on the send path
+      // (the send-cost pins count every trip).
+      const hasDevice = live > 0 || (memberId.has_device ?? 0) > 0;
+      let stamped = false;
+      if (hasDevice) {
+        await stampDelivered();
+        stamped = true;
+      }
       const pushed = await pushToUser(
         env,
         db,
@@ -9098,27 +9135,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       // the live-socket path does, and the sender is told at once (room
       // "delivered" frame + list poke), so the tick flips without the
       // recipient ever opening the app.
-      if (live > 0 || pushed) {
-        const at = nowIso();
-        const changed = await run(
-          db,
-          "UPDATE messages SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL",
-          at,
-          mid,
-        );
-        if (changed > 0) {
-          ctx.waitUntil(
-            broadcastRoomEvent(env, convId, {
-              type: "delivered",
-              conversationId: convId,
-              messageIds: [mid],
-              senderIds: [uid],
-              at,
-            }),
-          );
-          ctx.waitUntil(pokeUserReceipt(env, uid, convId, at));
-        }
-      }
+      if ((live > 0 || pushed) && !stamped) await stampDelivered();
     }
     // KuchuPuchu AI answers in its chat (owner feature): the reply generates
     // in the background so the send itself stays instant.
