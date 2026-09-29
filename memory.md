@@ -658,3 +658,34 @@ all chat medias incl. once-view same animation.
   regex when changing call args); r76-28/r76-29/r81-3a/r84-6/r85-4 duration
   literals 180->300 / 220->260; 42-r67 r67-3 narrative updated; new r87-1 +
   r87-2 pins. Suite 47/47, 1946 assertions.
+
+## r88 round (shipped d4dafa0, CI success, APK kuchupuchu-3.9.181-r88.apk 258/3.9.181)
+Owner retest r87: 1 REGRESSION ("first time animates hoi na, tap korleo
+animate hoi na, majhe majhe hoi"), 2 still not right ("sundor kore asbe FIRST
+MIDDLE a then Fullscreen hobe aste aste - rudely open hobe na" = the old r76-28
+choreography: tile -> CENTRE (medium) -> fullscreen, gradual).
+- **#1 (r88-1)**: r87's DEFECT: the birth rode a separate manual render loop
+  (liveT) whose render branch was checked FIRST - it SHADOWED the tap replay
+  for the whole seconds-long birth window (tap inside = invisible = "tap
+  korleo hoi na"), and a 0-duration Lottie ended the birth before a frame
+  ("first time hoi na"; "majhe majhe" = only long-duration glyphs showed).
+  FIX: ONE driver - `LaunchedEffect(composition, replayKey)`: birth branch
+  (`liveDanceKey != null && replayKey == 0`) does EmojiDance.begin +
+  progress -> `animatable.animate(initialProgress = resume)` (the LIBRARY
+  frame clock = the tap machinery, device-proven); tap branch (replayKey > 0)
+  re-animates from 0 - always visible. Swap resume = re-run of the effect in
+  the server composition with the same global clock. durMs floor 1200ms when
+  comp.duration <= 0. Render reverted to the single isPlaying/final path
+  (liveT deleted).
+- **#2 (r88-2)**: two-segment hero in BOTH transform sites (photo pager +
+  video overlay): t<=0.55 lerp seat->CENTRE at sMid=0.58 (emphasized
+  decelerate), t>0.55 lerp 0.58->1.0 (emphasized accelerate); uniform scale
+  (ratio holds); durations 460 open / 400 close. All chat medias incl.
+  view-once share the literals.
+- Pins: r87-1 RETARGETED to r88-1 (begin(liveDanceKey), if-branch,
+  initialProgress=resume, !liveT); r87-2 marked superseded; r76-28 + r76-30
+  `lerp(s0, 1f, t)` literals -> `lerp(s0, sMid, u)`; duration literals
+  300->460 (plain x1 + multiline + regexes x3) and 260->400 (plain x2 +
+  regexes x2); r84-6 absence literal !400 -> !300 (400 is now the VALID close
+  duration - absence pins on a number that becomes the new value must flip);
+  new r88-1/r88-2 pins. Suite 47/47, 1948 assertions.
