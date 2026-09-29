@@ -67,6 +67,7 @@ object VoiceNote {
     var livePeaks: List<Int> by mutableStateOf(emptyList())
         private set
 
+    @Synchronized
     fun start(ctx: Context): Boolean =
         runCatching {
             val f = File(ctx.cacheDir, "voice_${System.currentTimeMillis()}.m4a")
@@ -126,6 +127,23 @@ object VoiceNote {
         }.getOrDefault(false)
 
     /** Stops and returns the take (file, seconds, waveform bars) or null on failure. */
+    /**
+     * r84-3: a take whose start was still spinning up off-main when the hold
+     * ended - stop the recorder silently and delete the orphan file.
+     */
+    @Synchronized
+    fun discard() {
+        val r = recorder
+        val f = file
+        recorder = null
+        file = null
+        isRecording = false
+        handler.removeCallbacks(sampler)
+        runCatching { r?.stop() }
+        runCatching { r?.release() }
+        runCatching { f?.delete() }
+    }
+
     fun stop(): VoiceTake? {
         if (!isRecording) return null
         // The length is what was SPOKEN: read it while the paused clock still

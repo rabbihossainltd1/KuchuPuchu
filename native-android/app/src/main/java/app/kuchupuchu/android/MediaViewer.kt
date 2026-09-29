@@ -309,7 +309,7 @@ fun KpPhotoViewer(
             // fast-out punch. Decelerate-emphasized open.
             hero.animateTo(
                 1f,
-                tween(400, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)),
+                tween(280, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)),
             )
         }
     }
@@ -335,7 +335,7 @@ fun KpPhotoViewer(
                 // r81-3: emphasized-accelerate reverse, matching the open.
                 hero.animateTo(
                     0f,
-                    tween(300, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)),
+                    tween(220, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)),
                 )
                 // r77-3: the landed hero sits exactly on the live seat, fully
                 // opaque. Bring the tile back and commit ONE frame while that
@@ -827,8 +827,30 @@ internal fun MediaMenuSheet(
  * where the rotate button used to sit (v167 removed it). Tap anywhere toggles
  * the controls; they hide themselves after three seconds of playback.
  */
+/**
+ * r84-2 (owner r84 #2: "video opening thik ache but closing a jokhon ber
+ * hocche video theke jokhon background black thakche chat dekha jai na photo
+ * er moto"): the player used to open from the chat as a nav ROUTE, and while
+ * a route is on top the chat destination underneath is not composed - the
+ * close flight played against the nav host's plain black container. From the
+ * chat the player now rides this in-compose Dialog exactly like the photo
+ * viewer: the chat STAYS ALIVE behind it, so closing shrinks into the tile
+ * over the live chat. Open is faster too - no route push, no destination
+ * composition, the overlay mounts in the same window as the chat. (The
+ * gallery keeps the route: its "behind" is the gallery grid, not a chat.)
+ */
 @Composable
-fun VideoPlayerScreen(nav: NavController, b64: String) {
+fun KpVideoOverlay(nav: NavController, arg: String, onClose: () -> Unit) {
+    Dialog(
+        onDismissRequest = onClose,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        VideoPlayerScreen(nav, arg, overlayClose = onClose)
+    }
+}
+
+@Composable
+fun VideoPlayerScreen(nav: NavController, b64: String, overlayClose: (() -> Unit)? = null) {
     val haptics = rememberHaptics()
     val ctx = LocalContext.current
     val m = remember(b64) { mediaArgDecode(b64) }
@@ -901,7 +923,7 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
         if (vidHeroLaidOut && vidHeroSeat != null) {
             vidHero.animateTo(
                 1f,
-                tween(400, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)),
+                tween(280, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)),
             )
         }
     }
@@ -921,22 +943,25 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
             }
         }
     }
+    // r84-2: from the chat the player rides the in-compose overlay (see
+    // KpVideoOverlay) - closing pops the overlay, not the nav stack.
+    val closePlayer: () -> Unit = { if (overlayClose != null) overlayClose() else nav.popBackStack() }
     val dismissVid: () -> Unit = dismissVid@{
         if (vidClosing) return@dismissVid
         if (vidHeroSeat == null) {
-            nav.popBackStack()
+            closePlayer()
             return@dismissVid
         }
         vidClosing = true
         scope.launch {
             vidHero.animateTo(
                 0f,
-                tween(300, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)),
+                tween(220, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)),
             )
             PhotoHero.outId = null
             androidx.compose.runtime.withFrameNanos { }
             PhotoHero.heroCloseT = 0f
-            nav.popBackStack()
+            closePlayer()
         }
     }
     BackHandler(enabled = vidHeroSeat != null && !vidClosing) { dismissVid() }
@@ -967,7 +992,7 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
     fun raiseDelete(everyone: Boolean) {
         val id = m?.optString("id").orEmpty()
         if (id.isNotBlank()) ScreenStore.viewerDelete.value = ScreenStore.ViewerDelete(id, everyone)
-        nav.popBackStack()
+        closePlayer()
     }
     val canForward = m != null && !privateClip && m.optText("fileKey").isNotBlank()
     fun saveClip() {

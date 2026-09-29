@@ -261,7 +261,14 @@ fun Modifier.fxSlotOpen(active: Boolean, fromDp: Float = -30f, ms: Int = 480): M
  * first-arm-wins Flight), and the echo->server swap can never re-run it.
  */
 @Composable
-fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 380, isSent: Boolean = true): Modifier {
+fun Modifier.fxEmojiEntrance(
+    active: Boolean,
+    key: String,
+    ms: Int = 380,
+    isSent: Boolean = true,
+    // r84-1: the glyph readiness signal the clock waits on (see below).
+    glyphReady: () -> Boolean = { true },
+): Modifier {
     val scale = fxAnimatorScale()
     if (!active || scale <= 0f || key.isBlank()) return this
     // r81-6/8 (owner retest r80: "emojis left theke animate kore asche ...
@@ -300,8 +307,24 @@ fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 380, isSent
     var armed by remember(key) { mutableStateOf(false) }
     LaunchedEffect(key) {
         if (st.goAt < 0L) {
-            kotlinx.coroutines.withTimeoutOrNull(600L) {
-                androidx.compose.runtime.snapshotFlow { armed }.first { it }
+            // r84-1 (owner r84 #1 - STILL dead after r78/r81/r82/r83): every
+            // one of those rounds also carried a 600 ms CAP on this wait, and
+            // the cap is the piece that survived them all. On the FIRST send
+            // of a session the list is still settling (initial page fill,
+            // newest snap, keyboard glide) and the row can take longer than
+            // the cap to reach the viewport - the fallback then started the
+            // clock while the row was still OFF SCREEN, and the whole 380 ms
+            // window was spent before a single visible frame. The visibility
+            // wait is UNCAPPED now (the effect is cancelled the moment the
+            // row leaves composition, so nothing leaks), and the clock starts
+            // only after the GLYPH is in hand too: an emoji row IS its glyph,
+            // and a cold Lottie made the entrance play on the system fallback
+            // and swap mid-flight. The glyph wait keeps a 1.2 s cap - a
+            // never-seen emoji may need the network; past the cap the
+            // entrance plays on the fallback exactly as before.
+            androidx.compose.runtime.snapshotFlow { armed }.first { it }
+            kotlinx.coroutines.withTimeoutOrNull(1_200L) {
+                androidx.compose.runtime.snapshotFlow { glyphReady() }.first { it }
             }
             if (st.goAt < 0L) st.goAt = android.os.SystemClock.uptimeMillis()
         }
@@ -315,13 +338,13 @@ fun Modifier.fxEmojiEntrance(active: Boolean, key: String, ms: Int = 380, isSent
     }
     return this
         .onGloballyPositioned { c ->
+            // r84-1: the callback only FLAGS visibility - the clock itself
+            // is set by the coroutine above, after the glyph wait, so no path
+            // can burn the window off screen.
             if (st.goAt < 0L) {
                 val b = c.boundsInWindow()
                 val lb = FlightAnchors.listBounds
-                if (lb == null || b.bottom <= lb.bottom + 1f) {
-                    st.goAt = android.os.SystemClock.uptimeMillis()
-                    armed = true
-                }
+                if (lb == null || b.bottom <= lb.bottom + 1f) armed = true
             }
         }
         .graphicsLayer {

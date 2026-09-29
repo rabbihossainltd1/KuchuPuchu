@@ -3091,6 +3091,10 @@ async function ensureSchema(db: D1Database) {
     // deliberately outside the batch — a duplicate-column error must not roll the
     // whole batch back — and each one is individually tolerant.
     `ALTER TABLE messages ADD COLUMN delivered_at TEXT`,
+    // r84-5 (owner r84 #5): the callee's phone was REACHED by the call push -
+    // flips the caller's "Calling…" to "Ringing…" without the callee opening
+    // the app (see the call-start push site).
+    `ALTER TABLE calls ADD COLUMN reached_at TEXT`,
     // Owner round 42 (item 3): what the AI is making (image|text).
     `ALTER TABLE typing ADD COLUMN kind TEXT`,
     // Owner round 32 item 4: where each signed-in device last came from.
@@ -9048,7 +9052,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       // From the phone this reads exactly as "background e message push ashe
       // na": FCM accepts and 200s what the worker fires, so nothing looks
       // wrong server-side, but the sends themselves were racing teardown.
-      await pushToUser(
+      const pushed = await pushToUser(
         env,
         db,
         memberId.user_id,
@@ -9085,18 +9089,35 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         },
         recipientAlert(memberId, preview, me.display_name, live),
       );
-      // N4: FCM accepting the push is NOT a delivery — the tray card
-      // proves nothing about the app receiving the row, so an offline
-      // recipient used to show the sender a fake double-tick. Only a live
-      // socket frame (live > 0) marks delivered here; everyone else is
-      // marked by the reconnect/fetch paths when the row actually lands.
-      if (live > 0) {
-        await run(
+      // N4 -> r84-4 (owner r84 #4: "massage delivered double tick er system a
+      // problem ache opponent all open na korle double tick hoi na mane user
+      // background a notification peleo delivered dekhai na"): for the owner
+      // the tray card IS the delivery signal - a backgrounded phone that got
+      // the notification has the message. FCM accepting the push for any of
+      // the recipient's devices now stamps the row delivered the same moment
+      // the live-socket path does, and the sender is told at once (room
+      // "delivered" frame + list poke), so the tick flips without the
+      // recipient ever opening the app.
+      if (live > 0 || pushed) {
+        const at = nowIso();
+        const changed = await run(
           db,
           "UPDATE messages SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL",
-          nowIso(),
+          at,
           mid,
         );
+        if (changed > 0) {
+          ctx.waitUntil(
+            broadcastRoomEvent(env, convId, {
+              type: "delivered",
+              conversationId: convId,
+              messageIds: [mid],
+              senderIds: [uid],
+              at,
+            }),
+          );
+          ctx.waitUntil(pokeUserReceipt(env, uid, convId, at));
+        }
       }
     }
     // KuchuPuchu AI answers in its chat (owner feature): the reply generates
@@ -10052,7 +10073,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         //     fullScreenIntent + Accept/Decline) — a payload here would only
         //     duplicate it and could outlive a cancellation on a live process.
         const live = await pokeUserConversation(env, other, pairId(uid, other), nowIso());
-        await pushToUser(
+        const pushedCall = await pushToUser(
           env,
           db,
           other,
@@ -10080,6 +10101,18 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
               }
             : undefined,
         );
+        // r84-5: FCM accepting the ring push means the callee's phone is
+        // about to show the call - record it so the caller's screen flips
+        // from "Calling…" to "Ringing…" without the callee opening the app
+        // (the caller's /active poll picks reached_at up on its next tick).
+        if (pushedCall) {
+          await run(
+            db,
+            "UPDATE calls SET reached_at = ? WHERE id = ? AND reached_at IS NULL",
+            nowIso(),
+            callId,
+          );
+        }
       })(),
     );
     // Realtime: the caller's own devices flip to the ringing screen without
@@ -11200,6 +11233,7 @@ type CallRow = {
   media_json?: string | null;
   ended_at: string | null;
   created_at: string;
+  reached_at?: string | null;
 };
 
 function callFrom(row: CallRow, uid: string, other: UserRow | null, light = false) {
@@ -11226,7 +11260,11 @@ function callFrom(row: CallRow, uid: string, other: UserRow | null, light = fals
     startedAt: row.started_at,
     endedAt: row.ended_at,
     createdAt: row.created_at,
-    other: other ? userFrom(other, onlineNow(other), light, CONTACT_VIEW) : null,
+    // r84-5: online OR push-reached - the caller's "Ringing…" text no longer
+    // waits for the callee's app to be open (CallScreens' otherOnline).
+    other: other
+      ? userFrom(other, onlineNow(other) || row.reached_at != null, light, CONTACT_VIEW)
+      : null,
   };
 }
 

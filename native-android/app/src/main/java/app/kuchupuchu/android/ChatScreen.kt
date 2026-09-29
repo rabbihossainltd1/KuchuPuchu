@@ -297,6 +297,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     var showScheduleMedia by remember { mutableStateOf(false) }
     val scheduledRows = remember { mutableStateListOf<JSONObject>() }
     var recording by remember { mutableStateOf(false) }
+    // r84-3: session guard - a hold that ends while the recorder is still
+    // spinning up off-main must not leak a take (see startRecording).
+    var voiceSession by remember { mutableStateOf(0) }
     // r75-1 (owner: "current voice lock system hold swipe up system shob remove
     // koro ami ekta md file diyechi dekho ei vabe hobe shob"): the MD's LOCKED —
     // the finger drags UP into the lock capsule and the take locks MID-DRAG;
@@ -581,6 +584,8 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Owner round 34 (item 6): the viewer pages through these photos;
     // viewerAt tracks the page the chrome acts on (single photos: one).
     var viewerPhotos by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    // r84-2: the in-chat video player overlay's argument (null = closed).
+    var videoOverlayArg by remember { mutableStateOf<String?>(null) }
     var viewerStart by remember { mutableStateOf(0) }
     var viewerAt by remember { mutableStateOf(0) }
     // Owner round 31 (item 29): "See all" of a grouped photo bubble.
@@ -2719,25 +2724,42 @@ fun ChatScreen(nav: NavController, convId: String) {
         // Mic is asked HERE — at the feature — not at app launch (owner rule).
         gateMicCamera(video = false) {
             if (!VoiceNote.isRecording) {
-                if (VoiceNote.start(ctx)) {
-                    recMs = 0
-                    recording = true
-                    // r76-20 (owner item 14): the pack's record-start tone.
-                    runCatching { KpSounds.voiceStart(ctx) }
-                    // r75-1: a take is always born a HOLD — the lock is earned
-                    // by the drag into the capsule, never queued or assumed.
-                    voiceLocked = false
-                    recPaused = false
-                    // r56 item 2: ping voice immediately on recording start
-                    scope.launch {
-                        runCatching {
-                            withContext(Dispatchers.IO) {
-                                Api.post("/api/conversations/$convId/typing", JSONObject().put("kind", "voice"))
+                // r84-3 (owner r84 #3: "voice button hold kore record korte
+                // ektu late start hocche super fast hobe"): MediaRecorder's
+                // prepare()+start() ran ON MAIN before `recording = true`, so
+                // the whole 50-150 ms encoder spin-up was dead time between
+                // the finger and the first hint the take began. The UI flips
+                // INSTANTLY on the press now and the recorder spins up
+                // off-main; a take that ends while that is still in flight is
+                // discarded by session.
+                recMs = 0
+                recording = true
+                // r76-20 (owner item 14): the pack's record-start tone -
+                // instant now, it is the press's own confirmation.
+                runCatching { KpSounds.voiceStart(ctx) }
+                // r75-1: a take is always born a HOLD — the lock is earned
+                // by the drag into the capsule, never queued or assumed.
+                voiceLocked = false
+                recPaused = false
+                val session = ++voiceSession
+                scope.launch {
+                    val ok = withContext(Dispatchers.IO) { VoiceNote.start(ctx) }
+                    when {
+                        ok && session == voiceSession ->
+                            // r56 item 2: ping voice immediately on recording start
+                            scope.launch {
+                                runCatching {
+                                    withContext(Dispatchers.IO) {
+                                        Api.post("/api/conversations/$convId/typing", JSONObject().put("kind", "voice"))
+                                    }
+                                }
                             }
+                        ok -> VoiceNote.discard()
+                        session == voiceSession -> {
+                            recording = false
+                            error = "Mic is not available. Check the mic permission."
                         }
                     }
-                } else {
-                    error = "Mic is not available. Check the mic permission."
                 }
             }
         }
@@ -2746,6 +2768,8 @@ fun ChatScreen(nav: NavController, convId: String) {
     fun finishRecording(cancelled: Boolean, once: Boolean = false) {
         if (!recording) return
         recording = false
+        // r84-3: any in-flight off-main start lands after this and is discarded.
+        voiceSession++
         // r71-19: a locked note was ended by an explicit Send, so the old
         // "sub-second tap is a slip, cancel silently" rule must not swallow it
         // without a word — it says why instead.
@@ -4189,8 +4213,14 @@ fun ChatScreen(nav: NavController, convId: String) {
                                         // r71-18: their Save permission for the
                                         // clips THEY send (mine always save).
                                         .also { if (!isMe && !peerSaveOk) it.put("kpNoSave", true) }
-                                markViewerReturn()
-                                nav.navigate("videoplayer/${mediaArg(arg)}")
+                                // r84-2 (owner r84 #2 + #6): the player rides
+                                // an in-compose overlay like the photo viewer,
+                                // so the CHAT stays composed behind it - close
+                                // shrinks into the tile over the live chat
+                                // (not a dead-black nav container) and open
+                                // skips the route push entirely. The scroll
+                                // position survives by itself now.
+                                videoOverlayArg = mediaArg(arg)
                             },
                             // Owner round 32 (item 33): documents → the app's own viewer.
                             onOpenDoc = { msg ->
@@ -5225,6 +5255,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                 },
             )
         }
+        // r84-2: the video player overlay - see videoOverlayArg above.
+        videoOverlayArg?.let { varg -> KpVideoOverlay(nav, varg) { videoOverlayArg = null } }
         if (viewerPhotos.isNotEmpty()) {
             val m = viewerPhotos[viewerAt.coerceIn(viewerPhotos.indices)]
             // Owner round 31: the app's own photo viewer (MediaViewer.kt).
@@ -7670,7 +7702,7 @@ private fun MessageRow(
                     // claim before the row was ever drawn, and the entrance
                     // was gone forever. The clock inside is time-based, so a
                     // churned row simply continues the SAME entrance.
-                    Modifier.fxEmojiEntrance(fxBorn, fxKey, isSent = mine)
+                    Modifier.fxEmojiEntrance(fxBorn, fxKey, isSent = mine, glyphReady = { EmojiGlyphWarm.isReady(m.optText("body")) })
                 } else {
                     Modifier
                         .fxSlotOpen(fxFresh)

@@ -1351,7 +1351,9 @@ const convBetween = (db, a, b) =>
       "r20-video/r31-14: IN-APP player — video bubble + download-to-cache + own TextureView player",
       chat.includes("fun fileLooksVideo(") &&
         chat.includes("fun VideoMessageRow(") &&
-        mediaViewer.includes("fun VideoPlayerScreen(nav: NavController, b64: String)") &&
+        mediaViewer.includes(
+          "fun VideoPlayerScreen(nav: NavController, b64: String, overlayClose: (() -> Unit)? = null)",
+        ) &&
         mediaViewer.includes("Api.downloadToFile(src, tmp)") &&
         mediaViewer.includes("class KpClipPlayer(") &&
         mediaViewer.includes("android.view.TextureView(c)") &&
