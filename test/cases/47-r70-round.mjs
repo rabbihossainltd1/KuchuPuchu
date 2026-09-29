@@ -199,8 +199,11 @@ const main = (f) => read(`${ANDROID}/${f}`);
         "if (onDoubleTap != null && now - lastTapAt[0] in 1..DOUBLE_TAP_HEART_MS) onDoubleTap.invoke()",
       ) &&
       emo.includes("onDoubleTap: (() -> Unit)? = null,") &&
-      (chat.match(/onDoubleTap = \{ if \(!pendingEcho\) onDoubleTapHeart\(m\) \}\)/g) || [])
-        .length === 3,
+      (
+        chat.match(
+          /onDoubleTap = \{ if \(!pendingEcho\) onDoubleTapHeart\(m\) \}, danceKey = fxKey\)/g,
+        ) || []
+      ).length === 3,
   );
 }
 
@@ -985,7 +988,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       viewer.includes("val heroSeat = remember { heroFrom }") &&
       // r81-3: emphasized open
       viewer.includes(
-        "tween(180, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f))",
+        "tween(300, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f))",
       ) &&
       // r76-30: uniform scale now.
       viewer.includes("scaleX = androidx.compose.ui.util.lerp(s0, 1f, t)") &&
@@ -1028,7 +1031,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       viewer.includes("val dismiss: () -> Unit = {") &&
       // r81-3: emphasized close
       viewer.includes(
-        "tween(220, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f))",
+        "tween(260, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f))",
       ) &&
       viewer.includes("onDismissRequest = dismiss,") &&
       viewer.includes("alpha = dim * hero.value") &&
@@ -1429,10 +1432,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     'r81-3a smoothness (owner: "animation ta smooth hobe"): the open/close flights traded the fast-out punch for the Material emphasized pair - decelerate (0.05,0.7,0.1,1) over 400 ms on the way in, accelerate (0.3,0,0.8,0.15) over 300 ms on the way out; the photo viewer and the video player share the same pair',
     media3.includes(
-      "hero.animateTo(\n                1f,\n                tween(180, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f))",
+      "hero.animateTo(\n                1f,\n                tween(300, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f))",
     ) &&
       media3.includes(
-        "tween(220, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f))",
+        "tween(260, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f))",
       ),
   );
 
@@ -1555,12 +1558,12 @@ const main = (f) => read(`${ANDROID}/${f}`);
     "r84-6 (owner r84 #6: \"photo open korle late open hoi video o same super fast hobe\"): the hero open/close flights shortened to the same emphasized curves over 280 ms in and 220 ms out (was 400/300) - the open's first frame was already the tile's own pixels (r80-3), so the remaining latency was the flight length itself",
     (
       media4.match(
-        /tween\(180, easing = androidx\.compose\.animation\.core\.CubicBezierEasing\(0\.05f, 0\.7f, 0\.1f, 1f\)\)/g,
+        /tween\(300, easing = androidx\.compose\.animation\.core\.CubicBezierEasing\(0\.05f, 0\.7f, 0\.1f, 1f\)\)/g,
       ) || []
     ).length === 2 &&
       (
         media4.match(
-          /tween\(220, easing = androidx\.compose\.animation\.core\.CubicBezierEasing\(0\.3f, 0f, 0\.8f, 0\.15f\)\)/g,
+          /tween\(260, easing = androidx\.compose\.animation\.core\.CubicBezierEasing\(0\.3f, 0f, 0\.8f, 0\.15f\)\)/g,
         ) || []
       ).length === 2 &&
       !media4.includes(
@@ -1589,15 +1592,47 @@ const main = (f) => read(`${ANDROID}/${f}`);
     'r85-4 (owner r85 #6: "super fast hoini instant"): the hero OPEN flight shortened again - 280 ms to 180 ms (same emphasized decelerate curve) on both the photo viewer and the video overlay; close keeps its 220 ms',
     (
       media4.match(
-        /tween\(180, easing = androidx\.compose\.animation\.core\.CubicBezierEasing\(0\.05f, 0\.7f, 0\.1f, 1f\)\)/g,
+        /tween\(300, easing = androidx\.compose\.animation\.core\.CubicBezierEasing\(0\.05f, 0\.7f, 0\.1f, 1f\)\)/g,
       ) || []
     ).length === 2,
   );
   check(
-    'r86-1 (owner r86 #1 - SIXTH round on "first time animates hoi na"): the five entrance-flight redesigns chased the ROW flight while the owner\'s r78-4 words ("send korle first time animate hobe just ekbar") were about the GLYPH. The emoji now DANCES ONCE on a live birth via the tap-replay machinery proven on device: fxEmoji rides fxBorn into EmojiGlyphRow and a live single glyph seeds replayKey = 1 - warm glyphs dance at once, a cold glyph dances the moment its composition lands, so no send can ever read as "no animation". History/reopen stays static; the r76-18 second-scale zoom stays gone',
+    'r87-1 (owner r87 #1: "sending er somoy hoi thik ache but sent hobar por abar reanimate keno ... send sending sent zero gap"): the birth dance is GLOBAL and TIME-BASED per message key - EmojiDance (begin idempotent, progress off the wall clock), the same swap-proof pattern the row flights ride. The pending echo starts the clock the moment its glyph composition is in hand; the server row that takes the seat keys on the SAME stable fxKey (clientId-first, handed down EmojiGlyphRow danceKey -> NotoEmojiGlyph -> NotoAnimatedEmoji liveDanceKey) and renders at the CURRENT global frame - no restart, no freeze, no second pass. A cold glyph starts the clock the moment its composition lands; taps keep the local replay (replayKey seeds 0 now); history rows never dance',
+    anim4.includes("internal object EmojiDance {") &&
+      anim4.includes("fun begin(key: String): Long =") &&
+      anim4.includes("fun progress(key: String, durationMs: Int): Float {") &&
+      anim4.includes("EmojiDance.begin(key)") &&
+      anim4.includes("liveT < 1f -> {") &&
+      anim4.includes("liveDanceKey: String? = null,") &&
+      anim4.includes("var replayKey by remember(mid, ch) { mutableStateOf(0) }"),
+  );
+
+  check(
+    'r87-2 (owner r87 #2: "animation ta smooth koro hotath open hoi hotath close hoi smooth na ... once view soho chat a all medias same animation hobe"): the 180 ms open read as a snap (the r84-r85 speed hunt overshot); the hero flights sit at 300 ms in / 260 ms out on the SAME emphasized curves - long enough to read as motion, short enough to feel instant. The photo viewer, the video overlay and the view-once photo pages share the one composable, so every chat media (once included) plays the identical flight',
+    (
+      media4.match(
+        /tween\(300, easing = androidx\.compose\.animation\.core\.CubicBezierEasing\(0\.05f, 0\.7f, 0\.1f, 1f\)\)/g,
+      ) || []
+    ).length === 2 &&
+      (
+        media4.match(
+          /tween\(260, easing = androidx\.compose\.animation\.core\.CubicBezierEasing\(0\.3f, 0f, 0\.8f, 0\.15f\)\)/g,
+        ) || []
+      ).length === 2 &&
+      !media4.includes(
+        "tween(180, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f))",
+      ),
+  );
+
+  check(
+    'r86-1 (retargeted r87-1; owner r87 #1: "sending animation hoi sent hole abar stop hoye animation hoi ... send sending sent zero gap"): the r86 per-composition dance seed RESTARTED the pass at the pending->server swap (two different compositions, two local clocks - the emoji froze a beat and danced again as soon as the row read sent). The birth dance now rides a GLOBAL time-based clock (EmojiDance, the FlightAnims pattern): the echo\'s glyph starts it exactly once and the server row RESUMES the same wall-clock frame - one continuous dance from sending to sent, the swap invisible; fxEmoji still gates on fxBorn (live births only, history static), taps keep the local replay',
     chat4.includes("val fxEmoji = fxBorn") &&
       !chat4.includes("val fxEmoji = false") &&
-      anim4.includes("mutableStateOf(if (active && animScale > 0f && isSingle) 1 else 0)"),
+      anim4.includes("internal object EmojiDance {") &&
+      anim4.includes(
+        "liveDanceKey = if (active && isSingle && animScale > 0f) danceKey else null",
+      ) &&
+      (chat4.match(/danceKey = fxKey\)/g) || []).length === 3,
   );
 
   check(

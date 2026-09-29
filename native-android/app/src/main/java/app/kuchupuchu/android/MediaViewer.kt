@@ -309,7 +309,7 @@ fun KpPhotoViewer(
             // fast-out punch. Decelerate-emphasized open.
             hero.animateTo(
                 1f,
-                tween(180, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)),
+                tween(300, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)),
             )
         }
     }
@@ -335,7 +335,7 @@ fun KpPhotoViewer(
                 // r81-3: emphasized-accelerate reverse, matching the open.
                 hero.animateTo(
                     0f,
-                    tween(220, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)),
+                    tween(260, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)),
                 )
                 // r77-3: the landed hero sits exactly on the live seat, fully
                 // opaque. Bring the tile back and commit ONE frame while that
@@ -937,7 +937,7 @@ fun VideoPlayerScreen(nav: NavController, b64: String, overlayClose: (() -> Unit
         if (vidHeroLaidOut && vidHeroSeat != null) {
             vidHero.animateTo(
                 1f,
-                tween(180, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)),
+                tween(300, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)),
             )
         }
     }
@@ -970,7 +970,7 @@ fun VideoPlayerScreen(nav: NavController, b64: String, overlayClose: (() -> Unit
         scope.launch {
             vidHero.animateTo(
                 0f,
-                tween(220, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)),
+                tween(260, easing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)),
             )
             PhotoHero.outId = null
             androidx.compose.runtime.withFrameNanos { }

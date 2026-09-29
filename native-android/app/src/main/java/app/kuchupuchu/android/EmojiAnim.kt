@@ -164,6 +164,33 @@ internal object NotoEmojiWarm {
     }
 }
 
+/**
+ * r87-1 (owner r87 #1: "sending animation hoi sent hole abar stop hoye
+ * animation hoi ... send sending sent zero gap"): the pending echo and the
+ * server row that replaces it are TWO DIFFERENT compositions, so the r86
+ * per-composition dance restarted from zero at the swap - the emoji froze
+ * for a beat and danced again the moment the row became "sent". The birth
+ * dance is GLOBAL and TIME-BASED per message key (the FlightAnims pattern):
+ * the echo's composition starts the clock exactly once, and the server row
+ * that takes the seat RESUMES at the same wall-clock frame - the swap is
+ * invisible, one continuous dance from sending to sent.
+ */
+internal object EmojiDance {
+    private val startedAt = java.util.Collections.synchronizedMap(HashMap<String, Long>())
+
+    /** Idempotent - the first live composition owns the start. */
+    fun begin(key: String): Long =
+        synchronized(startedAt) {
+            startedAt.getOrPut(key) { android.os.SystemClock.uptimeMillis() }
+        }
+
+    /** 0..1 from the wall clock; 1 when never begun or already finished. */
+    fun progress(key: String, durationMs: Int): Float {
+        val t = startedAt[key] ?: return 1f
+        return ((android.os.SystemClock.uptimeMillis() - t).toFloat() / durationMs).coerceIn(0f, 1f)
+    }
+}
+
 internal fun emojiToCodepoint(emoji: String): String {
     if (emoji.isEmpty()) return ""
     val cps = mutableListOf<String>()
@@ -216,6 +243,9 @@ internal fun NotoAnimatedEmoji(
     sizeSp: Float,
     replayKey: Int,
     modifier: Modifier = Modifier,
+    // r87-1: the live-birth dance key (the row's stable fxKey). Null = this
+    // glyph has no birth dance (history row / multi-glyph / tap-replay only).
+    liveDanceKey: String? = null,
 ) {
     val codepoint = remember(emoji) { emojiToCodepoint(emoji) }
     val isBundled = remember(codepoint) { NotoBundled.isBundled(codepoint) }
@@ -261,6 +291,21 @@ internal fun NotoAnimatedEmoji(
     }
     val animatable = rememberLottieAnimatable()
     var isPlaying by remember(emoji) { mutableStateOf(false) }
+    // r87-1: the birth dance rides the GLOBAL clock - the pending->server
+    // swap resumes the same frame instead of restarting the pass.
+    var liveT by remember(liveDanceKey) { mutableStateOf(1f) }
+    LaunchedEffect(composition, liveDanceKey) {
+        val key = liveDanceKey ?: return@LaunchedEffect
+        val comp = composition ?: return@LaunchedEffect
+        EmojiDance.begin(key)
+        val durMs = (comp.duration * 1000f).toInt().coerceAtLeast(1)
+        while (true) {
+            val p = EmojiDance.progress(key, durMs)
+            liveT = p
+            if (p >= 1f) break
+            androidx.compose.runtime.withFrameNanos { }
+        }
+    }
 
     LaunchedEffect(composition, replayKey) {
         if (composition != null && replayKey > 0) {
@@ -279,18 +324,29 @@ internal fun NotoAnimatedEmoji(
         contentAlignment = Alignment.Center,
     ) {
         if (composition != null) {
-            if (isPlaying) {
-                LottieAnimation(
-                    composition = composition,
-                    progress = { animatable.progress },
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-                LottieAnimation(
-                    composition = composition,
-                    progress = { 1f },
-                    modifier = Modifier.fillMaxSize(),
-                )
+            when {
+                // r87-1: the live birth dance (global clock, swap-proof).
+                liveT < 1f -> {
+                    LottieAnimation(
+                        composition = composition,
+                        progress = { liveT },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+                isPlaying -> {
+                    LottieAnimation(
+                        composition = composition,
+                        progress = { animatable.progress },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+                else -> {
+                    LottieAnimation(
+                        composition = composition,
+                        progress = { 1f },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         } else {
             Text(
@@ -312,6 +368,9 @@ internal fun EmojiGlyphRow(
     // r71-21: the second tap of a double tap also drops the heart here — the
     // bubble kind that already spends a tap on the dance itself.
     onDoubleTap: (() -> Unit)? = null,
+    // r87-1: the row's stable fxKey (clientId-first) - the birth dance clock
+    // is keyed on it so the echo->server swap resumes the same frame.
+    danceKey: String = mid,
 ) {
     val clusters = remember(body) { splitEmojiClusters(body) }
     val isSingle = clusters.size == 1
@@ -328,7 +387,7 @@ internal fun EmojiGlyphRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         clusters.forEachIndexed { i, ch ->
-            NotoEmojiGlyph(ch, sizeSp, active && shouldAnimate, mid, i, isSingle, onLongPress, onDoubleTap)
+            NotoEmojiGlyph(ch, sizeSp, active && shouldAnimate, mid, i, isSingle, onLongPress, onDoubleTap, danceKey)
         }
     }
 }
@@ -346,6 +405,8 @@ private fun NotoEmojiGlyph(
     // r71-21: handed down from EmojiGlyphRow — a double tap on an emoji-only
     // bubble drops the heart without deferring the instant replay.
     onDoubleTap: (() -> Unit)?,
+    // r87-1: the row's stable key for the global birth-dance clock.
+    danceKey: String = mid,
 ) {
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
@@ -356,7 +417,10 @@ private fun NotoEmojiGlyph(
     // deferring anything: a second tap inside [DOUBLE_TAP_HEART_MS] also runs
     // [onDoubleTap] while the replay it already triggered plays on.
     val lastTapAt = remember { longArrayOf(0L) }
-    var replayKey by remember(mid, ch) { mutableStateOf(if (active && animScale > 0f && isSingle) 1 else 0) }
+    // r87-1: the birth dance moved OFF the per-composition replayKey (the
+    // swap restarted it) - it rides the global EmojiDance clock now, so the
+    // seed stays 0 and only a TAP bumps replayKey.
+    var replayKey by remember(mid, ch) { mutableStateOf(0) }
 
     /**
      * r67-4 (owner: "emojis a tap korle animates eita aro enchance koro ami tap
@@ -448,6 +512,7 @@ private fun NotoEmojiGlyph(
             emoji = ch,
             sizeSp = sizeSp,
             replayKey = replayKey,
+            liveDanceKey = if (active && isSingle && animScale > 0f) danceKey else null,
         )
     }
 }
