@@ -570,3 +570,34 @@ black (chat invisible, "photo er moto"), + 4 new items. All six shipped:
   literal updated; 6 new r84 pins (needs anim4/media4/voice4/worker4 reads).
   Suite 47/47, 1939 assertions. NOTE: pin literals exist under MULTIPLE read
   vars (chat/chat2/chat3) - grep the literal itself, not one var's includes.
+
+## r85 round (shipped 68318b1+8023494, CI success, APK kuchupuchu-3.9.178-r85.apk 255/3.9.178)
+Owner retest r84: 1 not fixed (5th!), 2 almost (dim black left), 3 fixed but
+cancel anim slow, 4/5 fixed, 6 not instant.
+- **#1 emoji (r85-1) — THE ANSWER after 5 rounds**: text bubbles always
+  animated on the same first send because a mine row armed at BIRTH
+  (FlightAnims.armIn in MessageRow composition) enters fxFlyIn with goAt
+  already set -> fxFlyIn's `if (f.goAt < 0L)` gate block is SKIPPED ENTIRELY
+  and the flight ticks from frame one. Every bespoke emoji entrance (r78/81/
+  82/83/84) sat INSIDE a visibility gate - that was the constant across all
+  five failures. Fix: DELETED fxEmojiEntrance + EmojiGlyphWarm entirely;
+  emoji-only rows take the exact text flight (fxSlotOpen+fxFlyIn 680ms corner
+  pivot); armIn birth-arm now covers ALL mine rows (`if (mine && fxBorn)
+  FlightAnims.armIn(fxKey, 0L)`). LESSON: when a custom mechanism fails
+  repeatedly, diff it against the PROVEN sibling path and reuse that path
+  wholesale; also grep for stale comments referencing deleted symbols.
+- **#2 dim black (r85-2)**: the overlay Dialog's PLATFORM dim (default ~0.6)
+  behind the fading player. KpVideoOverlay now sets dim 0 (photo viewer rule)
+  + player backdrop `.background(Color.Black.copy(alpha = vidHero.value))`
+  when a hero seat exists (fades both ways over the live chat).
+- **#3 cancel swallow (r85-3)**: swallowT 900ms linear -> 420ms (flyer+lid).
+- **#6 open speed (r85-4)**: hero open 280 -> 180ms (photo + video, same
+  curve); close stays 220ms.
+- Pins: armIn-exclusion literal retargeted x6 (was in r76-29/r80-8/r81-6/8
+  pins under chat/chat2/chat3 + plain x3); r78-6/8, r80-8, r81-6/8, r83-1,
+  r84-1 all rewritten to the unified-flight asserts; r76-28 (47-r70) tween
+  280->180; r79-6/8 (47-r70) dead fx literals (birth/withFrameNanos -
+  withFrameNanos left ChatFx entirely) retargeted; r81-3a multiline 280->180;
+  32-bots r33-11b swallow literal 900->420 (multiline-with-comment anchors
+  are fragile - pin single lines, never comment text); new r85-2/3/4 pins.
+  Suite 47/47, 1942 assertions. ChatFx lost 3 imports (ktlint caught).
