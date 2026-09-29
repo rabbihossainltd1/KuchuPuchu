@@ -601,3 +601,33 @@ cancel anim slow, 4/5 fixed, 6 not instant.
   32-bots r33-11b swallow literal 900->420 (multiline-with-comment anchors
   are fragile - pin single lines, never comment text); new r85-2/3/4 pins.
   Suite 47/47, 1942 assertions. ChatFx lost 3 imports (ktlint caught).
+
+## r86 round (shipped b5f8058, CI success, APK kuchupuchu-3.9.179-r86.apk 256/3.9.179)
+Owner retest r85: 1 not fixed (6th!), 2 fixed, 3 fixed, 4 ok but "aro fast
+possible hole kore daw". NEW STANDING RULE: workspace keeps ONLY the latest
+APK (old ones deleted; keep it clean every round).
+- **#1 emoji (r86-1) — REFRAMED after 6 failures**: the five/six entrance
+  flight rounds (r78/81/82/83/84/85) all chased the ROW flight; the owner's
+  r78-4 words were about the GLYPH: "send korle first time animate hobe just
+  ekbar" = the emoji should DANCE once on send. Fix: `val fxEmoji = fxBorn`
+  (was `= false` since r76-18) - EmojiGlyphRow gets fxBorn, NotoEmojiGlyph
+  seeds replayKey=1 for a live single glyph -> the LOTTIE plays its own
+  frames once on the tap-replay machinery (device-proven daily). Warm glyphs
+  dance at once; a COLD glyph dances the moment its composition lands
+  (LaunchedEffect keys on composition) - no send can ever read as "no
+  animation". History/reopen static; multi-glyph rows unchanged (v206);
+  stickers safe (their composition never resolves -> no dance, no harm).
+  LESSON: when the owner says "animate" about EMOJI, suspect the glyph dance
+  (tap-replay), not the row flight.
+- **#4 faster tick (r86-4, worker)**: stampDelivered closure now runs
+  BEFORE the FCM roundtrip (optimistic for any recipient with a device);
+  `has_device` rides membersOf as `(SELECT EXISTS(SELECT 1 FROM devices
+  WHERE devices.user_id = members.user_id))` - ZERO extra D1 roundtrips.
+  FIRST ATTEMPT used a standalone `one(SELECT ... devices)` query and broke
+  the send-cost pins (r33-4: w 4->5, t 6->7 - the pins count every D1 trip;
+  the runner's failure echo also matches 'Error' inside OK narratives like
+  'downloadError' - grep '^\\s+BROKEN' on full output, not -A on FAIL).
+  Backstop `if ((live > 0 || pushed) && !stamped) await stampDelivered();`.
+- Pins: r67-3 (42-r67) + r77-8 (47-r70) `val fxEmoji = false` -> `fxBorn`
+  (retargeted narratives); r84-4 pin literal -> the r86-4 backstop form; new
+  r86-1/r86-4 pins. Suite 47/47, 1944 assertions.
