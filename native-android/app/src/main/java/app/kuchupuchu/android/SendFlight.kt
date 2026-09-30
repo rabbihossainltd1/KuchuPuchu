@@ -251,9 +251,18 @@ fun Modifier.fxFlyIn(
             // last 38% of the flight: the bubble lands, pops past its seat
             // and glides back. One hump, shared by both directions
             // (subtracted for sent, added for received).
+            // r103 (owner r102 feedback: "bounce not fixed"): the r102 hump
+            // still never passed the SEAT - it was ADDED to a translation
+            // that was still closing (x0 * inv stays large until the very
+            // end), so the bubble only crossed its seat by a few dp for a
+            // couple of frames. The flight now lands at 75% of the progress
+            // and the whole last quarter IS the bounce: a real 18dp pass
+            // over the seat and back, clearly readable on both directions.
+            val approach = (v0 / 0.75f).coerceAtMost(1f)
+            val inv = 1f - approach
             val bounce =
-                if (v0 > 0.62f) {
-                    sin((v0 - 0.62f) / 0.38f * PI.toFloat()) * 18f * density
+                if (v0 > 0.75f) {
+                    sin((v0 - 0.75f) / 0.25f * PI.toFloat()) * 18f * density
                 } else {
                     0f
                 }
@@ -266,7 +275,6 @@ fun Modifier.fxFlyIn(
                 // the take-off sits well BELOW the seat - the bubble flies in
                 // from the true bottom-right corner, not merely from the right.
                 val y0 = 110f * density
-                val inv = 1f - v0
                 translationX = x0 * inv - bounce
                 translationY = y0 * inv
                 scaleX = 1f
@@ -284,7 +292,6 @@ fun Modifier.fxFlyIn(
                 val lb = FlightAnchors.listBounds
                 val x0 = if (s != null && lb != null) -(s.right - lb.left + 14f * density) else -120f * density
                 val y0 = 110f * density
-                val inv = 1f - v0
                 translationX = x0 * inv + bounce
                 translationY = y0 * inv
                 scaleX = 1f

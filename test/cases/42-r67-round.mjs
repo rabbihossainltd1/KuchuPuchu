@@ -201,7 +201,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
     ) &&
       (
         chat.match(
-          /key = \{ it\.optString\("clientId"\)\.ifBlank \{ it\.optString\("id"\) \} \},/g,
+          /key = \{ (?:_, it -> )?it\.optString\("clientId"\)\.ifBlank \{ it\.optString\("id"\) \} \},/g,
         ) || []
       ).length >= 2,
   );

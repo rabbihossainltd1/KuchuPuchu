@@ -31,8 +31,27 @@ object KpNotify {
      */
     private val cardsByConv = mutableMapOf<String, MutableSet<Int>>()
 
+    /**
+     * r103-2 (owner: "same account theke por por massage ashle alada
+     * notification hisabe count hobe na ba new notification asbe ... oi ager
+     * notification i add hoye jabe new notification content ta"): the recent
+     * messages of each conversation, so consecutive messages from the same
+     * account UPDATE the conversation's one card (MessagingStyle shows the
+     * thread) instead of stacking separate cards. Bounded; cleared whenever
+     * the conversation is cancelled or acted on from the shade.
+     */
+    private val convMsgs = mutableMapOf<String, MutableList<StkMsg>>()
+
+    private class StkMsg(val from: String, val body: String, val at: Long, val photo: Boolean)
+
+    /** r103-2: start the conversation's card fresh (reply / mark-read / opening the chat). */
+    fun resetConv(convoId: String) {
+        if (convoId.isNotBlank()) convMsgs.remove(convoId)
+    }
+
     /** Cancel every message card posted for a conversation (+ the summary). */
     fun cancelConversation(ctx: Context, convId: String) {
+        convMsgs.remove(convId)
         val mgr = NotificationManagerCompat.from(ctx)
         cardsByConv.remove(convId)?.forEach { runCatching { mgr.cancel(it) } }
         runCatching { mgr.cancel(GROUP.hashCode()) }
@@ -299,6 +318,23 @@ object KpNotify {
         // Owner round 32 (item 27): the login-alert card gets a Decline action
         // (owner: Decline only — Approve happens inside the app, where the
         // request details are on screen). The receiver posts the decline.
+        // r103-2: a conversation's messages stack into ONE card (stable
+        // conversation id, MessagingStyle thread) - only the reminder path
+        // (blank convoId) and the login alerts keep their own per-message
+        // cards.
+        val stackable = convoId.isNotBlank() && loginRequestId == null
+        val stacked: List<StkMsg>? =
+            if (stackable) {
+                convMsgs
+                    .getOrPut(convoId) { mutableListOf() }
+                    .apply {
+                        add(StkMsg(from, body, System.currentTimeMillis(), picture != null))
+                        while (size > 6) removeAt(0)
+                    }
+                    .toList()
+            } else {
+                null
+            }
         val declineAction =
             loginRequestId?.takeIf { it.isNotBlank() }?.let { req ->
                 NotificationCompat.Action.Builder(
@@ -334,7 +370,30 @@ object KpNotify {
                 // the right (the brand logo steps aside for it). The style only
                 // changes the body; Reply / Like / Mark-as-read stay below it.
                 .apply {
-                    if (picture != null) {
+                    // r103-2: consecutive messages from the same account stack
+                    // into the conversation's ONE card - the shade renders the
+                    // thread (MessagingStyle) and each new message updates the
+                    // card instead of a new one. A lone message keeps the exact
+                    // look it always had (big text / big picture).
+                    if (stacked != null && stacked.size >= 2) {
+                        setStyle(
+                            NotificationCompat.MessagingStyle(
+                                androidx.core.app.Person.Builder().setName("Me").build(),
+                            )
+                                .setConversationTitle(from)
+                                .also { st ->
+                                    stacked.forEach { e ->
+                                        st.addMessage(
+                                            NotificationCompat.MessagingStyle.Message(
+                                                if (e.photo) "\uD83D\uDDBC\uFE0F Photo" else e.body,
+                                                e.at,
+                                                androidx.core.app.Person.Builder().setName(e.from).build(),
+                                            ),
+                                        )
+                                    }
+                                },
+                        )
+                    } else if (picture != null) {
                         setLargeIcon(picture)
                         setStyle(
                             NotificationCompat.BigPictureStyle()
@@ -399,7 +458,9 @@ object KpNotify {
             // time), the second masked the sign bit on this side only (a negative
             // String.hashCode() is ~55% of real ids, so again: actions that
             // "did nothing").
-            val msgId = NotifyIds.messageCard(mid, convoId, System.nanoTime())
+            val msgId =
+                if (stackable) NotifyIds.conversationCard(convoId)
+                else NotifyIds.messageCard(mid, convoId, System.nanoTime())
             cardsByConv.getOrPut(convoId) { mutableSetOf() }.add(msgId)
             mgr.notify(msgId, n)
             mgr.notify(GROUP.hashCode(), summary)
@@ -618,12 +679,20 @@ class KpNotifActionReceiver : android.content.BroadcastReceiver() {
         // System.nanoTime(), which no other process can recompute — dismissing
         // those stays impossible by construction, not by oversight.
         val cardId =
-            NotifyIds.messageCard(intent.getStringExtra("mid")) ?: convoId.hashCode()
+            NotifyIds.messageCard(intent.getStringExtra("mid")) ?: NotifyIds.conversationCard(convoId)
         Api.loadToken(ctx)
         val nm = NotificationManagerCompat.from(ctx)
+        // r103-2: the conversation's stacked card lives under its OWN stable
+        // id - an action must dismiss it too, and its message history starts
+        // fresh (the next message opens a new thread).
+        fun cancelAllCards() {
+            nm.cancel(cardId)
+            nm.cancel(NotifyIds.conversationCard(convoId))
+            resetConv(convoId)
+        }
         when (intent.action) {
             ACTION_LIKE -> {
-                nm.cancel(cardId)
+                cancelAllCards()
                 val pending = goAsync()
                 Thread {
                     runCatching {
@@ -647,7 +716,7 @@ class KpNotifActionReceiver : android.content.BroadcastReceiver() {
                 // either way (an expired / already-handled request is a 4xx,
                 // which is the same outcome for the user).
                 val req = intent.getStringExtra("requestId") ?: return
-                nm.cancel(cardId)
+                cancelAllCards()
                 val pending = goAsync()
                 Thread {
                     runCatching {
@@ -661,7 +730,7 @@ class KpNotifActionReceiver : android.content.BroadcastReceiver() {
             ACTION_MARK_READ -> {
                 // Just dismisses + marks read server-side — no reply sent,
                 // no app open, matches the messenger-style tick behaviour.
-                nm.cancel(cardId)
+                cancelAllCards()
                 val pending = goAsync()
                 Thread {
                     runCatching { Api.post("/api/conversations/$convoId/read") }
@@ -690,7 +759,7 @@ class KpNotifActionReceiver : android.content.BroadcastReceiver() {
                             )
                         }.isSuccess
                     if (ok) {
-                        nm.cancel(cardId)
+                        cancelAllCards()
                         // Quiet "sent" confirmation REPLACES the same card
                         // (same id) — the old code posted a second card with
                         // convoId.hashCode(), so users saw the original card

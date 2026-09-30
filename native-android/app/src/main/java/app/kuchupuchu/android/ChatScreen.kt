@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -75,6 +76,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
@@ -368,6 +370,12 @@ fun ChatScreen(nav: NavController, convId: String) {
     // row on top, every message action under it. (No floating bar, no
     // system-style icon strip.) Multi-select is the sheet's "Select" action.
     var actionFor by remember { mutableStateOf<JSONObject?>(null) }
+
+    // r103-4 (owner: "massage tap hold korle je sheet ta ashe okahne arekta
+    // options add Hobe ''Info'' - eita click korle massage sent Time
+    // delivered time seen time read status oi massage er info dekha jabe"):
+    // the message-info sheet opened from the long-press actions.
+    var infoFor by remember { mutableStateOf<JSONObject?>(null) }
 
     val selected = remember { mutableStateListOf<String>() }
 
@@ -4141,11 +4149,20 @@ fun ChatScreen(nav: NavController, convId: String) {
                     bottom = 6.dp,
                 ),
             ) {
-                items(
+                // r103-3: the pending echoes render in their own block below -
+                // hoisted so the thread's last row can look past its own end.
+                val echoRows =
+                    foldAlbums(
+                        pending.filter { p ->
+                            val cid = p.optString("clientId").ifBlank { p.optString("id") }
+                            visibleMsgs.none { it.optString("clientId") == cid || it.optString("id") == cid }
+                        },
+                    )
+                itemsIndexed(
                     groupedMsgs,
-                    key = { it.optString("clientId").ifBlank { it.optString("id") } },
-                    contentType = { it.optString("kind") },
-                ) { m ->
+                    key = { _, it -> it.optString("clientId").ifBlank { it.optString("id") } },
+                    contentType = { _, it -> it.optString("kind") },
+                ) { idx, m ->
                     // WhatsApp-style selection: the whole ROW gets a translucent
                     // highlight strip, edge to edge — not just the bubble.
                     val rowSelected = m.optString("id") in selected
@@ -4166,6 +4183,21 @@ fun ChatScreen(nav: NavController, convId: String) {
                         tween(if (flashing) 180 else 700),
                         label = "quoteflash",
                     )
+                    // r103-3 (owner: "2 ta user e jodi continues massage
+                    // kore tobe last massage a just double tick+ time eshob
+                    // dekhabe baki gulai na"): a run of consecutive messages
+                    // from the same sender carries its time (+ ticks) only on
+                    // the LAST row - WhatsApp-style. The marker rides a COPY
+                    // of the message so every row renderer can honor it.
+                    val nextSender =
+                        groupedMsgs.getOrNull(idx + 1)?.optString("senderId")
+                            ?: if (echoRows.isNotEmpty()) Store.myId() else null
+                    val rowM =
+                        if (nextSender != null && nextSender == m.optString("senderId")) {
+                            JSONObject(m.toString()).put("kpHideStamp", true)
+                        } else {
+                            m
+                        }
                     // r76-27 (audit #15): a VANISHED / deleted row fades away
                     // on its way out (fadeInSpec stays null - arrivals belong
                     // to the flight system, untouched).
@@ -4206,7 +4238,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             },
                         ) {
                         MessageRow(
-                            m,
+                            rowM,
                             isGroup,
                             Store.myId(),
                             otherReadAt,
@@ -4332,12 +4364,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                 }
                 items(
-                    foldAlbums(
-                        pending.filter { p ->
-                            val cid = p.optString("clientId").ifBlank { p.optString("id") }
-                            visibleMsgs.none { it.optString("clientId") == cid || it.optString("id") == cid }
-                        },
-                    ),
+                    echoRows,
                     key = { it.optString("clientId").ifBlank { it.optString("id") } },
                     // r67-3: the same content type as the thread block, so the
                     // echo and the row that replaces it are the same kind of
@@ -4357,6 +4384,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                     bornKeys.remove(rowKey)
                     // E7: consume the history-unfurl key the same way (one shot, no replay).
                     historyFxKeys.remove(rowKey)
+                    // r103-3: a burst of echoes shows the stamp on the last
+                    // one only (the run's newest row).
+                    val echoM =
+                        if (m !== echoRows.lastOrNull()) JSONObject(m.toString()).put("kpHideStamp", true) else m
                     Box(
                         Modifier
                             .fillMaxWidth()
@@ -4364,7 +4395,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             .fxHistoryUnfurl(rowKey in historyFxKeys)
                     ) {
                         MessageRow(
-                            m,
+                            echoM,
                             isGroup,
                             Store.myId(),
                             otherReadAt,
@@ -4636,6 +4667,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                         android.widget.Toast.makeText(ctx, "Copied", android.widget.Toast.LENGTH_SHORT).show()
                     }
                 }
+                // r103-4: the message's own timeline - sent / delivered /
+                // seen, straight from the long-press sheet.
+                KpSheetRow(Icons.Filled.Info, "Info") {
+                    close()
+                    infoFor = m
+                }
                 // Owner round 31 item 21: no forwarding out of a private chat.
                 // Owner round 32 (item 17): nor of a view-once photo / video.
                 if (!echo && !privateChat && !isViewOnce(m)) {
@@ -4666,6 +4703,29 @@ fun ChatScreen(nav: NavController, convId: String) {
                 KpSheetRow(Icons.Filled.CheckCircle, "Select") {
                     close()
                     albumIds.forEach { if (it !in selected) selected.add(it) }
+                }
+            }
+        }
+
+        // r103-4: the message-info sheet - Sent / Delivered / Seen with
+        // full dates, read straight off the row the sheet was opened from.
+        infoFor?.let { m ->
+            val mineInfo = m.optString("senderId") == Store.myId()
+            val seenInfo = isReadByOther(otherReadAt, m.optString("createdAt"))
+            KpSheet(onDismiss = { infoFor = null }) {
+                Text(
+                    "Message info",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Ink,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                )
+                MessageInfoRow("Sent", infoStamp(m.optString("createdAt")))
+                if (mineInfo) {
+                    MessageInfoRow("Delivered", m.optIso("deliveredAt")?.let { infoStamp(it) } ?: "Not yet")
+                    MessageInfoRow("Seen", if (seenInfo) infoStamp(otherReadAt ?: "") else "Not yet")
+                } else {
+                    MessageInfoRow("Received", infoStamp(m.optString("createdAt")))
                 }
             }
         }
@@ -8585,7 +8645,7 @@ private fun MessageRow(
                 horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                BubbleStamp(m, mine, pendingEcho, otherReadAt, if (kind == "STICKER") 1 else emojiOnly, stampInk)
+                if (!m.optBoolean("kpHideStamp")) BubbleStamp(m, mine, pendingEcho, otherReadAt, if (kind == "STICKER") 1 else emojiOnly, stampInk)
             }
             // Owner round 16: reaction chips under the bubble.
             MessageReactions(m)
@@ -9182,20 +9242,22 @@ private fun VideoMessageRow(
                             .padding(horizontal = 5.dp, vertical = 1.dp),
                     )
                 }
-                Row(
-                    Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(horizontal = 8.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        msgStamp(m.optString("createdAt")),
-                        fontSize = 10.sp,
-                        color = Color.White,
-                    )
-                    if (mine) {
-                        Spacer(Modifier.width(3.dp))
-                        TickIcon(m, pendingEcho, otherReadAt)
+                if (!m.optBoolean("kpHideStamp")) {
+                    Row(
+                        Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(horizontal = 8.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            msgStamp(m.optString("createdAt")),
+                            fontSize = 10.sp,
+                            color = Color.White,
+                        )
+                        if (mine) {
+                            Spacer(Modifier.width(3.dp))
+                            TickIcon(m, pendingEcho, otherReadAt)
+                        }
                     }
                 }
                 if (rowSelected) {
@@ -9400,7 +9462,7 @@ private fun OnceTextRow(
                     Text("${((leftMs + 999) / 1000)}s", color = Red, fontSize = 10.sp)
                     Spacer(Modifier.width(4.dp))
                 }
-                BubbleStamp(m, mine, pendingEcho, otherReadAt, 0, stampInk)
+                if (!m.optBoolean("kpHideStamp")) BubbleStamp(m, mine, pendingEcho, otherReadAt, 0, stampInk)
             }
         }
     }
@@ -9846,22 +9908,24 @@ private fun ViewOnceRow(
                 // Bottom-right timestamp + tick
                 // r60 (owner: "time ta aro choto koro dim background remove koro"):
                 // clean compact timestamp without dim background box, single line.
-                Row(
-                    Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(end = 8.dp, bottom = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        msgStamp(m.optString("createdAt")),
-                        fontSize = 10.sp,
-                        maxLines = 1,
-                        softWrap = false,
-                        color = Color.White.copy(alpha = 0.9f),
-                    )
-                    if (mine) {
-                        Spacer(Modifier.width(3.dp))
-                        TickIcon(m, pendingEcho, otherReadAt)
+                if (!m.optBoolean("kpHideStamp")) {
+                    Row(
+                        Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 8.dp, bottom = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            msgStamp(m.optString("createdAt")),
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            color = Color.White.copy(alpha = 0.9f),
+                        )
+                        if (mine) {
+                            Spacer(Modifier.width(3.dp))
+                            TickIcon(m, pendingEcho, otherReadAt)
+                        }
                     }
                 }
                 if (rowSelected) Box(Modifier.matchParentSize().background(ActionBlue.copy(alpha = 0.35f)))
@@ -10090,20 +10154,22 @@ private fun ImageMessageRow(
                         ),
                     ),
             )
-            Row(
-                Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(horizontal = 8.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    msgStamp(m.optString("createdAt")),
-                    fontSize = 10.sp,
-                    color = Color.White,
-                )
-                if (mine) {
-                    Spacer(Modifier.width(3.dp))
-                    TickIcon(m, pendingEcho, otherReadAt)
+            if (!m.optBoolean("kpHideStamp")) {
+                Row(
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        msgStamp(m.optString("createdAt")),
+                        fontSize = 10.sp,
+                        color = Color.White,
+                    )
+                    if (mine) {
+                        Spacer(Modifier.width(3.dp))
+                        TickIcon(m, pendingEcho, otherReadAt)
+                    }
                 }
             }
         }
@@ -10451,20 +10517,22 @@ private fun AlbumMessageRow(
                             ),
                         ),
                 )
-                Row(
-                    Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(horizontal = 8.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        msgStamp(m.optString("createdAt")),
-                        fontSize = 10.sp,
-                        color = Color.White,
-                    )
-                    if (mine) {
-                        Spacer(Modifier.width(3.dp))
-                        TickIcon(m, pendingEcho, otherReadAt)
+                if (!m.optBoolean("kpHideStamp")) {
+                    Row(
+                        Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(horizontal = 8.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            msgStamp(m.optString("createdAt")),
+                            fontSize = 10.sp,
+                            color = Color.White,
+                        )
+                        if (mine) {
+                            Spacer(Modifier.width(3.dp))
+                            TickIcon(m, pendingEcho, otherReadAt)
+                        }
                     }
                 }
             }
@@ -11839,6 +11907,41 @@ private fun TickIcon(
  * emoji-only body, so its stamp reads in the wallpaper's ink.
  */
 @Composable
+/**
+ * r103-4: one line of the message-info sheet - a muted label, the full
+ * "23 Sep, 10:45 AM" value (Dhaka clock, the stamp's own formatter widened).
+ */
+private fun infoStamp(iso: String): String {
+    if (iso.isBlank()) return "-"
+    return try {
+        val z = atDhaka(java.time.Instant.parse(iso))
+        val h = (z.hour % 12).let { if (it == 0) 12 else it }
+        String.format(
+            "%d %s, %d:%02d %s",
+            z.dayOfMonth,
+            z.month.name.lowercase().substring(0, 3).replaceFirstChar { c -> c.uppercase() },
+            h,
+            z.minute,
+            if (z.hour < 12) "AM" else "PM",
+        )
+    } catch (e: Exception) {
+        "-"
+    }
+}
+
+@Composable
+private fun MessageInfoRow(label: String, value: String) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, fontSize = 13.5.sp, color = Muted, modifier = Modifier.width(96.dp))
+        Text(value, fontSize = 13.5.sp, color = Ink, fontWeight = FontWeight.Medium)
+    }
+}
+
 private fun BubbleStamp(
     m: JSONObject,
     mine: Boolean,

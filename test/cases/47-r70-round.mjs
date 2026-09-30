@@ -1479,6 +1479,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
   const media4 = main("MediaViewer.kt");
   const ui4 = main("Ui.kt");
   const notify4 = main("KpNotify.kt");
+  const nids4 = main("NotifyIds.kt");
   const pick4 = main("StatusPickScreen.kt");
   const edit4 = main("MediaEditScreen.kt");
   const settings4 = main("SettingsScreen.kt");
@@ -1713,7 +1714,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       "val dur = ((durMs * 0.5f * scale).toInt().coerceIn(240, 360)).coerceAtLeast(1)",
     ) &&
       flight4.includes("translationX = x0 * inv - bounce") &&
-      flight4.includes("sin((v0 - 0.62f) / 0.38f * PI.toFloat()) * 18f * density"),
+      flight4.includes("sin((v0 - 0.75f) / 0.25f * PI.toFloat()) * 18f * density"),
   );
 
   check(
@@ -1728,8 +1729,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
-    'r102 (owner r101 feedback: "arekta kaj to koroni bouns effect nei massage send receive a"): the landing bounce is now clearly VISIBLE on both the sent and the received flight - the r93 bonus was 5dp over the last 28% of a ~300 ms flight, which the eye cannot catch. One shared hump now overshoots 18dp past the seat over the last 38% of the flight (lands, pops past the seat, glides back), subtracted for the sent direction and added for the received one. Computed once before the direction branch so both flights bounce identically',
-    flight4.includes("sin((v0 - 0.62f) / 0.38f * PI.toFloat()) * 18f * density") &&
+    'r102 + r103 (owner r101: "bouns effect nei massage send receive a"; r102 test: "bounce not fixed"): the r93 bonus was 5dp over the last 28% - invisible; the r102 hump was ADDED to a translation that was still closing, so the bubble only crossed its seat by a few dp for a couple of frames. r103 makes the bounce REAL: the flight lands at 75% of the progress (approach clamps to 1) and the whole last quarter IS the bounce - a true 18dp pass over the seat and back, subtracted for the sent direction, added for the received one. One shared hump before the direction branch so both flights bounce identically',
+    flight4.includes("val approach = (v0 / 0.75f).coerceAtMost(1f)") &&
+      flight4.includes("sin((v0 - 0.75f) / 0.25f * PI.toFloat()) * 18f * density") &&
       (flight4.match(/val bounce =/g) || []).length === 1 &&
       flight4.includes("translationX = x0 * inv - bounce") &&
       flight4.includes("translationX = x0 * inv + bounce") &&
@@ -1861,6 +1863,47 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat4.includes("fun keyboardImagePasted(uri: android.net.Uri)") &&
       chat4.includes('openPastePreview(mime, uri, "kbd|$uri")') &&
       !chat4.includes("onValueChange = onInput"),
+  );
+
+  check(
+    'r103-2 (owner: "same account theke por por massage ashle alada notification hisabe count hobe na ba new notification asbe ba oi ager notification i add hoye jabe new notification content ta"): consecutive messages from the same account now stack into the conversation is ONE card - each new message UPDATES it (MessagingStyle renders the thread, capped at 6 entries) under a STABLE conversation id (NotifyIds.conversationCard, used by both the poster and the action receiver), instead of a fresh card per message. A lone message keeps the exact old look (big text / big picture); the reminder path (blank convoId) and login alerts keep per-message cards; cancelConversation / reply / like / mark-read reset the thread history',
+    nids4.includes("fun conversationCard(convId: String): Int = convId.hashCode()") &&
+      notify4.includes("NotificationCompat.MessagingStyle(") &&
+      notify4.includes("private val convMsgs = mutableMapOf<String, MutableList<StkMsg>>()") &&
+      notify4.includes("while (size > 6) removeAt(0)") &&
+      notify4.includes("if (stackable) NotifyIds.conversationCard(convoId)") &&
+      notify4.includes("fun resetConv(convoId: String)") &&
+      notify4.includes("fun cancelAllCards()") &&
+      notify4.includes("convMsgs.remove(convoId)"),
+  );
+
+  check(
+    'r103-3 (owner: "ekhon prottekta massage bubble er niche time + double tick but eita halka change Hobe 2 ta user e jodi continues massage kore tobe last massage a just double tick+ time eshob dekhabe baki gulai na"): a run of consecutive messages from the same sender shows its time (+ ticks) ONLY on the last row of the run - WhatsApp-style, both directions. The marker (kpHideStamp) rides a COPY of the message so every row renderer honors it without a signature change: the thread block looks ahead to the next row (and past its end to the pending echoes), the echo block hides all but the last echo, and all six stamp renderers (two BubbleStamp sites + the four photo/video/file/album overlay Rows) gate on the marker',
+    chat4.includes("val nextSender =") &&
+      chat4.includes("val rowM =") &&
+      chat4.includes("val echoM =") &&
+      chat4.includes("itemsIndexed(") &&
+      (chat4.match(/kpHideStamp/g) || []).length === 8 &&
+      chat4.includes(
+        'if (!m.optBoolean("kpHideStamp")) BubbleStamp(m, mine, pendingEcho, otherReadAt, if (kind == "STICKER") 1 else emojiOnly, stampInk)',
+      ),
+  );
+
+  check(
+    'r103-4 (owner: "massage tap hold korle je sheet ta ashe okahne arekta options add Hobe Info - eita click korle massage sent Time delivered time seen time read status oi massage er info dekha jabe"): the long-press sheet gains an Info row (after Copy) opening a message-info sheet: Sent (and Received for their rows) with the full date+time, Delivered and Seen for own rows (deliveredAt / otherReadAt vs createdAt), "Not yet" when pending',
+    chat4.includes('KpSheetRow(Icons.Filled.Info, "Info")') &&
+      chat4.includes("var infoFor by remember { mutableStateOf<JSONObject?>(null) }") &&
+      chat4.includes("private fun infoStamp(iso: String): String {") &&
+      chat4.includes('MessageInfoRow("Sent", infoStamp(m.optString("createdAt")))') &&
+      chat4.includes(
+        'MessageInfoRow("Delivered", m.optIso("deliveredAt")?.let { infoStamp(it) } ?: "Not yet")',
+      ),
+  );
+
+  check(
+    'r103-5 (owner: "jekono chat item a tap hold korlei select Hobe na ekhon hocche user jodi select a click kore tobei click Hobe"): a chat-list long-press no longer enters select mode or ticks the row - it only opens the sheet; selection happens exclusively via the sheet is Select action (which already ticks the row)',
+    list4.includes("ListSelect.sheetFor = conv") &&
+      !list4.includes("if (id !in ListSelect.ids) ListSelect.ids.add(id)"),
   );
 
   check(

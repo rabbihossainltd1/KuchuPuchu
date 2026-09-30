@@ -1411,8 +1411,11 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
     if (peek) ProfilePeekSheet(conv, nav) { peek = false }
     val longPress = {
         haptics.heavy()
-        ListSelect.active = true
-        if (id !in ListSelect.ids) ListSelect.ids.add(id)
+        // r103-5 (owner: "jekono chat item a tap hold korlei select Hobe na
+        // ... user jodi select a click kore tobei click Hobe"): long-press
+        // only OPENS the sheet now - it no longer activates select mode or
+        // ticks the row. Selection happens exclusively through the sheet's
+        // Select action.
         ListSelect.sheetFor = conv
     }
 

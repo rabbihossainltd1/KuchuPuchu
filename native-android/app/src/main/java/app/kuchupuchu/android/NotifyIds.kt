@@ -36,4 +36,15 @@ object NotifyIds {
     /** What [android.app.NotificationManager.notify] is called with. */
     fun messageCard(mid: String?, convId: String, nanoTime: Long): Int =
         messageCard(mid) ?: messageCardFallback(convId, nanoTime)
+
+    /**
+     * r103-2 (owner: "same account theke por por massage ashle alada
+     * notification hisabe count hobe na ... oi ager notification i add hoye
+     * jabe new notification content ta"): the STABLE id of a conversation's
+     * single stacked card. One card per conversation, updated in place as
+     * messages arrive - both the posting side and the action receiver go
+     * through this function so the two can never drift (the exact discipline
+     * messageCard exists for).
+     */
+    fun conversationCard(convId: String): Int = convId.hashCode()
 }
