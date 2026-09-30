@@ -47,10 +47,18 @@ import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.content.MediaType
+import androidx.compose.foundation.content.ReceiveContentListener
+import androidx.compose.foundation.content.consume
+import androidx.compose.foundation.content.contentReceiver
+import androidx.compose.foundation.content.hasMediaType
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
@@ -5242,6 +5250,20 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
             return false
         }
+        // r100-3 (owner: "Gboard a screenshot pasting option dei ... amar app
+        // a pasting option e nai"): the composer field now accepts keyboard-
+        // committed images (contentReceiver) — Gboard's own screenshot chip
+        // and the system paste menu finally work. The keyboard hands over a
+        // uri with a read grant; it opens the editor through the same flow
+        // as the clipboard chip.
+        fun keyboardImagePasted(uri: android.net.Uri) {
+            val mime =
+                runCatching { ctx.contentResolver.getType(uri) }.getOrNull()
+                    ?.takeIf { it.startsWith("image/") }
+                    ?: sniffClipMime(ctx.contentResolver, uri)
+                    ?: "image/jpeg"
+            openPastePreview(mime, uri, "kbd|$uri")
+        }
         pastePreview?.let { (pMime, pUri, pKey) ->
             Row(
                 Modifier
@@ -5305,6 +5327,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             onAttach = { haptics.tap(); showStickers = false; showAttach = true },
             onSticker = { requestAttachExit { haptics.tap(); showAttach = false; showStickers = true } },
             onPasteImage = { composerPasteImage() },
+            onReceiveImage = { uri -> keyboardImagePasted(uri) },
             onSend = { requestAttachExit {
                 haptics.confirm()
                 showAttach = false
@@ -5771,6 +5794,9 @@ private fun Composer(
     // r94-10 (owner r94 #10): the composer's PASTE understands a clipboard
     // IMAGE — return true when it handled one (text pastes as text).
     onPasteImage: () -> Boolean = { false },
+    // r100-3: an image COMMITTED by the keyboard (Gboard's screenshot chip /
+    // GIF / sticker) or the system paste menu arrives here with its own uri.
+    onReceiveImage: (android.net.Uri) -> Unit = {},
     onAttach: () -> Unit,
     onSticker: () -> Unit,
     onSend: () -> Unit,
@@ -5962,13 +5988,60 @@ private fun Composer(
                         androidx.compose.runtime.CompositionLocalProvider(
                             androidx.compose.ui.platform.LocalTextToolbar provides inputPasteToolbar,
                         ) {
+                            // r100-3 (owner: "ami kono screenshot nile je app
+                            // gula images pasting support kore oi app open
+                            // korle massage type korte gelei Gboard agei
+                            // keyboard a screenshot paste option dei ... amar
+                            // app a pasting option e nai"): the composer field
+                            // is the NEW state-based BasicTextField with a
+                            // contentReceiver — verified against the 1.7.4
+                            // sources: a field with a contentReceiver
+                            // advertises contentMimeTypes ["*/*","image/*",
+                            // "video/*"] to the IME, so Gboard's screenshot
+                            // chip appears exactly like WhatsApp's, and a
+                            // committed image (chip tap, GIF, sticker, the
+                            // system paste menu) arrives in the listener with
+                            // a read-granted uri → onReceiveImage → the
+                            // editor. The legacy value/onValueChange field
+                            // never advertised image support — that is why
+                            // every keyboard and the ROM said "not supported"
+                            // for five rounds. Text is untouched: a non-image
+                            // clip falls through to the field's own paste.
+                            val inputState = rememberTextFieldState(input)
+                            val currentInput by rememberUpdatedState(input)
+                            val currentOnInput by rememberUpdatedState(onInput)
+                            val currentOnReceiveImage by rememberUpdatedState(onReceiveImage)
+                            LaunchedEffect(inputState) {
+                                androidx.compose.runtime.snapshotFlow { inputState.text.toString() }
+                                    .collect { t -> if (t != currentInput) currentOnInput(t) }
+                            }
+                            LaunchedEffect(input) {
+                                if (inputState.text.toString() != input) inputState.setTextAndPlaceCursorAtEnd(input)
+                            }
+                            val imageReceiver = remember {
+                                ReceiveContentListener { tc ->
+                                    if (tc.hasMediaType(MediaType.Image)) {
+                                        var handled = false
+                                        val rest = tc.consume { item ->
+                                            val uri = item.uri
+                                            if (uri != null) {
+                                                currentOnReceiveImage(uri)
+                                                handled = true
+                                            }
+                                            uri != null
+                                        }
+                                        if (handled) rest else null
+                                    } else {
+                                        tc
+                                    }
+                                }
+                            }
                             BasicTextField(
-                                value = input,
-                                onValueChange = onInput,
+                                state = inputState,
                                 textStyle = TextStyle(color = Ink, fontSize = 14.sp, lineHeight = 20.sp),
                                 // Owner round 19: the caret follows the chat theme too.
                                 cursorBrush = androidx.compose.ui.graphics.SolidColor(accent),
-                                maxLines = 4,
+                                lineLimits = TextFieldLineLimits.MultiLine(minHeightInLines = 1, maxHeightInLines = 4),
                                 interactionSource = inputInteraction,
                                 // min height pinned to the placeholder's own line
                                 // height so the bar can never shrink the instant
@@ -5978,6 +6051,7 @@ private fun Composer(
                                 // composer visibly "chepe" (squeezed) on the
                                 // empty -> typing transition.
                                 modifier = Modifier
+                                    .contentReceiver(imageReceiver)
                                     .fillMaxWidth()
                                     .heightIn(min = 20.dp)
                                     .padding(vertical = 6.dp)

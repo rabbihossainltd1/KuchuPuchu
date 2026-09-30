@@ -1831,6 +1831,20 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
+    'r100-3 (owner: "je app gula images pasting support kore oi app open korle massage type korte gelei Gboard agei keyboard a screenshot paste option dei ... amar app a pasting option e nai" - the ROOT CAUSE at last, verified against the compose-foundation 1.7.4 sources): the legacy BasicTextField(value, onValueChange) never advertised contentMimeTypes - its RecordingInputConnection.commitContent literally returns false - so every IME (Gboard included) saw a text-only field and hid the image paste chip. The composer field is migrated to the state-based BasicTextField + Modifier.contentReceiver: with a receiver attached the field advertises contentMimeTypes ["*/*","image/*","video/*"] to the IME (Gboard shows the screenshot chip, WhatsApp-parity), and a committed image (chip tap, GIF, sticker, system paste) arrives in the listener with a read-granted uri -> onReceiveImage -> keyboardImagePasted -> the SAME openPastePreview flow. Text clips fall through untouched; the r94-10 toolbar interception and the r95-10 chip stay as the other doors',
+    chat4.includes("onReceiveImage: (android.net.Uri) -> Unit = {},") &&
+      chat4.includes("val inputState = rememberTextFieldState(input)") &&
+      chat4.includes(".contentReceiver(imageReceiver)") &&
+      chat4.includes("tc.hasMediaType(MediaType.Image)") &&
+      chat4.includes(
+        "lineLimits = TextFieldLineLimits.MultiLine(minHeightInLines = 1, maxHeightInLines = 4),",
+      ) &&
+      chat4.includes("fun keyboardImagePasted(uri: android.net.Uri)") &&
+      chat4.includes('openPastePreview(mime, uri, "kbd|$uri")') &&
+      !chat4.includes("onValueChange = onInput"),
+  );
+
+  check(
     'r98-3 (owner r97 #3 "not fixed" - the chip NEVER appeared, screenshot-toolbar Copy): with r97 detection the only remaining code path that shows nothing at all is the permanent-consume bug - a ROM whose clip stamp is unusable builds the key "0|<uri>", and if that ROM also serves a stable uri the very first test consumed it forever. Un-stamped clips are now tracked per uri (fresh 10 minutes from first sight, re-shown per chat entry inside the window, quiet once consumed or dismissed via ScreenStore.pasteDismissed). Diagnostics: a clip on the board that does not read as a picture now toasts what the ROM put there (kpclip log + one toast per chat entry)',
     chat4.includes("val seen = ScreenStore.lastNoStampPaste") &&
       chat4.includes("uriStr !in ScreenStore.pasteDismissed") &&
