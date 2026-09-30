@@ -5750,6 +5750,9 @@ private fun Composer(
                                     )
                                 }
 
+                                override val status: androidx.compose.ui.platform.TextToolbarStatus
+                                    get() = defaultToolbar.status
+
                                 override fun hide() = defaultToolbar.hide()
                             }
                         androidx.compose.runtime.CompositionLocalProvider(
