@@ -1489,6 +1489,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
   const list4 = main("ChatListScreen.kt");
   const store4 = main("ScreenStore.kt");
   const kpapp4 = main("KpApp.kt");
+  const flight4 = main("SendFlight.kt");
+  const feel4 = main("Feel.kt");
+  const calln4 = main("CallNotify.kt");
 
   check(
     'r83-1 (owner r83 #1: "shob thik ache just animate hoi na first time" - STILL dead after r78/r81/r82): every prior design armed the emoji flight from inside a cancellable LaunchedEffect, so the first send of a session painted settled on device while later sends flew. The arm is now bound to the layout pass itself - the onGloballyPositioned report that puts the seat inside the list viewport sets the clock (fxFlyIn\'s device-proven live-seat signal); the coroutine only waits on the armed flag and ticks, and a 600 ms fallback arm covers a row that never becomes visible',
@@ -1568,7 +1571,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     "r84-6 (owner r84 #6: \"photo open korle late open hoi video o same super fast hobe\"): the hero open/close flights shortened to the same emphasized curves over 280 ms in and 220 ms out (was 400/300) - the open's first frame was already the tile's own pixels (r80-3), so the remaining latency was the flight length itself",
     (media4.match(/tween\(320, easing = androidx\.compose\.animation\.core\.LinearEasing\)/g) || [])
-      .length === 4 &&
+      .length === 2 &&
       !media4.includes(
         "tween(300, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f))",
       ) &&
@@ -1594,7 +1597,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     'r85-4 (owner r85 #6: "super fast hoini instant"): the hero OPEN flight shortened again - 280 ms to 180 ms (same emphasized decelerate curve) on both the photo viewer and the video overlay; close keeps its 220 ms',
     (media4.match(/tween\(320, easing = androidx\.compose\.animation\.core\.LinearEasing\)/g) || [])
-      .length === 4,
+      .length === 2,
   );
   check(
     'r87-1 (retargeted r88-1; owner r87 #1: "sending er somoy hoi thik ache but sent hobar por abar reanimate keno ... send sending sent zero gap"): the birth dance is GLOBAL and TIME-BASED per message key - EmojiDance (begin idempotent, progress off the wall clock), the same swap-proof pattern the row flights ride. The pending echo starts the clock the moment its glyph composition is in hand; the server row that takes the seat keys on the SAME stable fxKey (clientId-first, handed down EmojiGlyphRow danceKey -> NotoEmojiGlyph -> NotoAnimatedEmoji liveDanceKey) and renders at the CURRENT global frame - no restart, no freeze, no second pass. A cold glyph starts the clock the moment its composition lands; taps keep the local replay (replayKey seeds 0 now); history rows never dance',
@@ -1613,7 +1616,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     'r87-2 (superseded by r88-2; owner r87 #2: "animation ta smooth koro hotath open hoi hotath close hoi smooth na ... once view soho chat a all medias same animation hobe"): the 180 ms open read as a snap (the r84-r85 speed hunt overshot); the flights moved to 460 ms in / 400 ms out and r88-2 made the path TWO-segment (tile -> centre at 58% -> fullscreen) - r90-2 supersedes both: ONE linear 320 ms pass each way. The photo viewer, the video overlay and the view-once photo pages share the one composable, so every chat media (once included) plays the identical flight',
     (media4.match(/tween\(320, easing = androidx\.compose\.animation\.core\.LinearEasing\)/g) || [])
-      .length === 4 &&
+      .length === 2 &&
       !media4.includes(
         "tween(180, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f))",
       ),
@@ -1658,7 +1661,16 @@ const main = (f) => read(`${ANDROID}/${f}`);
       (
         media4.match(/tween\(320, easing = androidx\.compose\.animation\.core\.LinearEasing\)/g) ||
         []
-      ).length === 4,
+      ).length === 2 &&
+      // r93-2 (owner r93 #2: "fixed but finishing ta rudely hoye geche"):
+      // the CLOSE eases its tail (LinearOutSlowEasing) so the landing
+      // settles instead of stopping dead at full speed; the open stays
+      // linear.
+      (
+        media4.match(
+          /tween\(320, easing = androidx\.compose\.animation\.core\.LinearOutSlowEasing\)/g,
+        ) || []
+      ).length === 2,
   );
   check(
     'r89-2 (owner r89 #2: "exactly oi media tai aste aste middle a ashe fullscreen a hobe ... fake fade effect add korecho"): the media page itself never fades - KpNetImage crossfade(false) on every path (the tile pixels are the base layer and the full decode hard-swaps under the flight), and the CLOSE is the pure reverse flight (r90-2 made it one linear pass): neither the photo pager nor the video player fades its hero out any more (the chat tile cross-fades underneath, invisible while the hero covers it - the r79-3 duplicate guard survives on the tile side)',
@@ -1692,6 +1704,30 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat4.includes("val fxFresh = remember { fxBorn && FxFlights.claim(fxKey) }") &&
       chat4.includes("if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)") &&
       chat4.includes("val fxEmoji = fxBorn"),
+  );
+
+  check(
+    'r93-4 (owner r93 #4: "massage ekhon halka right theke zoom hoye asche but ami chai full right side theke asbe massage ta right side er ektu niche mane corner theke. fast asbe slow na ar eshe bonus Hobe"): the sent bubble no longer zooms in place - it FLIES IN from the bottom-right corner: off the list right edge a little below its seat, at full size (no zoom), FAST (the caller duration is halved, clamped 240-360 ms), and it settles with a small overshoot bounce over the last 28% (the bonus). Received rows keep the r76-19 corner grow',
+    flight4.includes(
+      "val dur = ((durMs * 0.5f * scale).toInt().coerceIn(240, 360)).coerceAtLeast(1)",
+    ) &&
+      flight4.includes("translationX = x0 * inv - bounce") &&
+      flight4.includes("sin((v0 - 0.72f) / 0.28f * PI.toFloat()) * 5f * density") &&
+      flight4.includes("val sc = 0.6f + 0.4f * v0"),
+  );
+
+  check(
+    'r93-5 (owner r93 #5: "in app er system sounds volume kom hobe massage send sound sent sound call end sound"): the send tone drops to 0.30x trim and the sent tone to 0.35x trim (in-app / receive keep the r68 levels), and the call-end MediaPlayer plays at 0.3 volume instead of full',
+    feel4.includes("val v = 0.3f * MSG_VOLUME_TRIM") &&
+      feel4.includes("val v = 0.35f * MSG_VOLUME_TRIM") &&
+      calln4.includes("player.setVolume(0.3f, 0.3f)"),
+  );
+
+  check(
+    'r93-6 (owner r93 #6: "voice button a tap korle ta sounds hoi voice tap hold ar lock eksathe but just tap korle just voice lock sound ta hobe"): the record-start tone no longer fires on the PRESS - it waits out the 250 ms tap window and only plays for a genuine hold (still recording, not locked, same session). A quick tap locks the take and plays ONLY the lock tone; a slip-cancel stays silent',
+    chat4.includes("delay(250L)") &&
+      chat4.includes("if (recording && !voiceLocked && session == voiceSession) {") &&
+      !chat4.includes("instant now, it is the press's own confirmation."),
   );
 
   check(

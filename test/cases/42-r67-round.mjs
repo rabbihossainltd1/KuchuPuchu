@@ -250,10 +250,11 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
   const trimmed = feel.match(/0\.(?:6|7|55)f \* MSG_VOLUME_TRIM/g) || [];
   check(
-    // r76-20 (owner item 14): the pack's own chat tones (emoji send, sticker
-    // send) honour the SAME trim constant — six trimmed call sites now.
-    "r67-6: send (0.60), sent (0.70), in-app (0.70) and receive (0.55) all honour it",
-    trimmed.length === 6,
+    // r93-5 (owner r93 #5): send/sent moved to their own lower bases (0.30 /
+    // 0.35) - the shared-trim sites that remain are in-app, receive and the
+    // two pack tones (emoji / sticker send).
+    "r67-6: the message tones that still ride the shared trim honour it",
+    trimmed.length === 4,
     JSON.stringify(trimmed),
   );
   check(

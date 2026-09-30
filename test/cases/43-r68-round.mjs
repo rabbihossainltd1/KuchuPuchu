@@ -167,8 +167,14 @@ const main = (f) => read(`${ANDROID}/${f}`);
       !feel.includes("MSG_VOLUME_TRIM = 0.5f"),
   );
   const trimmed = feel.match(/0\.(?:6|7|55)f \* MSG_VOLUME_TRIM/g) || [];
-  // r76-20 (owner item 14): the pack added two more trimmed chat tones.
-  check("r68-6: all four message tones read it", trimmed.length === 6, JSON.stringify(trimmed));
+  // r93-5 (owner r93 #5): send/sent moved to their own lower bases (0.30 /
+  // 0.35) - the remaining shared-trim sites are in-app, receive and the two
+  // pack tones (emoji / sticker send).
+  check(
+    "r68-6: the message tones that still ride the shared trim read it",
+    trimmed.length === 4,
+    JSON.stringify(trimmed),
+  );
   check(
     "r68-6: the reaction / call / status tones are untouched",
     feel.includes("fun reaction(ctx: Context) = play(ctx, reactionId, 0.7f)") &&

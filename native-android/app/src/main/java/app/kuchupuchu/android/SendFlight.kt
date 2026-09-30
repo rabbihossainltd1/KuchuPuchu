@@ -121,7 +121,10 @@ fun Modifier.fxFlyIn(
 ): Modifier {
     val scale = fxAnimatorScale()
     val density = LocalDensity.current.density
-    val dur = ((durMs * scale).toInt().coerceIn(300, 520)).coerceAtLeast(1)
+    // r93-4 (owner r93 #4: "fast asbe slow na"): the flight is QUICK - the
+    // caller's duration is halved and clamped tight (a text bubble lands in
+    // ~340 ms instead of ~680).
+    val dur = ((durMs * 0.5f * scale).toInt().coerceIn(240, 360)).coerceAtLeast(1)
     // r76-25 (owner: "send hole off hoye jai instant" / "eto slow keno"):
     // the flight is TIME-BASED and GLOBAL per message key. The pending echo
     // starts it at birth (message appears INSTANTLY, animated — no waiting
@@ -217,10 +220,38 @@ fun Modifier.fxFlyIn(
             // reads as rising from the bottom-right (sent) / bottom-left
             // (received) corner.
             transformOrigin = if (isSent) TransformOrigin(1f, 1f) else TransformOrigin(0f, 1f)
-            val sc = 0.6f + 0.4f * v0
-            scaleX = sc
-            scaleY = sc
-            alpha = if (v0 < 0.35f) (v0 / 0.35f).coerceIn(0f, 1f) else 1f
+            // r93-4 (owner r93 #4: "massage ekhon halka right theke zoom
+            // hoye asche but ami chai full right side theke asbe massage ta
+            // right side er ektu niche mane corner theke. fast asbe slow na
+            // ar eshe bonus Hobe"): the SENT bubble no longer zooms in place
+            // - it FLIES IN from the bottom-right corner: off the right edge
+            // of the list, a little below its seat, at full size (no zoom),
+            // fast, and it settles with a small overshoot bounce as it
+            // lands (the bonus). Received rows keep the r76-19 corner grow
+            // (nothing is ever clipped - that flight stays inside the row).
+            if (isSent) {
+                val s = seat
+                val lb = FlightAnchors.listBounds
+                val x0 = if (s != null && lb != null) (lb.right - s.left + 14f * density) else 120f * density
+                val y0 = 30f * density
+                val inv = 1f - v0
+                val bounce =
+                    if (v0 > 0.72f) {
+                        sin((v0 - 0.72f) / 0.28f * PI.toFloat()) * 5f * density
+                    } else {
+                        0f
+                    }
+                translationX = x0 * inv - bounce
+                translationY = y0 * inv
+                scaleX = 1f
+                scaleY = 1f
+                alpha = if (v0 < 0.3f) (v0 / 0.3f).coerceIn(0f, 1f) else 1f
+            } else {
+                val sc = 0.6f + 0.4f * v0
+                scaleX = sc
+                scaleY = sc
+                alpha = if (v0 < 0.35f) (v0 / 0.35f).coerceIn(0f, 1f) else 1f
+            }
         }
 }
 

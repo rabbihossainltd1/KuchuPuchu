@@ -211,7 +211,10 @@ object KpSounds {
     fun send(ctx: Context) {
         runCatching {
             ensure(ctx)
-            val v = 0.6f * MSG_VOLUME_TRIM
+            // r93-5 (owner r93 #5: "in app er system sounds volume kom hobe
+            // massage send sound sent sound call end sound"): the send tone
+            // drops to 0.30x trim (was 0.60x).
+            val v = 0.3f * MSG_VOLUME_TRIM
             pool?.play(tapSendId, v, v, 1, 0, 1f)
         }
     }
@@ -220,7 +223,8 @@ object KpSounds {
     fun sent(ctx: Context) {
         runCatching {
             ensure(ctx)
-            val v = 0.7f * MSG_VOLUME_TRIM
+            // r93-5: the sent tone drops to 0.35x trim (was 0.70x).
+            val v = 0.35f * MSG_VOLUME_TRIM
             pool?.play(sentId, v, v, 1, 0, 1f)
         }
     }

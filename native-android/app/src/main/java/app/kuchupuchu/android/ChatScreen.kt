@@ -2739,14 +2739,25 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // discarded by session.
                 recMs = 0
                 recording = true
-                // r76-20 (owner item 14): the pack's record-start tone -
-                // instant now, it is the press's own confirmation.
-                runCatching { KpSounds.voiceStart(ctx) }
                 // r75-1: a take is always born a HOLD — the lock is earned
                 // by the drag into the capsule, never queued or assumed.
                 voiceLocked = false
                 recPaused = false
                 val session = ++voiceSession
+                // r93-6 (owner r93 #6: "voice button a tap korle ta sounds
+                // hoi voice tap hold ar lock eksathe but just tap korle just
+                // voice lock sound ta hobe"): the start tone no longer fires
+                // on the PRESS - it waits out the 250 ms tap window. A quick
+                // tap locks the take and plays ONLY the lock tone; a genuine
+                // hold (finger still down, still recording, not locked) gets
+                // the start tone while the finger is down; a slip-cancel
+                // stays silent.
+                scope.launch {
+                    delay(250L)
+                    if (recording && !voiceLocked && session == voiceSession) {
+                        runCatching { KpSounds.voiceStart(ctx) }
+                    }
+                }
                 scope.launch {
                     val ok = withContext(Dispatchers.IO) { VoiceNote.start(ctx) }
                     when {

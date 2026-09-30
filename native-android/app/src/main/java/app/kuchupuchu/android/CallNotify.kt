@@ -68,6 +68,9 @@ object CallSounds {
                     MediaPlayer.create(ctx.applicationContext, R.raw.kp_call_end, attrs, 1)
                         ?: return@runCatching
                 player.setOnCompletionListener { runCatching { it.release() } }
+                // r93-5 (owner r93 #5: the call-end tone joins the lowered
+                // in-app set): the player was born at FULL volume - 0.3 now.
+                runCatching { player.setVolume(0.3f, 0.3f) }
                 runCatching { player.start() }
             }
         }.start()
