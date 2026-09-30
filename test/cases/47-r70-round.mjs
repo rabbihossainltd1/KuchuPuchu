@@ -1663,12 +1663,11 @@ const main = (f) => read(`${ANDROID}/${f}`);
         []
       ).length === 2 &&
       // r93-2 (owner r93 #2: "fixed but finishing ta rudely hoye geche"):
-      // the CLOSE eases its tail (LinearOutSlowEasing) so the landing
-      // settles instead of stopping dead at full speed; the open stays
-      // linear.
+      // the CLOSE eases its tail (an ease-out curve) so the landing settles
+      // instead of stopping dead at full speed; the open stays linear.
       (
         media4.match(
-          /tween\(320, easing = androidx\.compose\.animation\.core\.LinearOutSlowEasing\)/g,
+          /tween\(320, easing = androidx\.compose\.animation\.core\.CubicBezierEasing\(0\.4f, 0f, 1f, 1f\)\)/g,
         ) || []
       ).length === 2,
   );

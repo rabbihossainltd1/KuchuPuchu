@@ -353,12 +353,13 @@ fun KpPhotoViewer(
             heroScope.launch {
                 // r93-2 (owner r93 #2: "fixed but finishing ta rudely hoye
                 // geche"): the close kept full speed to the last frame and
-                // stopped dead. The tail now decelerates into the tile -
-                // LinearOutSlowEasing keeps the pass at flight speed and
-                // eases only the landing, so it settles instead of snapping.
+                // stopped dead. The tail now decelerates into the tile - an
+                // ease-out curve (0.4, 0, 1, 1) keeps the pass at flight
+                // speed and eases only the landing, so it settles instead of
+                // snapping.
                 hero.animateTo(
                     0f,
-                    tween(320, easing = androidx.compose.animation.core.LinearOutSlowEasing),
+                    tween(320, easing = androidx.compose.animation.core.CubicBezierEasing(0.4f, 0f, 1f, 1f)),
                 )
                 // r92-2 (owner r92 #2: "ekhono closing position thik nai
                 // ektu niche hoye jacche ar agei doublicate thakche"): the
@@ -1027,7 +1028,7 @@ fun VideoPlayerScreen(nav: NavController, b64: String, overlayClose: (() -> Unit
             // keeps its speed and eases into the tile.
             vidHero.animateTo(
                 0f,
-                tween(320, easing = androidx.compose.animation.core.LinearOutSlowEasing),
+                tween(320, easing = androidx.compose.animation.core.CubicBezierEasing(0.4f, 0f, 1f, 1f)),
             )
             // r92-2: the hero hides and the tile returns in the SAME
             // committed frame - never two copies.
