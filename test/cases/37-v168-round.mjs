@@ -213,8 +213,8 @@ check(
     fx7.includes("fun claim(key: String): Boolean") &&
     // r76-25: back to birth-claim (r67-3); the swap-survival now lives in
     // fxFlyIn's global time-based FlightAnims.
-    // r91-4: the entrance flight is dead - fxFresh is hard false now.
-    chat.includes("val fxFresh = false") &&
+    // r92-4: the flight is back - only the light effects stay off.
+    chat.includes("val fxFresh = remember { fxBorn && FxFlights.claim(fxKey) }") &&
     (chat.includes('m.optString("senderId") == "kp_ai_bot" -> false') ||
       chat.includes('if (m.optString("senderId") == "kp_ai_bot") false')) &&
     chat.includes("FxArrivals.armed = false") &&
@@ -287,11 +287,11 @@ check(
     chat.includes(
       '.fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (kind == "FILE" && fileLooksVoice(m)) 720 else 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)',
     ) &&
-    // r46 item 6: the landing + shine + ripple ride the BUBBLE box, never
-    // the full-width row (the light swept the whole chat before).
+    // r46 item 6: the landing rides the BUBBLE box, never the full-width
+    // row. r92-4 (owner r92 #4): the blue shine sweep - the light effect -
+    // is REMOVED from the send/receive entrance entirely.
     chat.includes(".fxLanding(fxLanded)") &&
-    chat.includes(".fxShineRipple(fxLanded)") &&
-    chat.includes(".fxLanding(fxLanded)\n                    .fxShineRipple(fxLanded),"),
+    !chat.includes(".fxShineRipple("),
 );
 check(
   "r53: the send never hides - the send paths scroll to the bottom right away (no deferred-flight flag anywhere), the flight chases the moving seat instead; paintSent sweeps pending/msgs without iterators (the voice-send ConcurrentModificationException), the See more / See less toggle speaks the stamp's wallpaper ink outside the bubble, and the 2.5 s open-pin never drags back a reader who is scrolling away",

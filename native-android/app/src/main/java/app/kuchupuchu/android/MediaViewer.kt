@@ -70,6 +70,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
@@ -308,6 +309,16 @@ fun KpPhotoViewer(
     // outer box below): the first thing the eye sees is the photo AT the
     // tile, and the whole 320 ms plays in front of it. Zero-lag, no pop.
     var openLaidOut by remember { mutableStateOf(false) }
+    // r92-2 (owner r92 #2: "ekhono closing position thik nai ektu niche
+    // hoye jacche ar agei doublicate thakche"): the seat rects are SCREEN
+    // pixels, so the flight must aim at the layer's own screen-space centre
+    // - captured at layout, this compensates ANY window offset (an OEM
+    // dialog placement, an inset) instead of landing the hero low.
+    val viewerHost = androidx.compose.ui.platform.LocalView.current
+    var heroLayerOrigin by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    // r92-2: the handoff flag - the hero goes invisible the same committed
+    // frame the tile returns, so two copies can never show at once.
+    var landed by remember { mutableStateOf(false) }
     LaunchedEffect(openLaidOut) {
         if (openLaidOut && heroSeat != null) {
             // r90-2 (owner r90 #2: "shob time speed same Hobe closing o
@@ -346,10 +357,13 @@ fun KpPhotoViewer(
                     0f,
                     tween(320, easing = androidx.compose.animation.core.LinearEasing),
                 )
-                // r77-3: the landed hero sits exactly on the live seat, fully
-                // opaque. Bring the tile back and commit ONE frame while that
-                // still covers it, THEN detach the window - zero gap, no
-                // blank frame, no duplicate at the handoff.
+                // r92-2 (owner r92 #2: "ekhono closing position thik nai
+                // ektu niche hoye jacche ar agei doublicate thakche"): the
+                // handoff never shows two copies - the hero goes invisible
+                // and the tile returns in the SAME committed frame, then the
+                // window detaches. Even a hair of OEM offset can never flash
+                // a second photo again.
+                landed = true
                 PhotoHero.outId = null
                 androidx.compose.runtime.withFrameNanos { }
                 PhotoHero.heroCloseT = 0f
@@ -634,7 +648,16 @@ fun KpPhotoViewer(
                     state = pager,
                     modifier = Modifier
                         .fillMaxSize()
+                        .onGloballyPositioned { c ->
+                            val b = c.boundsInWindow()
+                            val loc = IntArray(2)
+                            viewerHost.getLocationOnScreen(loc)
+                            heroLayerOrigin = androidx.compose.ui.geometry.Offset(b.left + loc[0], b.top + loc[1])
+                        }
                         .graphicsLayer {
+                            // r92-2: never two copies - the hero hides the
+                            // same frame the tile returns.
+                            alpha = if (landed) 0f else 1f
                             // r77-3: on the way OUT the target is the tile's
                             // seat RIGHT NOW (it may have scrolled while the
                             // viewer was open); on the way IN the snapshot.
@@ -668,11 +691,16 @@ fun KpPhotoViewer(
                                 // same constant speed from the tile's seat to
                                 // fullscreen (the uniform scale keeps the
                                 // ratio - r76-30), and the close plays this
-                                // exact pass backwards.
+                                // exact pass backwards. r92-2: the target
+                                // centre is measured in the layer's OWN
+                                // screen space (origin captured at layout),
+                                // so the landing is pixel-exact on every ROM.
+                                val cx = heroLayerOrigin.x + sw / 2f
+                                val cy = heroLayerOrigin.y + sh / 2f
                                 scaleX = androidx.compose.ui.util.lerp(s0, 1f, t)
                                 scaleY = scaleX
-                                translationX = androidx.compose.ui.util.lerp(h.center.x - sw / 2f, 0f, t)
-                                translationY = androidx.compose.ui.util.lerp(h.center.y - sh / 2f, 0f, t)
+                                translationX = androidx.compose.ui.util.lerp(h.center.x - cx, 0f, t)
+                                translationY = androidx.compose.ui.util.lerp(h.center.y - cy, 0f, t)
                             }
                         },
                     userScrollEnabled = scale <= 1.01f,
@@ -897,6 +925,11 @@ fun VideoPlayerScreen(nav: NavController, b64: String, overlayClose: (() -> Unit
     val vidHero = remember { Animatable(if (vidHeroSeat == null) 1f else 0f) }
     var vidHeroLaidOut by remember { mutableStateOf(false) }
     var vidClosing by remember { mutableStateOf(false) }
+    // r92-2: the player box's own screen origin (the photo viewer's
+    // heroLayerOrigin rule) + the handoff flag.
+    val vidLayerHost = androidx.compose.ui.platform.LocalView.current
+    var vidLayerOrigin by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    var vidLanded by remember { mutableStateOf(false) }
     val vidPoster = remember(vidHeroId) { PhotoHero.bitmapOf(vidHeroId) }
     val accent = playerAccent()
     val window = MainActivity.current?.window
@@ -992,6 +1025,9 @@ fun VideoPlayerScreen(nav: NavController, b64: String, overlayClose: (() -> Unit
                 0f,
                 tween(320, easing = androidx.compose.animation.core.LinearEasing),
             )
+            // r92-2: the hero hides and the tile returns in the SAME
+            // committed frame - never two copies.
+            vidLanded = true
             PhotoHero.outId = null
             androidx.compose.runtime.withFrameNanos { }
             PhotoHero.heroCloseT = 0f
@@ -1185,26 +1221,35 @@ fun VideoPlayerScreen(nav: NavController, b64: String, overlayClose: (() -> Unit
     Box(
         Modifier
             .fillMaxSize()
-            .onGloballyPositioned { vidHeroLaidOut = true }
+            .onGloballyPositioned { c ->
+                vidHeroLaidOut = true
+                val b = c.boundsInWindow()
+                val loc = IntArray(2)
+                vidLayerHost.getLocationOnScreen(loc)
+                vidLayerOrigin = androidx.compose.ui.geometry.Offset(b.left + loc[0], b.top + loc[1])
+            }
             .graphicsLayer {
                 val t = vidHero.value
                 // r89-2: the close is the PURE reverse flight - the player
                 // itself never fades out (the chat tile cross-fades
                 // underneath, invisible while the player covers it).
-                alpha = if (vidHeroSeat != null && !vidHeroLaidOut) 0f else 1f
+                // r92-2: never two copies - the hero hides the same frame
+                // the tile returns.
+                alpha = if (vidLanded) 0f else if (vidHeroSeat != null && !vidHeroLaidOut) 0f else 1f
                 if (vidHeroSeat != null && t < 1f && size.width > 0f && size.height > 0f) {
-                    // r91-2: the close lands on the tile's LIVE seat (the
-                    // chat may have scrolled while the player was open) -
-                    // the same rule the photo viewer's exit flies by.
                     val h = PhotoHero.seatOf(vidHeroId) ?: vidHeroSeat
                     val s0 = maxOf(h.width / size.width, h.height / size.height)
                     // r90-2: the same ONE-pass linear flight as the photo
                     // viewer - constant speed tile -> fullscreen, and the
-                    // close plays it backwards.
+                    // close plays it backwards. r92-2: the target centre is
+                    // measured in the layer's OWN screen space, so the
+                    // landing is pixel-exact on every ROM.
+                    val cx = vidLayerOrigin.x + size.width / 2f
+                    val cy = vidLayerOrigin.y + size.height / 2f
                     scaleX = androidx.compose.ui.util.lerp(s0, 1f, t)
                     scaleY = scaleX
-                    translationX = androidx.compose.ui.util.lerp(h.center.x - size.width / 2f, 0f, t)
-                    translationY = androidx.compose.ui.util.lerp(h.center.y - size.height / 2f, 0f, t)
+                    translationX = androidx.compose.ui.util.lerp(h.center.x - cx, 0f, t)
+                    translationY = androidx.compose.ui.util.lerp(h.center.y - cy, 0f, t)
                 }
             }
             // r85-2: the backdrop fades WITH the hero (photo viewer rule) -

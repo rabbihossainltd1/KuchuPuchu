@@ -7536,14 +7536,15 @@ private fun MessageRow(
                 else -> live || FxArrivals.mark(m.optString("id")) != null
             }
         }
-    // r91-4 (owner r91 #4, r90 #4 "not fixed": "massage sending receive a
-    // light effect ta remove koro"): removing the letter reveal was not
-    // enough - the ROW entrance was still an effect (the flight's rise+fade,
-    // the slot, the blur, the side slide, the doc pop). fxFresh is hard
-    // FALSE now: every one of those modifiers is inert, a message paints
-    // whole and in place the instant it exists, sent or received. The emoji
-    // dance is a different gate (fxEmoji = fxBorn) and stays.
-    val fxFresh = false
+    // r92-4 (owner r92 #4, r91 #4 "not fixed (regression)": "tomay bolechi
+    // light effect remove korte massage send animation jemon right side er
+    // nicher theke asto ota remove na korte"): the SEND FLIGHT IS BACK -
+    // fxFresh claims the flight per stable key exactly as before, so a sent
+    // message still rises in from the bottom-right the way it always did.
+    // What stays removed is the LIGHT effect: the letter reveal (r90) and
+    // the blue shine sweep on landing (fxShineRipple, r92). The emoji dance
+    // is a different gate (fxEmoji = fxBorn) and stays.
+    val fxFresh = remember { fxBorn && FxFlights.claim(fxKey) } && fxScaleOf(ctx) > 0f
     // r76-29 (owner: "send korar por first time animates hoi na ... 0.5
     // seconds por auto animate hobe"): the SERVER row's first composition is
     // the send-ack - arm the flight here, deterministically (idempotent; the
@@ -7561,8 +7562,9 @@ private fun MessageRow(
     // row enters fxFlyIn with goAt already set, skips the visibility gate
     // and ticks from its first frame (the exact reason text bubbles always
     // animated on the first send of a session).
-    // r91-4: the birth arm is gone with the flight - nothing arms a
-    // FlightAnims entry any more, so no row can ever pick one up.
+    // r92-4: the birth arm is back with the flight (the light effects stay
+    // gone - see fxFresh above).
+    if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)
     // r86-1 (owner r86 #1 - SIXTH round on "first time animates hoi na"):
     // five entrance-flight redesigns (r78/r81/r82/r83/r84/r85) chased the
     // ROW flight while the owner's r78-4 words were about the GLYPH all
@@ -7928,8 +7930,9 @@ private fun MessageRow(
                     // v172 (owner: "light effect ta just message a hobe
                     // full chat a na"): the landing squash + shine + ripple
                     // ride the BUBBLE only.
-                    .fxLanding(fxLanded)
-                    .fxShineRipple(fxLanded),
+                    // r92-4: the light effect (the blue shine sweep) is
+                    // gone; the landing squash stays.
+                    .fxLanding(fxLanded),
             ) {
                 val senderName = m.optText("senderName")
                 Column {
