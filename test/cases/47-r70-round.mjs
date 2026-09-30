@@ -1773,7 +1773,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     'r95-5 (owner r95 #5: "handle i dhore swipe down korle close hocche but emni normally swipe down free swipe down a close hoi na"): the FREE swipe closes the half panel now - the panel ROOT carries its own vertical drag detector (the grid nested-scroll only ever reported drags that started ON the grid, so the action rows / chips never closed anything; deeper nodes keep their own handlers so nothing double-fires), and the grid top-path close gained the r45-style onPostScroll backup some ROMs need',
     attach4.includes("rootDragTotal") &&
-      attach4.includes("if (rootDragTotal.value > 70f) onSwipeDismiss()") &&
+      attach4.includes("if (rootDragTotal > 70f) onSwipeDismiss()") &&
       (attach4.match(/gridPreHalfTotal > 60f/g) || []).length === 2,
   );
 

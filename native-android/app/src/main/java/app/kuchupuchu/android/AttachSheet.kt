@@ -525,16 +525,16 @@ fun AttachPanel(
                 detectVerticalDragGestures(
                     onDragEnd = {
                         if (!fullscreen) {
-                            if (rootDragTotal.value < -70f) setFullscreen(true)
-                            else if (rootDragTotal.value > 70f) onSwipeDismiss()
-                        } else if (rootDragTotal.value > 70f) {
+                            if (rootDragTotal < -70f) setFullscreen(true)
+                            else if (rootDragTotal > 70f) onSwipeDismiss()
+                        } else if (rootDragTotal > 70f) {
                             setFullscreen(false)
                         }
-                        rootDragTotal.value = 0f
+                        rootDragTotal = 0f
                     },
-                    onDragCancel = { rootDragTotal.value = 0f },
+                    onDragCancel = { rootDragTotal = 0f },
                 ) { _, amount ->
-                    rootDragTotal.value += amount
+                    rootDragTotal += amount
                 }
             }
             .background(Color.Transparent)
