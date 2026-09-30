@@ -11906,7 +11906,6 @@ private fun TickIcon(
  * in-column placement of text bodies (KpStamped). r32-8: no bubble under an
  * emoji-only body, so its stamp reads in the wallpaper's ink.
  */
-@Composable
 /**
  * r103-4: one line of the message-info sheet - a muted label, the full
  * "23 Sep, 10:45 AM" value (Dhaka clock, the stamp's own formatter widened).
@@ -11942,6 +11941,7 @@ private fun MessageInfoRow(label: String, value: String) {
     }
 }
 
+@Composable
 private fun BubbleStamp(
     m: JSONObject,
     mine: Boolean,

@@ -688,7 +688,7 @@ class KpNotifActionReceiver : android.content.BroadcastReceiver() {
         fun cancelAllCards() {
             nm.cancel(cardId)
             nm.cancel(NotifyIds.conversationCard(convoId))
-            resetConv(convoId)
+            KpNotify.resetConv(convoId)
         }
         when (intent.action) {
             ACTION_LIKE -> {
