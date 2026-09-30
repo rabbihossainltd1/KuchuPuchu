@@ -3525,7 +3525,19 @@ function userSelf(row: UserRow, online = false) {
 /** The bearer token, or "". Three routes need it; only one place parses it. */
 function bearerToken(request: Request): string {
   const header = request.headers.get("authorization") ?? "";
-  return header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+  const fromHeader = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+  if (fromHeader) return fromHeader;
+  // r104-web (the KuchuPuchu web client): a browser WebSocket CANNOT set
+  // request headers, so the socket routes accept the session token as
+  // ?token=. Scoped to /ws/* only — every REST route keeps the header
+  // discipline (tokens must not leak into access logs).
+  try {
+    const u = new URL(request.url);
+    if (u.pathname.startsWith("/ws/")) return (u.searchParams.get("token") ?? "").trim();
+  } catch {
+    /* fall through */
+  }
+  return "";
 }
 
 async function requireUser(db: D1Database, request: Request, env?: Env, ctx?: ExecutionContext) {
