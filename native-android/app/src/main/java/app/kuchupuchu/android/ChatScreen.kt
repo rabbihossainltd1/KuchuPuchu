@@ -5033,6 +5033,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         // and only while fresh (10 minutes).
         val composerClipMgr = remember { ctx.getSystemService(android.content.ClipboardManager::class.java) }
         var pastePreview by remember { mutableStateOf<Triple<String, android.net.Uri, String>?>(null) }
+        var clipDiagShown by remember { mutableStateOf(false) }
         fun refreshPastePreview() {
             val clip = runCatching { composerClipMgr?.primaryClip }.getOrNull()
             if (clip == null || clip.itemCount == 0) {
@@ -5093,18 +5094,62 @@ fun ChatScreen(nav: NavController, convId: String) {
                 break
             }
             val f = found
-            if (f == null || (stamp > 0L && System.currentTimeMillis() - stamp > 600_000L)) {
+            val nowMs = System.currentTimeMillis()
+            if (f == null) {
                 pastePreview = null
-                return
+            } else {
+                when {
+                    // a trustworthy stamp: the clip is stale after 10 minutes
+                    stamp > 0L && nowMs - stamp > 600_000L -> pastePreview = null
+                    // a trustworthy stamp: consumed once, globally
+                    stamp > 0L && ScreenStore.lastPasteClipKey == f.third -> pastePreview = null
+                    // r98-3 (owner r97 #3 "not fixed" - the chip never appeared
+                    // at all): a ROM that stamps its clips with nothing usable
+                    // built the key "0|<uri>" - and if that ROM also serves a
+                    // STABLE uri for every copy of the same picture, the very
+                    // first test consumed it FOREVER and the chip never came
+                    // back (why r95/r96/r97 all read "not fixed"). An un-stamped
+                    // clip is now tracked per uri: fresh for 10 minutes from its
+                    // first sight, re-shown on a later chat entry inside that
+                    // window (WhatsApp behaviour), and quiet once its uri has
+                    // been consumed or dismissed in this process.
+                    stamp == 0L -> {
+                        val uriStr = f.second.toString()
+                        val seen = ScreenStore.lastNoStampPaste
+                        val firstSeen: Long
+                        if (seen != null && seen.first == uriStr) {
+                            firstSeen = seen.second
+                        } else {
+                            ScreenStore.lastNoStampPaste = uriStr to nowMs
+                            firstSeen = nowMs
+                        }
+                        pastePreview = if (firstSeen >= nowMs - 600_000L && uriStr !in ScreenStore.pasteDismissed) f else null
+                    }
+                    else -> pastePreview = f
+                }
             }
-            if (ScreenStore.lastPasteClipKey == f.third) {
-                pastePreview = null
-                return
+            // r98-3 diagnostics: a clip that IS on the board but did not
+            // read as a picture now tells the tester exactly what the ROM
+            // put there - no more guessing whether the copy ever reached
+            // the clipboard manager at all.
+            if (found == null) {
+                val mimes =
+                    (0 until desc.mimeTypeCount).joinToString("|") { desc.getMimeType(it) }.ifBlank { "no-mime" }
+                android.util.Log.d("kpclip", "clip present: items=${clip.itemCount} mimes=$mimes")
+                if (!clipDiagShown) {
+                    clipDiagShown = true
+                    android.widget.Toast
+                        .makeText(ctx, "Clipboard: ${clip.itemCount} item(s) · $mimes", android.widget.Toast.LENGTH_SHORT)
+                        .show()
+                }
             }
-            pastePreview = f
         }
         fun consumePastePreview(key: String) {
             ScreenStore.lastPasteClipKey = key
+            // r98-3: the uri half of the key is dismissed for this process -
+            // an un-stamped ROM clip must not re-open the editor at the
+            // next chat entry.
+            key.substringAfter('|').takeIf { it.isNotBlank() }?.let { ScreenStore.pasteDismissed.add(it) }
             pastePreview = null
         }
         fun openPastePreview(mime: String, uri: android.net.Uri, key: String) {
@@ -7824,13 +7869,17 @@ private fun MessageRow(
             val isRecent = runCatching { java.time.Instant.parse(m.optString("createdAt")).toEpochMilli() }
                 .getOrDefault(0L) > System.currentTimeMillis() - 8_000L
             val live = LiveArrivals.isLive(fxKey) || LiveArrivals.isLive(m.optString("clientId")) || LiveArrivals.isLive(m.optString("id"))
-            when {
+            val born = when {
                 !bornHere -> false
                 !isRecent -> false
                 m.optString("senderId") == "kp_ai_bot" -> false
                 mine -> live
                 else -> live || FxArrivals.mark(m.optString("id")) != null
             }
+            // r98-4 diagnostics: what the birth gate decided for this row
+            // (adb logcat -s kpfx) - the any-chat clip hunt.
+            android.util.Log.d("kpfx", "born key=$fxKey mine=$mine here=$bornHere recent=$isRecent live=$live -> $born")
+            born
         }
     // r92-4 (owner r92 #4, r91 #4 "not fixed (regression)": "tomay bolechi
     // light effect remove korte massage send animation jemon right side er

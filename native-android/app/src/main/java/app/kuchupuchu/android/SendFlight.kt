@@ -151,6 +151,9 @@ fun Modifier.fxFlyIn(
             else if (key.isNotBlank()) FlightAnims.of(key)?.takeIf { it.goAt >= 0L }
             else null
         }
+    // r98-4 diagnostics: which flight this composition picked up
+    // (adb logcat -s kpfx) - the any-chat clip hunt.
+    android.util.Log.d("kpfx", "flight key=$key active=$active goAt=${st?.goAt}")
     var v by remember(key) {
         mutableStateOf(
             when {

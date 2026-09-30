@@ -363,6 +363,13 @@ object ScreenStore {
     /** r90-5: the last clipboard image this device consumed into the editor. */
     var lastPasteClipKey: String? = null
 
+    /** r98-3: ROMs that stamp their clips with nothing trustworthy - the
+     *  first time an un-stamped image uri is seen (uri -> wall clock) and the
+     *  uris the user has already consumed/dismissed this process (the same
+     *  uri must not re-open the editor on every chat entry). */
+    var lastNoStampPaste: Pair<String, Long>? = null
+    val pasteDismissed = java.util.Collections.synchronizedSet(HashSet<String>())
+
     /** r91-5: the last opened chat (conv id + title) - the clipboard paste target. */
     var lastChatConvId: String? = null
     var lastChatTitle: String? = null

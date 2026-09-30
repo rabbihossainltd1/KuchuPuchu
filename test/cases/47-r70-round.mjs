@@ -1813,6 +1813,26 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
+    'r98-4 (owner r97 #4 "not fixed" - and the tester reports the clip in ANY chat opened, even chats untouched for hours, which the r96 bornHere floor and the r97 armed-adoption guard both prove impossible from the row fx layer): the chat route inherited the NavHost DEFAULT enter transition - slideInHorizontally { it / 6 } - the WHOLE screen entered offset toward the right edge, clipped by the display while the list snapped to the bottom: every row read as CUT at its right/bottom edges for the transition + settle window. That is why three rounds of row-level fx fixes never touched it. The chat screen now enters with a plain fade. Diagnostics ride along: kpfx logs at the birth gate and the flight pick-up (adb logcat -s kpfx)',
+    kpapp4.includes("enterTransition = { fadeIn(tween(220)) },") &&
+      chat4.includes('android.util.Log.d("kpfx", "born key=$fxKey') &&
+      flight4.includes('android.util.Log.d("kpfx", "flight key=$key'),
+  );
+
+  check(
+    'r98-3 (owner r97 #3 "not fixed" - the chip NEVER appeared, screenshot-toolbar Copy): with r97 detection the only remaining code path that shows nothing at all is the permanent-consume bug - a ROM whose clip stamp is unusable builds the key "0|<uri>", and if that ROM also serves a stable uri the very first test consumed it forever. Un-stamped clips are now tracked per uri (fresh 10 minutes from first sight, re-shown per chat entry inside the window, quiet once consumed or dismissed via ScreenStore.pasteDismissed). Diagnostics: a clip on the board that does not read as a picture now toasts what the ROM put there (kpclip log + one toast per chat entry)',
+    chat4.includes("val seen = ScreenStore.lastNoStampPaste") &&
+      chat4.includes("uriStr !in ScreenStore.pasteDismissed") &&
+      chat4.includes("ScreenStore.pasteDismissed.add(it)") &&
+      store4.includes("var lastNoStampPaste: Pair<String, Long>? = null") &&
+      store4.includes(
+        "val pasteDismissed = java.util.Collections.synchronizedSet(HashSet<String>())",
+      ) &&
+      chat4.includes("Clipboard: ${clip.itemCount} item(s)") &&
+      chat4.includes('android.util.Log.d("kpclip", "clip present:'),
+  );
+
+  check(
     "r90-1 (owner r90 #1: \"emojis double animate hoi sending a abar chat er emojis a tap korle double animate hoi\"): the tap double was the room echo - the tapper's own /fx frame came back and the phone mirrored its own tap as a SECOND pass. The frame now carries senderId and the handler skips its own; the send double is the same family - the row's dance key is FROZEN at first composition (remember), so a pending->server swap can never mint a second EmojiDance clock and a birth pass never restarts from zero. The r88-1 single driver itself is untouched",
     worker4.includes("senderId: uid,") &&
       chat4.includes('ev.optString("senderId") != Store.myId()') &&
