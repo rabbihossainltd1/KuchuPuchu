@@ -5566,7 +5566,7 @@ private fun Composer(
     onInputTap: () -> Unit = {},
     // r94-10 (owner r94 #10): the composer's PASTE understands a clipboard
     // IMAGE — return true when it handled one (text pastes as text).
-    onPasteImage: () -> Boolean = {},
+    onPasteImage: () -> Boolean = { false },
     onAttach: () -> Unit,
     onSticker: () -> Unit,
     onSend: () -> Unit,
@@ -5735,24 +5735,18 @@ private fun Composer(
                         val inputPasteToolbar =
                             object : androidx.compose.ui.platform.TextToolbar {
                                 override fun showMenu(
-                                    copy: String?,
-                                    cut: String?,
-                                    paste: String?,
-                                    selectAll: String?,
-                                    onCopy: (() -> Unit)?,
-                                    onCut: (() -> Unit)?,
-                                    onPaste: (() -> Unit)?,
-                                    onSelectAll: (() -> Unit)?,
+                                    rect: androidx.compose.ui.geometry.Rect,
+                                    onCopyRequested: (() -> Unit)?,
+                                    onPasteRequested: (() -> Unit)?,
+                                    onCutRequested: (() -> Unit)?,
+                                    onSelectAllRequested: (() -> Unit)?,
                                 ) {
                                     defaultToolbar.showMenu(
-                                        copy,
-                                        cut,
-                                        paste,
-                                        selectAll,
-                                        onCopy,
-                                        onCut,
-                                        onPaste?.let { op -> { if (!onPasteImage()) op() } },
-                                        onSelectAll,
+                                        rect,
+                                        onCopyRequested,
+                                        onPasteRequested?.let { op -> { if (!onPasteImage()) op() } },
+                                        onCutRequested,
+                                        onSelectAllRequested,
                                     )
                                 }
 

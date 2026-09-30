@@ -1762,9 +1762,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
 
   check(
     'r94-10 (owner r94 #10: "massage bar a ekhono images paste hoi na"): the composer PASTE understands a clipboard IMAGE - the system paste menu is kept, only the Paste action is intercepted (a custom TextToolbar): an image clip opens the media editor exactly like the attach panel single-photo pick, a text clip pastes as text. The app-root clipboard watcher (r91-5) stays',
-    chat4.includes("onPasteImage: () -> Boolean = {},") &&
+    chat4.includes("onPasteImage: () -> Boolean = { false },") &&
       chat4.includes("fun composerPasteImage(): Boolean {") &&
-      chat4.includes("onPaste?.let { op -> { if (!onPasteImage()) op() } }") &&
+      chat4.includes("onPasteRequested?.let { op -> { if (!onPasteImage()) op() } }") &&
       chat4.includes("LocalTextToolbar provides inputPasteToolbar"),
   );
 
