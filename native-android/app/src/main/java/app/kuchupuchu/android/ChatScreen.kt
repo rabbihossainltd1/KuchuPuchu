@@ -5097,6 +5097,16 @@ fun ChatScreen(nav: NavController, convId: String) {
                 nav.navigate("mediaedit/$convId/0/${statusPickArg(MediaItem(fileUri, false, 0, "", System.currentTimeMillis()))}")
             }
         }
+        // r96-3 (owner r96 #3): the paste goes STRAIGHT to the editor when
+        // the chat is free (his ask all along: "paste korle ... edit screen
+        // theke send kora jai") — the chip remains for the suppressed cases
+        // (a cover on top, recording, a selection, text mid-typed).
+        fun maybeAutoPaste() {
+            val p = pastePreview ?: return
+            if (!threadCovered() && !recording && selected.isEmpty() && input.isBlank()) {
+                openPastePreview(p.first, p.second, p.third)
+            }
+        }
         LaunchedEffect(convId) {
             refreshPastePreview()
             maybeAutoPaste()
@@ -5135,16 +5145,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                 return true
             }
             return false
-        }
-        // r96-3 (owner r96 #3): the paste goes STRAIGHT to the editor when
-        // the chat is free (his ask all along: "paste korle ... edit screen
-        // theke send kora jai") — the chip remains for the suppressed cases
-        // (a cover on top, recording, a selection, text mid-typed).
-        fun maybeAutoPaste() {
-            val p = pastePreview ?: return
-            if (!threadCovered() && !recording && selectedIds.isEmpty() && input.isBlank()) {
-                openPastePreview(p.first, p.second, p.third)
-            }
         }
         pastePreview?.let { (pMime, pUri, pKey) ->
             Row(
