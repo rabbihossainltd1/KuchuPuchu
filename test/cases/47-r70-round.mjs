@@ -1708,13 +1708,23 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
-    'r93-4 (owner r93 #4: "massage ekhon halka right theke zoom hoye asche but ami chai full right side theke asbe massage ta right side er ektu niche mane corner theke. fast asbe slow na ar eshe bonus Hobe"): the sent bubble no longer zooms in place - it FLIES IN from the bottom-right corner: off the list right edge a little below its seat, at full size (no zoom), FAST (the caller duration is halved, clamped 240-360 ms), and it settles with a small overshoot bounce over the last 28% (the bonus). Received rows keep the r76-19 corner grow',
+    'r93-4 (owner r93 #4: "massage ekhon halka right theke zoom hoye asche but ami chai full right side theke asbe massage ta right side er ektu niche mane corner theke. fast asbe slow na ar eshe bonus Hobe"): the sent bubble no longer zooms in place - it FLIES IN from the bottom-right corner: off the list right edge a little below its seat, at full size (no zoom), FAST (the caller duration is halved, clamped 240-360 ms), and it settles with a small overshoot bounce over the last 28% (the bonus). r101: the received rows now fly the mirrored corner flight instead of the old corner grow',
     flight4.includes(
       "val dur = ((durMs * 0.5f * scale).toInt().coerceIn(240, 360)).coerceAtLeast(1)",
     ) &&
       flight4.includes("translationX = x0 * inv - bounce") &&
-      flight4.includes("sin((v0 - 0.72f) / 0.28f * PI.toFloat()) * 5f * density") &&
-      flight4.includes("val sc = 0.6f + 0.4f * v0"),
+      flight4.includes("sin((v0 - 0.72f) / 0.28f * PI.toFloat()) * 5f * density"),
+  );
+
+  check(
+    'r101 (owner r100: "ekhon jemon massage send korle right side a nicher theke asche Receiver er screen o same sevabe asbe tobe left er ektu niche theke"): the RECEIVED bubble flies in exactly like the sent one, mirrored - off the LEFT edge of the list (x0 = -(seat.right - list.left + 14dp), fallback -120dp), 110dp below its seat, full size (no zoom), the same halved fast duration, and the same little overshoot bounce over the last 28% (ADDED past the landing - the mirror of the sent subtraction). Only live arrivals fly (fxFresh gates, r96 bornHere + r97 armed-adoption floors intact); history/loadOlder/reopen never do',
+    flight4.includes(
+      "val x0 = if (s != null && lb != null) -(s.right - lb.left + 14f * density) else -120f * density",
+    ) &&
+      flight4.includes("translationX = x0 * inv + bounce") &&
+      flight4.includes("translationY = y0 * inv") &&
+      (flight4.match(/val y0 = 110f \* density/g) || []).length === 2 &&
+      !flight4.includes("val sc = 0.6f + 0.4f * v0"),
   );
 
   check(

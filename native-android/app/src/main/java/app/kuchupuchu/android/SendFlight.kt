@@ -242,8 +242,8 @@ fun Modifier.fxFlyIn(
             // - it FLIES IN from the bottom-right corner: off the right edge
             // of the list, a little below its seat, at full size (no zoom),
             // fast, and it settles with a small overshoot bounce as it
-            // lands (the bonus). Received rows keep the r76-19 corner grow
-            // (nothing is ever clipped - that flight stays inside the row).
+            // lands (the bonus). r101: received rows fly the same way,
+            // mirrored from the bottom-left corner.
             if (isSent) {
                 val s = seat
                 val lb = FlightAnchors.listBounds
@@ -266,10 +266,29 @@ fun Modifier.fxFlyIn(
                 scaleY = 1f
                 alpha = if (v0 < 0.3f) (v0 / 0.3f).coerceIn(0f, 1f) else 1f
             } else {
-                val sc = 0.6f + 0.4f * v0
-                scaleX = sc
-                scaleY = sc
-                alpha = if (v0 < 0.35f) (v0 / 0.35f).coerceIn(0f, 1f) else 1f
+                // r101 (owner r100: "ekhon jemon massage send korle right
+                // side a nicher theke asche Receiver er screen o same sevabe
+                // asbe tobe left er ektu niche theke"): the RECEIVED bubble
+                // flies in the same way as the sent one, mirrored - off the
+                // LEFT edge of the list, a little below its seat, at full
+                // size, fast, with the same little overshoot bounce as it
+                // lands. The old corner-GROW (0.6 -> 1 zoom) is gone.
+                val s = seat
+                val lb = FlightAnchors.listBounds
+                val x0 = if (s != null && lb != null) -(s.right - lb.left + 14f * density) else -120f * density
+                val y0 = 110f * density
+                val inv = 1f - v0
+                val bounce =
+                    if (v0 > 0.72f) {
+                        sin((v0 - 0.72f) / 0.28f * PI.toFloat()) * 5f * density
+                    } else {
+                        0f
+                    }
+                translationX = x0 * inv + bounce
+                translationY = y0 * inv
+                scaleX = 1f
+                scaleY = 1f
+                alpha = if (v0 < 0.3f) (v0 / 0.3f).coerceIn(0f, 1f) else 1f
             }
         }
 }
