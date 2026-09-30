@@ -308,7 +308,7 @@ check(
 );
 check(
   "r52/r54: history stays smooth - older pages prefetch before row 0 (idx <= 2) and land on the exact row+offset the fling was on; the See more/See less toggle rides INSIDE the bubble under the body (the v177 layout that renders), folding at ten lines",
-  chat.includes("if (idx <= 2 && scrolling) loadOlder()") &&
+  chat.includes("if ((idx <= 2 && scrolling) || idx == 0) loadOlder()") &&
     chat.includes("listState.scrollToItem(freshOld.size + fi, fo)") &&
     chat.includes('r54 (owner: "see more ekhono removed ache")') &&
     chat.indexOf('"See less"') > chat.indexOf("when (kind) {"),

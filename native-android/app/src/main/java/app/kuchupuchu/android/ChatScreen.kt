@@ -263,6 +263,8 @@ fun ChatScreen(nav: NavController, convId: String) {
     var olderCursor by remember { mutableStateOf<JSONObject?>(null) }
     var hasMoreOlder by remember { mutableStateOf(false) }
     val loadingOlder = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    // r94-8: the observable twin of [loadingOlder] — the top loader pill.
+    var olderLoading by remember { mutableStateOf(false) }
     var lastTypingPing by remember { mutableStateOf(0L) }
     var showAttach by remember { mutableStateOf(false) }
     // r77-5 (owner: "edit e jowar por back dei ... back korle previous position
@@ -651,7 +653,12 @@ fun ChatScreen(nav: NavController, convId: String) {
         // and every later paint could then restart their dust.
         next = next.filter { it.optString("kind") != "DELETED" || it.optString("id") !in dustLatched }
         if (msgs.isEmpty()) {
-            msgs.addAll(next)
+            // r94-8 (owner r94 #8: "chat history ekbare shob load thakbe na
+            // beshi kichu chat thakbe load"): an OPEN paints only the newest
+            // window — the rest pages in from the server when the reader
+            // scrolls to the top (loadOlder), exactly like a fresh install
+            // sees the thread.
+            msgs.addAll(next.takeLast(60))
             return
         }
         // Owner round 39 (item 3): the server soft-deletes (kind='DELETED'
@@ -1521,6 +1528,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         val cur = olderCursor ?: return
         if (!hasMoreOlder) return
         if (!loadingOlder.compareAndSet(false, true)) return
+        olderLoading = true
         try {
             val data = withContext(Dispatchers.IO) {
                 Api.request(
@@ -1559,14 +1567,19 @@ fun ChatScreen(nav: NavController, convId: String) {
             // again. Swallowing it is right — the visible history is unaffected.
         } finally {
             loadingOlder.set(false)
+            olderLoading = false
         }
     }
 
     // Trigger: the user is at the top AND still dragging. Without the scroll flag
     // a settled list at index 0 would re-fire this on every recomposition.
+    // r94-8 (owner r94 #8: "user scroll kore history dekhte gele tokhon
+    // loading Hobe chat top a load hoye server theke history dekhte parbe"):
+    // a list that SETTLES at index 0 loads too — the fling often ends right
+    // at the top and the old trigger never fired again.
     LaunchedEffect(convId) {
         snapshotFlow { listState.firstVisibleItemIndex to listState.isScrollInProgress }
-            .collect { (idx, scrolling) -> if (idx <= 2 && scrolling) loadOlder() }
+            .collect { (idx, scrolling) -> if ((idx <= 2 && scrolling) || idx == 0) loadOlder() }
     }
 
     // Owner round 13 (2026-09-05, fixed 13b): keyboard opening used to COVER
@@ -4431,6 +4444,27 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                 }
             }
+            // r94-8 (owner r94 #8): a small loader pinned to the list's top
+            // while an older page is on its way in from the server.
+            if (olderLoading && hasMoreOlder) {
+                Row(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 6.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Card)
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircularProgressIndicator(
+                        color = Gold,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Loading…", fontSize = 12.5.sp, color = Muted)
+                }
+            }
         }
 
         /* ---------------- error ---------------- */
@@ -4985,6 +5019,51 @@ fun ChatScreen(nav: NavController, convId: String) {
         // r63-4: composer stays visible in half panel even when media is selected
         // (prevents abrupt message bar disappearance and avoids messages dropping 1 line)
         } else if (composerShown) {
+        // r94-10 (owner r94 #10: "massage bar a ekhono images paste hoi na"):
+        // the composer's Paste action on a clipboard IMAGE — copy a
+        // screenshot / photo, long-press the message bar, tap Paste, and the
+        // editor opens with it (the attach panel's single-photo flow).
+        val composerClipMgr = remember { ctx.getSystemService(android.content.ClipboardManager::class.java) }
+        fun composerPasteImage(): Boolean {
+            val clip = runCatching { composerClipMgr?.primaryClip }.getOrNull() ?: return false
+            if (clip.itemCount == 0) return false
+            val desc = clip.description
+            var imageMime: String? = null
+            for (i in 0 until desc.mimeTypeCount) {
+                val mm = desc.getMimeType(i)
+                if (mm.startsWith("image/")) {
+                    imageMime = mm
+                    break
+                }
+            }
+            val mime = imageMime ?: return false
+            val item = runCatching { clip.getItemAt(0) }.getOrNull() ?: return false
+            val uri = runCatching { item.uri }.getOrNull()
+                ?: runCatching {
+                    item.text?.toString()?.takeIf { it.startsWith("content://") || it.startsWith("file://") }
+                        ?.let { android.net.Uri.parse(it) }
+                }.getOrNull()
+                ?: return false
+            val stamp = if (android.os.Build.VERSION.SDK_INT >= 26) desc.timestamp else 0L
+            ScreenStore.lastPasteClipKey = "$stamp|$uri"
+            scope.launch {
+                val bytes =
+                    withContext(Dispatchers.IO) {
+                        runCatching { ctx.contentResolver.openInputStream(uri)?.use { s -> s.readBytes() } }.getOrNull()
+                    }
+                if (bytes == null || bytes.isEmpty()) return@launch
+                val ext = when {
+                    mime.contains("png") -> "png"
+                    mime.contains("webp") -> "webp"
+                    else -> "jpg"
+                }
+                val fileUri = FilesUtil.cacheFile(ctx, "paste.$ext", bytes, mime)
+                ScreenStore.editTitle = title
+                markViewerReturn()
+                nav.navigate("mediaedit/$convId/0/${statusPickArg(MediaItem(fileUri, false, 0, "", System.currentTimeMillis()))}")
+            }
+            return true
+        }
         Composer(
             input = input,
             replyFocusNonce = replyFocusNonce,
@@ -5021,6 +5100,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             } },
             onAttach = { haptics.tap(); showStickers = false; showAttach = true },
             onSticker = { requestAttachExit { haptics.tap(); showAttach = false; showStickers = true } },
+            onPasteImage = { composerPasteImage() },
             onSend = { requestAttachExit {
                 haptics.confirm()
                 showAttach = false
@@ -5101,6 +5181,16 @@ fun ChatScreen(nav: NavController, convId: String) {
                     attachSel.clear()
                     showAttach = false
                     attachFs = false
+                },
+                // r94-7: the swipe-down close routes through the gate — a
+                // panel with ticked media ASKS to deselect first (the old
+                // confirm), an empty one just closes.
+                onSwipeDismiss = {
+                    requestAttachExit {
+                        attachSel.clear()
+                        showAttach = false
+                        attachFs = false
+                    }
                 },
                 onFullscreenChange = { attachFs = it },
                 onPool = { attachPool = it },
@@ -5474,6 +5564,9 @@ private fun Composer(
     replyFocusNonce: Int = 0,
     onInput: (String) -> Unit,
     onInputTap: () -> Unit = {},
+    // r94-10 (owner r94 #10): the composer's PASTE understands a clipboard
+    // IMAGE — return true when it handled one (text pastes as text).
+    onPasteImage: () -> Boolean = {},
     onAttach: () -> Unit,
     onSticker: () -> Unit,
     onSend: () -> Unit,
@@ -5631,27 +5724,65 @@ private fun Composer(
                         LaunchedEffect(inputPressed) {
                             if (inputPressed) onInputTap()
                         }
-                        BasicTextField(
-                            value = input,
-                            onValueChange = onInput,
-                            textStyle = TextStyle(color = Ink, fontSize = 14.sp, lineHeight = 20.sp),
-                            // Owner round 19: the caret follows the chat theme too.
-                            cursorBrush = androidx.compose.ui.graphics.SolidColor(accent),
-                            maxLines = 4,
-                            interactionSource = inputInteraction,
-                            // min height pinned to the placeholder's own line
-                            // height so the bar can never shrink the instant
-                            // you type the first character — before this,
-                            // Text()'s and BasicTextField()'s empty-vs-typed
-                            // line metrics differed by a hair and the whole
-                            // composer visibly "chepe" (squeezed) on the
-                            // empty -> typing transition.
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 20.dp)
-                                .padding(vertical = 6.dp)
-                                .focusRequester(inputFocus),
-                        )
+                        // r94-10 (owner r94 #10: "massage bar a ekhono images
+                        // paste hoi na"): long-press the message bar, tap
+                        // Paste, and a copied screenshot / photo opens the
+                        // editor exactly like a single-photo pick from the
+                        // attach panel — a text clip still pastes as text.
+                        // The system's own paste menu is kept; only the
+                        // Paste action is intercepted.
+                        val defaultToolbar = androidx.compose.ui.platform.LocalTextToolbar.current
+                        val inputPasteToolbar =
+                            object : androidx.compose.ui.platform.TextToolbar {
+                                override fun showMenu(
+                                    copy: String?,
+                                    cut: String?,
+                                    paste: String?,
+                                    selectAll: String?,
+                                    onCopy: (() -> Unit)?,
+                                    onCut: (() -> Unit)?,
+                                    onPaste: (() -> Unit)?,
+                                    onSelectAll: (() -> Unit)?,
+                                ) {
+                                    defaultToolbar.showMenu(
+                                        copy,
+                                        cut,
+                                        paste,
+                                        selectAll,
+                                        onCopy,
+                                        onCut,
+                                        onPaste?.let { op -> { if (!onPasteImage()) op() } },
+                                        onSelectAll,
+                                    )
+                                }
+
+                                override fun hide() = defaultToolbar.hide()
+                            }
+                        androidx.compose.runtime.CompositionLocalProvider(
+                            androidx.compose.ui.platform.LocalTextToolbar provides inputPasteToolbar,
+                        ) {
+                            BasicTextField(
+                                value = input,
+                                onValueChange = onInput,
+                                textStyle = TextStyle(color = Ink, fontSize = 14.sp, lineHeight = 20.sp),
+                                // Owner round 19: the caret follows the chat theme too.
+                                cursorBrush = androidx.compose.ui.graphics.SolidColor(accent),
+                                maxLines = 4,
+                                interactionSource = inputInteraction,
+                                // min height pinned to the placeholder's own line
+                                // height so the bar can never shrink the instant
+                                // you type the first character — before this,
+                                // Text()'s and BasicTextField()'s empty-vs-typed
+                                // line metrics differed by a hair and the whole
+                                // composer visibly "chepe" (squeezed) on the
+                                // empty -> typing transition.
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 20.dp)
+                                    .padding(vertical = 6.dp)
+                                    .focusRequester(inputFocus),
+                            )
+                        }
                     }
                     IconButton(
                         onClick = {

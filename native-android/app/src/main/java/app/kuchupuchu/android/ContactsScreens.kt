@@ -88,17 +88,34 @@ private fun openChatWith(
     }
 }
 
-/** SMS composer pre-filled with the invite (falls back to the share sheet). */
+/**
+ * r94-9 (owner r94 #9: "contacts er number a Kuchupuchu account na theke
+ * invite ekhon phone sms a jai but ota Whatsapp a kore daw user invite a
+ * click korle Whatsapp open hoye asbe invite link"): WhatsApp FIRST — a
+ * wa.me link with the number (digits only) and the invite text preloaded;
+ * SMS and the share sheet stay as the fallbacks for phones without it.
+ */
 private fun invite(ctx: android.content.Context, phone: String) {
-    val sms =
-        android.content.Intent(android.content.Intent.ACTION_SENDTO, android.net.Uri.parse("smsto:$phone"))
-            .putExtra("sms_body", INVITE_TEXT)
-    runCatching { ctx.startActivity(sms) }.onFailure {
-        val share =
-            android.content.Intent(android.content.Intent.ACTION_SEND)
-                .setType("text/plain")
-                .putExtra(android.content.Intent.EXTRA_TEXT, INVITE_TEXT)
-        runCatching { ctx.startActivity(android.content.Intent.createChooser(share, "Invite to KuchuPuchu")) }
+    val digits = phone.filter { it.isDigit() }
+    val wa =
+        android.content.Intent(android.content.Intent.ACTION_VIEW)
+            .setData(
+                android.net.Uri.parse(
+                    "https://wa.me/$digits?text=" + java.net.URLEncoder.encode(INVITE_TEXT, "UTF-8"),
+                ),
+            )
+            .setPackage("com.whatsapp")
+    runCatching { ctx.startActivity(wa) }.onFailure {
+        val sms =
+            android.content.Intent(android.content.Intent.ACTION_SENDTO, android.net.Uri.parse("smsto:$phone"))
+                .putExtra("sms_body", INVITE_TEXT)
+        runCatching { ctx.startActivity(sms) }.onFailure {
+            val share =
+                android.content.Intent(android.content.Intent.ACTION_SEND)
+                    .setType("text/plain")
+                    .putExtra(android.content.Intent.EXTRA_TEXT, INVITE_TEXT)
+            runCatching { ctx.startActivity(android.content.Intent.createChooser(share, "Invite to KuchuPuchu")) }
+        }
     }
 }
 

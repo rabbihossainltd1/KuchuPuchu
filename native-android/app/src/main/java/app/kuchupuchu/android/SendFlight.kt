@@ -233,7 +233,11 @@ fun Modifier.fxFlyIn(
                 val s = seat
                 val lb = FlightAnchors.listBounds
                 val x0 = if (s != null && lb != null) (lb.right - s.left + 14f * density) else 120f * density
-                val y0 = 30f * density
+                // r94-4 (owner r94 #4: "right theke asche ok but ektu nicher
+                // thekeo asbe ekdom corner theke right side er nicher theke"):
+                // the take-off sits well BELOW the seat - the bubble flies in
+                // from the true bottom-right corner, not merely from the right.
+                val y0 = 110f * density
                 val inv = 1f - v0
                 val bounce =
                     if (v0 > 0.72f) {

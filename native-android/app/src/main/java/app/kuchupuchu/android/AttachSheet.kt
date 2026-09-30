@@ -148,6 +148,9 @@ fun AttachPanel(
     sel: androidx.compose.runtime.snapshots.SnapshotStateList<MediaItem>,
     onSendBatch: () -> Unit,
     onDismiss: () -> Unit,
+    // r94-7 (owner r94 #7): a swipe DOWN on the half panel closes it — the
+    // caller decides whether to ask about the ticked media first.
+    onSwipeDismiss: () -> Unit = {},
     // Owner round 32 (item 19): the panel owns the media Send now (the
     // composer's circle stays the mic) — hold it to pick a time; one picked
     // photo / video also gets Edit (the light editor).
@@ -408,6 +411,8 @@ fun AttachPanel(
             }
         }
     var gridPreDownTotal by remember { mutableStateOf(0f) }
+    // r94-7: the half panel's close run (swipe down at the grid's top).
+    var gridPreHalfTotal by remember { mutableStateOf(0f) }
     var gridPreTotal by remember { mutableStateOf(0f) }
     val gridScroll = remember {
         object : NestedScrollConnection {
@@ -424,8 +429,22 @@ fun AttachPanel(
                             setFullscreen(true)
                             gridPreTotal = 0f
                         }
+                    } else if (!gridState.canScrollBackward) {
+                        // r94-7 (owner r94 #7: "jemon swipe up korle attach
+                        // panel ta Fullscreen hoi temoni ... half thakbe
+                        // swipe down korle attach panel ta close hoye habe"):
+                        // the symmetric gesture — a swipe down at the HALF
+                        // panel's top CLOSES it (only when the grid itself is
+                        // at its top, so an in-grid scroll never closes).
+                        gridPreHalfTotal += available.y
+                        if (gridPreHalfTotal > 60f) {
+                            haptics.tap()
+                            onSwipeDismiss()
+                            gridPreHalfTotal = 0f
+                        }
                     } else {
                         gridPreTotal = 0f
+                        gridPreHalfTotal = 0f
                     }
                 }
                 // Owner round 45 (item 2, second pass): the r44 gate asked
@@ -511,7 +530,11 @@ fun AttachPanel(
                         onDragStart = { isDragging = true },
                         onDragEnd = {
                             if (dragTotal.value < -70f) setFullscreen(true)
-                            else if (dragTotal.value > 70f) setFullscreen(false)
+                            else if (dragTotal.value > 70f) {
+                                // r94-7: down on the handle folds a fullscreen
+                                // panel to half, and CLOSES a half panel.
+                                if (fullscreen) setFullscreen(false) else onSwipeDismiss()
+                            }
                             dragTotal.value = 0f
                             isDragging = false
                         },

@@ -494,7 +494,7 @@ has(list, "Api.PollCadence.failed()", "…and a bad one starts it");
   const lo = chat.slice(chat.indexOf("fun loadOlder()"), chat.indexOf("fun loadOlder()") + 1900);
   check(
     "loadOlder exists and is called from the scroll, not a timer",
-    lo.length > 200 && chat.includes("if (idx <= 2 && scrolling) loadOlder()"),
+    lo.length > 200 && chat.includes("if ((idx <= 2 && scrolling) || idx == 0) loadOlder()"),
   );
   check(
     "…it refuses to run when there is nothing older or a page is in flight",

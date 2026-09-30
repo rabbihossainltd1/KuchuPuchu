@@ -8052,7 +8052,7 @@ const convBetween = (db, a, b) =>
         chat.includes(
           'val flashing = flashId.isNotBlank() && albumPhotos(m).any { it.optString("id") == flashId }',
         ) &&
-        chat.includes("if (idx <= 2 && scrolling) loadOlder()"),
+        chat.includes("if ((idx <= 2 && scrolling) || idx == 0) loadOlder()"),
     );
   }
   // Item 19: a video send shows its upload progress (photo-style ring with

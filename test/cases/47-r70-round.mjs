@@ -1492,6 +1492,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
   const flight4 = main("SendFlight.kt");
   const feel4 = main("Feel.kt");
   const calln4 = main("CallNotify.kt");
+  const attach4 = main("AttachSheet.kt");
+  const contacts4 = main("ContactsScreens.kt");
 
   check(
     'r83-1 (owner r83 #1: "shob thik ache just animate hoi na first time" - STILL dead after r78/r81/r82): every prior design armed the emoji flight from inside a cancellable LaunchedEffect, so the first send of a session painted settled on device while later sends flew. The arm is now bound to the layout pass itself - the onGloballyPositioned report that puts the seat inside the list viewport sets the clock (fxFlyIn\'s device-proven live-seat signal); the coroutine only waits on the armed flag and ticks, and a 600 ms fallback arm covers a row that never becomes visible',
@@ -1727,6 +1729,43 @@ const main = (f) => read(`${ANDROID}/${f}`);
     chat4.includes("delay(250L)") &&
       chat4.includes("if (recording && !voiceLocked && session == voiceSession) {") &&
       !chat4.includes("instant now, it is the press's own confirmation."),
+  );
+
+  check(
+    'r94-4 (owner r94 #4: "right theke asche ok but ektu nicher thekeo asbe ekdom corner theke right side er nicher theke"): the sent bubble\'s take-off sits well BELOW its seat - it flies in from the true bottom-right corner, not merely from the right edge',
+    flight4.includes("val y0 = 110f * density"),
+  );
+
+  check(
+    'r94-7 (owner r94 #7: "jemon swipe up korle attach panel ta Fullscreen hoi temoni ami chai attach panel ta jokhon half thakbe swipe down korle attach panel ta close hoye habe (media select thakle kintu ager motoi deselect korte bole)"): the symmetric gesture - a swipe DOWN at the half panel (the grid at its top, or the drag handle) CLOSES it, routed through the exit gate so a panel with ticked media ASKS to deselect first (the old confirm sheet) and an empty one just closes',
+    attach4.includes("onSwipeDismiss: () -> Unit = {},") &&
+      attach4.includes("gridPreHalfTotal") &&
+      attach4.includes("if (fullscreen) setFullscreen(false) else onSwipeDismiss()") &&
+      chat4.includes("onSwipeDismiss = {") &&
+      chat4.includes("requestAttachExit"),
+  );
+
+  check(
+    'r94-8 (owner r94 #8: "chat history ekbare shob load thakbe na beshi kichu chat thakbe load user scroll kore history dekhte gele tokhon loading Hobe chat top a load hoye server theke history dekhte parbe"): an OPEN paints only the newest 60 rows (the store may hold the whole thread), a list that SETTLES at the top also loads (the fling often ends right at index 0), and a small loader pill pins to the list top while an older page is in flight',
+    chat4.includes("next.takeLast(60)") &&
+      chat4.includes("if ((idx <= 2 && scrolling) || idx == 0) loadOlder()") &&
+      chat4.includes("var olderLoading by remember") &&
+      chat4.includes('Text("Loading…", fontSize = 12.5.sp, color = Muted)'),
+  );
+
+  check(
+    'r94-9 (owner r94 #9: "contacts er number a Kuchupuchu account na theke invite ekhon phone sms a jai but ota Whatsapp a kore daw"): Invite opens WHATSAPP first - a wa.me link with the number and the invite text preloaded (digits only, URL-encoded), SMS and the share sheet stay as fallbacks',
+    contacts4.includes('"https://wa.me/$digits?text="') &&
+      contacts4.includes('.setPackage("com.whatsapp")') &&
+      contacts4.includes("java.net.URLEncoder.encode(INVITE_TEXT"),
+  );
+
+  check(
+    'r94-10 (owner r94 #10: "massage bar a ekhono images paste hoi na"): the composer PASTE understands a clipboard IMAGE - the system paste menu is kept, only the Paste action is intercepted (a custom TextToolbar): an image clip opens the media editor exactly like the attach panel single-photo pick, a text clip pastes as text. The app-root clipboard watcher (r91-5) stays',
+    chat4.includes("onPasteImage: () -> Boolean = {},") &&
+      chat4.includes("fun composerPasteImage(): Boolean {") &&
+      chat4.includes("onPaste?.let { op -> { if (!onPasteImage()) op() } }") &&
+      chat4.includes("LocalTextToolbar provides inputPasteToolbar"),
   );
 
   check(
