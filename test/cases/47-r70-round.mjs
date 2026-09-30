@@ -1813,10 +1813,21 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
-    'r98-4 (owner r97 #4 "not fixed" - and the tester reports the clip in ANY chat opened, even chats untouched for hours, which the r96 bornHere floor and the r97 armed-adoption guard both prove impossible from the row fx layer): the chat route inherited the NavHost DEFAULT enter transition - slideInHorizontally { it / 6 } - the WHOLE screen entered offset toward the right edge, clipped by the display while the list snapped to the bottom: every row read as CUT at its right/bottom edges for the transition + settle window. That is why three rounds of row-level fx fixes never touched it. The chat screen now enters with a plain fade. Diagnostics ride along: kpfx logs at the birth gate and the flight pick-up (adb logcat -s kpfx)',
-    kpapp4.includes("enterTransition = { fadeIn(tween(220)) },") &&
+    'r99-4 (owner r98 #1: "baad daw tumi regression kore felba" - leave the chat entrance alone, do not risk regressions): the r98-4 per-route fade is REVERTED, chat/{id} is back to the plain composable inheriting the NavHost default transitions. The r96 bornHere floor and the r97 armed-adoption guard stay in force (they suppress real re-flights), and the kpfx diagnostic logs stay for the adb hunt',
+    kpapp4.includes('composable("chat/{id}") { entry ->') &&
+      !kpapp4.includes("enterTransition = { fadeIn(tween(220)) },") &&
       chat4.includes('android.util.Log.d("kpfx", "born key=$fxKey') &&
       flight4.includes('android.util.Log.d("kpfx", "flight key=$key'),
+  );
+
+  check(
+    'r99-3 (owner r98 #2 "not fixed - ekhono dekhai current application does not supporting image pasting" - the tester judges by the ROM paste menu, which the ROM itself blocks for image clips into a text field before the app ever sees the tap; the only path the app owns is chip/auto-open, and the missing datapoint is what the app REALLY sees on the clipboard): the null/empty-clipboard state now LOGS (kpclip - a privacy ROM returning a null primaryClip was previously indistinguishable from no clipboard work at all), the uri net gains the Intent EXTRA_STREAM shape, and the mystery toast fires only for a NON-TEXT clip with no readable picture (a text clipboard stays quiet - no nag on every chat open)',
+    chat4.includes("primaryClip null or empty (blocked or cleared)") &&
+      chat4.includes("Intent.EXTRA_STREAM") &&
+      chat4.includes(
+        'val textOnly = (0 until desc.mimeTypeCount).all { desc.getMimeType(it).startsWith("text/") }',
+      ) &&
+      chat4.includes('android.util.Log.d("kpclip", "image detected:'),
   );
 
   check(

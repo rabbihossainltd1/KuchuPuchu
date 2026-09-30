@@ -5036,7 +5036,12 @@ fun ChatScreen(nav: NavController, convId: String) {
         var clipDiagShown by remember { mutableStateOf(false) }
         fun refreshPastePreview() {
             val clip = runCatching { composerClipMgr?.primaryClip }.getOrNull()
+            // r99-3 diagnostics: the previously SILENT state - a clipboard
+            // this app cannot read (null on a privacy ROM) or an empty one -
+            // now logs too (adb logcat -s kpclip). No toast for the empty
+            // case: an empty board is the normal state and must not nag.
             if (clip == null || clip.itemCount == 0) {
+                android.util.Log.d("kpclip", "primaryClip null or empty (blocked or cleared)")
                 pastePreview = null
                 return
             }
@@ -5068,6 +5073,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }.getOrNull()
                     ?: runCatching {
                         item.intent?.data?.takeIf { it.scheme == "content" || it.scheme == "file" }
+                    }.getOrNull()
+                    // r99-3: the uri can also ride an Intent as EXTRA_STREAM
+                    // (the shape several ROM clipboards use for media).
+                    ?: runCatching {
+                        (item.intent?.getParcelableExtra(android.content.Intent.EXTRA_STREAM) as? android.net.Uri)
+                            ?.takeIf { it.scheme == "content" || it.scheme == "file" }
                     }.getOrNull()
                     ?: runCatching {
                         item.text?.toString()?.takeIf { it.startsWith("/") && java.io.File(it).isFile }
@@ -5128,20 +5139,25 @@ fun ChatScreen(nav: NavController, convId: String) {
                     else -> pastePreview = f
                 }
             }
-            // r98-3 diagnostics: a clip that IS on the board but did not
-            // read as a picture now tells the tester exactly what the ROM
-            // put there - no more guessing whether the copy ever reached
-            // the clipboard manager at all.
-            if (found == null) {
+            // r98-3/r99-3 diagnostics: a clip that IS on the board but did
+            // not read as a picture tells the tester exactly what the ROM
+            // put there (adb logcat -s kpclip); a recognised image logs its
+            // uri. The toast fires only for the MYSTERY state - a non-text
+            // clip with no readable picture - so a normal text clipboard
+            // stays quiet.
+            if (f == null) {
                 val mimes =
                     (0 until desc.mimeTypeCount).joinToString("|") { desc.getMimeType(it) }.ifBlank { "no-mime" }
                 android.util.Log.d("kpclip", "clip present: items=${clip.itemCount} mimes=$mimes")
-                if (!clipDiagShown) {
+                val textOnly = (0 until desc.mimeTypeCount).all { desc.getMimeType(it).startsWith("text/") }
+                if (!textOnly && !clipDiagShown) {
                     clipDiagShown = true
                     android.widget.Toast
                         .makeText(ctx, "Clipboard: ${clip.itemCount} item(s) · $mimes", android.widget.Toast.LENGTH_SHORT)
                         .show()
                 }
+            } else {
+                android.util.Log.d("kpclip", "image detected: ${f.second}")
             }
         }
         fun consumePastePreview(key: String) {

@@ -218,22 +218,7 @@ fun KpApp() {
                 ) { entry ->
                     CreateGroupScreen(nav, entry.arguments?.getString("with") ?: "")
                 }
-                // r98-4 (owner r96/r97 #4 "not fixed": "notun kore chat a gele
-                // ager chat a thaka emojis nice ar right side a kata pore
-                // jacche"): the chat route inherited the NavHost DEFAULT
-                // enter transition - slideInHorizontally { it / 6 } - so the
-                // WHOLE screen entered offset toward the right edge, clipped
-                // by the display, while the list was still snapping to the
-                // bottom: every row's right/bottom edges read as CUT for the
-                // transition + settle window (~1 s on a janky device), any
-                // chat, old emojis included - which is why three rounds of
-                // row-level fx fixes never touched it. The chat screen now
-                // enters with a plain fade: nothing is ever offset from the
-                // screen, so nothing can be cut at its edges.
-                composable(
-                    "chat/{id}",
-                    enterTransition = { fadeIn(tween(220)) },
-                ) { entry ->
+                composable("chat/{id}") { entry ->
                     val id = entry.arguments?.getString("id") ?: ""
                     ChatScreen(nav, id)
                 }
