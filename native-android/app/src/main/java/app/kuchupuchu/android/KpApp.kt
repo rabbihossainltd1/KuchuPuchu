@@ -70,9 +70,9 @@ fun KpApp() {
     // (or copy from a split screen) and the editor is up with it - edit,
     // Send. A clip is consumed once and only while fresh; text clips are
     // ignored entirely.
-    val appCtx = LocalContext.current
+    val pasteCtx = LocalContext.current
     val appScope = rememberCoroutineScope()
-    val clipboardMgr = remember { appCtx.getSystemService(android.content.ClipboardManager::class.java) }
+    val clipboardMgr = remember { pasteCtx.getSystemService(android.content.ClipboardManager::class.java) }
     fun consumeClipboardImage() {
         val clip = runCatching { clipboardMgr?.primaryClip }.getOrNull() ?: return
         if (clip.itemCount == 0) return
@@ -88,15 +88,12 @@ fun KpApp() {
         val mime = imageMime ?: return
         val item = runCatching { clip.getItemAt(0) }.getOrNull() ?: return
         // ROMs differ in HOW a copied picture rides the clip - a content uri
-        // (most), a uri inside the item's text (some galleries), or
-        // localData (drag-style). Take the first one that can yield bytes.
+        // (most) or a uri inside the item's text (some galleries). Take the
+        // first one that can yield bytes.
         val uri = runCatching { item.uri }.getOrNull()
             ?: runCatching {
                 item.text?.toString()?.takeIf { it.startsWith("content://") || it.startsWith("file://") }
                     ?.let { android.net.Uri.parse(it) }
-            }.getOrNull()
-            ?: runCatching {
-                if (android.os.Build.VERSION.SDK_INT >= 26) item.localData as? android.net.Uri else null
             }.getOrNull()
             ?: return
         val stamp = if (android.os.Build.VERSION.SDK_INT >= 26) desc.timestamp else 0L
@@ -110,7 +107,7 @@ fun KpApp() {
         appScope.launch {
             val bytes =
                 withContext(Dispatchers.IO) {
-                    runCatching { appCtx.contentResolver.openInputStream(uri)?.use { s -> s.readBytes() } }.getOrNull()
+                    runCatching { pasteCtx.contentResolver.openInputStream(uri)?.use { s -> s.readBytes() } }.getOrNull()
                 }
             if (bytes == null || bytes.isEmpty()) return@launch
             val ext = when {
@@ -118,7 +115,7 @@ fun KpApp() {
                 mime.contains("webp") -> "webp"
                 else -> "jpg"
             }
-            val fileUri = FilesUtil.cacheFile(appCtx, "paste.$ext", bytes, mime)
+            val fileUri = FilesUtil.cacheFile(pasteCtx, "paste.$ext", bytes, mime)
             ScreenStore.editTitle = ScreenStore.lastChatTitle ?: "Chat"
             nav.navigate("mediaedit/$convId/0/${statusPickArg(MediaItem(fileUri, false, 0, "", System.currentTimeMillis()))}")
         }

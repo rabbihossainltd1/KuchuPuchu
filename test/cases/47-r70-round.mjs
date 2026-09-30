@@ -1712,8 +1712,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
       kpapp4.includes(
         'nav.navigate("mediaedit/$convId/0/${statusPickArg(MediaItem(fileUri, false, 0, "", System.currentTimeMillis()))}")',
       ) &&
-      kpapp4.includes('FilesUtil.cacheFile(appCtx, "paste.$ext", bytes, mime)') &&
-      kpapp4.includes("item.localData as? android.net.Uri") &&
+      kpapp4.includes('FilesUtil.cacheFile(pasteCtx, "paste.$ext", bytes, mime)') &&
+      kpapp4.includes('?.takeIf { it.startsWith("content://") || it.startsWith("file://") }') &&
       store4.includes("var lastPasteClipKey: String? = null") &&
       store4.includes("var lastChatConvId: String? = null") &&
       chat4.includes("ScreenStore.lastChatConvId = convId"),
