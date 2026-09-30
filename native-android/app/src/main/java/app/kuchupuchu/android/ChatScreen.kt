@@ -4447,13 +4447,12 @@ fun ChatScreen(nav: NavController, convId: String) {
             // r94-8 (owner r94 #8): a small loader pinned to the list's top
             // while an older page is on its way in from the server.
             if (olderLoading && hasMoreOlder) {
+                // r96-2 (owner r96 #2: "loading text er background border
+                // thakbe na remove koro"): bare spinner + text, no pill.
                 Row(
                     Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 6.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Card)
-                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                        .padding(top = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     CircularProgressIndicator(
@@ -5041,42 +5040,39 @@ fun ChatScreen(nav: NavController, convId: String) {
                 return
             }
             val desc = clip.description
-            var imageMime: String? = null
-            for (i in 0 until desc.mimeTypeCount) {
-                val mm = desc.getMimeType(i)
-                if (mm.startsWith("image/")) {
-                    imageMime = mm
-                    break
-                }
-            }
-            val mime = imageMime ?: run {
-                pastePreview = null
-                return
-            }
-            val item = runCatching { clip.getItemAt(0) }.getOrNull() ?: run {
-                pastePreview = null
-                return
-            }
-            val uri = runCatching { item.uri }.getOrNull()
-                ?: runCatching {
-                    item.text?.toString()?.takeIf { it.startsWith("content://") || it.startsWith("file://") }
-                        ?.let { android.net.Uri.parse(it) }
-                }.getOrNull()
-                ?: run {
-                    pastePreview = null
-                    return
-                }
             val stamp = if (android.os.Build.VERSION.SDK_INT >= 26) desc.timestamp else 0L
-            if (stamp > 0L && System.currentTimeMillis() - stamp > 600_000L) {
+            // r96-3 (owner r96 #3: "not fixed"): some ROMs label a copied
+            // picture "*/*" or nothing at all, and the picture is not always
+            // the first item — every item is scanned and the MIME is
+            // re-resolved from the uri itself when the clip description has
+            // no image type.
+            var found: Triple<String, android.net.Uri, String>? = null
+            for (i in 0 until clip.itemCount) {
+                val item = runCatching { clip.getItemAt(i) }.getOrNull() ?: continue
+                val uri = runCatching { item.uri }.getOrNull()
+                    ?: runCatching {
+                        item.text?.toString()?.takeIf { it.startsWith("content://") || it.startsWith("file://") }
+                            ?.let { android.net.Uri.parse(it) }
+                    }.getOrNull()
+                    ?: continue
+                val mime =
+                    (0 until desc.mimeTypeCount).map { desc.getMimeType(it) }.firstOrNull { it.startsWith("image/") }
+                        ?: runCatching { ctx.contentResolver.getType(uri) }.getOrNull()
+                            ?.takeIf { it.startsWith("image/") }
+                        ?: continue
+                found = Triple(mime, uri, "$stamp|$uri")
+                break
+            }
+            val f = found
+            if (f == null || (stamp > 0L && System.currentTimeMillis() - stamp > 600_000L)) {
                 pastePreview = null
                 return
             }
-            val key = "$stamp|$uri"
-            if (ScreenStore.lastPasteClipKey == key) {
+            if (ScreenStore.lastPasteClipKey == f.third) {
                 pastePreview = null
                 return
             }
-            pastePreview = Triple(mime, uri, key)
+            pastePreview = f
         }
         fun consumePastePreview(key: String) {
             ScreenStore.lastPasteClipKey = key
@@ -5101,10 +5097,16 @@ fun ChatScreen(nav: NavController, convId: String) {
                 nav.navigate("mediaedit/$convId/0/${statusPickArg(MediaItem(fileUri, false, 0, "", System.currentTimeMillis()))}")
             }
         }
-        LaunchedEffect(convId) { refreshPastePreview() }
+        LaunchedEffect(convId) {
+            refreshPastePreview()
+            maybeAutoPaste()
+        }
         DisposableEffect(convId) {
             val clipListener = android.content.ClipboardManager.OnPrimaryClipChangedListener {
-                android.os.Handler(android.os.Looper.getMainLooper()).post { refreshPastePreview() }
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    refreshPastePreview()
+                    maybeAutoPaste()
+                }
             }
             runCatching { composerClipMgr?.addPrimaryClipChangedListener(clipListener) }
             val lifecycleObs = object : androidx.lifecycle.LifecycleEventObserver {
@@ -5112,7 +5114,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                     owner: androidx.lifecycle.LifecycleOwner,
                     event: androidx.lifecycle.Lifecycle.Event,
                 ) {
-                    if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) refreshPastePreview()
+                    if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                        refreshPastePreview()
+                        maybeAutoPaste()
+                    }
                 }
             }
             MainActivity.current?.lifecycle?.addObserver(lifecycleObs)
@@ -5130,6 +5135,16 @@ fun ChatScreen(nav: NavController, convId: String) {
                 return true
             }
             return false
+        }
+        // r96-3 (owner r96 #3): the paste goes STRAIGHT to the editor when
+        // the chat is free (his ask all along: "paste korle ... edit screen
+        // theke send kora jai") — the chip remains for the suppressed cases
+        // (a cover on top, recording, a selection, text mid-typed).
+        fun maybeAutoPaste() {
+            val p = pastePreview ?: return
+            if (!threadCovered() && !recording && selectedIds.isEmpty() && input.isBlank()) {
+                openPastePreview(p.first, p.second, p.third)
+            }
         }
         pastePreview?.let { (pMime, pUri, pKey) ->
             Row(
@@ -7758,10 +7773,24 @@ private fun MessageRow(
             // r50 / r58 (owner: "history scrolling er somoy o animation keno hocche eita"):
             // the flight is for LIVE arrivals only - history, loadOlder, or reopen
             // never fly; they get the soft fade instead.
+            // r96-4 (owner r96 #4: "chat a history ba notun kore chat a gele
+            // ager chat a thaka emojis 1 second er jonno niche ar right side
+            // a kata pore jacche abar thik o hoye jacche"): a message that
+            // predates this composition can never fly — a re-entered chat
+            // re-ran the corner flight on rows that were live seconds ago
+            // (the bubble clipped at the bottom-right for a beat, then
+            // settling), and an off-screen arrival did the same the moment
+            // it was scrolled to. The composition's own birth time is the
+            // hard floor (2 s of clock-skew slack).
+            val composedAt = System.currentTimeMillis()
+            val bornHere =
+                runCatching { java.time.Instant.parse(m.optString("createdAt")).toEpochMilli() }
+                    .getOrDefault(0L) > composedAt - 2_000L
             val isRecent = runCatching { java.time.Instant.parse(m.optString("createdAt")).toEpochMilli() }
                 .getOrDefault(0L) > System.currentTimeMillis() - 8_000L
             val live = LiveArrivals.isLive(fxKey) || LiveArrivals.isLive(m.optString("clientId")) || LiveArrivals.isLive(m.optString("id"))
             when {
+                !bornHere -> false
                 !isRecent -> false
                 m.optString("senderId") == "kp_ai_bot" -> false
                 mine -> live

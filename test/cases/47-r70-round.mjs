@@ -1778,12 +1778,21 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
-    'r95-6 (owner r95 #6: "loading progress circle er colour blue hobe tumi yellow use korcho"): the chat-top history loader spinner is BLUE now (ActionBlueDeep), not the yellow Gold',
+    'r96-2 (owner r96 #2: "loading text er background border thakbe na remove koro"; r95 #6 made it blue): the chat-top history loader is BARE - spinner (ActionBlueDeep, never Gold) + text, no pill background at all',
     (() => {
       const i = chat4.indexOf("Loading\u2026");
-      const slice = chat4.slice(Math.max(0, i - 500), i);
-      return slice.includes("color = ActionBlueDeep") && !slice.includes("color = Gold");
+      const slice = chat4.slice(Math.max(0, i - 600), i);
+      return (
+        slice.includes("color = ActionBlueDeep") &&
+        !slice.includes("color = Gold") &&
+        !slice.includes(".background(Card)")
+      );
     })(),
+  );
+
+  check(
+    'r96-4 (owner r96 #4: "chat a history ba notun kore chat a gele ager chat a thaka emojis 1 second er jonno niche ar right side a kata pore jacche abar thik o hoye jacche"): a message that predates its first composition can never fly - fxBorn gains a bornHere floor (createdAt > composedAt - 2s of clock-skew slack), so a re-entered chat never re-runs the corner flight on rows that were live seconds ago, and an off-screen arrival scrolled to later is covered by the same floor',
+    chat4.includes("val bornHere =") && chat4.includes("!bornHere -> false"),
   );
 
   check(
@@ -1804,6 +1813,13 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat4.includes("fun consumePastePreview(key: String) {") &&
       chat4.includes("OnPrimaryClipChangedListener") &&
       chat4.includes("Lifecycle.Event.ON_RESUME") &&
+      // r96-3 (owner r96 #3: "not fixed"): the paste now goes STRAIGHT to
+      // the editor when the chat is free (maybeAutoPaste), and detection is
+      // widened - every clip item is scanned and the MIME is re-resolved
+      // from the uri when the clip description carries no image type (some
+      // ROMs label a copied picture "*/*").
+      chat4.includes("fun maybeAutoPaste()") &&
+      chat4.includes("contentResolver.getType(uri)") &&
       store4.includes("var lastPasteClipKey: String? = null") &&
       store4.includes("var lastChatConvId: String? = null") &&
       chat4.includes("ScreenStore.lastChatConvId = convId"),
