@@ -1796,6 +1796,23 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
+    'r97-4 (owner r96 #4 "not fixed": the re-entered chat STILL flew its old emojis from the corner for ~1 s): the r96 bornHere floor was the right idea at the WRONG LAYER - fxFlyIn also picks up flights PASSIVELY. A row composed with active=false still read FlightAnims.of(key), and any registry entry that had been birthed but never ARMED (its owning row left composition inside the 600 ms viewport gate, or a send that never acked) made the row render pinned at the bottom-right corner (v=0) while the effect SELF-ARMED it - a fresh corner flight on a re-entered chat, every gate bypassed. A passive pick-up may now only ADOPT an already-armed flight (goAt >= 0, the pending->server swap handoff); unarmed entries are ignored and the row renders settled',
+    flight4.includes("FlightAnims.of(key)?.takeIf { it.goAt >= 0L }") &&
+      flight4.includes("if (f.goAt < 0L) f.goAt = android.os.SystemClock.uptimeMillis()"),
+  );
+
+  check(
+    'r97-3 (owner r96 #3 "not fixed": neither the chip nor the auto-open ever appeared on the device): the clip description timestamp is now only trusted as epoch MILLIS inside a sane window (some ROMs stamp the clip in seconds or boot-relative garbage, and the 10-minute freshness test then rejected EVERY clip), the uri can hide in the item INTENT data or a plain file-path text, and a provider that reports no MIME at all gets its magic bytes sniffed (sniffClipMime) with the file extension as the last resort. An unreadable stream toasts "Copied image could not be read" instead of vanishing silently',
+    chat4.includes("1_500_000_000_000L") &&
+      chat4.includes("item.intent?.data") &&
+      chat4.includes("sniffClipMime(ctx.contentResolver, uri)") &&
+      chat4.includes("private fun sniffClipMime(") &&
+      chat4.includes("Copied image could not be read") &&
+      chat4.includes("fun maybeAutoPaste()") &&
+      chat4.includes("contentResolver.getType(uri)"),
+  );
+
+  check(
     "r90-1 (owner r90 #1: \"emojis double animate hoi sending a abar chat er emojis a tap korle double animate hoi\"): the tap double was the room echo - the tapper's own /fx frame came back and the phone mirrored its own tap as a SECOND pass. The frame now carries senderId and the handler skips its own; the send double is the same family - the row's dance key is FROZEN at first composition (remember), so a pending->server swap can never mint a second EmojiDance clock and a birth pass never restarts from zero. The r88-1 single driver itself is untouched",
     worker4.includes("senderId: uid,") &&
       chat4.includes('ev.optString("senderId") != Store.myId()') &&

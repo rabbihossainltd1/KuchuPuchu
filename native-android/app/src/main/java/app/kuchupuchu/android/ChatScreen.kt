@@ -5040,12 +5040,23 @@ fun ChatScreen(nav: NavController, convId: String) {
                 return
             }
             val desc = clip.description
-            val stamp = if (android.os.Build.VERSION.SDK_INT >= 26) desc.timestamp else 0L
+            // r97-3 (owner r96 #3 "not fixed"): the description's timestamp
+            // is only trusted as epoch MILLIS inside a sane window - some
+            // ROMs stamp the clip in seconds or with boot-relative garbage,
+            // and that made the 10-minute freshness test reject EVERY clip
+            // (no chip, no auto-open, ever). A stamp outside the window is
+            // ignored; the consumed-key still dedupes.
+            val rawStamp = if (android.os.Build.VERSION.SDK_INT >= 26) desc.timestamp else 0L
+            val stamp =
+                if (rawStamp > 1_500_000_000_000L && rawStamp <= System.currentTimeMillis() + 86_400_000L) rawStamp else 0L
             // r96-3 (owner r96 #3: "not fixed"): some ROMs label a copied
             // picture "*/*" or nothing at all, and the picture is not always
             // the first item — every item is scanned and the MIME is
             // re-resolved from the uri itself when the clip description has
-            // no image type.
+            // no image type. r97-3 widens the net further: the uri can hide
+            // in the item's INTENT data or a plain file-path text, and a
+            // provider that reports no MIME at all gets its magic bytes
+            // sniffed, with the file extension as the last resort.
             var found: Triple<String, android.net.Uri, String>? = null
             for (i in 0 until clip.itemCount) {
                 val item = runCatching { clip.getItemAt(i) }.getOrNull() ?: continue
@@ -5054,11 +5065,29 @@ fun ChatScreen(nav: NavController, convId: String) {
                         item.text?.toString()?.takeIf { it.startsWith("content://") || it.startsWith("file://") }
                             ?.let { android.net.Uri.parse(it) }
                     }.getOrNull()
+                    ?: runCatching {
+                        item.intent?.data?.takeIf { it.scheme == "content" || it.scheme == "file" }
+                    }.getOrNull()
+                    ?: runCatching {
+                        item.text?.toString()?.takeIf { it.startsWith("/") && java.io.File(it).isFile }
+                            ?.let { android.net.Uri.fromFile(java.io.File(it)) }
+                    }.getOrNull()
                     ?: continue
                 val mime =
                     (0 until desc.mimeTypeCount).map { desc.getMimeType(it) }.firstOrNull { it.startsWith("image/") }
                         ?: runCatching { ctx.contentResolver.getType(uri) }.getOrNull()
                             ?.takeIf { it.startsWith("image/") }
+                        ?: sniffClipMime(ctx.contentResolver, uri)
+                        ?: when (uri.toString().substringAfterLast('.', "").lowercase()) {
+                            "png" -> "image/png"
+                            "jpg", "jpeg" -> "image/jpeg"
+                            "webp" -> "image/webp"
+                            "gif" -> "image/gif"
+                            "bmp" -> "image/bmp"
+                            "heic" -> "image/heic"
+                            "heif" -> "image/heif"
+                            else -> null
+                        }
                         ?: continue
                 found = Triple(mime, uri, "$stamp|$uri")
                 break
@@ -5085,7 +5114,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                     withContext(Dispatchers.IO) {
                         runCatching { ctx.contentResolver.openInputStream(uri)?.use { s -> s.readBytes() } }.getOrNull()
                     }
-                if (bytes == null || bytes.isEmpty()) return@launch
+                if (bytes == null || bytes.isEmpty()) {
+                    // r97-3: a detected clip whose stream cannot be read used
+                    // to vanish SILENTLY (no chip state change, no editor) -
+                    // to the owner that reads as "paste not fixed".
+                    android.widget.Toast.makeText(ctx, "Copied image could not be read", android.widget.Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
                 val ext = when {
                     mime.contains("png") -> "png"
                     mime.contains("webp") -> "webp"
@@ -9700,6 +9735,39 @@ private fun ViewOnceRow(
 
 /** Owner round 31 (item 16): picked via "Document" — never the photo/video bubble. */
 internal fun sentAsDocument(m: JSONObject): Boolean = m.optJSONObject("meta")?.optBoolean("document") == true
+
+/**
+ * r97-3 (owner r96 #3 "not fixed"): the last-resort MIME probe for a copied
+ * image whose clip description and provider both report nothing usable —
+ * twelve magic bytes decide what the picture is.
+ */
+private fun sniffClipMime(res: android.content.ContentResolver, uri: android.net.Uri): String? {
+    val b =
+        runCatching {
+            res.openInputStream(uri)?.use { s ->
+                val head = ByteArray(12)
+                var off = 0
+                while (off < 12) {
+                    val r = s.read(head, off, 12 - off)
+                    if (r < 0) break
+                    off += r
+                }
+                head.copyOf(off)
+            }
+        }.getOrNull() ?: return null
+    if (b.size < 3) return null
+    fun c(i: Int, ch: Char) = b.size > i && b[i] == ch.code.toByte()
+    return when {
+        c(0, 'G') && c(1, 'I') && c(2, 'F') -> "image/gif"
+        c(0, 'B') && c(1, 'M') -> "image/bmp"
+        b[0] == 0x89.toByte() && b[1] == 0x50.toByte() -> "image/png"
+        b[0] == 0xFF.toByte() && b[1] == 0xD8.toByte() && b[2] == 0xFF.toByte() -> "image/jpeg"
+        b.size >= 12 && c(0, 'R') && c(1, 'I') && c(2, 'F') && c(3, 'F') &&
+            c(8, 'W') && c(9, 'E') && c(10, 'B') && c(11, 'P') -> "image/webp"
+        b.size >= 12 && c(4, 'f') && c(5, 't') && c(6, 'y') && c(7, 'p') -> "image/heic"
+        else -> null
+    }
+}
 
 /** Owner round 32 (item 45): a voice note (recorded in-app or an audio file
  *  sent as media) — the row uses it to drop the bubble's bottom band. */

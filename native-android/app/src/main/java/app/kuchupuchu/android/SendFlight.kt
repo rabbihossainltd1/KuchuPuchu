@@ -133,10 +133,22 @@ fun Modifier.fxFlyIn(
     // flight mid-air. Now every frame is computed from (now - goAt), so ANY
     // composition that picks the row up continues the SAME flight, and the
     // flight itself can never be killed by a swap.
+    // r97-4 (owner r96 #4 "not fixed": "notun kore chat a gele ager chat a
+    // thaka emojis 1 second er jonno nice ar right side a kata pore
+    // jacche"): a PASSIVE pick-up (this composition was not born live) may
+    // only ADOPT a flight that is already armed (goAt >= 0) - that is the
+    // pending->server swap handoff. An entry birthed but never armed (its
+    // owning row left composition inside the 600 ms viewport gate, or a send
+    // that never acked) used to be adopted anyway: the row rendered pinned
+    // at the bottom-right corner (v = 0) and the effect below SELF-ARMED
+    // it, so a re-entered chat flew its old emojis in from the corner for
+    // ~1 s no matter what fxBorn said. Unarmed entries are ignored now -
+    // the row renders settled (v = 1), the global entry stays untouched for
+    // whoever truly owns it.
     val st =
         remember(key) {
             if (active && key.isNotBlank() && scale > 0f) FlightAnims.birth(key)
-            else if (key.isNotBlank()) FlightAnims.of(key)
+            else if (key.isNotBlank()) FlightAnims.of(key)?.takeIf { it.goAt >= 0L }
             else null
         }
     var v by remember(key) {
