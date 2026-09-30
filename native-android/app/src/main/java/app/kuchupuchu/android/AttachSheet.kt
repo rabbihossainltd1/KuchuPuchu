@@ -413,6 +413,9 @@ fun AttachPanel(
     var gridPreDownTotal by remember { mutableStateOf(0f) }
     // r94-7: the half panel's close run (swipe down at the grid's top).
     var gridPreHalfTotal by remember { mutableStateOf(0f) }
+    // r95-5: the panel ROOT's own drag run (the free swipe on the panel's
+    // non-scrollable surfaces).
+    var rootDragTotal by remember { mutableStateOf(0f) }
     var gridPreTotal by remember { mutableStateOf(0f) }
     val gridScroll = remember {
         object : NestedScrollConnection {
@@ -474,6 +477,19 @@ fun AttachPanel(
                 available: Offset,
                 source: NestedScrollSource,
             ): Offset {
+                // r95-5 (owner r95 #5: "emni normally swipe down free swipe
+                // down a close hoi na"): the same r45 lesson — some ROMs
+                // deliver the down-drag only HERE. The half panel's close
+                // gets the same backup the fullscreen fold always had.
+                if ((source == NestedScrollSource.UserInput || source == NestedScrollSource.SideEffect) && !fullscreen &&
+                    !gridState.canScrollBackward && available.y > 0f) {
+                    gridPreHalfTotal += available.y
+                    if (gridPreHalfTotal > 60f) {
+                        haptics.tap()
+                        onSwipeDismiss()
+                        gridPreHalfTotal = 0f
+                    }
+                }
                 // Owner round 45 (item 2): the leftover down-drag at the
                 // top edge backs the pre-scroll path up — whichever fires
                 // first folds the panel (some ROMs deliver the drag only
@@ -497,6 +513,30 @@ fun AttachPanel(
             .fillMaxWidth()
             .height(panelH)
             .nestedScroll(gridScroll)
+            // r95-5 (owner r95 #5): the FREE swipe. The grid's nested scroll
+            // only reports drags that start ON the grid — the panel's other
+            // surfaces (the action rows, the folder chips) never produced a
+            // nested-scroll event at all, so a free swipe down there did
+            // nothing and only the handle worked. The panel ROOT carries its
+            // own vertical drag detector for those areas; the grid, the
+            // caption bar and the handle keep their own handlers (a deeper
+            // node always wins, so nothing double-fires).
+            .pointerInput("halfClose") {
+                detectVerticalDragGestures(
+                    onDragEnd = {
+                        if (!fullscreen) {
+                            if (rootDragTotal.value < -70f) setFullscreen(true)
+                            else if (rootDragTotal.value > 70f) onSwipeDismiss()
+                        } else if (rootDragTotal.value > 70f) {
+                            setFullscreen(false)
+                        }
+                        rootDragTotal.value = 0f
+                    },
+                    onDragCancel = { rootDragTotal.value = 0f },
+                ) { _, amount ->
+                    rootDragTotal.value += amount
+                }
+            }
             .background(Color.Transparent)
             // Owner round 40 (item 3): the caption field's keyboard must push
             // the selection bar up instead of burying it — the grid (weight)

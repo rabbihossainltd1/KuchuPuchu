@@ -66,10 +66,10 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
-import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Mic
@@ -4457,7 +4457,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     CircularProgressIndicator(
-                        color = Gold,
+                        // r95-6 (owner r95 #6: "loading progress circle er
+                        // colour blue hobe tumi yellow use korcho").
+                        color = ActionBlueDeep,
                         strokeWidth = 2.dp,
                         modifier = Modifier.size(14.dp),
                     )
@@ -5019,14 +5021,25 @@ fun ChatScreen(nav: NavController, convId: String) {
         // r63-4: composer stays visible in half panel even when media is selected
         // (prevents abrupt message bar disappearance and avoids messages dropping 1 line)
         } else if (composerShown) {
-        // r94-10 (owner r94 #10: "massage bar a ekhono images paste hoi na"):
-        // the composer's Paste action on a clipboard IMAGE — copy a
-        // screenshot / photo, long-press the message bar, tap Paste, and the
-        // editor opens with it (the attach panel's single-photo flow).
+        // r95-10 (owner r95 #8 / r94 #10: "paste korle bole current
+        // application not supporting image paste"): the SYSTEM paste menu
+        // cannot paste an image into a text field — the ROM says exactly
+        // that when Paste is tapped. The composer now carries its OWN
+        // WhatsApp-style clipboard chip: while a fresh, unconsumed image
+        // clip is on the board a preview row sits above the message bar —
+        // tap it and the editor opens with the picture (the attach panel's
+        // single-photo flow), tap the X to dismiss it. Detection runs at
+        // chat open, on every ON_RESUME and on every clip change while the
+        // chat lives; a clip is consumed once (ScreenStore.lastPasteClipKey)
+        // and only while fresh (10 minutes).
         val composerClipMgr = remember { ctx.getSystemService(android.content.ClipboardManager::class.java) }
-        fun composerPasteImage(): Boolean {
-            val clip = runCatching { composerClipMgr?.primaryClip }.getOrNull() ?: return false
-            if (clip.itemCount == 0) return false
+        var pastePreview by remember { mutableStateOf<Triple<String, android.net.Uri, String>?>(null) }
+        fun refreshPastePreview() {
+            val clip = runCatching { composerClipMgr?.primaryClip }.getOrNull()
+            if (clip == null || clip.itemCount == 0) {
+                pastePreview = null
+                return
+            }
             val desc = clip.description
             var imageMime: String? = null
             for (i in 0 until desc.mimeTypeCount) {
@@ -5036,16 +5049,41 @@ fun ChatScreen(nav: NavController, convId: String) {
                     break
                 }
             }
-            val mime = imageMime ?: return false
-            val item = runCatching { clip.getItemAt(0) }.getOrNull() ?: return false
+            val mime = imageMime ?: run {
+                pastePreview = null
+                return
+            }
+            val item = runCatching { clip.getItemAt(0) }.getOrNull() ?: run {
+                pastePreview = null
+                return
+            }
             val uri = runCatching { item.uri }.getOrNull()
                 ?: runCatching {
                     item.text?.toString()?.takeIf { it.startsWith("content://") || it.startsWith("file://") }
                         ?.let { android.net.Uri.parse(it) }
                 }.getOrNull()
-                ?: return false
+                ?: run {
+                    pastePreview = null
+                    return
+                }
             val stamp = if (android.os.Build.VERSION.SDK_INT >= 26) desc.timestamp else 0L
-            ScreenStore.lastPasteClipKey = "$stamp|$uri"
+            if (stamp > 0L && System.currentTimeMillis() - stamp > 600_000L) {
+                pastePreview = null
+                return
+            }
+            val key = "$stamp|$uri"
+            if (ScreenStore.lastPasteClipKey == key) {
+                pastePreview = null
+                return
+            }
+            pastePreview = Triple(mime, uri, key)
+        }
+        fun consumePastePreview(key: String) {
+            ScreenStore.lastPasteClipKey = key
+            pastePreview = null
+        }
+        fun openPastePreview(mime: String, uri: android.net.Uri, key: String) {
+            consumePastePreview(key)
             scope.launch {
                 val bytes =
                     withContext(Dispatchers.IO) {
@@ -5062,7 +5100,62 @@ fun ChatScreen(nav: NavController, convId: String) {
                 markViewerReturn()
                 nav.navigate("mediaedit/$convId/0/${statusPickArg(MediaItem(fileUri, false, 0, "", System.currentTimeMillis()))}")
             }
-            return true
+        }
+        LaunchedEffect(convId) { refreshPastePreview() }
+        DisposableEffect(convId) {
+            val clipListener = android.content.ClipboardManager.OnPrimaryClipChangedListener {
+                android.os.Handler(android.os.Looper.getMainLooper()).post { refreshPastePreview() }
+            }
+            runCatching { composerClipMgr?.addPrimaryClipChangedListener(clipListener) }
+            val lifecycleObs = object : androidx.lifecycle.LifecycleEventObserver {
+                override fun onStateChanged(
+                    owner: androidx.lifecycle.LifecycleOwner,
+                    event: androidx.lifecycle.Lifecycle.Event,
+                ) {
+                    if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) refreshPastePreview()
+                }
+            }
+            MainActivity.current?.lifecycle?.addObserver(lifecycleObs)
+            onDispose {
+                runCatching { composerClipMgr?.removePrimaryClipChangedListener(clipListener) }
+                MainActivity.current?.lifecycle?.removeObserver(lifecycleObs)
+            }
+        }
+        // r94-10: the intercepted system Paste action routes an image clip
+        // here too (a text clip falls through to the normal text paste).
+        fun composerPasteImage(): Boolean {
+            refreshPastePreview()
+            pastePreview?.let { (pMime, pUri, pKey) ->
+                openPastePreview(pMime, pUri, pKey)
+                return true
+            }
+            return false
+        }
+        pastePreview?.let { (pMime, pUri, pKey) ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Card)
+                    .clickable { openPastePreview(pMime, pUri, pKey) }
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Image, "Clipboard image", tint = ActionBlueDeep, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Clipboard image", fontSize = 13.sp, color = Muted, modifier = Modifier.weight(1f))
+                Text("Paste", color = ActionBlueDeep, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.width(12.dp))
+                Icon(
+                    Icons.Filled.Close,
+                    "Dismiss",
+                    tint = Muted,
+                    modifier = Modifier
+                        .size(16.dp)
+                        .clickable { consumePastePreview(pKey) },
+                )
+            }
         }
         Composer(
             input = input,

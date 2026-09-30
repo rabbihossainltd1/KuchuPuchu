@@ -1761,11 +1761,29 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
-    'r94-10 (owner r94 #10: "massage bar a ekhono images paste hoi na"): the composer PASTE understands a clipboard IMAGE - the system paste menu is kept, only the Paste action is intercepted (a custom TextToolbar): an image clip opens the media editor exactly like the attach panel single-photo pick, a text clip pastes as text. The app-root clipboard watcher (r91-5) stays',
+    'r94-10 (owner r94 #10: "massage bar a ekhono images paste hoi na"): the composer PASTE understands a clipboard IMAGE - the system paste menu is kept, only the Paste action is intercepted (a custom TextToolbar): an image clip opens the media editor exactly like the attach panel single-photo pick, a text clip pastes as text. r95-10 added the always-visible clipboard chip (the system menu never offers Paste for an image clip on most ROMs)',
     chat4.includes("onPasteImage: () -> Boolean = { false },") &&
       chat4.includes("fun composerPasteImage(): Boolean {") &&
       chat4.includes("onPasteRequested?.let { op -> { if (!onPasteImage()) op() } }") &&
-      chat4.includes("LocalTextToolbar provides inputPasteToolbar"),
+      chat4.includes("LocalTextToolbar provides inputPasteToolbar") &&
+      chat4.includes("pastePreview?.let { (pMime, pUri, pKey) ->") &&
+      chat4.includes("openPastePreview(pMime, pUri, pKey)"),
+  );
+
+  check(
+    'r95-5 (owner r95 #5: "handle i dhore swipe down korle close hocche but emni normally swipe down free swipe down a close hoi na"): the FREE swipe closes the half panel now - the panel ROOT carries its own vertical drag detector (the grid nested-scroll only ever reported drags that started ON the grid, so the action rows / chips never closed anything; deeper nodes keep their own handlers so nothing double-fires), and the grid top-path close gained the r45-style onPostScroll backup some ROMs need',
+    attach4.includes("rootDragTotal") &&
+      attach4.includes("if (rootDragTotal.value > 70f) onSwipeDismiss()") &&
+      (attach4.match(/gridPreHalfTotal > 60f/g) || []).length === 2,
+  );
+
+  check(
+    'r95-6 (owner r95 #6: "loading progress circle er colour blue hobe tumi yellow use korcho"): the chat-top history loader spinner is BLUE now (ActionBlueDeep), not the yellow Gold',
+    (() => {
+      const i = chat4.indexOf("Loading\u2026");
+      const slice = chat4.slice(Math.max(0, i - 500), i);
+      return slice.includes("color = ActionBlueDeep") && !slice.includes("color = Gold");
+    })(),
   );
 
   check(
@@ -1779,15 +1797,13 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
-    'r91-5 (owner r91 #5, r90 #5 "not fixed"): the watcher lived on an OPEN CHAT SCREEN, so the natural copy-then-open-the-app flow (screenshot copied, app brought forward onto the list) never fired. The clipboard watcher now lives at the APP ROOT (KpApp): a clip listener for the whole process lifetime + Activity ON_RESUME for the copy-then-switch flow, an image clip (uri, or a uri in the item text, or localData) opens the media editor in CHAT mode for the LAST OPENED conversation (ScreenStore.lastChatConvId / lastChatTitle, recorded by every chat screen) - exactly the attach-panel single-photo pick: cacheFile -> statusPickArg(MediaItem) -> mediaedit/$convId/0/... Consumed once per clip (lastPasteClipKey), only while fresh (10 minutes), never stacked on an open editor',
-    kpapp4.includes("OnPrimaryClipChangedListener") &&
-      kpapp4.includes("Lifecycle.Event.ON_RESUME") &&
-      kpapp4.includes("consumeClipboardImage()") &&
-      kpapp4.includes(
-        'nav.navigate("mediaedit/$convId/0/${statusPickArg(MediaItem(fileUri, false, 0, "", System.currentTimeMillis()))}")',
-      ) &&
-      kpapp4.includes('FilesUtil.cacheFile(pasteCtx, "paste.$ext", bytes, mime)') &&
-      kpapp4.includes('?.takeIf { it.startsWith("content://") || it.startsWith("file://") }') &&
+    'r95-10 (supersedes r91-5; owner r95 #8: "paste korle bole current application not supporting image paste"): the system paste menu CANNOT paste an image into a text field - the ROM literally says so. The app-root auto-open watcher is GONE; the chat screen now runs the detection itself (clip listener + ON_RESUME + chat open) and shows a WhatsApp-style CLIPBOARD CHIP above the message bar while a fresh, unconsumed image clip is on the board: tap = the editor with the picture, X = dismiss. Consumed once per clip (lastPasteClipKey), fresh within 10 minutes',
+    !kpapp4.includes("consumeClipboardImage") &&
+      !kpapp4.includes("OnPrimaryClipChangedListener") &&
+      chat4.includes("fun refreshPastePreview()") &&
+      chat4.includes("fun consumePastePreview(key: String) {") &&
+      chat4.includes("OnPrimaryClipChangedListener") &&
+      chat4.includes("Lifecycle.Event.ON_RESUME") &&
       store4.includes("var lastPasteClipKey: String? = null") &&
       store4.includes("var lastChatConvId: String? = null") &&
       chat4.includes("ScreenStore.lastChatConvId = convId"),
