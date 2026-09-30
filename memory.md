@@ -809,3 +809,10 @@ Owner r100 feedback: paste "perfect fixed" (the Gboard chip + contentReceiver mi
 - Pins: 47-r70 — r93-4 check RETARGETED (the `val sc = 0.6f + 0.4f * v0` literal dropped, narrative notes the r101 mirror); new r101 check (mirrored x0 literal, `+ bounce`, y0 count === 2, grow literal ABSENT); latch 36 → 271/3.9.194. 1974 assertions.
 - Round trip: CLEAN.
 - Owner test notes: from ANOTHER phone (or the AI bot), send a message into the open chat — the received bubble flies in fast from the bottom-left corner with the little bounce, full size, exactly like the sent one but mirrored. History/reopen must stay still.
+
+## r102 — 2026-09-30 (3dc4d41, CI 36765589174 success, kuchupuchu-3.9.195-r102.apk, 272/3.9.195, 47/47 1975; no worker change)
+Owner r101 feedback: "arekta kaj to koroni bouns effect nei massage send receive a ota add kore release kore daw version bump kore" — the landing bounce (the r93 "bonus") is not visible on send or receive; make it real and ship it with a version bump.
+- r102 (SendFlight.kt fxFlyIn): the bounce was 5dp over the last 28% of a ~300 ms flight — impossible to catch with the eye. It is now ONE shared hump computed before the direction branch: an 18dp overshoot PAST the seat over the last 38% of the flight (`sin((v0 - 0.62f) / 0.38f * PI) * 18dp`) — the bubble lands, pops past its seat and glides back. Subtracted for the sent flight (`- bounce`, overshoot to the left), added for the received one (`+ bounce`, overshoot to the right) — both directions bounce identically and visibly. Full size, duration clamp and all gates unchanged.
+- Pins: 47-r70 — the r93-4 check's bounce literal swapped to the new formula; new r102 check (the 18dp/0.62 literal, `val bounce =` count === 1, both translationX lines, and the old `* 5f * density` ABSENT); r101 check unchanged (y0 === 2 etc.); latch 36 → 272/3.9.195. 1975 assertions.
+- Round trip: CLEAN.
+- Owner test notes: send a message (the bubble now visibly pops past its seat and settles back on landing); receive one from the other phone (the same bounce, mirrored). History/reopen stay still.
