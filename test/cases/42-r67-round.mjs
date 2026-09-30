@@ -173,7 +173,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
     // r67-3 birth claim — waiting for SENT made arrivals crawl. The swap no
     // longer kills the flight because fxFlyIn's state is global + time-based.
     "r67-3: that claim IS the arrival animation (no per-composition re-decision)",
-    chat.includes("val fxFresh = remember { fxBorn && FxFlights.claim(fxKey) }"),
+    // r91-4: the entrance flight is dead - fxFresh is hard false now.
+    chat.includes("val fxFresh = false"),
   );
   check(
     "r76-25: own rows fly at BIRTH again (the r76-23 pendingEcho gate is gone)",

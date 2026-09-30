@@ -3108,68 +3108,13 @@ fun ChatScreen(nav: NavController, convId: String) {
             }.firstOrNull() ?: rawTitle
     // Owner round 31: groups carry their own picture (avatarRef "g:<id>@vN").
     val avatarUrl = if (isGroup) c?.optIso("avatarUrl") else c?.optJSONObject("other")?.optIso("avatarUrl")
-    // r90-5 (owner r90 #5: "onno app a jemon screenshot ba copied image paste
-    // kora jai amar app a o same kore daw"): a clipboard that holds a picture
-    // (a copied screenshot / image) opens the media editor in CHAT mode -
-    // exactly the single-photo pick from the attach panel: copy the picture,
-    // come back to the chat (or copy from a split screen) and the editor is
-    // up with it - edit, Send. A clip is consumed once (ScreenStore) and only
-    // while it is fresh (10 minutes); text clips are ignored entirely.
-    val clipboardMgr = remember { ctx.getSystemService(android.content.ClipboardManager::class.java) }
-    fun consumeClipboardImage() {
-        val clip = runCatching { clipboardMgr?.primaryClip }.getOrNull() ?: return
-        if (clip.itemCount == 0) return
-        val desc = clip.description
-        var imageMime: String? = null
-        for (i in 0 until desc.mimeTypeCount) {
-            val mm = desc.getMimeType(i)
-            if (mm.startsWith("image/")) {
-                imageMime = mm
-                break
-            }
-        }
-        val mime = imageMime ?: return
-        val uri = runCatching { clip.getItemAt(0).uri }.getOrNull() ?: return
-        val stamp = if (android.os.Build.VERSION.SDK_INT >= 26) desc.timestamp else 0L
-        if (stamp > 0L && System.currentTimeMillis() - stamp > 600_000L) return
-        val clipKey = "$stamp|$uri"
-        if (ScreenStore.lastPasteClipKey == clipKey) return
-        ScreenStore.lastPasteClipKey = clipKey
-        scope.launch {
-            val bytes =
-                withContext(Dispatchers.IO) {
-                    runCatching { ctx.contentResolver.openInputStream(uri)?.use { s -> s.readBytes() } }.getOrNull()
-                }
-            if (bytes == null || bytes.isEmpty()) return@launch
-            val ext = when {
-                mime.contains("png") -> "png"
-                mime.contains("webp") -> "webp"
-                else -> "jpg"
-            }
-            val fileUri = FilesUtil.cacheFile(ctx, "paste.$ext", bytes, mime)
-            ScreenStore.editTitle = title
-            markViewerReturn()
-            nav.navigate("mediaedit/$convId/0/${statusPickArg(MediaItem(fileUri, false, 0, "", System.currentTimeMillis()))}")
-        }
-    }
-    DisposableEffect(convId) {
-        val clipListener = android.content.ClipboardManager.OnPrimaryClipChangedListener {
-            android.os.Handler(android.os.Looper.getMainLooper()).post { consumeClipboardImage() }
-        }
-        runCatching { clipboardMgr?.addPrimaryClipChangedListener(clipListener) }
-        val lifecycleObs = object : androidx.lifecycle.LifecycleEventObserver {
-            override fun onStateChanged(
-                owner: androidx.lifecycle.LifecycleOwner,
-                event: androidx.lifecycle.Lifecycle.Event,
-            ) {
-                if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) consumeClipboardImage()
-            }
-        }
-        MainActivity.current?.lifecycle?.addObserver(lifecycleObs)
-        onDispose {
-            runCatching { clipboardMgr?.removePrimaryClipChangedListener(clipListener) }
-            MainActivity.current?.lifecycle?.removeObserver(lifecycleObs)
-        }
+    // r91-5 (owner r91 #5, r90 #5 "not fixed"): the clipboard watcher moved
+    // to the APP ROOT (KpApp) - it only lived on an open chat screen before,
+    // so the copy-then-open-the-app flow never fired. The chat records the
+    // last opened conversation + title for it.
+    LaunchedEffect(convId) {
+        ScreenStore.lastChatConvId = convId
+        ScreenStore.lastChatTitle = title
     }
     // The ref is what makes the header paint without re-fetching: pass it too.
     val avatarRef = if (isGroup) c?.optIso("avatarRef") else c?.optJSONObject("other")?.optIso("avatarRef")
@@ -7591,7 +7536,14 @@ private fun MessageRow(
                 else -> live || FxArrivals.mark(m.optString("id")) != null
             }
         }
-    val fxFresh = remember { fxBorn && FxFlights.claim(fxKey) } && fxScaleOf(ctx) > 0f
+    // r91-4 (owner r91 #4, r90 #4 "not fixed": "massage sending receive a
+    // light effect ta remove koro"): removing the letter reveal was not
+    // enough - the ROW entrance was still an effect (the flight's rise+fade,
+    // the slot, the blur, the side slide, the doc pop). fxFresh is hard
+    // FALSE now: every one of those modifiers is inert, a message paints
+    // whole and in place the instant it exists, sent or received. The emoji
+    // dance is a different gate (fxEmoji = fxBorn) and stays.
+    val fxFresh = false
     // r76-29 (owner: "send korar por first time animates hoi na ... 0.5
     // seconds por auto animate hobe"): the SERVER row's first composition is
     // the send-ack - arm the flight here, deterministically (idempotent; the
@@ -7609,7 +7561,8 @@ private fun MessageRow(
     // row enters fxFlyIn with goAt already set, skips the visibility gate
     // and ticks from its first frame (the exact reason text bubbles always
     // animated on the first send of a session).
-    if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)
+    // r91-4: the birth arm is gone with the flight - nothing arms a
+    // FlightAnims entry any more, so no row can ever pick one up.
     // r86-1 (owner r86 #1 - SIXTH round on "first time animates hoi na"):
     // five entrance-flight redesigns (r78/r81/r82/r83/r84/r85) chased the
     // ROW flight while the owner's r78-4 words were about the GLYPH all

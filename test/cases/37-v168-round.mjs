@@ -213,7 +213,8 @@ check(
     fx7.includes("fun claim(key: String): Boolean") &&
     // r76-25: back to birth-claim (r67-3); the swap-survival now lives in
     // fxFlyIn's global time-based FlightAnims.
-    chat.includes("val fxFresh = remember { fxBorn && FxFlights.claim(fxKey) }") &&
+    // r91-4: the entrance flight is dead - fxFresh is hard false now.
+    chat.includes("val fxFresh = false") &&
     (chat.includes('m.optString("senderId") == "kp_ai_bot" -> false') ||
       chat.includes('if (m.optString("senderId") == "kp_ai_bot") false')) &&
     chat.includes("FxArrivals.armed = false") &&

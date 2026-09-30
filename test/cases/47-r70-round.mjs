@@ -1019,8 +1019,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
       // r77-1/r77-6 superseded the ack-arm: the arm now lands at the echo's
       // birth with 0 wait (see the r77 crash/fix block at the bottom).
       // r81-8 emoji-only rows arrive unarmed now (self-arm after the
-      // viewport gate); the birth arm below stays for every other kind.
-      chat.includes("if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)") &&
+      // viewport gate); r91-4: the birth arm is gone with the flight.
+      !chat.includes("FlightAnims.armIn(fxKey") &&
       chat.includes("Column(if (small) Modifier.width(150.dp) else Modifier.weight(1f)) {") &&
       // (r76-30 reverted the sender-side CDN detour - the R2 copy won.)
       chat.includes("hostView.getLocationOnScreen(loc)") &&
@@ -1090,7 +1090,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
     'r77-1/r77-6 (owner: "item onek slow chat a paste hocche, instant animation diye asche na" + "send sending sent alada na ek kore daw, zero gap, alada kono animation effect kichui na"): a mine row\'s flight arms at the echo\'s BIRTH with no wait - the lift-off IS the entrance, the ack does nothing at all (first arm wins), and the echo->server swap shares one time-based flight keyed by clientId, so the swap is a silent seat swap with no second effect',
     // r81-8 emoji-only rows arrive unarmed now (self-arm after the
     // viewport gate); the birth arm below stays for every other kind.
-    chat.includes("if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)") &&
+    // r91-4: the birth arm is gone (entrance effects off) - the armIn
+    // definition stays in SendFlight.kt, nothing calls it from the chat.
+    !chat.includes("FlightAnims.armIn(fxKey") &&
       !chat.includes("!pendingEcho && fxBorn) FlightAnims.armIn(fxKey, 500L") &&
       flight.includes("if (f.goAt >= 0L) return false") &&
       chat.includes(
@@ -1176,7 +1178,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
     'r77-8 (owner: "emojis send korle first time animate hobe just ekbar, eita kortei onek session failed korche ... amar moner moto hoini"): every failed mode he lists came from the ack-armed double animation - the glyph re-playing at the server swap (appears, hides, re-animates) and the body clipping mid-flight. Emoji rows ride the one-motion flight now: armed at the echo\'s BIRTH (r77-1), keyed by clientId so the echo->server swap adds nothing (r77-6, the same LazyColumn key in pending and messages), and the glyph itself renders static (r76-18), so one send = one animation, never two',
     // r81-8 emoji-only rows arrive unarmed now (self-arm after the
     // viewport gate); the birth arm below stays for every other kind.
-    chat.includes("if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)") &&
+    // r91-4: the birth arm is gone (entrance effects off).
+    !chat.includes("FlightAnims.armIn(fxKey") &&
       chat.includes(
         'val fxKey = remember { m.optString("clientId").ifBlank { m.optString("id") } }',
       ) &&
@@ -1255,7 +1258,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
     // and ticks from its first frame).
     !fx.includes("fxEmojiEntrance") &&
       chat.includes(".fxSlotOpen(fxFresh)") &&
-      chat.includes("if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)") &&
+      !chat.includes("FlightAnims.armIn(fxKey") &&
       chat.includes('fxFlyIn(fxFresh, if (kind == "TEXT") 680') &&
       chat.includes(
         '.fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (kind == "FILE" && fileLooksVoice(m)) 720 else 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)',
@@ -1334,7 +1337,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       // r85-1: the custom entrance is gone - emoji rows ride the text
       // flight, armed at birth (birth-armed rows skip the visibility gate).
       !fx.includes("fxEmojiEntrance") &&
-      chat.includes("if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)") &&
+      !chat.includes("FlightAnims.armIn(fxKey") &&
       anim.includes("NotoEmojiWarm.peek(cacheKey)"),
   );
 
@@ -1342,10 +1345,14 @@ const main = (f) => read(`${ANDROID}/${f}`);
     'r79-3 (owner: "close a photo age thekei thakche + overlap + position a na"): the hidden-tile handoff snapped released at the very END of the close flight - any window-level seat disagreement flashed the photo twice. The handoff is now a CROSS-FADE over the close\'s last 45% (hero opacity down, tile opacity up on the same progress), album tiles gained the seat report + hide wiring they never had (they opened with no entrance and closed to nothing before)',
     media.includes("var heroCloseT by androidx.compose.runtime.mutableStateOf(0f)") &&
       media.includes("fun tileAlphaFor(id: String?): Float") &&
-      media.includes("return if (t >= 0.45f) 0f else ((0.45f - t) / 0.45f).coerceIn(0f, 1f)") &&
+      // r91-2: the cross-fade math is gone - the tile is flat-hidden for
+      // the whole trip (hard handoff at the landing frame).
+      media
+        .slice(media.indexOf("fun tileAlphaFor"), media.indexOf("fun tileAlphaFor") + 900)
+        .includes("return 0f") &&
       media.includes("PhotoHero.heroCloseT = if (closing) v else 0f") &&
       // r89-2: the hero itself no longer fades on close (pure reverse
-      // flight); the cross-fade survives on the TILE side only.
+      // flight); r91-2 removed the tile-side cross-fade too (flat hide).
       !media.includes("alpha = if (closing && t < 0.45f)") &&
       chat.includes("alpha = PhotoHero.tileAlphaFor(") &&
       chat.includes(
@@ -1376,14 +1383,14 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     'r80-8 (owner: "not fixed" - no entrance, settles instantly): two clocks already died on device (r78 wall-clock eaten by first-frame jank, r79 layout-anchor never visible). The entrance now rides the ONE family of animation the owner demonstrably SEES: the row flight - time-based, GLOBAL per key (FlightAnims.birth + valueAt + the same withFrameNanos tick), gated on fxBorn (survives churn) with a self-arm fallback, armed at birth for mine and armed in fast-paint for emoji-only received rows; the old second birth animator (glyph-row fxPopIn) is gone so one message is one animation',
     !fx2.includes("fxEmojiEntrance") &&
-      chat2.includes("if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)") &&
+      !chat2.includes("FlightAnims.armIn(fxKey") &&
       chat2.includes('fxFlyIn(fxFresh, if (kind == "TEXT") 680') &&
       // r81-8: no external arm for received emoji (self-arm only)
       !chat2.includes("FlightAnims.armIn(liveMsg") &&
       // r81-8: external arming was REMOVED (r81) - the entrance self-arms
       // only after the r76-21 viewport gate, or the clock ran out
       // off-screen ("first time animates hoi na").
-      chat2.includes("if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)") &&
+      !chat2.includes("FlightAnims.armIn(fxKey") &&
       anim2.includes("Modifier.padding(start = 2.dp, end = 2.dp),") &&
       !anim2.includes("fxPopIn("),
   );
@@ -1426,9 +1433,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     'r81-6/8 (retargeted r83-1; owner: "emojis left theke animate kore asche - normal massage jemon right er nicher theke" + "first time animates hoi na ekhono"): TWO device-true causes - (a) the entrance pivoted around the full-width ROW\'s center (= the screen\'s center), so a right-side bubble grew out of mid-screen and read as arriving from the LEFT; the pivot is the bubble corner now (1,1 mine / 0,1 theirs - the fxFlyIn geometry the owner calls normal). (b) SUPERSEDED by r83-1: the coroutine-gated self-arm (r76-21 viewport gate, 600 ms cap) still left the FIRST send of a session settled on device, so the arm moved into the layout callback itself - the same seat-inside-listBounds test now runs inside onGloballyPositioned and sets the clock the moment the row is first laid out on screen (fx4 r83-1 pin); the birth-arm for emoji rows stays removed',
     !fx3.includes("fxEmojiEntrance") &&
-      chat3.includes("if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)") &&
+      !chat3.includes("FlightAnims.armIn(fxKey") &&
       chat3.includes('fxFlyIn(fxFresh, if (kind == "TEXT") 680') &&
-      chat3.includes("if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)"),
+      !chat3.includes("FlightAnims.armIn(fxKey"),
   );
 
   check(
@@ -1482,13 +1489,14 @@ const main = (f) => read(`${ANDROID}/${f}`);
   const chat4 = main("ChatScreen.kt");
   const list4 = main("ChatListScreen.kt");
   const store4 = main("ScreenStore.kt");
+  const kpapp4 = main("KpApp.kt");
 
   check(
     'r83-1 (owner r83 #1: "shob thik ache just animate hoi na first time" - STILL dead after r78/r81/r82): every prior design armed the emoji flight from inside a cancellable LaunchedEffect, so the first send of a session painted settled on device while later sends flew. The arm is now bound to the layout pass itself - the onGloballyPositioned report that puts the seat inside the list viewport sets the clock (fxFlyIn\'s device-proven live-seat signal); the coroutine only waits on the armed flag and ticks, and a 600 ms fallback arm covers a row that never becomes visible',
     // r85-1 SUPERSEDES r83-1: the whole custom entrance was deleted -
     // emoji rows ride the text flight, armed at birth.
     !fx4.includes("fxEmojiEntrance") &&
-      chat4.includes("if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)") &&
+      !chat4.includes("FlightAnims.armIn(fxKey") &&
       chat4.includes('fxFlyIn(fxFresh, if (kind == "TEXT") 680'),
   );
 
@@ -1518,7 +1526,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
     // from its first frame - why text bubbles always animated).
     !anim4.includes("EmojiGlyphWarm") &&
       !fx4.includes("fxEmojiEntrance") &&
-      chat4.includes("if (mine && fxBorn) FlightAnims.armIn(fxKey, 0L)") &&
+      !chat4.includes("FlightAnims.armIn(fxKey") &&
       chat4.includes('fxFlyIn(fxFresh, if (kind == "TEXT") 680'),
   );
 
@@ -1678,11 +1686,12 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
-    'r90-4 (owner r90 #4: "massage sending receive a light effect ta remove koro"): the letter-by-letter reveal is GONE - no fxLetterSpans call on the bubble any more (a message paints whole at once, sent or received) and the helper itself is deleted from ChatFx; the row flight (fxFlyIn / fxFresh) is a different effect and stays',
+    'r91-4 (owner r91 #4, r90 #4 "not fixed"): the letter reveal was only HALF the light effect - the ROW entrance (flight rise+fade, slot, blur, side slide, doc pop) was still playing on every send/receive. fxFresh is hard FALSE and the birth arm (FlightAnims.armIn) is gone, so nothing arms a flight and every entrance modifier is inert: a message paints whole and in place the instant it exists, sent or received. fxLetterSpans stays deleted; the emoji dance is a different gate (fxEmoji = fxBorn) and is untouched',
     !chat4.includes("fxLetterSpans") &&
       !fx4.includes("fun fxLetterSpans") &&
-      chat4.includes("r90-4") &&
-      chat4.includes("val fxFresh = remember { fxBorn && FxFlights.claim(fxKey) }"),
+      chat4.includes("val fxFresh = false") &&
+      !chat4.includes("FlightAnims.armIn(fxKey") &&
+      chat4.includes("val fxEmoji = fxBorn"),
   );
 
   check(
@@ -1696,15 +1705,29 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
-    'r90-5 (owner r90 #5: "onno app a jemon screenshot ba copied image paste kora jai amar app a o same kore daw ... same temon kore daw"): a clipboard image (copied screenshot / picture) opens the media editor in CHAT mode exactly like a single-photo pick from the attach panel - the chat watches the clipboard (a clip listener while the screen lives + ON_RESUME for the copy-then-switch flow), caches the bytes via FilesUtil.cacheFile and navigates mediaedit/$convId/0/... with statusPickArg (MediaItem); a clip is consumed once (ScreenStore.lastPasteClipKey) and only while fresh (10 minutes)',
-    chat4.includes("OnPrimaryClipChangedListener") &&
-      chat4.includes("Lifecycle.Event.ON_RESUME") &&
-      chat4.includes("consumeClipboardImage()") &&
-      chat4.includes(
+    'r91-5 (owner r91 #5, r90 #5 "not fixed"): the watcher lived on an OPEN CHAT SCREEN, so the natural copy-then-open-the-app flow (screenshot copied, app brought forward onto the list) never fired. The clipboard watcher now lives at the APP ROOT (KpApp): a clip listener for the whole process lifetime + Activity ON_RESUME for the copy-then-switch flow, an image clip (uri, or a uri in the item text, or localData) opens the media editor in CHAT mode for the LAST OPENED conversation (ScreenStore.lastChatConvId / lastChatTitle, recorded by every chat screen) - exactly the attach-panel single-photo pick: cacheFile -> statusPickArg(MediaItem) -> mediaedit/$convId/0/... Consumed once per clip (lastPasteClipKey), only while fresh (10 minutes), never stacked on an open editor',
+    kpapp4.includes("OnPrimaryClipChangedListener") &&
+      kpapp4.includes("Lifecycle.Event.ON_RESUME") &&
+      kpapp4.includes("consumeClipboardImage()") &&
+      kpapp4.includes(
         'nav.navigate("mediaedit/$convId/0/${statusPickArg(MediaItem(fileUri, false, 0, "", System.currentTimeMillis()))}")',
       ) &&
-      chat4.includes('FilesUtil.cacheFile(ctx, "paste.$ext", bytes, mime)') &&
-      store4.includes("var lastPasteClipKey: String? = null"),
+      kpapp4.includes('FilesUtil.cacheFile(appCtx, "paste.$ext", bytes, mime)') &&
+      kpapp4.includes("item.localData as? android.net.Uri") &&
+      store4.includes("var lastPasteClipKey: String? = null") &&
+      store4.includes("var lastChatConvId: String? = null") &&
+      chat4.includes("ScreenStore.lastChatConvId = convId"),
+  );
+
+  check(
+    "r91-2 (owner r91 #2: \"closing a chat a agei doublicate thakche otar upor overlap korche eita hobe na ar position thik nai\"): the r79-3 cross-fade faded the chat tile IN under the closing hero - two copies at two sizes read as a duplicate overlapping the chat. The tile is hidden for the WHOLE trip now (tileAlphaFor is a flat 0f while the hero owns the id, close included) and the landing frame swaps hero -> tile with the window detaching a frame later; the video close also lands on the tile's LIVE seat (seatOf(vidHeroId), the photo viewer's exit rule) so the flight ends exactly on the tile",
+    media4
+      .slice(media4.indexOf("fun tileAlphaFor"), media4.indexOf("fun tileAlphaFor") + 900)
+      .includes("return 0f") &&
+      !media4
+        .slice(media4.indexOf("fun tileAlphaFor"), media4.indexOf("fun tileAlphaFor") + 900)
+        .includes("if (t >= 0.45f)") &&
+      media4.includes("val h = PhotoHero.seatOf(vidHeroId) ?: vidHeroSeat"),
   );
 
   check(

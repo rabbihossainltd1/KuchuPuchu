@@ -3,12 +3,15 @@ package app.kuchupuchu.android
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -34,7 +37,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Root of the v3 app. Auth gate → main tabs (Chats / Status / Calls) with
@@ -52,6 +57,89 @@ fun KpApp() {
         KpCrash.mark("app-open")
         nav.addOnDestinationChangedListener { _, d, _ ->
             KpCrash.mark("nav:${d.route?.takeLast(28)}")
+        }
+    }
+
+    // r91-5 (owner r91 #5, r90 #5 "not fixed"): the clipboard watcher lives
+    // at the APP ROOT. r90 scoped it to an open chat screen, so the natural
+    // copy-then-open-the-app flow (a screenshot copied, then the app brought
+    // forward onto the chat list) never fired. A clipboard that holds a
+    // picture (a copied screenshot / image) now opens the media editor in
+    // CHAT mode for the last opened conversation - exactly the single-photo
+    // pick from the attach panel: copy the picture, come back to the app
+    // (or copy from a split screen) and the editor is up with it - edit,
+    // Send. A clip is consumed once and only while fresh; text clips are
+    // ignored entirely.
+    val appCtx = LocalContext.current
+    val appScope = rememberCoroutineScope()
+    val clipboardMgr = remember { appCtx.getSystemService(android.content.ClipboardManager::class.java) }
+    fun consumeClipboardImage() {
+        val clip = runCatching { clipboardMgr?.primaryClip }.getOrNull() ?: return
+        if (clip.itemCount == 0) return
+        val desc = clip.description
+        var imageMime: String? = null
+        for (i in 0 until desc.mimeTypeCount) {
+            val mm = desc.getMimeType(i)
+            if (mm.startsWith("image/")) {
+                imageMime = mm
+                break
+            }
+        }
+        val mime = imageMime ?: return
+        val item = runCatching { clip.getItemAt(0) }.getOrNull() ?: return
+        // ROMs differ in HOW a copied picture rides the clip - a content uri
+        // (most), a uri inside the item's text (some galleries), or
+        // localData (drag-style). Take the first one that can yield bytes.
+        val uri = runCatching { item.uri }.getOrNull()
+            ?: runCatching {
+                item.text?.toString()?.takeIf { it.startsWith("content://") || it.startsWith("file://") }
+                    ?.let { android.net.Uri.parse(it) }
+            }.getOrNull()
+            ?: runCatching {
+                if (android.os.Build.VERSION.SDK_INT >= 26) item.localData as? android.net.Uri else null
+            }.getOrNull()
+            ?: return
+        val stamp = if (android.os.Build.VERSION.SDK_INT >= 26) desc.timestamp else 0L
+        if (stamp > 0L && System.currentTimeMillis() - stamp > 600_000L) return
+        val clipKey = "$stamp|$uri"
+        if (ScreenStore.lastPasteClipKey == clipKey) return
+        val convId = ScreenStore.lastChatConvId ?: return
+        // Never stack a second editor on one already open.
+        if (Store.route.startsWith("mediaedit/")) return
+        ScreenStore.lastPasteClipKey = clipKey
+        appScope.launch {
+            val bytes =
+                withContext(Dispatchers.IO) {
+                    runCatching { appCtx.contentResolver.openInputStream(uri)?.use { s -> s.readBytes() } }.getOrNull()
+                }
+            if (bytes == null || bytes.isEmpty()) return@launch
+            val ext = when {
+                mime.contains("png") -> "png"
+                mime.contains("webp") -> "webp"
+                else -> "jpg"
+            }
+            val fileUri = FilesUtil.cacheFile(appCtx, "paste.$ext", bytes, mime)
+            ScreenStore.editTitle = ScreenStore.lastChatTitle ?: "Chat"
+            nav.navigate("mediaedit/$convId/0/${statusPickArg(MediaItem(fileUri, false, 0, "", System.currentTimeMillis()))}")
+        }
+    }
+    DisposableEffect(Unit) {
+        val clipListener = android.content.ClipboardManager.OnPrimaryClipChangedListener {
+            android.os.Handler(android.os.Looper.getMainLooper()).post { consumeClipboardImage() }
+        }
+        runCatching { clipboardMgr?.addPrimaryClipChangedListener(clipListener) }
+        val lifecycleObs = object : androidx.lifecycle.LifecycleEventObserver {
+            override fun onStateChanged(
+                owner: androidx.lifecycle.LifecycleOwner,
+                event: androidx.lifecycle.Lifecycle.Event,
+            ) {
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) consumeClipboardImage()
+            }
+        }
+        MainActivity.current?.lifecycle?.addObserver(lifecycleObs)
+        onDispose {
+            runCatching { clipboardMgr?.removePrimaryClipChangedListener(clipListener) }
+            MainActivity.current?.lifecycle?.removeObserver(lifecycleObs)
         }
     }
 

@@ -163,9 +163,15 @@ object PhotoHero {
     fun tileAlphaFor(id: String?): Float {
         val out = outId
         if (id.isNullOrBlank() || out.isNullOrBlank() || out != id) return 1f
-        val t = heroCloseT
-        if (t <= 0f) return 0f // viewer open, not closing: fully hidden
-        return if (t >= 0.45f) 0f else ((0.45f - t) / 0.45f).coerceIn(0f, 1f)
+        // r91-2 (owner r91 #2: "closing a chat a agei doublicate thakche
+        // otar upor overlap korche eita hobe na ar position thik nai"):
+        // the r79-3 cross-fade faded the tile IN under the closing hero -
+        // two copies at two sizes read as a duplicate overlapping the chat.
+        // The tile is hidden for the WHOLE trip, close included: the hero is
+        // the only copy on screen, and the landing frame swaps them (outId ->
+        // null shows the tile exactly under the landed hero, the window
+        // detaches a frame later - no duplicate, no gap).
+        return 0f
     }
 
     // r77-3: the tile reports its seat on every layout, so the map always
@@ -1187,7 +1193,10 @@ fun VideoPlayerScreen(nav: NavController, b64: String, overlayClose: (() -> Unit
                 // underneath, invisible while the player covers it).
                 alpha = if (vidHeroSeat != null && !vidHeroLaidOut) 0f else 1f
                 if (vidHeroSeat != null && t < 1f && size.width > 0f && size.height > 0f) {
-                    val h = vidHeroSeat
+                    // r91-2: the close lands on the tile's LIVE seat (the
+                    // chat may have scrolled while the player was open) -
+                    // the same rule the photo viewer's exit flies by.
+                    val h = PhotoHero.seatOf(vidHeroId) ?: vidHeroSeat
                     val s0 = maxOf(h.width / size.width, h.height / size.height)
                     // r90-2: the same ONE-pass linear flight as the photo
                     // viewer - constant speed tile -> fullscreen, and the
