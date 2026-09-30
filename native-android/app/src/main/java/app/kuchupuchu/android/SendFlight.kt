@@ -244,6 +244,19 @@ fun Modifier.fxFlyIn(
             // fast, and it settles with a small overshoot bounce as it
             // lands (the bonus). r101: received rows fly the same way,
             // mirrored from the bottom-left corner.
+            // r102 (owner r101 feedback: "bonus effect nei massage send
+            // receive a"): the r93 bounce was 5dp over the last 28% of a
+            // ~300 ms flight - invisible in practice. The landing bounce is
+            // now a clearly VISIBLE 18dp overshoot past the seat over the
+            // last 38% of the flight: the bubble lands, pops past its seat
+            // and glides back. One hump, shared by both directions
+            // (subtracted for sent, added for received).
+            val bounce =
+                if (v0 > 0.62f) {
+                    sin((v0 - 0.62f) / 0.38f * PI.toFloat()) * 18f * density
+                } else {
+                    0f
+                }
             if (isSent) {
                 val s = seat
                 val lb = FlightAnchors.listBounds
@@ -254,12 +267,6 @@ fun Modifier.fxFlyIn(
                 // from the true bottom-right corner, not merely from the right.
                 val y0 = 110f * density
                 val inv = 1f - v0
-                val bounce =
-                    if (v0 > 0.72f) {
-                        sin((v0 - 0.72f) / 0.28f * PI.toFloat()) * 5f * density
-                    } else {
-                        0f
-                    }
                 translationX = x0 * inv - bounce
                 translationY = y0 * inv
                 scaleX = 1f
@@ -271,19 +278,13 @@ fun Modifier.fxFlyIn(
                 // asbe tobe left er ektu niche theke"): the RECEIVED bubble
                 // flies in the same way as the sent one, mirrored - off the
                 // LEFT edge of the list, a little below its seat, at full
-                // size, fast, with the same little overshoot bounce as it
-                // lands. The old corner-GROW (0.6 -> 1 zoom) is gone.
+                // size, fast, with the same overshoot bounce as it lands.
+                // The old corner-GROW (0.6 -> 1 zoom) is gone.
                 val s = seat
                 val lb = FlightAnchors.listBounds
                 val x0 = if (s != null && lb != null) -(s.right - lb.left + 14f * density) else -120f * density
                 val y0 = 110f * density
                 val inv = 1f - v0
-                val bounce =
-                    if (v0 > 0.72f) {
-                        sin((v0 - 0.72f) / 0.28f * PI.toFloat()) * 5f * density
-                    } else {
-                        0f
-                    }
                 translationX = x0 * inv + bounce
                 translationY = y0 * inv
                 scaleX = 1f

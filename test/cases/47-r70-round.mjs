@@ -1713,7 +1713,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       "val dur = ((durMs * 0.5f * scale).toInt().coerceIn(240, 360)).coerceAtLeast(1)",
     ) &&
       flight4.includes("translationX = x0 * inv - bounce") &&
-      flight4.includes("sin((v0 - 0.72f) / 0.28f * PI.toFloat()) * 5f * density"),
+      flight4.includes("sin((v0 - 0.62f) / 0.38f * PI.toFloat()) * 18f * density"),
   );
 
   check(
@@ -1725,6 +1725,15 @@ const main = (f) => read(`${ANDROID}/${f}`);
       flight4.includes("translationY = y0 * inv") &&
       (flight4.match(/val y0 = 110f \* density/g) || []).length === 2 &&
       !flight4.includes("val sc = 0.6f + 0.4f * v0"),
+  );
+
+  check(
+    'r102 (owner r101 feedback: "arekta kaj to koroni bouns effect nei massage send receive a"): the landing bounce is now clearly VISIBLE on both the sent and the received flight - the r93 bonus was 5dp over the last 28% of a ~300 ms flight, which the eye cannot catch. One shared hump now overshoots 18dp past the seat over the last 38% of the flight (lands, pops past the seat, glides back), subtracted for the sent direction and added for the received one. Computed once before the direction branch so both flights bounce identically',
+    flight4.includes("sin((v0 - 0.62f) / 0.38f * PI.toFloat()) * 18f * density") &&
+      (flight4.match(/val bounce =/g) || []).length === 1 &&
+      flight4.includes("translationX = x0 * inv - bounce") &&
+      flight4.includes("translationX = x0 * inv + bounce") &&
+      !flight4.includes("* 5f * density"),
   );
 
   check(
