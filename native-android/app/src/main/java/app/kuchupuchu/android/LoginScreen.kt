@@ -20,6 +20,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -91,14 +92,13 @@ import org.json.JSONObject
 
 /**
  * Phone auth (PHONE_AUTH_PLAN.md) — a real fullscreen page (no popup card):
- * big brand header at the top, single-line controls below. No OTP, no
- * email, no password.
+ * big brand header at the top, single-line controls below. OTP and approval
+ * are alternative ways to complete a new-device sign-in; Google is recovery.
  *
  * PHONE → VERIFYING → VERIFY_OK →
  *   same device   → DONE → home
- *   other device  → WAITING (≤60s for the approval message on the old device;
- *                   then "Failed to verify" + Try another way → Google. A late
- *                   approval still signs in.) · deviceGone → Google directly.
+ *   other device  → WAITING (six-digit OTP + quiet approval polling; a late
+ *                   approval still signs in) · deviceGone → Google recovery.
  *   new number    → BIND (Google) → PROFILE → DONE → home
  * "Recover account" → Google recovery for a lost previous device.
  */
@@ -152,6 +152,9 @@ fun LoginScreen(onAuthed: () -> Unit) {
     var waitStartedAt by remember { mutableStateOf(0L) }
     var waitFailed by remember { mutableStateOf(false) }
     var waitFailReason by remember { mutableStateOf("") }
+    var otpAvailable by remember { mutableStateOf(false) }
+    var otpLocked by remember { mutableStateOf(false) }
+    var otpCode by remember { mutableStateOf("") }
     var showAnotherWay by remember { mutableStateOf(false) }
     var googlePressed by remember { mutableStateOf(false) }
 
@@ -164,6 +167,10 @@ fun LoginScreen(onAuthed: () -> Unit) {
     var profileError by remember { mutableStateOf("") }
 
     fun finish(data: JSONObject) {
+        requestId = ""
+        otpAvailable = false
+        otpLocked = false
+        otpCode = ""
         Api.saveToken(ctx, data.optString("token"))
         Store.saveMe(data.optJSONObject("user") ?: JSONObject())
         onAuthed()
@@ -230,6 +237,9 @@ fun LoginScreen(onAuthed: () -> Unit) {
                     }
                     "APPROVAL_REQUIRED" -> {
                         requestId = data.optString("requestId")
+                        otpAvailable = data.optBoolean("otpAvailable")
+                        otpLocked = false
+                        otpCode = ""
                         waitStartedAt = System.currentTimeMillis()
                         waitFailed = false
                         waitFailReason = ""
@@ -453,6 +463,11 @@ fun LoginScreen(onAuthed: () -> Unit) {
         val rid = requestId
         stage = LoginStage.PHONE
         requestId = ""
+        otpAvailable = false
+        otpLocked = false
+        otpCode = ""
+        waitFailed = false
+        waitFailReason = ""
         error = ""
         if (rid.isNotBlank())
             scope.launch(Dispatchers.IO) {
@@ -463,6 +478,90 @@ fun LoginScreen(onAuthed: () -> Unit) {
                     )
                 }
             }
+    }
+
+    fun submitOtp() {
+        if (busy || !otpAvailable || otpLocked || requestId.isBlank()) return
+        if (!Regex("^[0-9]{6}$").matches(otpCode)) {
+            error = "Enter all six digits. / ছয় সংখ্যার কোড দিন।"
+            return
+        }
+        val rid = requestId
+        val code = otpCode
+        busy = true
+        error = ""
+        focusManager.clearFocus()
+        keyboard?.hide()
+        scope.launch {
+            try {
+                val data =
+                    withContext(Dispatchers.IO) {
+                        Api.post(
+                            "/api/auth/login/otp",
+                            JSONObject()
+                                .put("requestId", rid)
+                                .put("deviceId", deviceId)
+                                .put("otp", code),
+                        )
+                    }
+                when (data.optString("status")) {
+                    "SESSION" -> finish(data)
+                    "INVALID_CODE" -> {
+                        otpCode = ""
+                        val left = data.optInt("attemptsRemaining", -1)
+                        error =
+                            if (left >= 0) {
+                                "Code didn't match — $left tries left. / কোড মেলেনি — আরও $left বার।"
+                            } else {
+                                "Code didn't match. / কোডটি মেলেনি।"
+                            }
+                    }
+                    "OTP_LOCKED" -> {
+                        otpCode = ""
+                        otpLocked = true
+                        error = "Five wrong codes used. Approval still works. / পাঁচবার ভুল হয়েছে; Approve করা যাবে।"
+                    }
+                    "OTP_UNAVAILABLE" -> {
+                        otpCode = ""
+                        otpAvailable = false
+                        error = "Code verification is unavailable; approval still works. / কোড যাচাই বন্ধ, Approve করা যাবে।"
+                    }
+                    "APPROVED" -> {
+                        otpCode = ""
+                        error = "Approved on another device — signing in… / অন্য ডিভাইস Approve করেছে…"
+                    }
+                    "DECLINED" -> {
+                        otpCode = ""
+                        waitFailed = true
+                        showAnotherWay = true
+                        waitFailReason = "The login was declined on a signed-in device."
+                    }
+                    "EXPIRED" -> {
+                        otpCode = ""
+                        otpAvailable = false
+                        waitFailed = true
+                        showAnotherWay = true
+                        waitFailReason = "The login request expired."
+                    }
+                    "CANCELLED" -> {
+                        otpCode = ""
+                        waitFailed = true
+                        showAnotherWay = true
+                        waitFailReason = "The login request was cancelled."
+                    }
+                    else -> {
+                        otpCode = ""
+                        waitFailed = true
+                        showAnotherWay = true
+                        waitFailReason = "This login request is no longer available."
+                    }
+                }
+            } catch (e: Exception) {
+                error = e.message ?: "Network unavailable. Approval can still finish sign-in."
+            } finally {
+                busy = false
+            }
+        }
     }
 
     // Poll loop for the approval wait (§14). The OLD device answers from the
@@ -736,51 +835,99 @@ fun LoginScreen(onAuthed: () -> Unit) {
                 }
 
                 LoginStage.WAITING -> {
-                    AuthHeader("KuchuPuchu", null, wordmark = true)
-                    Spacer(Modifier.height(40.dp))
-                    if (!waitFailed) {
-                        VerifyingPane(
-                            "Waiting for approval",
-                            "Check KuchuPuchu's message on your other device.",
+                    AuthHeader("Confirm this sign-in", null, compact = true)
+                    Spacer(Modifier.height(20.dp))
+                    Text(
+                        "Enter the six-digit code shown inside the KuchuPuchu approval card. A signed-in device can also approve you automatically.",
+                        fontSize = 12.sp,
+                        color = Muted,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    if (otpAvailable && !otpLocked) {
+                        KpInputField(
+                            otpCode,
+                            { raw ->
+                                otpCode = raw.filter { it in '0'..'9' }.take(6)
+                                if (error.isNotBlank()) error = ""
+                            },
+                            placeholder = "Six-digit code",
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { submitOtp() }),
                         )
-                        Spacer(Modifier.height(8.dp))
-                        GoldBtn("Cancel", Modifier.fillMaxWidth(), enabled = true) { cancelApproval() }
+                        Spacer(Modifier.height(10.dp))
+                        GoldBtn("Verify code", Modifier.fillMaxWidth(), enabled = !busy && otpCode.length == 6) {
+                            submitOtp()
+                        }
                     } else {
-                        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("Failed to verify", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                waitFailReason,
-                                fontSize = 12.sp,
-                                color = Muted,
-                                textAlign = TextAlign.Center,
-                                maxLines = 3,
+                        Text(
+                            if (otpLocked) {
+                                "Five incorrect attempts used. The code is cleared, but approval still works."
+                            } else {
+                                "No code is available right now. A signed-in device can still approve this request."
+                            },
+                            fontSize = 12.sp,
+                            color = Muted,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                    if (error.isNotBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(error, color = Red, fontSize = 12.sp, maxLines = 3, textAlign = TextAlign.Center)
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    if (!waitFailed) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                        ) {
+                            CircularProgressIndicator(
+                                color = ActionBlue,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(16.dp),
                             )
-                            Spacer(Modifier.height(12.dp))
-                            if (showAnotherWay) {
-                                if (waitFailReason.startsWith("We couldn't reach")) {
-                                    // The previous device is gone — Google is the
-                                    // primary path, not an alternative.
-                                    GoogleButton(text = "Verify with Google", busy = busy, enabled = !busy) { recoverWithGoogle() }
-                                } else {
-                                    if (busy) {
-                                        CircularProgressIndicator(color = ActionBlue, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
-                                    } else if (!googlePressed) {
-                                        TextButton(onClick = { googlePressed = true }) {
-                                            Text("Try another way", color = ActionBlueDeep, maxLines = 1)
-                                        }
-                                        TextButton(onClick = { cancelApproval() }) { Text("Try again", color = Muted, maxLines = 1) }
-                                    } else {
-                                        GoogleButton(text = "Verify with Google", busy = busy, enabled = !busy) { recoverWithGoogle() }
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Waiting for approval in the background…",
+                                fontSize = 11.sp,
+                                color = Muted,
+                                maxLines = 2,
+                            )
+                        }
+                    }
+                    if (waitFailed) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(waitFailReason, fontSize = 12.sp, color = Muted, textAlign = TextAlign.Center, maxLines = 3)
+                        Spacer(Modifier.height(8.dp))
+                        if (showAnotherWay) {
+                            if (waitFailReason.startsWith("We couldn't reach")) {
+                                // No live trusted device was found; linked Google is the recovery path.
+                                GoogleButton(text = "Verify with Google", busy = busy, enabled = !busy) { recoverWithGoogle() }
+                            } else if (!googlePressed) {
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    TextButton(onClick = { googlePressed = true }) {
+                                        Text("Try another way", color = ActionBlueDeep, maxLines = 1)
+                                    }
+                                    TextButton(onClick = { cancelApproval() }) {
+                                        Text("Try again", color = Muted, maxLines = 1)
                                     }
                                 }
                             } else {
-                                GoldBtn("Try again", Modifier.fillMaxWidth(), enabled = true) { cancelApproval() }
+                                GoogleButton(text = "Verify with Google", busy = busy, enabled = !busy) { recoverWithGoogle() }
                             }
-                            if (error.isNotBlank()) {
-                                Spacer(Modifier.height(6.dp))
-                                Text(error, color = Red, fontSize = 12.sp, maxLines = 2, textAlign = TextAlign.Center)
+                        } else {
+                            TextButton(onClick = { cancelApproval() }) {
+                                Text("Try again", color = ActionBlueDeep, maxLines = 1)
                             }
+                        }
+                    } else {
+                        TextButton(onClick = { cancelApproval() }) {
+                            Text("Cancel request", color = Muted, maxLines = 1)
                         }
                     }
                 }

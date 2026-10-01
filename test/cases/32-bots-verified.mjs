@@ -5701,8 +5701,7 @@ const convBetween = (db, a, b) =>
   }
   // Item 24: form inputs are ONE compact 46dp pill (KpInputField) — hint
   // inside, 1dp border, no thick M3 outlined field with a floating label —
-  // on the login phone + profile step, the country search and the name /
-  // username edit screens.
+  // on login/profile/recovery and editor inputs, including the new numeric OTP.
   {
     const ui = kt("Ui.kt");
     const login = kt("LoginScreen.kt");
@@ -5718,7 +5717,7 @@ const convBetween = (db, a, b) =>
           "if (value.isEmpty()) Text(placeholder, color = Muted.copy(alpha = 0.7f), fontSize = 15.sp, maxLines = 1)",
         ) &&
         !login.includes("OutlinedTextField") &&
-        (login.match(/KpInputField\(/g) || []).length === 6 &&
+        (login.match(/KpInputField\(/g) || []).length === 7 &&
         login.includes(
           'placeholder = if (country.iso == "BD") "1XXXXXXXXX" else "Phone number",',
         ) &&
@@ -6692,7 +6691,7 @@ const convBetween = (db, a, b) =>
         src.includes("          lat,\n          dispatched,\n        }),") &&
         // v163: + the status sweep / upload counts the tick now reports.
         t27.includes(
-          '"reaped|pruneRan|pruned|devices|statuses|staleUploads|metrics|lat|dispatched"',
+          '"reaped|expiredLoginRequests|pruneRan|pruned|devices|statuses|staleUploads|metrics|lat|dispatched"',
         ),
     );
     check(

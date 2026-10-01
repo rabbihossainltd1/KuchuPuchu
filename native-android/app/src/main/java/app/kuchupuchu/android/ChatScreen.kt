@@ -7219,17 +7219,40 @@ private fun LoginApprovalMessage(m: JSONObject) {
     // session (ScreenStore) — Accept/Decline never come back once answered
     // or expired.
     val requestId = meta.optString("requestId")
-    val expired = runCatching {
-        java.time.Instant.parse(m.optText("createdAt")).plusSeconds(300).isBefore(java.time.Instant.now())
-    }.getOrDefault(true)
-    var status by remember(m.optString("id")) {
+    val messageId = m.optString("id")
+    val serverStatus = meta.optString("status", "PENDING").uppercase()
+    val expiresAtMs =
+        runCatching {
+            val expiresAt = meta.optString("expiresAt")
+            if (expiresAt.isNotBlank()) java.time.Instant.parse(expiresAt).toEpochMilli()
+            else java.time.Instant.parse(m.optText("createdAt")).plusSeconds(300).toEpochMilli()
+        }.getOrDefault(0L)
+    var expired by remember(messageId) { mutableStateOf(expiresAtMs <= System.currentTimeMillis()) }
+    LaunchedEffect(messageId, expiresAtMs) {
+        val remaining = expiresAtMs - System.currentTimeMillis()
+        if (remaining > 0L) delay(remaining)
+        meta.remove("otp")
+        meta.remove("otpLocked")
+        expired = true
+    }
+    var status by remember(messageId) {
         mutableStateOf(
             ScreenStore.loginApprovals[requestId]
-                ?: if (meta.optString("status", "PENDING") == "PENDING" && expired) "EXPIRED"
-                else meta.optString("status", "PENDING"),
+                ?: if (serverStatus == "PENDING" && expired) "EXPIRED" else serverStatus,
         )
     }
-    var busy by remember(m.optString("id")) { mutableStateOf(false) }
+    LaunchedEffect(messageId, serverStatus, expired) {
+        val localDecision = ScreenStore.loginApprovals[requestId]
+        if (localDecision == null || serverStatus !in setOf("PENDING", "OTP_LOCKED")) {
+            status = if (serverStatus == "PENDING" && expired) "EXPIRED" else serverStatus
+        }
+    }
+    var busy by remember(messageId) { mutableStateOf(false) }
+    val otpLocked = meta.optInt("otpLocked", 0) >= 1 || status == "OTP_LOCKED"
+    val otpCode = meta.optString("otp").takeIf {
+        status == "PENDING" && !expired && !otpLocked && Regex("^[0-9]{6}$").matches(it)
+    }
+    val canApprove = (status == "PENDING" || status == "OTP_LOCKED") && !expired
     val device = meta.optString("deviceName").takeIf { it.isNotBlank() } ?: "Another device"
     // Attempt time in Bangladesh Standard Time (owner rule) — the raw UTC
     // string it replaced read as gibberish to everyone.
@@ -7288,8 +7311,45 @@ private fun LoginApprovalMessage(m: JSONObject) {
         if (ip != null) {
             Text("IP: $ip", fontSize = 12.sp, color = Ink)
         }
+        if (status == "PENDING" || status == "OTP_LOCKED") {
+            Spacer(Modifier.height(8.dp))
+            when {
+                otpCode != null -> {
+                    Text("Sign-in code · enter on the new device", fontSize = 11.sp, color = Muted)
+                    Spacer(Modifier.height(5.dp))
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0x22F59E0B))
+                            .border(1.dp, Color(0x66F59E0B), RoundedCornerShape(10.dp))
+                            .padding(vertical = 9.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            otpCode,
+                            fontSize = 26.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 5.sp,
+                            color = GoldDeep,
+                            maxLines = 1,
+                        )
+                    }
+                }
+                otpLocked -> Text(
+                    "Five incorrect codes used. The code is cleared, but approval is still available.",
+                    fontSize = 11.sp,
+                    color = Muted,
+                )
+                else -> Text(
+                    "No code is available. You can still approve this sign-in.",
+                    fontSize = 11.sp,
+                    color = Muted,
+                )
+            }
+        }
         Spacer(Modifier.height(8.dp))
-        if (status == "PENDING") {
+        if (canApprove) {
             Row {
                 androidx.compose.material3.Button(
                     onClick = {
@@ -7300,6 +7360,8 @@ private fun LoginApprovalMessage(m: JSONObject) {
                                 Api.post("/api/auth/login/approve", JSONObject().put("id", meta.optString("requestId")))
                             }.isSuccess
                             if (ok) {
+                                meta.remove("otp")
+                                meta.remove("otpLocked")
                                 ScreenStore.loginApprovals[requestId] = "APPROVED"
                                 status = "APPROVED"
                             } else {
@@ -7324,6 +7386,8 @@ private fun LoginApprovalMessage(m: JSONObject) {
                                 Api.post("/api/auth/login/decline", JSONObject().put("id", meta.optString("requestId")))
                             }.isSuccess
                             if (ok) {
+                                meta.remove("otp")
+                                meta.remove("otpLocked")
                                 ScreenStore.loginApprovals[requestId] = "DECLINED"
                                 status = "DECLINED"
                             } else {
@@ -7341,8 +7405,10 @@ private fun LoginApprovalMessage(m: JSONObject) {
             }
         } else {
             val (label, color) = when (status) {
-                "APPROVED" -> "Approved — new device signed in" to Color(0xFF16A34A)
+                "APPROVED" -> "Approved — new device can sign in" to Color(0xFF16A34A)
+                "CLAIMED" -> "New device signed in" to Color(0xFF16A34A)
                 "DECLINED" -> "⛔ Declined" to Red
+                "CANCELLED" -> "Login request cancelled" to Muted
                 else -> "⏰ Expired" to Muted
             }
             Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = color, maxLines = 1)

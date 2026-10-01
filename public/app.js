@@ -1,7 +1,8 @@
 /* KuchuPuchu Web — v1 (r104)
  * Same API, same account, same chats as the Android app — from the browser.
  *
- * Login: phone number → the phone app approves (WhatsApp-Web style poll).
+ * Login: phone number → in-app six-digit code or approval by any signed-in client;
+ * background polling completes an approval without another code entry.
  * Live: /ws/user (chat list) + /ws/chat/<id> (open chat); browsers cannot set
  * WebSocket headers, so the sockets carry ?token= (the worker accepts the
  * query param on /ws/* routes only).
@@ -14,6 +15,8 @@
  * and the web share ONE keypair and every envelope opens on both.
  */
 "use strict";
+
+import { buildE164, validOtp } from "./login-utils.mjs";
 
 (() => {
   const $ = (id) => document.getElementById(id);
@@ -45,6 +48,23 @@
     chatWs: null,
     mediaCache: new Map(), // url-string -> objectURL
     atBottom: true,
+    authMode: "login",
+    loginRequestId: "",
+    currentPhone: "",
+    otpAvailable: false,
+    deviceGone: false,
+    otpBusy: false,
+    otpLocked: false,
+    pollBusy: false,
+    approvalBusy: new Set(),
+    approvalFeedback: new Map(),
+    approvalExpiryTimers: new Map(),
+    countries: [],
+    country: { iso: "BD", name: "Bangladesh", dial: "880" },
+    googleClientId: null,
+    gsiLoad: null,
+    recoveryPhone: "",
+    googleReturn: "entry",
   };
 
   /* ---------------- tiny helpers ---------------- */
@@ -65,12 +85,12 @@
     return btoa(s);
   };
   const b64d = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
-  function normPhone(p) {
-    let t = String(p || "").replace(/[^\d+]/g, "");
-    if (!t) return "";
-    if (!t.startsWith("+")) t = "+" + t.replace(/^0+/, "");
-    return t;
+  function flagFor(iso) {
+    return String(iso || "BD")
+      .toUpperCase()
+      .replace(/./g, (c) => String.fromCodePoint(127397 + c.charCodeAt(0)));
   }
+  const bdCountry = { iso: "BD", name: "Bangladesh", dial: "880" };
   function clock(iso) {
     if (!iso) return "";
     const d = new Date(iso);
@@ -78,6 +98,17 @@
     let h = d.getHours() % 12;
     if (h === 0) h = 12;
     return `${h}:${String(d.getMinutes()).padStart(2, "0")} ${d.getHours() < 12 ? "AM" : "PM"}`;
+  }
+  function dhakaClock(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d)) return "";
+    return new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Dhaka",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }).format(d);
   }
   function dayLabel(iso) {
     const d = new Date(iso);
@@ -389,20 +420,111 @@
     el.textContent = text || "";
     el.className = err ? "err" : "";
   }
+  function setOtpState(text, err = false) {
+    const el = $("otpState");
+    el.textContent = text || "";
+    el.classList.toggle("err", !!err);
+  }
+  function setGoogleStatus(text, err = false) {
+    const el = $("googleStatus");
+    el.textContent = text || "";
+    el.classList.toggle("err", !!err);
+  }
+  function showAuthPanel(name) {
+    $("entryPanel").classList.toggle("off", name !== "entry");
+    $("otpPanel").classList.toggle("off", name !== "otp");
+    $("googlePanel").classList.toggle("off", name !== "google");
+  }
+  function setAuthMode(mode) {
+    state.authMode = mode === "recovery" ? "recovery" : "login";
+    $("loginTitle").textContent =
+      state.authMode === "recovery" ? "Recover account" : "KuchuPuchu Web";
+    $("loginSubtitle").innerHTML =
+      state.authMode === "recovery"
+        ? "অ্যাকাউন্টে যুক্ত নম্বর দিন।<br />Enter the phone number linked to the account."
+        : "দেশ বেছে স্থানীয় নম্বর লিখুন।<br />Choose a country, then enter your local number.";
+    $("loginBtn").textContent = state.authMode === "recovery" ? "Continue" : "Continue";
+    $("recoverLink").textContent =
+      state.authMode === "recovery" ? "Back to sign in" : "Recover account";
+  }
+  function updateCountryButton() {
+    const c = state.country || bdCountry;
+    $("countryFlag").textContent = flagFor(c.iso);
+    $("countryLabel").textContent = `${c.name} +${c.dial}`;
+    $("countryBtn").setAttribute("aria-label", `Country: ${c.name}, calling code +${c.dial}`);
+  }
+  function renderCountryOptions() {
+    const box = $("countryOptions");
+    const q = $("countrySearch").value.trim().toLocaleLowerCase();
+    const countries = state.countries.length ? state.countries : [bdCountry];
+    const matches = countries.filter((c) =>
+      `${c.name} ${c.iso} ${c.dial} +${c.dial}`.toLocaleLowerCase().includes(q),
+    );
+    box.innerHTML = matches.length
+      ? matches
+          .map(
+            (c) =>
+              `<button class="country-option ${c.iso === state.country.iso ? "selected" : ""}" type="button" role="option" aria-selected="${c.iso === state.country.iso}" data-iso="${esc(c.iso)}"><span>${flagFor(c.iso)} ${esc(c.name)}</span><small>+${esc(c.dial)}</small></button>`,
+          )
+          .join("")
+      : '<div class="auth-note">No countries found.</div>';
+  }
+  async function loadCountries() {
+    try {
+      const res = await fetch("/countries.json", { cache: "force-cache" });
+      if (!res.ok) throw new Error("Country list unavailable");
+      const rows = await res.json();
+      if (!Array.isArray(rows) || !rows.some((c) => c.iso === "BD" && c.dial === "880"))
+        throw new Error("Country list invalid");
+      state.countries = rows;
+      state.country = rows.find((c) => c.iso === "BD") || bdCountry;
+    } catch {
+      state.countries = [bdCountry];
+      state.country = bdCountry;
+    }
+    updateCountryButton();
+    renderCountryOptions();
+  }
+  function openCountryPicker() {
+    $("countryOverlay").classList.remove("off");
+    $("countryBtn").setAttribute("aria-expanded", "true");
+    $("countrySearch").value = "";
+    renderCountryOptions();
+    setTimeout(() => $("countrySearch").focus(), 0);
+  }
+  function closeCountryPicker() {
+    $("countryOverlay").classList.add("off");
+    $("countryBtn").setAttribute("aria-expanded", "false");
+    $("countryBtn").focus();
+  }
+  function buildCurrentPhone() {
+    return buildE164($("phone").value, state.country || bdCountry);
+  }
   async function login() {
-    const phone = normPhone($("phone").value);
-    if (phone.length < 8)
-      return setLogin("একটি সঠিক ফোন নম্বর দিন / Enter a valid phone number.", true);
+    const phone = buildCurrentPhone();
+    if (!phone) {
+      return setLogin(
+        state.country.iso === "BD"
+          ? "সঠিক বাংলাদেশি মোবাইল নম্বর দিন। / Enter a valid Bangladeshi mobile number."
+          : "সঠিক নম্বর দিন। / Enter a valid phone number.",
+        true,
+      );
+    }
+    state.currentPhone = phone;
+    if (state.authMode === "recovery") {
+      await lookupRecovery(phone, "entry");
+      return;
+    }
     $("loginBtn").disabled = true;
-    setLogin("যাচাই করা হচ্ছে… Checking…");
+    setLogin("যাচাই করা হচ্ছে… / Checking…");
     try {
       const r = await api("/api/auth/verify-phone", {
         method: "POST",
-        // A browser has no SIM to check — the honest value (the app sends the
-        // same when it has no SIM / no permission). Attest stays DEVICE_ONLY.
+        // A browser has no SIM: always report UNAVAILABLE, never a match.
         body: {
           phone,
           deviceId: ensureDeviceId(),
+          platform: "WEB",
           deviceName: "KuchuPuchu Web",
           sim: "UNAVAILABLE",
         },
@@ -410,21 +532,33 @@
       if (r.status === "SESSION" && r.token) {
         startSession(r.token, r.user);
       } else if (r.status === "APPROVAL_REQUIRED") {
+        state.loginRequestId = String(r.requestId || "");
+        state.otpAvailable = !!r.otpAvailable;
+        state.deviceGone = !!r.deviceGone;
+        state.otpLocked = false;
+        $("otpInput").value = "";
+        $("otpInput").disabled = !state.otpAvailable;
+        $("otpSubmit").disabled = !state.otpAvailable;
+        $("otpGoogle").classList.toggle("off", !state.deviceGone);
+        $("otpCancel").textContent = "Cancel request";
+        setOtpState("");
+        $("otpCopy").textContent = state.otpAvailable
+          ? "Enter the six-digit code shown inside the KuchuPuchu approval card. If a signed-in Android or Web device approves, you will sign in automatically."
+          : "A code is not available right now. A signed-in device can still approve this request and sign you in automatically.";
+        if (state.deviceGone) {
+          setOtpState("No recent approval connection. You can try linked-Google recovery instead.");
+        }
+        showAuthPanel("otp");
+        setLogin("");
+        pollApproval(state.loginRequestId);
+        if (state.otpAvailable) setTimeout(() => $("otpInput").focus(), 0);
+      } else if (["ACCOUNT_CREATED", "BIND_REQUIRED", "PENDING"].includes(r.status)) {
         setLogin(
-          "ফোনের KuchuPuchu অ্যাপে বার্তা গেছে — সেখানে Accept চাপুন। অপেক্ষা করা হচ্ছে…\nApproval was sent to your phone app — tap Accept there.",
-        );
-        pollApproval(r.requestId);
-      } else if (
-        r.status === "ACCOUNT_CREATED" ||
-        r.status === "BIND_REQUIRED" ||
-        r.status === "PENDING"
-      ) {
-        setLogin(
-          "এই নম্বরে কোনো অ্যাকাউন্ট নেই — আগে ফোনের অ্যাপে অ্যাকাউন্ট খুলুন।\nNo account for this number yet — sign up in the phone app first.",
+          "এই নম্বরে অ্যাকাউন্ট নেই — আগে ফোনের অ্যাপে সাইন আপ করুন।\nNo account for this number yet — sign up in the phone app first.",
           true,
         );
       } else {
-        setLogin("অপ্রত্যাশিত উত্তর / unexpected reply: " + (r.status || "?"), true);
+        setLogin("অপ্রত্যাশিত উত্তর / Unexpected reply: " + (r.status || "?"), true);
       }
     } catch (e) {
       setLogin(e.message, true);
@@ -432,39 +566,301 @@
       $("loginBtn").disabled = false;
     }
   }
-  async function pollApproval(requestId) {
+  function stopApprovalPolling() {
     clearInterval(state.pollTimer);
+    state.pollTimer = 0;
+    state.pollBusy = false;
+  }
+  function finishApprovalState(status) {
+    stopApprovalPolling();
+    state.loginRequestId = "";
+    state.otpAvailable = false;
+    state.otpLocked = false;
+    $("otpInput").value = "";
+    $("otpInput").disabled = true;
+    $("otpSubmit").disabled = true;
+    $("otpCancel").textContent = "Try again";
+    if (status === "DECLINED")
+      setOtpState("অনুরোধটি প্রত্যাখ্যান করা হয়েছে। / The request was declined.", true);
+    else if (status === "CANCELLED")
+      setOtpState("অনুরোধ বাতিল হয়েছে। / The request was cancelled.", true);
+    else if (status === "UNKNOWN")
+      setOtpState(
+        "অনুরোধটি আর চালু নেই। নতুন করে চেষ্টা করুন। / This request is no longer available. Start again.",
+        true,
+      );
+    else setOtpState("অনুরোধের সময় শেষ। / The request expired.", true);
+  }
+  function pollApproval(requestId) {
+    stopApprovalPolling();
     let tries = 0;
-    state.pollTimer = setInterval(async () => {
-      if (++tries > 120) {
-        clearInterval(state.pollTimer);
-        setLogin("অনুরোধের সময় শেষ — আবার চেষ্টা করুন। / Request timed out, try again.", true);
+    const tick = async () => {
+      if (state.loginRequestId !== requestId || state.pollBusy) return;
+      if (++tries > 150) {
+        finishApprovalState("EXPIRED");
         return;
       }
+      state.pollBusy = true;
       try {
         const r = await api("/api/auth/login/poll", {
           method: "POST",
-          body: { requestId, deviceId: state.deviceId },
+          body: { requestId, deviceId: ensureDeviceId() },
         });
         if (r.status === "SESSION" && r.token) {
-          clearInterval(state.pollTimer);
+          stopApprovalPolling();
           startSession(r.token, r.user);
-        } else if (r.status === "DECLINED" || r.status === "EXPIRED" || r.status === "UNKNOWN") {
-          clearInterval(state.pollTimer);
-          setLogin(
-            r.status === "DECLINED"
-              ? "ফোন থেকে Decline করা হয়েছে। / Declined on the phone."
-              : "অনুরোধের সময় শেষ — আবার চেষ্টা করুন। / Timed out, try again.",
+          return;
+        }
+        if (
+          r.status === "DECLINED" ||
+          r.status === "EXPIRED" ||
+          r.status === "CANCELLED" ||
+          r.status === "UNKNOWN"
+        ) {
+          finishApprovalState(r.status);
+          return;
+        }
+        if (r.status === "APPROVED") setOtpState("Approved — completing sign-in automatically…");
+      } catch {
+        /* keep polling through transient network errors */
+      } finally {
+        state.pollBusy = false;
+      }
+    };
+    tick();
+    state.pollTimer = setInterval(tick, 3000);
+  }
+  async function submitOtp() {
+    if (state.otpBusy || !state.loginRequestId || !state.otpAvailable || state.otpLocked) return;
+    const code = $("otpInput").value.trim();
+    if (!validOtp(code)) {
+      setOtpState("ছয় সংখ্যার কোড দিন। / Enter all six digits.", true);
+      return;
+    }
+    state.otpBusy = true;
+    $("otpSubmit").disabled = true;
+    try {
+      const r = await api("/api/auth/login/otp", {
+        method: "POST",
+        body: { requestId: state.loginRequestId, deviceId: ensureDeviceId(), otp: code },
+      });
+      if (r.status === "SESSION" && r.token) {
+        stopApprovalPolling();
+        $("otpInput").value = "";
+        startSession(r.token, r.user);
+      } else if (r.status === "INVALID_CODE") {
+        $("otpInput").value = "";
+        setOtpState(
+          `কোডটি মেলেনি। আরও ${r.attemptsRemaining ?? "কয়েকটি"} বার চেষ্টা করা যাবে। / Incorrect code; ${r.attemptsRemaining ?? "limited"} tries remain.`,
+          true,
+        );
+        $("otpSubmit").disabled = false;
+        $("otpInput").focus();
+      } else if (r.status === "OTP_LOCKED") {
+        state.otpLocked = true;
+        $("otpInput").value = "";
+        $("otpInput").disabled = true;
+        setOtpState(
+          "পাঁচবার ভুল হয়েছে। কোড বন্ধ, তবে অন্য ডিভাইস Approve করতে পারে। / Code attempts used; approval can still finish sign-in.",
+          true,
+        );
+      } else if (r.status === "OTP_UNAVAILABLE") {
+        state.otpAvailable = false;
+        $("otpInput").disabled = true;
+        setOtpState(
+          "কোড যাচাই এখন উপলভ্য নয়। অন্য ডিভাইস Approve করতে পারে। / Code verification is unavailable; approval still works.",
+          true,
+        );
+      } else if (r.status === "APPROVED") {
+        setOtpState(
+          "অন্য ডিভাইস Approve করেছে — সাইন-ইন হচ্ছে… / Approved; signing in automatically…",
+        );
+      } else if (
+        r.status === "EXPIRED" ||
+        r.status === "DECLINED" ||
+        r.status === "CANCELLED" ||
+        r.status === "UNKNOWN"
+      ) {
+        finishApprovalState(r.status);
+      } else {
+        setOtpState(
+          "কোড যাচাই করা যায়নি। / Could not verify the code. Try approval or recovery.",
+          true,
+        );
+      }
+    } catch (e) {
+      setOtpState(e.message || "Network unavailable. Try again.", true);
+      $("otpSubmit").disabled = false;
+    } finally {
+      state.otpBusy = false;
+      if (state.otpAvailable && !state.otpLocked && state.loginRequestId)
+        $("otpSubmit").disabled = false;
+    }
+  }
+  async function lookupRecovery(phone, returnPanel) {
+    state.recoveryPhone = phone;
+    state.googleReturn = returnPanel;
+    setGoogleStatus("Checking account… / অ্যাকাউন্ট যাচাই হচ্ছে…");
+    if (returnPanel === "entry") {
+      $("loginBtn").disabled = true;
+      setLogin("Checking recovery options…");
+    }
+    try {
+      const found = await api("/api/auth/recovery/lookup", { method: "POST", body: { phone } });
+      if (!found.exists) {
+        if (returnPanel === "otp") {
+          setOtpState(
+            "এই নম্বরে recoverable account নেই। / No recoverable account was found.",
             true,
           );
+        } else {
+          showAuthPanel("entry");
+          setLogin("এই নম্বরে recoverable account নেই। / No recoverable account was found.", true);
         }
-      } catch {
-        /* keep polling through transient errors */
+        return;
       }
-    }, 3000);
+      showAuthPanel("google");
+      setLogin("");
+      setGoogleStatus("Use the Google account already linked to this phone number.");
+      await renderGoogleButton();
+    } catch (e) {
+      if (returnPanel === "otp") setOtpState(e.message, true);
+      else {
+        showAuthPanel("entry");
+        setLogin(e.message, true);
+      }
+    } finally {
+      $("loginBtn").disabled = false;
+    }
+  }
+  async function loadGoogleIdentity() {
+    if (!state.gsiLoad) {
+      state.gsiLoad = new Promise((resolve, reject) => {
+        if (window.google?.accounts?.id) return resolve();
+        const script = document.createElement("script");
+        script.src = "https://accounts.google.com/gsi/client";
+        script.async = true;
+        script.defer = true;
+        script.onload = () =>
+          window.google?.accounts?.id
+            ? resolve()
+            : reject(new Error("Google sign-in did not load."));
+        script.onerror = () =>
+          reject(new Error("Google sign-in is unavailable in this browser or network."));
+        document.head.appendChild(script);
+        setTimeout(() => reject(new Error("Google sign-in took too long to load.")), 10000);
+      }).catch((error) => {
+        state.gsiLoad = null;
+        throw error;
+      });
+    }
+    return state.gsiLoad;
+  }
+  async function renderGoogleButton() {
+    try {
+      if (state.googleClientId === null) {
+        const config = await api("/api/config/firebase");
+        state.googleClientId = config.googleWebClientId || "";
+      }
+      if (!state.googleClientId)
+        throw new Error("Google recovery is not configured on the server.");
+      await loadGoogleIdentity();
+      const host = $("googleButton");
+      host.innerHTML = "";
+      const gsi = window.google?.accounts?.id;
+      if (!gsi) throw new Error("Google sign-in is unavailable in this browser.");
+      gsi.initialize({
+        client_id: state.googleClientId,
+        auto_select: false,
+        cancel_on_tap_outside: true,
+        callback: (response) => {
+          if (!response?.credential) {
+            setGoogleStatus("Google verification was cancelled. Try again when ready.", true);
+            return;
+          }
+          finishGoogleRecovery(response.credential);
+        },
+      });
+      gsi.renderButton(host, {
+        type: "standard",
+        theme: "filled_black",
+        size: "large",
+        text: "continue_with",
+        shape: "pill",
+        width: Math.min(340, Math.max(220, host.clientWidth || 320)),
+      });
+      setGoogleStatus("Google verifies your linked account; the server checks the ID token.");
+    } catch (e) {
+      setGoogleStatus(
+        e.message || "Google sign-in is unavailable. Try another browser or network.",
+        true,
+      );
+    }
+  }
+  async function finishGoogleRecovery(idToken) {
+    if (!idToken || state.otpBusy) return;
+    state.otpBusy = true;
+    setGoogleStatus("Verifying linked Google account…");
+    try {
+      const deviceId = ensureDeviceId();
+      const started = await api("/api/auth/recovery/start", {
+        method: "POST",
+        body: { phone: state.recoveryPhone, idToken, deviceId, platform: "WEB" },
+      });
+      const completed = await api("/api/auth/recovery/complete", {
+        method: "POST",
+        body: { requestId: started.requestId, deviceId, platform: "WEB" },
+      });
+      const pendingApproval = state.loginRequestId;
+      if (pendingApproval) {
+        stopApprovalPolling();
+        state.loginRequestId = "";
+        state.otpAvailable = false;
+        state.otpLocked = false;
+        $("otpInput").value = "";
+        api("/api/auth/login/cancel", {
+          method: "POST",
+          body: { requestId: pendingApproval, deviceId },
+        }).catch(() => {});
+      }
+      startSession(completed.token, completed.user);
+    } catch (e) {
+      setGoogleStatus(e.message || "Google recovery failed. Please try again.", true);
+    } finally {
+      state.otpBusy = false;
+    }
+  }
+  async function recoverFromOtp() {
+    const phone = state.currentPhone || buildCurrentPhone();
+    if (!phone) {
+      setOtpState("Enter the account phone number first. / আগে নম্বর দিন।", true);
+      return;
+    }
+    await lookupRecovery(phone, "otp");
+  }
+  function cancelApproval() {
+    const requestId = state.loginRequestId;
+    stopApprovalPolling();
+    state.loginRequestId = "";
+    state.otpAvailable = false;
+    state.otpLocked = false;
+    $("otpInput").value = "";
+    showAuthPanel("entry");
+    setAuthMode("login");
+    setLogin("");
+    if (requestId) {
+      api("/api/auth/login/cancel", {
+        method: "POST",
+        body: { requestId, deviceId: ensureDeviceId() },
+      }).catch(() => {});
+    }
   }
   function startSession(token, user) {
-    clearInterval(state.pollTimer);
+    stopApprovalPolling();
+    state.loginRequestId = "";
+    state.otpAvailable = false;
+    state.otpLocked = false;
+    $("otpInput").value = "";
     state.token = token;
     state.me = user || null;
     localStorage.setItem(LS.token, token);
@@ -476,7 +872,7 @@
       state.userWs && state.userWs.close();
       state.chatWs && state.chatWs.close();
     } catch {}
-    clearInterval(state.pollTimer);
+    stopApprovalPolling();
     state.token = "";
     state.me = null;
     state.e2ee = null;
@@ -484,10 +880,13 @@
     localStorage.removeItem(LS.me);
     localStorage.removeItem(LS.e2ee);
     show("login");
+    showAuthPanel("entry");
+    setAuthMode("login");
     setLogin("");
   }
   async function logout() {
     try {
+      // The worker reads device_id from this bearer; body IDs are not trusted.
       await api("/api/auth/logout", { method: "POST", body: {} });
     } catch {}
     hardLogout();
@@ -635,11 +1034,80 @@
     }
     return null;
   }
+  function loginApprovalHtml(m) {
+    const meta = m.meta && typeof m.meta === "object" ? m.meta : {};
+    const requestId = String(meta.requestId || "");
+    let status = String(meta.status || "PENDING").toUpperCase();
+    const expiresAt = Date.parse(meta.expiresAt || "");
+    const createdAt = Date.parse(m.createdAt || "");
+    const deadline = Number.isFinite(expiresAt)
+      ? expiresAt
+      : Number.isFinite(createdAt)
+        ? createdAt + 5 * 60 * 1000
+        : 0;
+    const expired = !deadline || deadline <= Date.now();
+    if (status === "PENDING" && expired) status = "EXPIRED";
+    const pending = (status === "PENDING" || status === "OTP_LOCKED") && !expired;
+    const locked = Number(meta.otpLocked) === 1 || status === "OTP_LOCKED";
+    const code = pending && !locked && validOtp(String(meta.otp || "")) ? String(meta.otp) : "";
+    const busy = requestId && state.approvalBusy.has(requestId);
+    const feedback = requestId ? state.approvalFeedback.get(requestId) || "" : "";
+    const device = String(meta.deviceName || "Another device");
+    const place = [meta.city, meta.country].filter(Boolean).map(String).join(", ");
+    const ip = String(meta.ip || "");
+    const when = dhakaClock(meta.time || m.createdAt);
+    const details = [
+      `<div class="approval-detail">Device: ${esc(device)} wants to sign in to your account.</div>`,
+      place ? `<div class="approval-detail">Location: ${esc(place)}</div>` : "",
+      ip && ip !== "unknown" ? `<div class="approval-detail">IP: ${esc(ip)}</div>` : "",
+      when ? `<div class="approval-footnote">${esc(when)} · Bangladesh time</div>` : "",
+    ].join("");
+    let stateText = "";
+    if (pending) {
+      if (locked) {
+        stateText = "Five incorrect codes used. The code is cleared; approval is still available.";
+      } else if (!code) {
+        stateText = "No code is available. A signed-in device can still approve this request.";
+      } else {
+        stateText = "Enter this code on the device trying to sign in.";
+      }
+    } else if (status === "APPROVED") {
+      stateText = "Approved — the new device can finish signing in.";
+    } else if (status === "CLAIMED") {
+      stateText = "The new device signed in successfully.";
+    } else if (status === "DECLINED") {
+      stateText = "Declined. No new device was signed in.";
+    } else if (status === "CANCELLED") {
+      stateText = "Login request cancelled.";
+    } else {
+      stateText = "Login request expired.";
+    }
+    const actionHtml =
+      pending && requestId
+        ? `<div class="approval-actions">
+          <button class="approval-accept" type="button" data-login-action="approve" ${busy ? "disabled" : ""}>${busy ? "Working…" : "Accept"}</button>
+          <button class="approval-decline" type="button" data-login-action="decline" ${busy ? "disabled" : ""}>${busy ? "Working…" : "Decline"}</button>
+        </div>
+        <div class="approval-footnote">Only approve if you recognize this sign-in.</div>`
+        : "";
+    return `<div class="approval-card">
+      <div class="approval-title">KuchuPuchu · Security</div>
+      <div class="approval-detail"><strong>New sign-in attempt</strong></div>
+      ${details}
+      ${code ? `<div class="approval-code-label">In-app sign-in code</div><div class="approval-code" aria-label="Six-digit sign-in code">${esc(code)}</div>` : ""}
+      <div class="approval-state">${esc(stateText)}</div>
+      ${actionHtml}
+      ${feedback ? `<div class="approval-error" role="status">${esc(feedback)}</div>` : ""}
+    </div>`;
+  }
   function bubbleHtml(m) {
     const mine = state.me && m.senderId === state.me.id;
     let inner = "";
     const kind = m.kind || "TEXT";
-    if (kind === "DELETED") {
+    const isApproval = kind === "LOGIN_APPROVAL";
+    if (isApproval) {
+      inner = loginApprovalHtml(m);
+    } else if (kind === "DELETED") {
       inner = '<i style="color:var(--muted)">This message was deleted</i>';
     } else if (kind === "IMAGE" || mediaSrc(m)) {
       inner =
@@ -674,12 +1142,98 @@
         seen || delivered ? "✓✓" : "✓"
       }</span>`;
     }
-    const stamp = `<span class="stamp">${clock(m.createdAt)}${tick}</span>`;
+    const stamp = isApproval ? "" : `<span class="stamp">${clock(m.createdAt)}${tick}</span>`;
     const sender =
       !mine && state.conv && state.conv.isGroup && m.senderName
         ? `<div class="sender">${esc(m.senderName)}</div>`
         : "";
-    return `<div class="mrow ${mine ? "mine" : "their"}" data-mid="${esc(m.id)}">${sender}<div class="bubble">${inner}</div>${stamp}</div>`;
+    const securityClass = isApproval ? " security-row" : "";
+    return `<div class="mrow ${mine ? "mine" : "their"}${securityClass}" data-mid="${esc(m.id)}">${sender}<div class="bubble">${inner}</div>${stamp}</div>`;
+  }
+  async function actOnLoginApproval(messageId, action) {
+    const message = state.msgs.find((item) => item.id === messageId);
+    const meta = message && message.meta && typeof message.meta === "object" ? message.meta : null;
+    const requestId = meta && String(meta.requestId || "");
+    if (!message || message.kind !== "LOGIN_APPROVAL" || !meta || !requestId) return;
+    const status = String(meta.status || "PENDING").toUpperCase();
+    const expiresAt = Date.parse(meta.expiresAt || "");
+    const createdAt = Date.parse(message.createdAt || "");
+    const deadline = Number.isFinite(expiresAt)
+      ? expiresAt
+      : Number.isFinite(createdAt)
+        ? createdAt + 5 * 60 * 1000
+        : 0;
+    if ((status !== "PENDING" && status !== "OTP_LOCKED") || !deadline || deadline <= Date.now())
+      return;
+    if (action !== "approve" && action !== "decline") return;
+    if (state.approvalBusy.has(requestId)) return;
+
+    state.approvalBusy.add(requestId);
+    state.approvalFeedback.delete(requestId);
+    renderMsgs(false);
+    try {
+      await api(`/api/auth/login/${action}`, {
+        method: "POST",
+        body: { id: requestId },
+      });
+      meta.status = action === "approve" ? "APPROVED" : "DECLINED";
+      delete meta.otp;
+      delete meta.otpLocked;
+      state.approvalFeedback.delete(requestId);
+    } catch (error) {
+      state.approvalFeedback.set(
+        requestId,
+        error.message || "Could not update this request. Try again.",
+      );
+    } finally {
+      state.approvalBusy.delete(requestId);
+      renderMsgs(false);
+    }
+  }
+  function scheduleApprovalExpiry(message) {
+    const existing = state.approvalExpiryTimers.get(message.id);
+    const meta = message.meta && typeof message.meta === "object" ? message.meta : null;
+    if (!meta) return;
+    const status = String(meta.status || "PENDING").toUpperCase();
+    if (status !== "PENDING" && status !== "OTP_LOCKED") {
+      if (existing) clearTimeout(existing.timer);
+      state.approvalExpiryTimers.delete(message.id);
+      return;
+    }
+    const expiresAt = Date.parse(meta.expiresAt || "");
+    const createdAt = Date.parse(message.createdAt || "");
+    const deadline = Number.isFinite(expiresAt)
+      ? expiresAt
+      : Number.isFinite(createdAt)
+        ? createdAt + 5 * 60 * 1000
+        : 0;
+    if (!deadline || deadline <= Date.now()) {
+      delete meta.otp;
+      delete meta.otpLocked;
+      if (status === "PENDING") meta.status = "EXPIRED";
+      if (existing) clearTimeout(existing.timer);
+      state.approvalExpiryTimers.delete(message.id);
+      return;
+    }
+    if (existing && existing.deadline === deadline) return;
+    if (existing) clearTimeout(existing.timer);
+    const timer = setTimeout(
+      () => {
+        state.approvalExpiryTimers.delete(message.id);
+        const current = state.msgs.find((item) => item.id === message.id);
+        const currentMeta =
+          current && current.meta && typeof current.meta === "object" ? current.meta : null;
+        if (currentMeta) {
+          delete currentMeta.otp;
+          delete currentMeta.otpLocked;
+          if (String(currentMeta.status || "PENDING").toUpperCase() === "PENDING")
+            currentMeta.status = "EXPIRED";
+        }
+        renderMsgs(state.atBottom);
+      },
+      Math.max(0, deadline - Date.now()),
+    );
+    state.approvalExpiryTimers.set(message.id, { timer, deadline });
   }
   function renderMsgs(scrollDown) {
     const box = $("msgs");
@@ -687,6 +1241,7 @@
     let html = "";
     let prevDay = "";
     for (const m of state.msgs) {
+      if (m.kind === "LOGIN_APPROVAL") scheduleApprovalExpiry(m);
       const d = dayLabel(m.createdAt);
       if (d && d !== prevDay) {
         html += `<div class="day">${esc(d)}</div>`;
@@ -903,11 +1458,16 @@
       const meId = state.me && state.me.id;
       if (f.type === "message" && f.message) {
         const m = f.message;
+        const existing = state.msgs.findIndex((x) => x.id === m.id);
         if (m.senderId === meId) {
-          const i = state.msgs.findIndex((x) => x.clientId && x.clientId === m.clientId);
-          if (i >= 0) state.msgs[i] = m;
+          const echo = state.msgs.findIndex((x) => x.clientId && x.clientId === m.clientId);
+          if (echo >= 0) state.msgs[echo] = m;
+          else if (existing >= 0) state.msgs[existing] = m;
           else state.msgs.push(m);
-        } else if (!state.msgs.some((x) => x.id === m.id)) {
+        } else if (existing >= 0) {
+          // Existing security cards can receive redacted/status updates in place.
+          state.msgs[existing] = m;
+        } else {
           state.msgs.push(m);
           markRead();
           loadConvs();
@@ -961,6 +1521,57 @@
   }
 
   /* ---------------- ui wiring ---------------- */
+  $("countryBtn").addEventListener("click", openCountryPicker);
+  $("countryClose").addEventListener("click", closeCountryPicker);
+  $("countryOverlay").addEventListener("click", (event) => {
+    if (event.target === $("countryOverlay")) closeCountryPicker();
+  });
+  $("countrySearch").addEventListener("input", renderCountryOptions);
+  $("countryOptions").addEventListener("click", (event) => {
+    const option = event.target.closest(".country-option");
+    if (!option) return;
+    const country = state.countries.find((item) => item.iso === option.dataset.iso);
+    if (!country) return;
+    state.country = country;
+    updateCountryButton();
+    closeCountryPicker();
+    $("phone").focus();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !$("countryOverlay").classList.contains("off"))
+      closeCountryPicker();
+  });
+  $("recoverLink").addEventListener("click", () => {
+    const nextMode = state.authMode === "recovery" ? "login" : "recovery";
+    setAuthMode(nextMode);
+    showAuthPanel("entry");
+    setLogin("");
+  });
+  $("googleBack").addEventListener("click", () => {
+    setGoogleStatus("");
+    showAuthPanel(state.googleReturn === "otp" && state.loginRequestId ? "otp" : "entry");
+  });
+  $("otpSubmit").addEventListener("click", submitOtp);
+  $("otpInput").addEventListener("input", (event) => {
+    const input = event.target;
+    const clean = input.value.replace(/\D/g, "").slice(0, 6);
+    if (input.value !== clean) input.value = clean;
+    if (clean.length) setOtpState("");
+  });
+  $("otpInput").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitOtp();
+    }
+  });
+  $("otpCancel").addEventListener("click", cancelApproval);
+  $("otpGoogle").addEventListener("click", recoverFromOtp);
+  $("msgs").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-login-action]");
+    if (!button) return;
+    const row = button.closest("[data-mid]");
+    if (row) actOnLoginApproval(row.dataset.mid, button.dataset.loginAction);
+  });
   $("loginBtn").addEventListener("click", login);
   $("phone").addEventListener("keydown", (e) => e.key === "Enter" && login());
   $("logoutBtn").addEventListener("click", logout);
@@ -1006,6 +1617,7 @@
   });
 
   /* ---------------- boot ---------------- */
+  loadCountries();
   if (state.token) {
     // Token might be stale: validate silently, then enter (or bounce to login).
     api("/api/me")

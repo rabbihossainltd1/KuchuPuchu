@@ -1,0 +1,120 @@
+name: GitHub APK Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type RELEASE to build and publish the production APK
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == 'RELEASE' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Require production signing secrets
+        shell: bash
+        env:
+          KP_KEYSTORE_B64: ${{ secrets.KP_KEYSTORE_B64 }}
+          KP_STORE_PASSWORD: ${{ secrets.KP_STORE_PASSWORD }}
+          KP_KEY_ALIAS: ${{ secrets.KP_KEY_ALIAS }}
+          KP_KEY_PASSWORD: ${{ secrets.KP_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$KP_KEYSTORE_B64" || { echo "Missing KP_KEYSTORE_B64"; exit 1; }
+          test -n "$KP_STORE_PASSWORD" || { echo "Missing KP_STORE_PASSWORD"; exit 1; }
+          test -n "$KP_KEY_ALIAS" || { echo "Missing KP_KEY_ALIAS"; exit 1; }
+          test -n "$KP_KEY_PASSWORD" || { echo "Missing KP_KEY_PASSWORD"; exit 1; }
+
+      - name: Worker and source CI
+        run: |
+          npm ci
+          npm run ci
+          bash scripts/ktlint-check.sh
+
+      - name: Android unit tests and lint
+        working-directory: native-android
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:testDebugUnitTest :app:lintDebug --no-daemon --continue \
+            -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
+
+      - name: Build production-signed APK
+        working-directory: native-android
+        env:
+          KP_KEYSTORE_B64: ${{ secrets.KP_KEYSTORE_B64 }}
+          KP_STORE_PASSWORD: ${{ secrets.KP_STORE_PASSWORD }}
+          KP_KEY_ALIAS: ${{ secrets.KP_KEY_ALIAS }}
+          KP_KEY_PASSWORD: ${{ secrets.KP_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew assembleRelease --no-daemon --stacktrace \
+            -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
+          apk="app/build/outputs/apk/release/app-release.apk"
+          test -s "$apk"
+          code="$(sed -n 's/^[[:space:]]*versionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle.kts | head -n1)"
+          name="$(sed -n 's/^[[:space:]]*versionName = \"\([^\"]*\)\".*/\1/p' app/build.gradle.kts | head -n1)"
+          test "$code" = "274"
+          test "$name" = "3.9.197"
+          asset="$RUNNER_TEMP/kuchupuchu-${name}-r104.apk"
+          cp "$apk" "$asset"
+          echo "RELEASE_TAG=v${code}" >> "$GITHUB_ENV"
+          echo "RELEASE_TITLE=v${code} (${name})" >> "$GITHUB_ENV"
+          echo "RELEASE_ASSET=$asset" >> "$GITHUB_ENV"
+
+      - name: Verify signing continuity with v273
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          previous_dir="$RUNNER_TEMP/previous-release"
+          mkdir -p "$previous_dir"
+          gh release download v273 \
+            --pattern "kuchupuchu-3.9.196-r103.apk" \
+            --dir "$previous_dir"
+          old_apk="$previous_dir/kuchupuchu-3.9.196-r103.apk"
+          apksigner="$(command -v apksigner || find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -type f -name apksigner | sort -V | tail -n1)"
+          test -x "$apksigner"
+          cert_digest() {
+            "$apksigner" verify --print-certs "$1" 2>/dev/null \
+              | sed -n 's/.*certificate SHA-256 digest: //p' \
+              | head -n1 | tr -d ':[:space:]'
+          }
+          old_digest="$(cert_digest "$old_apk")"
+          new_digest="$(cert_digest "$RELEASE_ASSET")"
+          test -n "$old_digest" && test -n "$new_digest"
+          if [ "$old_digest" != "$new_digest" ]; then
+            echo "APK signing certificate does not match the published v273 certificate. Refusing release."
+            exit 1
+          fi
+          echo "Published signing certificate continuity verified."
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" "$RELEASE_ASSET" \
+            --title "$RELEASE_TITLE" \
+            --generate-notes \
+            --target "$GITHUB_SHA"

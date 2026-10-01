@@ -59,6 +59,8 @@ export type Env = {
    *  misconfigured deploy must break login loudly, never silently skip the
    *  audience check. */
   GOOGLE_WEB_CLIENT_ID?: string;
+  /** Dedicated private HMAC key for six-digit login-code verifiers. */
+  LOGIN_OTP_HMAC_SECRET?: string;
   /** Cloudflare account id — the Workers-AI rescue brain's run route (r48). */
   CF_ACCOUNT?: string;
   /** Cloudflare API token with Workers-AI run rights (r48 rescue brain). */
@@ -225,6 +227,64 @@ function parseDeviceId(raw: unknown): string {
   return v;
 }
 
+type AuthPlatform = "ANDROID" | "WEB";
+
+/** Old Web v1 device IDs are namespaced `web-…`; older Android clients send a UUID. */
+function parseAuthPlatform(raw: unknown, deviceId: string): AuthPlatform {
+  const value = String(raw ?? "")
+    .trim()
+    .toUpperCase();
+  const inferred: AuthPlatform = deviceId.startsWith("web-") ? "WEB" : "ANDROID";
+  if (!value) return inferred;
+  if (value !== "ANDROID" && value !== "WEB")
+    fail(400, "Unsupported device platform.", "BAD_PLATFORM");
+  if ((value === "WEB") !== deviceId.startsWith("web-"))
+    fail(400, "Device id does not match its platform.", "BAD_PLATFORM");
+  return value;
+}
+
+/** Secure six-digit login code. Rejection sampling avoids modulo bias. */
+function createLoginOtp(): string {
+  const limit = Math.floor(0x1_0000_0000 / 1_000_000) * 1_000_000;
+  const word = new Uint32Array(1);
+  let value = 0;
+  do {
+    crypto.getRandomValues(word);
+    value = word[0] ?? 0;
+  } while (value >= limit);
+  return String(value % 1_000_000).padStart(6, "0");
+}
+
+function constantTimeTextEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+function loginOtpSecret(env: Env): string | null {
+  const secret = String(env.LOGIN_OTP_HMAC_SECRET || "").trim();
+  return secret.length >= 32 ? secret : null;
+}
+
+async function loginOtpVerifier(secret: string, requestId: string, otp: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(`${requestId}:${otp}`),
+  );
+  return Array.from(new Uint8Array(signature), (byte) => byte.toString(16).padStart(2, "0")).join(
+    "",
+  );
+}
+
 /**
  * Server-side Google ID token verification without any service account key:
  * Google's tokeninfo endpoint validates the signature, and THIS function owns
@@ -264,35 +324,6 @@ async function verifyGoogleIdToken(env: Env, rawToken: unknown) {
   return { sub, email: verified ? email : "" };
 }
 
-/** Opaque session token + its INSERT statement, pre-hashed so callers can
- *  drop it into an atomic db.batch() alongside the rest of a transfer. */
-async function sessionStmt(
-  db: D1Database,
-  userId: string,
-  deviceId: string,
-): Promise<{ token: string; stmt: D1PreparedStatement }> {
-  const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
-  const stmt = db
-    .prepare(
-      `INSERT INTO sessions (token_hash, user_id, expires_at, created_at, device_id)
-       VALUES (?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      await sha256Hex(token),
-      userId,
-      new Date(Date.now() + SESSION_TTL_MS).toISOString(),
-      nowIso(),
-      deviceId,
-    );
-  return { token, stmt };
-}
-
-/** The device-transfer half every "activate a new device" path shares:
- *  kill the user's other sessions, revoke any ACTIVE device row, activate
- *  this install, and drop the OLD install's FCM push rows so a transferred
- *  -away phone stops lighting up. Callers put these in ONE batch with the
- *  request-state UPDATE that authorises the transfer — that is what makes
- *  the swap atomic (§15/§18). */
 /** Where a request comes from (Cloudflare edge: IP + geo). Owner round 32
  *  item 4: stored per signed-in device so Settings → Devices can show it. */
 type ClientWhere = { ip: string | null; city: string | null; country: string | null };
@@ -306,42 +337,267 @@ function clientWhere(request: Request): ClientWhere {
   };
 }
 
+type ClaimGuard = {
+  table: "login_requests" | "recovery_requests";
+  requestId: string;
+  claimId: string;
+  status: "CLAIMED" | "COMPLETED";
+};
+
+function claimGuardSql(guard: ClaimGuard): string {
+  return `EXISTS (
+    SELECT 1 FROM ${guard.table}
+     WHERE id = ? AND status = ? AND claim_id = ?
+  )`;
+}
+
+function claimGuardBinds(guard?: ClaimGuard): unknown[] {
+  return guard ? [guard.requestId, guard.status, guard.claimId] : [];
+}
+
+function approvalCardStatusStmt(
+  db: D1Database,
+  requestId: string,
+  status: string,
+  expectedStatus: string,
+  claimId?: string,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `UPDATE messages
+          SET meta_json = json_set(json_remove(meta_json, '$.otp', '$.otpLocked'), '$.status', ?)
+        WHERE kind = 'LOGIN_APPROVAL'
+          AND json_extract(meta_json, '$.requestId') = ?
+          AND EXISTS (
+            SELECT 1 FROM login_requests WHERE id = ? AND status = ?${claimId ? " AND claim_id = ?" : ""}
+          )`,
+    )
+    .bind(status, requestId, requestId, expectedStatus, ...(claimId ? [claimId] : []));
+}
+
+function approvalCardOtpLockStmt(db: D1Database, requestId: string): D1PreparedStatement {
+  return db
+    .prepare(
+      `UPDATE messages
+          SET meta_json = json_set(json_remove(meta_json, '$.otp'), '$.otpLocked', 1)
+        WHERE kind = 'LOGIN_APPROVAL'
+          AND json_extract(meta_json, '$.requestId') = ?
+          AND EXISTS (
+            SELECT 1 FROM login_requests
+             WHERE id = ? AND status = 'PENDING' AND otp_attempts >= 5 AND otp_hash IS NULL
+          )`,
+    )
+    .bind(requestId, requestId);
+}
+
+/**
+ * Create a bearer session. Request-claim flows add a claim-id predicate to the
+ * INSERT so a losing batch cannot leave a session behind.
+ */
+async function sessionStmt(
+  db: D1Database,
+  userId: string,
+  deviceId: string,
+  guard?: ClaimGuard,
+): Promise<{ token: string; stmt: D1PreparedStatement }> {
+  const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+  const values = [
+    await sha256Hex(token),
+    userId,
+    new Date(Date.now() + SESSION_TTL_MS).toISOString(),
+    nowIso(),
+    deviceId,
+  ];
+  const stmt = guard
+    ? db
+        .prepare(
+          `INSERT INTO sessions (token_hash, user_id, expires_at, created_at, device_id)
+           SELECT ?, ?, ?, ?, ? WHERE ${claimGuardSql(guard)}`,
+        )
+        .bind(...values, ...claimGuardBinds(guard))
+    : db
+        .prepare(
+          `INSERT INTO sessions (token_hash, user_id, expires_at, created_at, device_id)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .bind(...values);
+  return { token, stmt };
+}
+
+/**
+ * Replace only the target platform's one active slot. The optional claim guard
+ * is repeated on every statement because D1 batches still execute later SQL
+ * when their conditional first UPDATE changes zero rows.
+ */
 function deviceTransferStmts(
   db: D1Database,
   userId: string,
   deviceId: string,
   deviceName: string | null,
   where: ClientWhere,
+  platform: AuthPlatform = "ANDROID",
+  guard?: ClaimGuard,
 ): D1PreparedStatement[] {
   const at = nowIso();
+  const claimSql = guard ? ` AND ${claimGuardSql(guard)}` : "";
+  const claimBinds = claimGuardBinds(guard);
+  const fcmPlatform =
+    platform === "ANDROID"
+      ? `(lower(trim(platform)) = 'android' OR
+          (platform IS NULL AND device_id IS NOT NULL AND device_id NOT LIKE 'web-%'))`
+      : `(lower(trim(platform)) = 'web' OR
+          (platform IS NULL AND device_id LIKE 'web-%'))`;
+  const deviceInsert = guard
+    ? db
+        .prepare(
+          `INSERT INTO auth_devices
+             (id, user_id, device_id, device_name, platform, status, created_at, last_seen_at, ip, city, country)
+           SELECT ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, ?
+            WHERE ${claimGuardSql(guard)}
+           ON CONFLICT (user_id, device_id) DO UPDATE SET
+             platform = excluded.platform, status = 'ACTIVE', revoked_at = NULL,
+             device_name = COALESCE(excluded.device_name, auth_devices.device_name),
+             created_at = excluded.created_at,
+             last_seen_at = excluded.last_seen_at,
+             ip = excluded.ip, city = excluded.city, country = excluded.country`,
+        )
+        .bind(
+          id(),
+          userId,
+          deviceId,
+          deviceName,
+          platform,
+          at,
+          at,
+          where.ip,
+          where.city,
+          where.country,
+          ...claimGuardBinds(guard),
+        )
+    : db
+        .prepare(
+          `INSERT INTO auth_devices
+             (id, user_id, device_id, device_name, platform, status, created_at, last_seen_at, ip, city, country)
+           VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, ?)
+           ON CONFLICT (user_id, device_id) DO UPDATE SET
+             platform = excluded.platform, status = 'ACTIVE', revoked_at = NULL,
+             device_name = COALESCE(excluded.device_name, auth_devices.device_name),
+             created_at = excluded.created_at,
+             last_seen_at = excluded.last_seen_at,
+             ip = excluded.ip, city = excluded.city, country = excluded.country`,
+        )
+        .bind(
+          id(),
+          userId,
+          deviceId,
+          deviceName,
+          platform,
+          at,
+          at,
+          where.ip,
+          where.city,
+          where.country,
+        );
   return [
-    db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId),
+    db
+      .prepare(
+        `DELETE FROM sessions
+          WHERE user_id = ?
+            AND (device_id = ? OR device_id IN (
+              SELECT device_id FROM auth_devices WHERE user_id = ? AND platform = ?
+            ))${claimSql}`,
+      )
+      .bind(userId, deviceId, userId, platform, ...claimBinds),
     db
       .prepare(
         `UPDATE auth_devices SET status = 'REVOKED', revoked_at = ?
-          WHERE user_id = ? AND status = 'ACTIVE'`,
+          WHERE user_id = ? AND platform = ? AND status = 'ACTIVE'${claimSql}`,
       )
-      .bind(at, userId),
+      .bind(at, userId, platform, ...claimBinds),
+    deviceInsert,
+    // Keep only the target platform's push registrations. Older Android rows
+    // may have no platform but a non-Web device ID; fully unknown rows stay put.
     db
       .prepare(
-        `INSERT INTO auth_devices
-           (id, user_id, device_id, device_name, status, created_at, last_seen_at, ip, city, country)
-         VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, ?)
-         ON CONFLICT (user_id, device_id) DO UPDATE SET
-           status = 'ACTIVE', revoked_at = NULL,
-           device_name = COALESCE(excluded.device_name, auth_devices.device_name),
-           created_at = excluded.created_at,
-           last_seen_at = excluded.last_seen_at,
-           ip = excluded.ip, city = excluded.city, country = excluded.country`,
+        `DELETE FROM devices
+          WHERE user_id = ? AND ${fcmPlatform}
+            AND (device_id IS NULL OR device_id != ?)${claimSql}`,
       )
-      .bind(id(), userId, deviceId, deviceName, at, at, where.ip, where.city, where.country),
-    // Old install's push handles die with the transfer. Rows with a NULL
-    // device_id predate per-install identity; they cannot be proven to belong
-    // to the surviving install, so they go too.
-    db
-      .prepare(`DELETE FROM devices WHERE user_id = ? AND (device_id IS NULL OR device_id != ?)`)
-      .bind(userId, deviceId),
+      .bind(userId, deviceId, ...claimBinds),
   ];
+}
+
+/**
+ * The one final-claim path shared by OTP and approval. The conditional status
+ * transition, platform transfer and session insert all use the same claim id;
+ * every later statement is guarded because D1 continues a batch after a
+ * zero-change conditional UPDATE.
+ */
+async function claimLoginSession(
+  db: D1Database,
+  env: Env,
+  ctx: ExecutionContext,
+  request: Request,
+  args: {
+    requestId: string;
+    userId: string;
+    deviceId: string;
+    deviceName: string | null;
+    platform: AuthPlatform;
+    expectedStatus: "APPROVED" | "PENDING";
+    otpHash?: string;
+    method: "APPROVAL" | "OTP";
+  },
+): Promise<string | null> {
+  const claimId = id();
+  const guard: ClaimGuard = {
+    table: "login_requests",
+    requestId: args.requestId,
+    claimId,
+    status: "CLAIMED",
+  };
+  const at = nowIso();
+  const predicate =
+    args.expectedStatus === "APPROVED"
+      ? `id = ? AND user_id = ? AND new_device_id = ? AND new_device_platform = ?
+         AND status = 'APPROVED' AND expires_at > ?`
+      : `id = ? AND user_id = ? AND new_device_id = ? AND new_device_platform = ?
+         AND status = 'PENDING' AND expires_at > ? AND otp_hash = ? AND otp_attempts < 5`;
+  const binds = [
+    args.requestId,
+    args.userId,
+    args.deviceId,
+    args.platform,
+    at,
+    ...(args.expectedStatus === "PENDING" ? [args.otpHash || ""] : []),
+  ];
+  const { token, stmt } = await sessionStmt(db, args.userId, args.deviceId, guard);
+  const claimed = (await db.batch([
+    db
+      .prepare(
+        `UPDATE login_requests SET status = 'CLAIMED', claim_id = ?, resolved_at = ?, otp_hash = NULL
+          WHERE ${predicate}`,
+      )
+      .bind(claimId, at, ...binds),
+    approvalCardStatusStmt(db, args.requestId, "CLAIMED", "CLAIMED", claimId),
+    ...deviceTransferStmts(
+      db,
+      args.userId,
+      args.deviceId,
+      args.deviceName || (args.platform === "WEB" ? "Web browser" : "Android"),
+      clientWhere(request),
+      args.platform,
+      guard,
+    ),
+    stmt,
+  ])) as { meta: { changes: number } }[];
+  if (!claimed[0]?.meta.changes) return null;
+  await resolveApprovalMessage(db, args.requestId, "CLAIMED", env, ctx);
+  await audit(db, "LOGIN_CLAIMED", args.userId, args.deviceId, {
+    method: args.method,
+    platform: args.platform,
+  });
+  return token;
 }
 
 /** Best-effort audit trail (§11 audit_logs). Never blocks a login. */
@@ -480,6 +736,7 @@ async function sendApprovalMessage(
   requestId: string,
   deviceName: string | null,
   expiresAt: string,
+  otp: string | null,
   request: Request,
 ) {
   const botId = await ensureOfficialBot(db);
@@ -497,6 +754,7 @@ async function sendApprovalMessage(
     requestId,
     deviceName: label,
     expiresAt,
+    ...(otp ? { otp } : {}),
     status: "PENDING",
     ip,
     city: cf?.city ?? null,
@@ -574,30 +832,85 @@ async function sendApprovalMessage(
   );
 }
 
+/** Broadcasts the current security card after its sensitive metadata or state changes. */
+async function broadcastApprovalCardUpdate(
+  env: Env,
+  db: D1Database,
+  ctx: ExecutionContext,
+  requestId: string,
+) {
+  try {
+    const row = await one<MsgRow & { user_id: string }>(
+      db,
+      `SELECT m.*, r.user_id
+         FROM messages m JOIN login_requests r ON r.id = ?
+        WHERE m.kind = 'LOGIN_APPROVAL'
+          AND json_extract(m.meta_json, '$.requestId') = ?
+        LIMIT 1`,
+      requestId,
+      requestId,
+    );
+    if (!row) return;
+    const message = msgFrom(row);
+    ctx.waitUntil(
+      broadcastRoomEvent(env, row.conv_id, {
+        type: "message",
+        conversationId: row.conv_id,
+        message,
+      }),
+    );
+    ctx.waitUntil(
+      broadcastRoomEvent(env, `user:${row.user_id}`, {
+        type: "conv",
+        conversationId: row.conv_id,
+        msg: 1,
+      }),
+    );
+  } catch {
+    /* a lost realtime update must not break authentication */
+  }
+}
+
 /** Flips the approval card's status and drops a short follow-up from the bot,
  *  so the conversation reads as a dialogue: request → outcome. */
-async function resolveApprovalMessage(db: D1Database, requestId: string, status: string) {
+async function resolveApprovalMessage(
+  db: D1Database,
+  requestId: string,
+  status: string,
+  env?: Env,
+  ctx?: ExecutionContext,
+) {
   try {
-    const row = await one<{ id: string; conv_id: string }>(
+    const row = await one<{ id: string; conv_id: string; user_id: string }>(
       db,
-      `SELECT id, conv_id FROM messages
-        WHERE kind = 'LOGIN_APPROVAL' AND json_extract(meta_json, '$.requestId') = ?`,
+      `SELECT m.id, m.conv_id, r.user_id
+         FROM messages m JOIN login_requests r ON r.id = ?
+        WHERE m.kind = 'LOGIN_APPROVAL'
+          AND json_extract(m.meta_json, '$.requestId') = ?
+        LIMIT 1`,
+      requestId,
       requestId,
     );
     if (!row) return;
     await run(
       db,
-      `UPDATE messages SET meta_json = json_set(meta_json, '$.status', ?) WHERE id = ?`,
+      `UPDATE messages SET meta_json = json_set(json_remove(meta_json, '$.otp', '$.otpLocked'), '$.status', ?) WHERE id = ?`,
       status,
       row.id,
     );
     const botId = await ensureOfficialBot(db);
     const text =
       status === "APPROVED"
-        ? "✅ Login approved — the new device has been signed in."
-        : status === "DECLINED"
-          ? "⛔ Login request declined. No new device was signed in."
-          : "⏰ Login request expired without a response.";
+        ? "✅ Login approved — the new device can now sign in."
+        : status === "CLAIMED"
+          ? "✅ The new device signed in successfully."
+          : status === "DECLINED"
+            ? "⛔ Login request declined. No new device was signed in."
+            : status === "CANCELLED"
+              ? "Login request cancelled. No new device was signed in."
+              : status === "OTP_LOCKED"
+                ? "⛔ Too many incorrect login codes. Start again to request a new code."
+                : "⏰ Login request expired without a response.";
     const mid = id();
     const created = nowIso();
     await run(
@@ -623,6 +936,7 @@ async function resolveApprovalMessage(db: D1Database, requestId: string, status:
       row.conv_id,
       botId,
     );
+    if (env && ctx) await broadcastApprovalCardUpdate(env, db, ctx, requestId);
   } catch {
     /* the approval decision itself must never fail because of the card */
   }
@@ -663,6 +977,39 @@ function checkedMessageBody(raw: string): string {
     return raw;
   }
   return raw.slice(0, MESSAGE_MAX_LENGTH);
+}
+
+/** Expire unattended approval cards on the minute cron; never leave a stale code readable. */
+async function expireLoginRequests(
+  db: D1Database,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<number> {
+  const at = nowIso();
+  const due = await all<{ id: string }>(
+    db,
+    `SELECT id FROM login_requests
+      WHERE status IN ('PENDING', 'APPROVED') AND expires_at <= ?
+      ORDER BY expires_at LIMIT 100`,
+    at,
+  );
+  let expired = 0;
+  for (const row of due) {
+    const results = (await db.batch([
+      db
+        .prepare(
+          `UPDATE login_requests SET status = 'EXPIRED', resolved_at = ?, otp_hash = NULL
+            WHERE id = ? AND status IN ('PENDING', 'APPROVED') AND expires_at <= ?`,
+        )
+        .bind(at, row.id, at),
+      approvalCardStatusStmt(db, row.id, "EXPIRED", "EXPIRED"),
+    ])) as { meta: { changes: number } }[];
+    const changed = results[0]?.meta.changes ?? 0;
+    if (!changed) continue;
+    expired += changed;
+    await resolveApprovalMessage(db, row.id, "EXPIRED", env, ctx);
+  }
+  return expired;
 }
 
 async function ensureAiBot(db: D1Database): Promise<string> {
@@ -2942,7 +3289,8 @@ async function ensureSchema(db: D1Database) {
     // signed in. UNIQUE (user_id, device_id): one row per install per account.
     `CREATE TABLE IF NOT EXISTS auth_devices (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, device_id TEXT NOT NULL,
-      device_name TEXT, status TEXT NOT NULL DEFAULT 'PENDING',
+      device_name TEXT, platform TEXT NOT NULL DEFAULT 'ANDROID',
+      status TEXT NOT NULL DEFAULT 'PENDING',
       created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, revoked_at TEXT,
       UNIQUE (user_id, device_id)
     )`,
@@ -2958,12 +3306,15 @@ async function ensureSchema(db: D1Database) {
     `CREATE INDEX IF NOT EXISTS idx_ai_session_msgs ON ai_session_msgs(session_id, seq)`,
     `CREATE TABLE IF NOT EXISTS login_requests (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, new_device_id TEXT NOT NULL,
-      new_device_name TEXT, status TEXT NOT NULL DEFAULT 'PENDING',
+      new_device_name TEXT, new_device_platform TEXT NOT NULL DEFAULT 'ANDROID',
+      claim_id TEXT, otp_hash TEXT, otp_attempts INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'PENDING',
       created_at TEXT NOT NULL, expires_at TEXT NOT NULL, resolved_at TEXT
     )`,
     `CREATE TABLE IF NOT EXISTS recovery_requests (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, new_device_id TEXT NOT NULL,
-      google_subject TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'PENDING',
+      google_subject TEXT NOT NULL, new_device_platform TEXT NOT NULL DEFAULT 'ANDROID',
+      claim_id TEXT, status TEXT NOT NULL DEFAULT 'PENDING',
       created_at TEXT NOT NULL, expires_at TEXT NOT NULL, completed_at TEXT
     )`,
     `CREATE TABLE IF NOT EXISTS auth_audit (
@@ -3098,6 +3449,10 @@ async function ensureSchema(db: D1Database) {
     // Owner round 42 (item 3): what the AI is making (image|text).
     `ALTER TABLE typing ADD COLUMN kind TEXT`,
     // Owner round 32 item 4: where each signed-in device last came from.
+    `ALTER TABLE auth_devices ADD COLUMN platform TEXT NOT NULL DEFAULT 'ANDROID'`,
+    `UPDATE auth_devices SET platform = 'WEB' WHERE device_id LIKE 'web-%'`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_authdevices_active_platform
+       ON auth_devices(user_id, platform) WHERE status = 'ACTIVE'`,
     `ALTER TABLE auth_devices ADD COLUMN ip TEXT`,
     `ALTER TABLE auth_devices ADD COLUMN city TEXT`,
     `ALTER TABLE auth_devices ADD COLUMN country TEXT`,
@@ -3213,6 +3568,17 @@ async function ensureSchema(db: D1Database) {
     `ALTER TABLE users ADD COLUMN private_profile INTEGER`,
     `ALTER TABLE sessions ADD COLUMN device_id TEXT`,
     `ALTER TABLE login_requests ADD COLUMN new_device_name TEXT`,
+    `ALTER TABLE login_requests ADD COLUMN new_device_platform TEXT NOT NULL DEFAULT 'ANDROID'`,
+    `ALTER TABLE login_requests ADD COLUMN claim_id TEXT`,
+    `ALTER TABLE login_requests ADD COLUMN otp_hash TEXT`,
+    `ALTER TABLE login_requests ADD COLUMN otp_attempts INTEGER NOT NULL DEFAULT 0`,
+    `UPDATE login_requests SET new_device_platform = 'WEB' WHERE new_device_id LIKE 'web-%'`,
+    `CREATE INDEX IF NOT EXISTS idx_loginreq_status_expiry ON login_requests(status, expires_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_login_approval_request
+       ON messages(json_extract(meta_json, '$.requestId')) WHERE kind = 'LOGIN_APPROVAL'`,
+    `ALTER TABLE recovery_requests ADD COLUMN new_device_platform TEXT NOT NULL DEFAULT 'ANDROID'`,
+    `ALTER TABLE recovery_requests ADD COLUMN claim_id TEXT`,
+    `UPDATE recovery_requests SET new_device_platform = 'WEB' WHERE new_device_id LIKE 'web-%'`,
     // Uniqueness the legacy schema cannot express: one phone → one account,
     // one Google subject → one account (§9/§22). Partial indexes so legacy
     // NULL rows never collide; fresh DBs got these constraints in the CREATE,
@@ -5204,6 +5570,10 @@ export default {
     ctx: ExecutionContext,
   ): Promise<void> {
     try {
+      // Ensure the additive OTP columns/indexes exist in a cold scheduled isolate,
+      // then erase expired codes even when both login clients have closed.
+      await ensureSchema(env.DB);
+      const expiredLoginRequests = await expireLoginRequests(env.DB, env, ctx);
       const reaped = await reapStaleCalls(env, env.DB, ctx);
       // Owner round 32 (item 18): due "send later" rows (own try, see the helper).
       let dispatched = 0;
@@ -5284,6 +5654,7 @@ export default {
         "cron_reap",
         JSON.stringify({
           reaped,
+          expiredLoginRequests,
           pruneRan,
           pruned,
           devices: devs,
@@ -5512,6 +5883,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const phone = normalizePhone(body.phone);
     const sim = parseSimResult(body.sim);
     const deviceId = parseDeviceId(body.deviceId);
+    const platform = parseAuthPlatform(body.platform, deviceId);
     // M1: per-phone global cap - a botnet rotating IPs still shares one
     // budget per targeted number.
     await rateLimitGlobal(db, `gppv:${phone}`, 20);
@@ -5588,33 +5960,29 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // ---- existing ACTIVE account ----
     if (user.auth_status !== "ACTIVE") fail(403, "This account is not available.", "ACCOUNT_STATE");
 
-    const activeDevice = await one<{ device_id: string }>(
+    const activeDevices = await all<{ device_id: string; platform: string }>(
       db,
-      `SELECT device_id FROM auth_devices WHERE user_id = ? AND status = 'ACTIVE'`,
+      `SELECT a.device_id, a.platform
+         FROM auth_devices a
+        WHERE a.user_id = ? AND a.status = 'ACTIVE'
+          AND EXISTS (
+            SELECT 1 FROM sessions s
+             WHERE s.user_id = a.user_id AND s.device_id = a.device_id AND s.expires_at > ?
+          )`,
       user.id,
+      nowIso(),
     );
-    // Owner round 28: an ACTIVE device row whose install holds NO live session
-    // any more is a signed-out phone (the logout request never reached the
-    // worker — offline, killed mid-request, app data cleared, reinstall). Only a
-    // device that can still open the app can approve, so such a row must not
-    // gate the login behind an approval nobody is able to give ("onno device
-    // login korte gele approval chai") — treat it exactly like a clean logout.
-    const activeDeviceLive =
-      !!activeDevice &&
-      !!(await one<{ n: number }>(
-        db,
-        `SELECT 1 AS n FROM sessions WHERE user_id = ? AND device_id = ? AND expires_at > ? LIMIT 1`,
-        user.id,
-        activeDevice.device_id,
-        nowIso(),
-      ));
+    const sameDeviceLive = activeDevices.some(
+      (d) => d.device_id === deviceId && d.platform === platform,
+    );
 
-    if (!activeDevice || activeDevice.device_id === deviceId || !activeDeviceLive) {
-      // Same install (or no active device anywhere — e.g. after logout):
-      // restore/create the session directly (§13/§24).
+    if (activeDevices.length === 0 || sameDeviceLive) {
+      // No signed-in client exists, or this exact install is returning. Replace
+      // only this platform's slot; a signed-in client on the other platform is
+      // never evicted by a direct login.
       const { token, stmt } = await sessionStmt(db, user.id, deviceId);
       await db.batch([
-        ...deviceTransferStmts(db, user.id, deviceId, deviceName, clientWhere(request)),
+        ...deviceTransferStmts(db, user.id, deviceId, deviceName, clientWhere(request), platform),
         db.prepare("UPDATE users SET last_active_at = ? WHERE id = ?").bind(nowIso(), user.id),
         stmt,
       ]);
@@ -5622,46 +5990,76 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       await audit(db, "LOGIN", user.id, deviceId, {
         phone: maskPhone(phone),
         method: attestMethod,
+        platform,
       });
       return json({ status: "SESSION", token, user: userSelf(user, true) });
     }
 
-    // ---- different device: the current device must approve (§14) ----
-    // Is the old install even alive? The app re-registers its push handle on
-    // every start/boot; an account whose newest handle is weeks old (or that
-    // has none at all) almost certainly uninstalled the app — waiting a
-    // minute for an approval nobody can give is exactly the dead end the
-    // owner reported. Flag it so the client offers the Google path directly.
-    const pushRows = await all<{ last_seen_at: string | null }>(
-      db,
-      "SELECT last_seen_at FROM devices WHERE user_id = ?",
-      user.id,
+    // ---- different device: any currently signed-in client can approve (§14) ----
+    // Android reachability still uses its fresh FCM heartbeat. Web has no FCM
+    // registration, so a live Web session is itself an eligible approver.
+    const pushRows = await all<{
+      platform: string | null;
+      device_id: string | null;
+      last_seen_at: string | null;
+    }>(db, "SELECT platform, device_id, last_seen_at FROM devices WHERE user_id = ?", user.id);
+    const androidPushRows = pushRows.filter(
+      (r) =>
+        String(r.platform || "").toLowerCase() === "android" ||
+        (!r.platform && (!r.device_id || !r.device_id.startsWith("web-"))),
     );
-    const stamps = pushRows
+    const stamps = androidPushRows
       .map((r) => (r.last_seen_at ? Date.parse(r.last_seen_at) : 0))
       .filter((t) => t > 0);
-    const deviceGone =
-      pushRows.length === 0 ||
-      (stamps.length > 0 && Math.max(...stamps) < Date.now() - 14 * 86_400_000);
+    const androidPushFresh =
+      androidPushRows.length > 0 &&
+      stamps.length > 0 &&
+      Math.max(...stamps) >= Date.now() - 14 * 86_400_000;
+    const liveWeb = activeDevices.some((d) => d.platform === "WEB");
+    const liveAndroid = activeDevices.some((d) => d.platform === "ANDROID");
+    const deviceGone = !liveWeb && !(liveAndroid && androidPushFresh);
 
     const requestId = id();
     const expiresAt = new Date(Date.now() + LOGIN_REQUEST_TTL_MS).toISOString();
+    const otpSecret = loginOtpSecret(env);
+    const otp = otpSecret ? createLoginOtp() : null;
+    const otpHash = otp && otpSecret ? await loginOtpVerifier(otpSecret, requestId, otp) : null;
+    const requestCreatedAt = nowIso();
     await db.batch([
       db
         .prepare(
-          `UPDATE login_requests SET status = 'CANCELLED', resolved_at = ?
-            WHERE user_id = ? AND status = 'PENDING'`,
+          `UPDATE login_requests SET status = 'CANCELLED', resolved_at = ?, otp_hash = NULL
+            WHERE user_id = ? AND status IN ('PENDING', 'APPROVED')`,
         )
-        .bind(nowIso(), user.id),
+        .bind(requestCreatedAt, user.id),
       db
         .prepare(
           `INSERT INTO login_requests
-             (id, user_id, new_device_id, new_device_name, status, created_at, expires_at)
-           VALUES (?, ?, ?, ?, 'PENDING', ?, ?)`,
+             (id, user_id, new_device_id, new_device_name, new_device_platform,
+              otp_hash, otp_attempts, status, created_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?, 0, 'PENDING', ?, ?)`,
         )
         // NOTE: binds `requestId`, the SAME id the response returns — the
         // polling device only ever learns this one.
-        .bind(requestId, user.id, deviceId, deviceName, nowIso(), expiresAt),
+        .bind(
+          requestId,
+          user.id,
+          deviceId,
+          deviceName,
+          platform,
+          otpHash,
+          requestCreatedAt,
+          expiresAt,
+        ),
+      db
+        .prepare(
+          `UPDATE messages SET meta_json = json_set(json_remove(meta_json, '$.otp', '$.otpLocked'), '$.status', 'CANCELLED')
+            WHERE kind = 'LOGIN_APPROVAL'
+              AND json_extract(meta_json, '$.requestId') IN (
+                SELECT id FROM login_requests WHERE user_id = ? AND status = 'CANCELLED' AND resolved_at = ?
+              )`,
+        )
+        .bind(user.id, requestCreatedAt),
     ]);
     await audit(db, "LOGIN_REQUESTED", user.id, deviceId, { phone: maskPhone(phone) });
     // The approval itself arrives as a chat message from the official
@@ -5669,9 +6067,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // conversation, Accept/Decline live on the message card. FCM stays a
     // doorbell; the worker decides (§19).
     ctx.waitUntil(
-      sendApprovalMessage(env, db, ctx, user.id, requestId, deviceName, expiresAt, request),
+      sendApprovalMessage(env, db, ctx, user.id, requestId, deviceName, expiresAt, otp, request),
     );
-    return json({ status: "APPROVAL_REQUIRED", requestId, expiresAt, phone, deviceGone });
+    return json({
+      status: "APPROVAL_REQUIRED",
+      requestId,
+      expiresAt,
+      phone,
+      deviceGone,
+      otpAvailable: !!otp,
+    });
   }
 
   if (path === "/api/auth/google/bind" && method === "POST") {
@@ -5679,6 +6084,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     await rateLimitGlobal(db, `ggb:${clientIp(request)}`, 20);
     const phone = normalizePhone(body.phone);
     const deviceId = parseDeviceId(body.deviceId);
+    const platform = parseAuthPlatform(body.platform, deviceId);
     const displayName =
       String(body.displayName || "")
         .trim()
@@ -5775,8 +6181,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         db,
         target.id,
         deviceId,
-        displayName ?? "Android",
+        displayName ?? (platform === "WEB" ? "Web browser" : "Android"),
         clientWhere(request),
+        platform,
       ),
       stmt,
     ]);
@@ -5802,6 +6209,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       id: string;
       user_id: string;
       new_device_id: string;
+      new_device_name: string | null;
+      new_device_platform: string;
       status: string;
       expires_at: string;
     }>(db, "SELECT * FROM login_requests WHERE id = ?", requestId);
@@ -5810,41 +6219,172 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (row.status === "PENDING") {
       if (Date.parse(row.expires_at) < Date.now()) {
         // Lazy expiry: never auto-approve after timeout (§17).
-        await run(
+        const expiredAt = nowIso();
+        const expiredRows = (await db.batch([
+          db
+            .prepare(
+              `UPDATE login_requests SET status = 'EXPIRED', resolved_at = ?, otp_hash = NULL
+                WHERE id = ? AND status = 'PENDING' AND expires_at <= ?`,
+            )
+            .bind(expiredAt, requestId, expiredAt),
+          approvalCardStatusStmt(db, requestId, "EXPIRED", "EXPIRED"),
+        ])) as { meta: { changes: number } }[];
+        const expired = expiredRows[0]?.meta.changes ?? 0;
+        if (expired) await resolveApprovalMessage(db, requestId, "EXPIRED", env, ctx);
+        const latest = await one<{ status: string; expires_at: string }>(
           db,
-          `UPDATE login_requests SET status = 'EXPIRED', resolved_at = ?
-            WHERE id = ? AND status = 'PENDING'`,
-          nowIso(),
+          "SELECT status, expires_at FROM login_requests WHERE id = ?",
           requestId,
         );
-        await resolveApprovalMessage(db, requestId, "EXPIRED");
-        return json({ status: "EXPIRED" });
+        return json({
+          status: latest?.status === "PENDING" ? "PENDING" : latest?.status || "UNKNOWN",
+        });
       }
       return json({ status: "PENDING", expiresAt: row.expires_at });
     }
     if (row.status === "APPROVED") {
+      if (Date.parse(row.expires_at) < Date.now()) {
+        const expiredAt = nowIso();
+        const expiredRows = (await db.batch([
+          db
+            .prepare(
+              `UPDATE login_requests SET status = 'EXPIRED', resolved_at = ?, otp_hash = NULL
+                WHERE id = ? AND status = 'APPROVED' AND expires_at <= ?`,
+            )
+            .bind(expiredAt, requestId, expiredAt),
+          approvalCardStatusStmt(db, requestId, "EXPIRED", "EXPIRED"),
+        ])) as { meta: { changes: number } }[];
+        const expired = expiredRows[0]?.meta.changes ?? 0;
+        if (expired) await resolveApprovalMessage(db, requestId, "EXPIRED", env, ctx);
+        return json({ status: expired ? "EXPIRED" : "UNKNOWN" });
+      }
       const user = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row.user_id);
       if (!user || user.auth_status !== "ACTIVE") return json({ status: "DECLINED" });
-      const { token, stmt } = await sessionStmt(db, user.id, deviceId);
-      const claimed = (await db.batch([
-        db
-          .prepare(
-            `UPDATE login_requests SET status = 'CLAIMED', resolved_at = ?
-              WHERE id = ? AND status = 'APPROVED'`,
-          )
-          .bind(nowIso(), requestId),
-        // approve() already ran the transfer; re-running is idempotent and
-        // keeps the batch self-healing if approve crashed mid-way.
-        ...deviceTransferStmts(db, user.id, deviceId, null, clientWhere(request)),
-        stmt,
-      ])) as { meta: { changes: number } }[];
-      if (!claimed[0]?.meta.changes) return json({ status: "UNKNOWN" });
-      await audit(db, "LOGIN_CLAIMED", user.id, deviceId, {});
+      const platform = parseAuthPlatform(row.new_device_platform, deviceId);
+      const token = await claimLoginSession(db, env, ctx, request, {
+        requestId,
+        userId: user.id,
+        deviceId,
+        deviceName: row.new_device_name,
+        platform,
+        expectedStatus: "APPROVED",
+        method: "APPROVAL",
+      });
+      if (!token) return json({ status: "UNKNOWN" });
       return json({ status: "SESSION", token, user: userSelf(user, true) });
     }
     // DECLINED | CANCELLED | EXPIRED | CLAIMED (claimed = someone else
     // finished this request; treat as unknown rather than an error)
     return json({ status: row.status === "CLAIMED" ? "UNKNOWN" : row.status });
+  }
+
+  if (path === "/api/auth/login/otp" && method === "POST") {
+    // The requesting device can prove possession of the six-digit code shown
+    // only inside the signed-in approval card. Five bad guesses lock this
+    // request; the independent approval action remains an alternative.
+    rateLimit(`lotp:${clientIp(request)}`, 20, 60);
+    await rateLimitGlobal(db, `glotp:${clientIp(request)}`, 60);
+    const requestId = String(body.requestId || "")
+      .trim()
+      .slice(0, 64);
+    const deviceId = parseDeviceId(body.deviceId);
+    const otp = String(body.otp || "").trim();
+    if (!requestId) fail(400, "Missing request id.");
+    if (!/^\d{6}$/.test(otp)) return json({ status: "INVALID_CODE", attemptsRemaining: 5 });
+
+    const row = await one<{
+      id: string;
+      user_id: string;
+      new_device_id: string;
+      new_device_name: string | null;
+      new_device_platform: string;
+      otp_hash: string | null;
+      otp_attempts: number;
+      status: string;
+      expires_at: string;
+    }>(db, "SELECT * FROM login_requests WHERE id = ?", requestId);
+    if (!row || row.new_device_id !== deviceId) return json({ status: "UNKNOWN" });
+    if (row.status === "OTP_LOCKED" || (row.status === "PENDING" && row.otp_attempts >= 5))
+      return json({ status: "OTP_LOCKED" });
+    if (row.status !== "PENDING" || !row.otp_hash)
+      return json({
+        status: row.status === "CLAIMED" ? "UNKNOWN" : row.status || "OTP_UNAVAILABLE",
+      });
+
+    if (Date.parse(row.expires_at) <= Date.now()) {
+      const expiredAt = nowIso();
+      const expiredRows = (await db.batch([
+        db
+          .prepare(
+            `UPDATE login_requests SET status = 'EXPIRED', resolved_at = ?, otp_hash = NULL
+              WHERE id = ? AND new_device_id = ? AND status = 'PENDING' AND expires_at <= ?`,
+          )
+          .bind(expiredAt, requestId, deviceId, expiredAt),
+        approvalCardStatusStmt(db, requestId, "EXPIRED", "EXPIRED"),
+      ])) as { meta: { changes: number } }[];
+      const expired = expiredRows[0]?.meta.changes ?? 0;
+      if (expired) await resolveApprovalMessage(db, requestId, "EXPIRED", env, ctx);
+      return json({ status: "EXPIRED" });
+    }
+
+    const otpSecret = loginOtpSecret(env);
+    if (!otpSecret) return json({ status: "OTP_UNAVAILABLE" });
+    const candidate = await loginOtpVerifier(otpSecret, requestId, otp);
+    if (!constantTimeTextEqual(candidate, row.otp_hash)) {
+      const at = nowIso();
+      const attemptRows = (await db.batch([
+        db
+          .prepare(
+            `UPDATE login_requests
+                SET otp_attempts = otp_attempts + 1,
+                    otp_hash = CASE WHEN otp_attempts + 1 >= 5 THEN NULL ELSE otp_hash END
+              WHERE id = ? AND new_device_id = ? AND status = 'PENDING'
+                AND expires_at > ? AND otp_hash = ? AND otp_attempts < 5`,
+          )
+          .bind(requestId, deviceId, at, row.otp_hash),
+        approvalCardOtpLockStmt(db, requestId),
+      ])) as { meta: { changes: number } }[];
+      const changed = attemptRows[0]?.meta.changes ?? 0;
+      const latest = await one<{ status: string; otp_attempts: number }>(
+        db,
+        "SELECT status, otp_attempts FROM login_requests WHERE id = ?",
+        requestId,
+      );
+      if (latest?.status === "PENDING" && latest.otp_attempts >= 5) {
+        await broadcastApprovalCardUpdate(env, db, ctx, requestId);
+        return json({ status: "OTP_LOCKED" });
+      }
+      if (!changed) return json({ status: latest?.status || "UNKNOWN" });
+      return json({
+        status: "INVALID_CODE",
+        attemptsRemaining: Math.max(0, 5 - (latest?.otp_attempts ?? 0)),
+      });
+    }
+
+    const user = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row.user_id);
+    if (!user || user.auth_status !== "ACTIVE") return json({ status: "UNKNOWN" });
+    const platform = parseAuthPlatform(row.new_device_platform, deviceId);
+    const token = await claimLoginSession(db, env, ctx, request, {
+      requestId,
+      userId: user.id,
+      deviceId,
+      deviceName: row.new_device_name,
+      platform,
+      expectedStatus: "PENDING",
+      otpHash: row.otp_hash,
+      method: "OTP",
+    });
+    if (!token) {
+      const latest = await one<{ status: string }>(
+        db,
+        "SELECT status FROM login_requests WHERE id = ?",
+        requestId,
+      );
+      return json({
+        status: latest?.status === "CLAIMED" ? "UNKNOWN" : latest?.status || "UNKNOWN",
+      });
+    }
+    return json({ status: "SESSION", token, user: userSelf(user, true) });
   }
 
   if (path === "/api/auth/login/cancel" && method === "POST") {
@@ -5855,14 +6395,18 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       .slice(0, 64);
     const deviceId = parseDeviceId(body.deviceId);
     if (!requestId) fail(400, "Missing request id.");
-    await run(
-      db,
-      `UPDATE login_requests SET status = 'CANCELLED', resolved_at = ?
-        WHERE id = ? AND new_device_id = ? AND status = 'PENDING'`,
-      nowIso(),
-      requestId,
-      deviceId,
-    );
+    const cancelledAt = nowIso();
+    const cancelledRows = (await db.batch([
+      db
+        .prepare(
+          `UPDATE login_requests SET status = 'CANCELLED', resolved_at = ?, otp_hash = NULL
+            WHERE id = ? AND new_device_id = ? AND status IN ('PENDING', 'APPROVED')`,
+        )
+        .bind(cancelledAt, requestId, deviceId),
+      approvalCardStatusStmt(db, requestId, "CANCELLED", "CANCELLED"),
+    ])) as { meta: { changes: number } }[];
+    const cancelled = cancelledRows[0]?.meta.changes ?? 0;
+    if (cancelled) await resolveApprovalMessage(db, requestId, "CANCELLED", env, ctx);
     return json({ ok: true });
   }
 
@@ -5897,6 +6441,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     rateLimit(`rs:${clientIp(request)}`, 5, 2);
     await rateLimitGlobal(db, `grs:${clientIp(request)}`, 10);
     const phone = normalizePhone(body.phone);
+    const deviceId = parseDeviceId(body.deviceId);
+    const platform = parseAuthPlatform(body.platform, deviceId);
     rateLimit(`rsp:${phone}`, 5, 2);
     await rateLimitGlobal(db, `grsp:${phone}`, 10);
     const user = await one<UserRow>(db, "SELECT * FROM users WHERE phone_e164 = ?", phone);
@@ -5923,13 +6469,13 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       db
         .prepare(
           `INSERT INTO recovery_requests
-             (id, user_id, new_device_id, google_subject, status, created_at, expires_at)
-           VALUES (?, ?, ?, ?, 'PENDING', ?, ?)`,
+             (id, user_id, new_device_id, google_subject, new_device_platform, status, created_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?)`,
         )
         // Binds `requestId` — the SAME id the response returns.
-        .bind(requestId, user.id, parseDeviceId(body.deviceId), google.sub, nowIso(), expiresAt),
+        .bind(requestId, user.id, deviceId, google.sub, platform, nowIso(), expiresAt),
     ]);
-    await audit(db, "RECOVERY_STARTED", user.id, String(body.deviceId || ""), {});
+    await audit(db, "RECOVERY_STARTED", user.id, deviceId, { platform });
     return json({ requestId, expiresAt });
   }
 
@@ -5945,85 +6491,90 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       id: string;
       user_id: string;
       new_device_id: string;
+      new_device_platform: string;
       google_subject: string;
       status: string;
       expires_at: string;
     }>(db, "SELECT * FROM recovery_requests WHERE id = ?", requestId);
     if (!row || row.new_device_id !== deviceId || row.status !== "PENDING")
       fail(404, "This recovery request is no longer valid.", "RECOVERY_INVALID");
-    if (Date.parse(row.expires_at) < Date.now())
+    if (Date.parse(row.expires_at) < Date.now()) {
+      await run(
+        db,
+        `UPDATE recovery_requests SET status = 'EXPIRED', completed_at = ?
+          WHERE id = ? AND status = 'PENDING' AND expires_at <= ?`,
+        nowIso(),
+        requestId,
+        nowIso(),
+      );
       fail(410, "The recovery request expired. Please start again.", "RECOVERY_EXPIRED");
+    }
+    const platform = parseAuthPlatform(row.new_device_platform, deviceId);
     const user = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row.user_id);
     if (!user || user.google_subject !== row.google_subject)
       fail(404, "This recovery request is no longer valid.", "RECOVERY_INVALID");
-    // Single-use claim + full device transfer + session, in ONE atomic batch
-    // (§15/§22): the old device and its session die here.
-    const { token, stmt } = await sessionStmt(db, user.id, deviceId);
+    // The one-time Google proof is claimed in the same transaction as the
+    // target-platform transfer and session insert. A losing concurrent
+    // completion cannot revoke devices or leave a bearer row behind.
+    const claimId = id();
+    const guard: ClaimGuard = {
+      table: "recovery_requests",
+      requestId,
+      claimId,
+      status: "COMPLETED",
+    };
+    const { token, stmt } = await sessionStmt(db, user.id, deviceId, guard);
     const done = (await db.batch([
       db
         .prepare(
-          `UPDATE recovery_requests SET status = 'COMPLETED', completed_at = ?
+          `UPDATE recovery_requests SET status = 'COMPLETED', claim_id = ?, completed_at = ?
             WHERE id = ? AND status = 'PENDING' AND expires_at > ?`,
         )
-        .bind(nowIso(), requestId, nowIso()),
-      ...deviceTransferStmts(db, user.id, deviceId, null, clientWhere(request)),
+        .bind(claimId, nowIso(), requestId, nowIso()),
+      ...deviceTransferStmts(db, user.id, deviceId, null, clientWhere(request), platform, guard),
       stmt,
     ])) as { meta: { changes: number } }[];
     if (!done[0]?.meta.changes)
       fail(409, "This recovery request was already used.", "RECOVERY_USED");
-    await audit(db, "RECOVERY_COMPLETED", user.id, deviceId, {});
+    await audit(db, "RECOVERY_COMPLETED", user.id, deviceId, { platform });
     return json({ token, user: userSelf(user, true) });
   }
 
   if (path === "/api/auth/logout" && method === "POST") {
     const token = bearerToken(request);
-    // Owner round 28: the install can name the exact push handle it is
-    // signing out. A token is a capability only its holder has (FCM hands it
-    // to that one app instance), so deleting BY TOKEN needs no session — this
-    // is what makes "logout while the session was already revoked/expired"
-    // stop pushing at the phone: the bearer is dead, but the device row is not.
+    // A push token is itself a capability; it can still be unregistered after
+    // the bearer was revoked. Session/device revocation below is always scoped
+    // to the device_id stored with that bearer, never a caller-supplied ID.
     const pushToken = String(body.pushToken || "")
       .trim()
       .slice(0, 512);
     if (pushToken) await run(db, "DELETE FROM devices WHERE token = ?", pushToken);
     if (token) {
       const hash = await sha256Hex(token);
-      // The session and the push handle die together — and ONLY this device's row.
-      // This has to happen inside the logout request itself: SettingsScreen signs
-      // out first, so a later authenticated DELETE would already be a 401, and
-      // KpPush.unregister() on its own leaves the server pushing at a token the
-      // user just walked away from (a signed-out phone still lighting up for the
-      // old account). No deviceId → no device rows touched: a token revocation
-      // elsewhere must not silence the user's tablet.
-      const deviceId = String(body.deviceId || "")
-        .trim()
-        .slice(0, 64);
-      const owner = await one<{ user_id: string }>(
+      const session = await one<{ user_id: string; device_id: string | null }>(
         db,
-        "SELECT user_id FROM sessions WHERE token_hash = ?",
+        "SELECT user_id, device_id FROM sessions WHERE token_hash = ?",
         hash,
       );
       await run(db, "DELETE FROM sessions WHERE token_hash = ?", hash);
-      if (deviceId && owner) {
+      const deviceId = session?.device_id || null;
+      if (session && deviceId) {
         await run(
           db,
           "DELETE FROM devices WHERE user_id = ? AND device_id = ?",
-          owner.user_id,
+          session.user_id,
           deviceId,
         );
-        // §24: logging out also releases the device slot, so the next login on
-        // this install (or any other) is a plain same-device/no-device login
-        // instead of asking a device that is no longer there to approve.
         await run(
           db,
           `UPDATE auth_devices SET status = 'REVOKED', revoked_at = ?
             WHERE user_id = ? AND device_id = ? AND status = 'ACTIVE'`,
           nowIso(),
-          owner.user_id,
+          session.user_id,
           deviceId,
         );
       }
-      if (owner) await audit(db, "LOGOUT", owner.user_id, deviceId || null, {});
+      if (session) await audit(db, "LOGOUT", session.user_id, deviceId, {});
     }
     return json({ ok: true });
   }
@@ -6064,6 +6615,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const rows = await all<{
       device_id: string;
       device_name: string | null;
+      platform: string;
       status: string;
       created_at: string;
       last_seen_at: string;
@@ -6075,7 +6627,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       push_seen_at: string | null;
     }>(
       db,
-      `SELECT a.device_id, a.device_name, a.status, a.created_at, a.last_seen_at, a.revoked_at,
+      `SELECT a.device_id, a.device_name, a.platform, a.status, a.created_at, a.last_seen_at, a.revoked_at,
               a.ip, a.city, a.country,
               (SELECT d.app_version FROM devices d
                  WHERE d.user_id = a.user_id AND d.device_id = a.device_id
@@ -6090,7 +6642,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     );
     const items = rows.map((r) => ({
       deviceId: r.device_id,
-      name: r.device_name || "Android",
+      platform: (r.platform || (r.device_id.startsWith("web-") ? "WEB" : "ANDROID")).toUpperCase(),
+      name: r.device_name || (r.platform === "WEB" ? "Web browser" : "Android"),
       active: r.status === "ACTIVE",
       current: !!me.session_device_id && r.device_id === me.session_device_id,
       appVersion: r.app_version,
@@ -6109,11 +6662,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   /* ---------- phone auth: current-device approval + phone change ---------- */
 
   if (path === "/api/auth/login/approve" && method === "POST") {
-    // Called by the OLD (currently active) device. One atomic batch: the
-    // request flips APPROVED exactly once, the old session + device die, the
-    // new install becomes the ACTIVE device (§15). The session itself is
-    // minted by the new device's /login/poll claim, which is the only place
-    // the token ever exists in the clear for that device.
+    // Any signed-in client may approve. Approval records consent only; the
+    // requesting device performs the one-time, platform-scoped session claim
+    // when it next polls. Keeping transfer out of this route prevents a lost
+    // or stale approval from signing out the current client.
     rateLimit(`la:${uid}`, 15, 10);
     const requestId = String(body.id || body.requestId || "")
       .trim()
@@ -6126,17 +6678,43 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       expires_at: string;
     }>(db, "SELECT * FROM login_requests WHERE id = ?", requestId);
     if (!row || row.user_id !== uid) fail(404, "Login request not found.", "REQUEST_NOT_FOUND");
-    const claimed = (await db.batch([
+    const approvedAt = nowIso();
+    const approvedRows = (await db.batch([
       db
         .prepare(
-          `UPDATE login_requests SET status = 'APPROVED', resolved_at = ?
-            WHERE id = ? AND status = 'PENDING' AND expires_at > ?`,
+          `UPDATE login_requests SET status = 'APPROVED', resolved_at = ?, otp_hash = NULL
+            WHERE id = ? AND user_id = ? AND status = 'PENDING' AND expires_at > ?`,
         )
-        .bind(nowIso(), requestId, nowIso()),
-      ...deviceTransferStmts(db, uid, row.new_device_id, null, clientWhere(request)),
+        .bind(approvedAt, requestId, uid, approvedAt),
+      approvalCardStatusStmt(db, requestId, "APPROVED", "APPROVED"),
     ])) as { meta: { changes: number } }[];
-    if (!claimed[0]?.meta.changes) {
-      if (row.status === "PENDING")
+    const approved = approvedRows[0]?.meta.changes ?? 0;
+    if (!approved) {
+      const latest = await one<{ status: string; expires_at: string }>(
+        db,
+        "SELECT status, expires_at FROM login_requests WHERE id = ?",
+        requestId,
+      );
+      if (latest?.status === "PENDING" && Date.parse(latest.expires_at) <= Date.now()) {
+        const at = nowIso();
+        const expiredRows = (await db.batch([
+          db
+            .prepare(
+              `UPDATE login_requests SET status = 'EXPIRED', resolved_at = ?, otp_hash = NULL
+                WHERE id = ? AND status = 'PENDING' AND expires_at <= ?`,
+            )
+            .bind(at, requestId, at),
+          approvalCardStatusStmt(db, requestId, "EXPIRED", "EXPIRED"),
+        ])) as { meta: { changes: number } }[];
+        const expired = expiredRows[0]?.meta.changes ?? 0;
+        if (expired) await resolveApprovalMessage(db, requestId, "EXPIRED", env, ctx);
+        fail(
+          410,
+          "The login request expired. Please try again from the other device.",
+          "REQUEST_EXPIRED",
+        );
+      }
+      if (latest?.status === "EXPIRED")
         fail(
           410,
           "The login request expired. Please try again from the other device.",
@@ -6144,7 +6722,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         );
       fail(409, "The login request was already handled.", "REQUEST_NOT_PENDING");
     }
-    await resolveApprovalMessage(db, requestId, "APPROVED");
+    await resolveApprovalMessage(db, requestId, "APPROVED", env, ctx);
     await audit(db, "LOGIN_APPROVED", uid, row.new_device_id, {});
     return json({ ok: true });
   }
@@ -6157,15 +6735,17 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (!requestId) fail(400, "Missing request id.");
     // Owner round 3 (2026-09-04): a request can only be acted on inside its
     // 5-minute window — after that the answer is EXPIRED, whatever it is.
-    const declined = await run(
-      db,
-      `UPDATE login_requests SET status = 'DECLINED', resolved_at = ?
-        WHERE id = ? AND user_id = ? AND status = 'PENDING' AND expires_at > ?`,
-      nowIso(),
-      requestId,
-      uid,
-      nowIso(),
-    );
+    const declinedAt = nowIso();
+    const declinedRows = (await db.batch([
+      db
+        .prepare(
+          `UPDATE login_requests SET status = 'DECLINED', resolved_at = ?, otp_hash = NULL
+            WHERE id = ? AND user_id = ? AND status = 'PENDING' AND expires_at > ?`,
+        )
+        .bind(declinedAt, requestId, uid, declinedAt),
+      approvalCardStatusStmt(db, requestId, "DECLINED", "DECLINED"),
+    ])) as { meta: { changes: number } }[];
+    const declined = declinedRows[0]?.meta.changes ?? 0;
     if (!declined) {
       const stale = await one<{ status: string; expires_at: string }>(
         db,
@@ -6180,7 +6760,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         );
       fail(409, "The login request was already handled.", "REQUEST_NOT_PENDING");
     }
-    await resolveApprovalMessage(db, requestId, "DECLINED");
+    await resolveApprovalMessage(db, requestId, "DECLINED", env, ctx);
     await audit(db, "LOGIN_DECLINED", uid, null, {});
     return json({ ok: true });
   }
@@ -11196,11 +11776,26 @@ function msgFrom(row: MsgRow) {
     document?: boolean;
     w?: number;
     h?: number;
-    status?: { id: string; kind: string; text: string };
+    status?: { id: string; kind: string; text: string } | string;
+    expiresAt?: string;
+    otp?: string;
+    otpLocked?: number;
     viewOnce?: boolean;
     viewedAt?: string;
     viewedBy?: string;
   }>(row.meta_json, {});
+  // Never return an expired plaintext login code, even in the minute before
+  // the scheduled cleanup has erased it from the stored approval card.
+  if (
+    row.kind === "LOGIN_APPROVAL" &&
+    meta.status === "PENDING" &&
+    meta.expiresAt &&
+    Date.parse(meta.expiresAt) <= Date.now()
+  ) {
+    delete meta.otp;
+    delete meta.otpLocked;
+    meta.status = "EXPIRED";
+  }
   const imageFile =
     row.kind === "FILE" && String(meta.type || "").startsWith("image/") && meta.document !== true;
   // Owner round 32 (item 17): once a view-once message has been opened its

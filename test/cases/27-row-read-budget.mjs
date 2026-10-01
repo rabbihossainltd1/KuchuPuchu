@@ -253,9 +253,9 @@ const plan = (raw, sql, ...bind) =>
     .filter(Boolean);
   check(
     "the cron log carries counts only, never a stack, token or row body (§52)",
-    // r32-18: + the number of "send later" rows the tick dispatched.
+    // r32-18: dispatched schedule count; auth workstream: expired login-request count.
     keys.join("|") ===
-      "reaped|pruneRan|pruned|devices|statuses|staleUploads|metrics|lat|dispatched" &&
+      "reaped|expiredLoginRequests|pruneRan|pruned|devices|statuses|staleUploads|metrics|lat|dispatched" &&
       !/stack|token|sdp|body|text/.test(payload),
     JSON.stringify(keys),
   );

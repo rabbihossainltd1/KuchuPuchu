@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PermMedia
 import androidx.compose.material.icons.filled.PhoneAndroid
@@ -752,6 +753,8 @@ private fun DevicesSection() {
         list.forEachIndexed { i, d ->
             val current = d.optBoolean("current") || d.optString("deviceId") == myDevice
             val active = d.optBoolean("active")
+            val platform = d.optString("platform").uppercase().ifBlank { "ANDROID" }
+            val platformLabel = if (platform == "WEB") "Web" else "Android"
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -770,7 +773,7 @@ private fun DevicesSection() {
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        Icons.Filled.PhoneAndroid,
+                        if (platform == "WEB") Icons.Filled.Language else Icons.Filled.PhoneAndroid,
                         null,
                         tint = if (active) ActionBlueDeep else Muted,
                         modifier = Modifier.size(20.dp),
@@ -806,6 +809,8 @@ private fun DevicesSection() {
                     Text(
                         buildString {
                             append(if (active) "Active" else "Signed out")
+                            append(" · ")
+                            append(platformLabel)
                             append(" · ")
                             append(deviceSeen(d.optText("lastSeenAt")))
                             if (ver.isNotBlank()) append(" · v$ver")

@@ -4,10 +4,12 @@
 // Google recovery, one-Google-one-account, pending-signup takeover, legacy
 // email migration, phone change, placeholder-email privacy, rate limits.
 
+import { createHmac } from "node:crypto";
 import { makeD1, makeR2, makeCtx } from "../d1shim.mjs";
 import { makeReg, installGoogleStub, phoneFrom, fakeIdToken } from "../helpers/phoneauth.mjs";
 
 installGoogleStub();
+const OTP_SECRET = "local-test-login-otp-hmac-secret-only";
 
 const WORKER = new URL("../../src/worker/index.ts", import.meta.url).href;
 let n = 0;
@@ -20,7 +22,22 @@ const check = (name, cond, detail) =>
 async function mk() {
   const worker = await freshWorker();
   const db = makeD1();
-  const env = { DB: db, MEDIA: makeR2(), GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
+  const events = [];
+  const env = {
+    DB: db,
+    MEDIA: makeR2(),
+    GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
+    LOGIN_OTP_HMAC_SECRET: OTP_SECRET,
+    CHAT_ROOM: {
+      idFromName: (name) => ({ name }),
+      get: (room) => ({
+        fetch: async (_url, init) => {
+          events.push({ room: room.name, event: JSON.parse(init.body) });
+          return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        },
+      }),
+    },
+  };
   const ctx = makeCtx();
   let ipSeq = 0;
   const call = async (method, path, body, token, fixedIp) => {
@@ -42,13 +59,31 @@ async function mk() {
     }
     return { status: res.status, json: j };
   };
-  return { db, call, reg: makeReg(call) };
+  const runScheduled = async () => {
+    await worker.scheduled({ noRetryIfBusy: true }, env, ctx);
+    await ctx.drain();
+  };
+  return { db, call, reg: makeReg(call), events, runScheduled };
 }
 
-const verify = (k, phone, sim, deviceId) =>
-  k.call("POST", "/api/auth/verify-phone", { phone, sim, deviceId, deviceName: "Pixel Test" });
-const bind = (k, phone, idToken, deviceId, displayName) =>
-  k.call("POST", "/api/auth/google/bind", { phone, idToken, deviceId, displayName });
+const verify = (k, phone, sim, deviceId, platform) =>
+  k.call("POST", "/api/auth/verify-phone", {
+    phone,
+    sim,
+    deviceId,
+    deviceName: "Pixel Test",
+    ...(platform ? { platform } : {}),
+  });
+const bind = (k, phone, idToken, deviceId, displayName, platform) =>
+  k.call("POST", "/api/auth/google/bind", {
+    phone,
+    idToken,
+    deviceId,
+    displayName,
+    ...(platform ? { platform } : {}),
+  });
+const otpHash = (requestId, code) =>
+  createHmac("sha256", OTP_SECRET).update(`${requestId}:${code}`).digest("hex");
 
 // ---- 1. new account: verify → bind → ACTIVE, device registered ----
 {
@@ -170,8 +205,8 @@ const bind = (k, phone, idToken, deviceId, displayName) =>
   const approve = await k.call("POST", "/api/auth/login/approve", { id: reqId }, a.token);
   check("current device can approve", approve.status === 200, JSON.stringify(approve.json));
   check(
-    "the old session is dead the moment approve lands",
-    (await k.call("GET", "/api/me", undefined, a.token)).status === 401,
+    "approval records consent without signing out the current device",
+    (await k.call("GET", "/api/me", undefined, a.token)).status === 200,
   );
 
   const poll = await k.call("POST", "/api/auth/login/poll", {
@@ -187,6 +222,10 @@ const bind = (k, phone, idToken, deviceId, displayName) =>
     "new token works",
     (await k.call("GET", "/api/me", undefined, poll.json.token)).status === 200,
   );
+  check(
+    "successful same-platform claim replaces the old session",
+    (await k.call("GET", "/api/me", undefined, a.token)).status === 401,
+  );
   const again = await k.call("POST", "/api/auth/login/poll", {
     requestId: reqId,
     deviceId: "dev-thief",
@@ -201,6 +240,391 @@ const bind = (k, phone, idToken, deviceId, displayName) =>
     "exactly one ACTIVE device after the transfer",
     active.length === 1 && active[0].device_id === "dev-thief",
     JSON.stringify(devs),
+  );
+}
+
+// ---- 5a. six-digit OTP is delivered only in the approval card and claims once ----
+{
+  const k = await mk();
+  const a = await k.reg("otp@x.com", "otp");
+  const v = await verify(k, a.user.phone, "MATCH", "dev-otp-new");
+  check(
+    "new-device request advertises OTP without returning the code",
+    v.json.otpAvailable === true && !v.json.otp,
+  );
+  const msg = k.db._db
+    .prepare(
+      "SELECT * FROM messages WHERE kind = 'LOGIN_APPROVAL' AND json_extract(meta_json, '$.requestId') = ?",
+    )
+    .get(v.json.requestId);
+  const meta = JSON.parse(msg?.meta_json || "{}");
+  check(
+    "six-digit code exists only in approval-card metadata",
+    /^\d{6}$/.test(meta.otp || "") &&
+      !msg.body.includes(meta.otp) &&
+      !k.db._db
+        .prepare("SELECT last_message FROM conversations WHERE id = ?")
+        .get(msg.conv_id)
+        ?.last_message?.includes(meta.otp),
+  );
+  check(
+    "request stores a keyed verifier, not the plaintext code",
+    k.db._db
+      .prepare("SELECT otp_hash, otp_attempts FROM login_requests WHERE id = ?")
+      .get(v.json.requestId)?.otp_hash === otpHash(v.json.requestId, meta.otp) &&
+      k.db._db.prepare("SELECT otp_hash FROM login_requests WHERE id = ?").get(v.json.requestId)
+        ?.otp_hash !== meta.otp,
+  );
+  // Leading zeroes are valid six-digit codes, not an integer to be trimmed.
+  const code = "012345";
+  k.db._db
+    .prepare("UPDATE login_requests SET otp_hash = ?, otp_attempts = 0 WHERE id = ?")
+    .run(otpHash(v.json.requestId, code), v.json.requestId);
+  k.db._db
+    .prepare("UPDATE messages SET meta_json = json_set(meta_json, '$.otp', ?) WHERE id = ?")
+    .run(code, msg.id);
+  const wrongDevice = await k.call("POST", "/api/auth/login/otp", {
+    requestId: v.json.requestId,
+    deviceId: "dev-not-otp",
+    otp: code,
+  });
+  check("OTP request is bound to the requested device", wrongDevice.json.status === "UNKNOWN");
+  const done = await k.call("POST", "/api/auth/login/otp", {
+    requestId: v.json.requestId,
+    deviceId: "dev-otp-new",
+    otp: code,
+  });
+  check(
+    "correct leading-zero OTP returns a session",
+    done.json.status === "SESSION" && !!done.json.token,
+  );
+  check(
+    "new OTP session authenticates",
+    (await k.call("GET", "/api/me", undefined, done.json.token)).status === 200,
+  );
+  check(
+    "OTP claim replaces the same-platform old bearer",
+    (await k.call("GET", "/api/me", undefined, a.token)).status === 401,
+  );
+  const finished = JSON.parse(
+    k.db._db.prepare("SELECT meta_json FROM messages WHERE id = ?").get(msg.id).meta_json,
+  );
+  const req = k.db._db
+    .prepare("SELECT status, otp_hash FROM login_requests WHERE id = ?")
+    .get(v.json.requestId);
+  check(
+    "successful OTP consumes request verifier and redacts the card",
+    req.status === "CLAIMED" &&
+      req.otp_hash === null &&
+      finished.status === "CLAIMED" &&
+      !finished.otp,
+  );
+  const replay = await k.call("POST", "/api/auth/login/otp", {
+    requestId: v.json.requestId,
+    deviceId: "dev-otp-new",
+    otp: code,
+  });
+  check("a consumed OTP cannot be replayed", replay.json.status === "UNKNOWN");
+}
+
+// ---- 5b. five wrong codes disable OTP only; approval remains an alternative ----
+{
+  const k = await mk();
+  const a = await k.reg("otplock@x.com", "otplock");
+  const v = await verify(k, a.user.phone, "MATCH", "dev-otp-lock");
+  const msg = k.db._db
+    .prepare(
+      "SELECT * FROM messages WHERE kind = 'LOGIN_APPROVAL' AND json_extract(meta_json, '$.requestId') = ?",
+    )
+    .get(v.json.requestId);
+  const intended = "111111";
+  k.db._db
+    .prepare("UPDATE login_requests SET otp_hash = ?, otp_attempts = 0 WHERE id = ?")
+    .run(otpHash(v.json.requestId, intended), v.json.requestId);
+  k.db._db
+    .prepare("UPDATE messages SET meta_json = json_set(meta_json, '$.otp', ?) WHERE id = ?")
+    .run(intended, msg.id);
+  let fifth;
+  for (let i = 0; i < 5; i++) {
+    fifth = await k.call("POST", "/api/auth/login/otp", {
+      requestId: v.json.requestId,
+      deviceId: "dev-otp-lock",
+      otp: "999999",
+    });
+  }
+  const locked = k.db._db
+    .prepare("SELECT status, otp_attempts, otp_hash FROM login_requests WHERE id = ?")
+    .get(v.json.requestId);
+  const lockedMeta = JSON.parse(
+    k.db._db.prepare("SELECT meta_json FROM messages WHERE id = ?").get(msg.id).meta_json,
+  );
+  check(
+    "fifth incorrect code exhausts OTP",
+    fifth?.json.status === "OTP_LOCKED" && locked.otp_attempts === 5,
+  );
+  check(
+    "lockout erases code but leaves request open for approval",
+    locked.status === "PENDING" &&
+      locked.otp_hash === null &&
+      !lockedMeta.otp &&
+      lockedMeta.otpLocked === 1,
+  );
+  const lockUpdate = k.events
+    .filter(({ event }) => event.type === "message" && event.message?.id === msg.id)
+    .at(-1)?.event.message;
+  check(
+    "OTP lock broadcasts a redacted card update to connected clients",
+    lockUpdate?.meta?.status === "PENDING" &&
+      lockUpdate.meta.otpLocked === 1 &&
+      !lockUpdate.meta.otp,
+  );
+  check(
+    "current device stays signed in while awaiting approval",
+    (await k.call("GET", "/api/me", undefined, a.token)).status === 200,
+  );
+  const approved = await k.call(
+    "POST",
+    "/api/auth/login/approve",
+    { id: v.json.requestId },
+    a.token,
+  );
+  const claim = await k.call("POST", "/api/auth/login/poll", {
+    requestId: v.json.requestId,
+    deviceId: "dev-otp-lock",
+  });
+  check(
+    "approval still succeeds after OTP lockout",
+    approved.status === 200 && claim.json.status === "SESSION",
+  );
+}
+
+// ---- 5c. one Android + one Web session coexist; cross-client approval replaces only its slot ----
+{
+  const k = await mk();
+  const a = await k.reg("platformslots@x.com", "platformslots");
+  const phone = a.user.phone;
+  const now = new Date().toISOString();
+  k.db._db
+    .prepare(
+      "INSERT INTO devices (token, user_id, updated_at, device_id, platform, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .run("fcm-android-slot", a.user.id, now, "dev-platformslots", "android", now);
+
+  const webId = "web-browser-one";
+  const webReq = await verify(k, phone, "UNAVAILABLE", webId, "WEB");
+  check(
+    "Web login is platform-tagged and requires approval on a different install",
+    webReq.json.status === "APPROVAL_REQUIRED" &&
+      k.db._db
+        .prepare("SELECT new_device_platform FROM login_requests WHERE id = ?")
+        .get(webReq.json.requestId)?.new_device_platform === "WEB",
+  );
+  const webApproval = await k.call(
+    "POST",
+    "/api/auth/login/approve",
+    { id: webReq.json.requestId },
+    a.token,
+  );
+  const web = await k.call("POST", "/api/auth/login/poll", {
+    requestId: webReq.json.requestId,
+    deviceId: webId,
+  });
+  check(
+    "Android can approve a Web login",
+    webApproval.status === 200 && web.json.status === "SESSION",
+  );
+  check(
+    "first Web claim preserves the Android session",
+    (await k.call("GET", "/api/me", undefined, a.token)).status === 200,
+  );
+  check(
+    "Web claim preserves the Android FCM registration",
+    !!k.db._db.prepare("SELECT token FROM devices WHERE token = ?").get("fcm-android-slot"),
+  );
+
+  const androidReq = await verify(k, phone, "MATCH", "dev-android-two", "ANDROID");
+  check(
+    "live Web session is an eligible approver without FCM",
+    androidReq.json.status === "APPROVAL_REQUIRED" && androidReq.json.deviceGone === false,
+  );
+  const androidApproval = await k.call(
+    "POST",
+    "/api/auth/login/approve",
+    { id: androidReq.json.requestId },
+    web.json.token,
+  );
+  const android2 = await k.call("POST", "/api/auth/login/poll", {
+    requestId: androidReq.json.requestId,
+    deviceId: "dev-android-two",
+  });
+  check(
+    "Web can approve a new Android login",
+    androidApproval.status === 200 && android2.json.status === "SESSION",
+  );
+  check(
+    "Android replacement leaves Web usable",
+    (await k.call("GET", "/api/me", undefined, web.json.token)).status === 200 &&
+      (await k.call("GET", "/api/me", undefined, a.token)).status === 401,
+  );
+
+  const webRelogin = await verify(k, phone, "UNAVAILABLE", webId, "WEB");
+  check(
+    "same Web install replaces only Web without approval",
+    webRelogin.json.status === "SESSION",
+  );
+  check(
+    "same-platform Web replacement keeps Android",
+    (await k.call("GET", "/api/me", undefined, android2.json.token)).status === 200 &&
+      (await k.call("GET", "/api/me", undefined, web.json.token)).status === 401,
+  );
+
+  const webTwoId = "web-browser-two";
+  const webTwoReq = await verify(k, phone, "UNAVAILABLE", webTwoId, "WEB");
+  const approvedFromAndroid = await k.call(
+    "POST",
+    "/api/auth/login/approve",
+    { id: webTwoReq.json.requestId },
+    android2.json.token,
+  );
+  const webTwo = await k.call("POST", "/api/auth/login/poll", {
+    requestId: webTwoReq.json.requestId,
+    deviceId: webTwoId,
+  });
+  check(
+    "a second Web device replaces only the Web slot",
+    webTwoReq.json.status === "APPROVAL_REQUIRED" &&
+      approvedFromAndroid.status === 200 &&
+      webTwo.json.status === "SESSION" &&
+      (await k.call("GET", "/api/me", undefined, android2.json.token)).status === 200 &&
+      (await k.call("GET", "/api/me", undefined, webRelogin.json.token)).status === 401,
+  );
+
+  const active = k.db._db
+    .prepare("SELECT device_id, platform FROM auth_devices WHERE user_id = ? AND status = 'ACTIVE'")
+    .all(a.user.id);
+  check(
+    "at most one active auth device per platform",
+    active.length === 2 &&
+      active.filter((d) => d.platform === "ANDROID").length === 1 &&
+      active.filter((d) => d.platform === "WEB").length === 1,
+    JSON.stringify(active),
+  );
+  const listed = await k.call("GET", "/api/auth/devices", undefined, webTwo.json.token);
+  check(
+    "device list exposes both canonical platforms",
+    listed.json.items.some((d) => d.platform === "ANDROID") &&
+      listed.json.items.some((d) => d.platform === "WEB"),
+  );
+
+  const webOut = await k.call(
+    "POST",
+    "/api/auth/logout",
+    { deviceId: "dev-android-two" },
+    webTwo.json.token,
+  );
+  check(
+    "Web logout trusts its bearer device, not a supplied Android ID",
+    webOut.status === 200 &&
+      (await k.call("GET", "/api/me", undefined, android2.json.token)).status === 200 &&
+      (await k.call("GET", "/api/me", undefined, webTwo.json.token)).status === 401,
+  );
+  const webThreeReq = await verify(k, phone, "UNAVAILABLE", "web-browser-three", "WEB");
+  await k.call(
+    "POST",
+    "/api/auth/login/approve",
+    { id: webThreeReq.json.requestId },
+    android2.json.token,
+  );
+  const webThree = await k.call("POST", "/api/auth/login/poll", {
+    requestId: webThreeReq.json.requestId,
+    deviceId: "web-browser-three",
+  });
+  const androidOut = await k.call("POST", "/api/auth/logout", {}, android2.json.token);
+  check(
+    "Android logout leaves the Web session signed in",
+    androidOut.status === 200 &&
+      (await k.call("GET", "/api/me", undefined, webThree.json.token)).status === 200 &&
+      (await k.call("GET", "/api/me", undefined, android2.json.token)).status === 401,
+  );
+}
+
+// ---- 5d. concurrent OTP/approval and duplicate polls have one side-effect-free winner ----
+{
+  const k = await mk();
+  const a = await k.reg("loginrace@x.com", "loginrace");
+  const v = await verify(k, a.user.phone, "MATCH", "dev-login-race");
+  const card = k.db._db
+    .prepare(
+      "SELECT * FROM messages WHERE kind = 'LOGIN_APPROVAL' AND json_extract(meta_json, '$.requestId') = ?",
+    )
+    .get(v.json.requestId);
+  const code = JSON.parse(card.meta_json).otp;
+  const [approved, otp] = await Promise.all([
+    k.call("POST", "/api/auth/login/approve", { id: v.json.requestId }, a.token),
+    k.call("POST", "/api/auth/login/otp", {
+      requestId: v.json.requestId,
+      deviceId: "dev-login-race",
+      otp: code,
+    }),
+  ]);
+  let winner = otp.json.status === "SESSION" ? otp : null;
+  if (!winner) {
+    const poll = await k.call("POST", "/api/auth/login/poll", {
+      requestId: v.json.requestId,
+      deviceId: "dev-login-race",
+    });
+    if (poll.json.status === "SESSION") winner = poll;
+  }
+  const raceReq = k.db._db
+    .prepare("SELECT status, claim_id, otp_hash FROM login_requests WHERE id = ?")
+    .get(v.json.requestId);
+  check(
+    "OTP and approval race returns one final bearer",
+    !!winner?.json.token &&
+      [200, 409].includes(approved.status) &&
+      ["SESSION", "APPROVED", "UNKNOWN"].includes(otp.json.status),
+  );
+  check(
+    "race produces one guarded CLAIMED row and erases OTP",
+    raceReq.status === "CLAIMED" && !!raceReq.claim_id && raceReq.otp_hash === null,
+  );
+  check(
+    "race winner authenticates; original same-platform bearer is revoked",
+    !!winner?.json.token &&
+      (await k.call("GET", "/api/me", undefined, winner.json.token)).status === 200 &&
+      (await k.call("GET", "/api/me", undefined, a.token)).status === 401,
+  );
+
+  const second = await verify(k, a.user.phone, "MATCH", "dev-poll-race");
+  await k.call("POST", "/api/auth/login/approve", { id: second.json.requestId }, winner.json.token);
+  const polls = await Promise.all([
+    k.call("POST", "/api/auth/login/poll", {
+      requestId: second.json.requestId,
+      deviceId: "dev-poll-race",
+    }),
+    k.call("POST", "/api/auth/login/poll", {
+      requestId: second.json.requestId,
+      deviceId: "dev-poll-race",
+    }),
+  ]);
+  const sessions = polls.filter((r) => r.json.status === "SESSION");
+  const others = polls.filter((r) => r.json.status === "UNKNOWN");
+  check(
+    "two simultaneous polls produce exactly one session result",
+    sessions.length === 1 && others.length === 1,
+  );
+  const dbSessions = k.db._db
+    .prepare("SELECT device_id FROM sessions WHERE user_id = ?")
+    .all(a.user.id);
+  const activeDevices = k.db._db
+    .prepare("SELECT device_id FROM auth_devices WHERE user_id = ? AND status = 'ACTIVE'")
+    .all(a.user.id);
+  check(
+    "losing poll leaves no extra session/device side effects",
+    dbSessions.length === 1 &&
+      dbSessions[0].device_id === "dev-poll-race" &&
+      activeDevices.length === 1 &&
+      activeDevices[0].device_id === "dev-poll-race",
   );
 }
 
@@ -230,11 +654,55 @@ const bind = (k, phone, idToken, deviceId, displayName) =>
   k.db._db
     .prepare("UPDATE login_requests SET expires_at = ? WHERE id = ?")
     .run("2020-01-01T00:00:00.000Z", v.json.requestId);
+  k.db._db
+    .prepare(
+      "UPDATE messages SET meta_json = json_set(meta_json, '$.expiresAt', ?) WHERE kind = 'LOGIN_APPROVAL' AND json_extract(meta_json, '$.requestId') = ?",
+    )
+    .run("2020-01-01T00:00:00.000Z", v.json.requestId);
+  const cardRow = k.db._db
+    .prepare(
+      "SELECT id, conv_id, meta_json FROM messages WHERE kind = 'LOGIN_APPROVAL' AND json_extract(meta_json, '$.requestId') = ?",
+    )
+    .get(v.json.requestId);
+  const rawCode = JSON.parse(cardRow.meta_json).otp;
+  const messagePage = await k.call(
+    "GET",
+    `/api/conversations/${cardRow.conv_id}/messages`,
+    undefined,
+    a.token,
+  );
+  const redactedCard = (messagePage.json.items || []).find((item) => item.id === cardRow.id);
+  check(
+    "message API suppresses an expired code before scheduled cleanup",
+    redactedCard?.meta?.status === "EXPIRED" &&
+      !redactedCard.meta.otp &&
+      JSON.parse(
+        k.db._db.prepare("SELECT meta_json FROM messages WHERE id = ?").get(cardRow.id).meta_json,
+      ).otp === rawCode,
+  );
+  await k.runScheduled();
   const poll = await k.call("POST", "/api/auth/login/poll", {
     requestId: v.json.requestId,
     deviceId: "dev-b",
   });
-  check("poll reports EXPIRED after the window", poll.json.status === "EXPIRED");
+  check(
+    "scheduled cleanup expires the unattended request; poll reports EXPIRED",
+    poll.json.status === "EXPIRED",
+  );
+  const expiredReq = k.db._db
+    .prepare("SELECT status, otp_hash FROM login_requests WHERE id = ?")
+    .get(v.json.requestId);
+  const expiredCard = k.db._db
+    .prepare(
+      "SELECT meta_json FROM messages WHERE kind = 'LOGIN_APPROVAL' AND json_extract(meta_json, '$.requestId') = ?",
+    )
+    .get(v.json.requestId);
+  check(
+    "scheduled expiry clears the verifier and card code",
+    expiredReq.status === "EXPIRED" &&
+      expiredReq.otp_hash === null &&
+      !JSON.parse(expiredCard.meta_json).otp,
+  );
   const late = await k.call("POST", "/api/auth/login/approve", { id: v.json.requestId }, a.token);
   check("an expired request cannot be approved", late.status !== 200, String(late.status));
   check(
@@ -431,7 +899,12 @@ const bind = (k, phone, idToken, deviceId, displayName) =>
 {
   const k = await mk();
   const a = await k.reg("logout@x.com", "logout");
-  const lo = await k.call("POST", "/api/auth/logout", { deviceId: "dev-logout" }, a.token);
+  const lo = await k.call(
+    "POST",
+    "/api/auth/logout",
+    { deviceId: "web-not-this-session" },
+    a.token,
+  );
   check("logout ok", lo.status === 200);
   const row = k.db._db.prepare("SELECT status FROM auth_devices WHERE user_id = ?").get(a.user.id);
   check("auth device row is REVOKED", row?.status === "REVOKED", row?.status);
@@ -500,7 +973,14 @@ const bind = (k, phone, idToken, deviceId, displayName) =>
   const metaAfter = JSON.parse(
     k.db._db.prepare("SELECT meta_json FROM messages WHERE id = ?").get(msg.id).meta_json || "{}",
   );
-  check("card status flips to APPROVED", metaAfter.status === "APPROVED", metaAfter.status);
+  check(
+    "card status flips to APPROVED and its one-time code is cleared",
+    metaAfter.status === "APPROVED" &&
+      !metaAfter.otp &&
+      k.db._db.prepare("SELECT otp_hash FROM login_requests WHERE id = ?").get(v.json.requestId)
+        ?.otp_hash === null,
+    metaAfter.status,
+  );
   const follow = k.db._db
     .prepare(
       "SELECT body FROM messages WHERE conv_id = ? AND kind = 'TEXT' AND sender_id = 'kp_official_bot' ORDER BY created_at DESC LIMIT 1",

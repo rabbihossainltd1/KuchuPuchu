@@ -116,10 +116,10 @@ async function main() {
   }
 
   {
-    // Sign-out carries its own install id, so the row goes in the same request
-    // (a separate authenticated DELETE after logout is already a 401).
-    await h.register("tokA3", "dev-3", A.token);
-    const out = await h.call("POST", "/api/auth/logout", { deviceId: "dev-3" }, A.token);
+    // Logout uses the install identity bound to this bearer; a caller-supplied
+    // deviceId is not authoritative, and a separate DELETE after logout is 401.
+    await h.register("tokA3", "dev-dev-a", A.token);
+    const out = await h.call("POST", "/api/auth/logout", undefined, A.token);
     const rows = await h.devices(A.user.id);
     check(
       "logout removes the signing-out device's push row",
