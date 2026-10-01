@@ -1,6 +1,6 @@
 # KuchuPuchu Web Login Parity & Multi-Device Authentication Plan
 
-> **Status:** The requested implementation and local source/regression verification are complete. The owner explicitly approved a one-time Worker/Web deployment plus Android GitHub Release. Worker/Web is deployed; Android release `v274` (`3.9.197`) is in progress.
+> **Status:** The requested implementation and local source/regression verification are complete. The owner explicitly approved a one-time Worker/Web deployment plus Android GitHub Release. Worker/Web is deployed; Android release `v274` (`3.9.197`) is blocked at signer continuity and remains unpublished.
 >
 > **Prepared:** 2026-10-01
 >
@@ -12,7 +12,7 @@
 >
 > **Worker deployment:** deployed `kuchupuchu-api` on 2026-10-01 (version `22ddb1f5-3e34-45ef-b6ac-0ffa9d0fcc66`); `/api/health` and `/` both returned HTTP 200. The dedicated OTP HMAC secret is provisioned in Worker secrets.
 >
-> **Android release status:** a manual GitHub Release workflow is being prepared. It requires production signing secrets, runs Android unit tests/lint, verifies signer continuity with published `v273`, then publishes `v274` only after all checks pass. Local Gradle testing was blocked by the sandbox's 1 GB `/tmp` limit while installing NDK 27.0.12077973, so GitHub Actions must provide the Android build verification.
+> **Android release status:** `.github/workflows/release.yml` is pushed on `main` (commit `42a27ec`). GitHub Actions run `36839205925` passed source CI, Android unit tests, lint and APK build, but the signer-continuity gate stopped publication. The published `v273` APK matches the tracked debug keystore; the configured production signing key does not. The only matching key in the repository is the debug key, so `v274` remains unpublished until the owner restores the intended matching signing key in Actions secrets. Local Gradle testing remains blocked by the sandbox's 1 GB `/tmp` limit.
 >
 > **Release gate:** this one-time v274 release is owner-approved; no later release is authorized by that approval.
 
