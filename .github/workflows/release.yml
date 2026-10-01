@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: Type RELEASE to build and publish the production APK
+        description: Type RELEASE-DEBUG-KEY for the owner-approved v273-compatible signer
         required: true
         type: string
 
@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   release:
-    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == 'RELEASE' }}
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == 'RELEASE-DEBUG-KEY' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
@@ -29,19 +29,11 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Require production signing secrets
-        shell: bash
-        env:
-          KP_KEYSTORE_B64: ${{ secrets.KP_KEYSTORE_B64 }}
-          KP_STORE_PASSWORD: ${{ secrets.KP_STORE_PASSWORD }}
-          KP_KEY_ALIAS: ${{ secrets.KP_KEY_ALIAS }}
-          KP_KEY_PASSWORD: ${{ secrets.KP_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          test -n "$KP_KEYSTORE_B64" || { echo "Missing KP_KEYSTORE_B64"; exit 1; }
-          test -n "$KP_STORE_PASSWORD" || { echo "Missing KP_STORE_PASSWORD"; exit 1; }
-          test -n "$KP_KEY_ALIAS" || { echo "Missing KP_KEY_ALIAS"; exit 1; }
-          test -n "$KP_KEY_PASSWORD" || { echo "Missing KP_KEY_PASSWORD"; exit 1; }
+      # One-time owner-approved exception: v273 is signed with the tracked
+      # debug keystore. Requiring this explicit dispatch input and checking the
+      # published signer prevents accidental use for future releases.
+      - name: Confirm v273-compatible keystore is present
+        run: test -s native-android/app/debug.keystore
 
       - name: Worker and source CI
         run: |
@@ -56,13 +48,14 @@ jobs:
           ./gradlew :app:testDebugUnitTest :app:lintDebug --no-daemon --continue \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
 
-      - name: Build production-signed APK
+      - name: Build v273-compatible APK using the debug keystore
         working-directory: native-android
         env:
-          KP_KEYSTORE_B64: ${{ secrets.KP_KEYSTORE_B64 }}
-          KP_STORE_PASSWORD: ${{ secrets.KP_STORE_PASSWORD }}
-          KP_KEY_ALIAS: ${{ secrets.KP_KEY_ALIAS }}
-          KP_KEY_PASSWORD: ${{ secrets.KP_KEY_PASSWORD }}
+          KP_KEYSTORE_B64: ""
+          KP_STORE_PASSWORD: ""
+          KP_KEY_ALIAS: ""
+          KP_KEY_PASSWORD: ""
+          KP_DEBUG_KEYSTORE_B64: ""
         shell: bash
         run: |
           set -euo pipefail
