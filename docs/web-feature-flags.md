@@ -2,12 +2,12 @@
 
 The separate Vite app reads these values at **build time**. They are public client configuration, not secrets or authorization controls. Server-side Worker/API authorization remains mandatory regardless of a browser flag.
 
-Only `serviceWorker` currently gates shipped behavior. Account, messaging, statuses, media, and calls are reserved rollout gates for future implementation; setting one to `true` does not create or enable an unimplemented feature.
+`serviceWorker` controls registration, and `accountIntegration` gates the opt-in browser account experience. The account flag stays default-off. Messaging, statuses, media, and calls remain reserved gates; setting one to `true` does not create or enable an unimplemented feature.
 
 | Environment variable | Flag | Default | Current effect |
 |---|---|---:|---|
 | `VITE_KP_WEB_SERVICE_WORKER` | `serviceWorker` | `true` | Controls registration of the generated `/sw.js`; it does not affect build-time worker generation. |
-| `VITE_KP_WEB_ACCOUNT_INTEGRATION` | `accountIntegration` | `false` | Reserved; account flows are not connected. |
+| `VITE_KP_WEB_ACCOUNT_INTEGRATION` | `accountIntegration` | `false` | Gates phone sign-in/signup, device approval/OTP, Google binding/recovery, session restore/logout, protected account routes, profile/privacy and device listing. |
 | `VITE_KP_WEB_MESSAGING` | `messaging` | `false` | Reserved; message data/actions are not connected. |
 | `VITE_KP_WEB_STATUSES` | `statuses` | `false` | Reserved; status data/actions are not connected. |
 | `VITE_KP_WEB_MEDIA` | `media` | `false` | Reserved; media features are not connected. |
@@ -16,7 +16,11 @@ Only `serviceWorker` currently gates shipped behavior. Account, messaging, statu
 Values accept `true` or `false` (case-insensitive, surrounding whitespace ignored). Any other value uses that flag's safe default. Example:
 
 ```sh
-VITE_KP_WEB_SERVICE_WORKER=false npm run build:web
+# Verify the default-off production build
+npm run build:web
+
+# Build an opt-in account preview; other feature flags remain off
+VITE_KP_WEB_ACCOUNT_INTEGRATION=true npm run build:web
 ```
 
 Do not place credentials in `VITE_*` variables: Vite embeds them in browser-delivered output.

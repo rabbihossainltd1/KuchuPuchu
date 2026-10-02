@@ -1,0 +1,15 @@
+# Build-only config for Cloudflare's non-production `kuchupuchu` trigger.
+# The root wrangler.toml remains the source of truth for `kuchupuchu-api`.
+name = "kuchupuchu"
+main = "src/worker/index.ts"
+compatibility_date = "2025-08-01"
+account_id = "92081fac7caf54a46a756c382081544b"
+workers_dev = false
+preview_urls = false
+
+# Intentionally no production bindings, routes, cron triggers, or DO migrations.
+# This config only validates/bundles the Worker; it is not a runtime preview.
+[assets]
+directory = "./public"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*", "/ws/*"]

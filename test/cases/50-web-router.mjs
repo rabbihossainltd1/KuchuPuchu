@@ -1,6 +1,11 @@
-// Typed Web route parsing and canonical path generation.
+// Typed Web route parsing, canonical path generation, and protected-route policy.
 import { isDeepStrictEqual } from "node:util";
-import { canonicalPath, parseRoute, pathForRoute } from "../../web/src/router.ts";
+import {
+  canonicalPath,
+  parseRoute,
+  pathForRoute,
+  routeRequiresAuthentication,
+} from "../../web/src/router.ts";
 
 const lines = [];
 const check = (name, condition, detail = "") =>
@@ -19,6 +24,11 @@ routeIs("trailing slash parses to its section", "/statuses/", {
   section: "statuses",
 });
 routeIs("section paths are case-insensitive", "/CALLS", { kind: "section", section: "calls" });
+routeIs("account settings route parses", "/account", { kind: "section", section: "account" });
+routeIs("account settings path is case-insensitive", "/ACCOUNT/", {
+  kind: "section",
+  section: "account",
+});
 routeIs("opaque conversation id parses", "/chats/thread-42", {
   kind: "conversation",
   conversationId: "thread-42",
@@ -59,9 +69,30 @@ check(
   "encoded conversation path round-trips",
   isDeepStrictEqual(parseRoute(pathForRoute(encodedRoute)), encodedRoute),
 );
+check(
+  "account settings path is canonical",
+  pathForRoute({ kind: "section", section: "account" }) === "/account",
+);
 check("root canonicalizes to chats", canonicalPath("/") === "/chats");
 check("trailing slash canonicalizes", canonicalPath("/calls/") === "/calls");
 check("unknown path is not rewritten", canonicalPath("/unknown") === null);
+check(
+  "account settings are protected",
+  routeRequiresAuthentication({ kind: "section", section: "account" }),
+);
+check(
+  "conversation deep links are protected",
+  routeRequiresAuthentication({ kind: "conversation", conversationId: "private-thread" }),
+);
+check(
+  "public section routes remain available without an account",
+  !routeRequiresAuthentication({ kind: "section", section: "chats" }) &&
+    !routeRequiresAuthentication({ kind: "section", section: "calls" }),
+);
+check(
+  "unknown routes do not expose protected content",
+  !routeRequiresAuthentication({ kind: "not-found" }),
+);
 
 console.log(lines.join("\n"));
 const broken = lines.filter((line) => line.includes("BROKEN")).length;
