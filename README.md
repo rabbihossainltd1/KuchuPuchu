@@ -1,7 +1,6 @@
 # KuchuPuchu
 
-Messenger for Free Fire players: 1:1 + group chat, media and file send, 24h statuses,
-WebRTC audio/video calls with screen share, blocks, and FCM push.
+KuchuPuchu is a messenger for Free Fire players. The Android app offers 1:1 and group chat, media/files, 24h statuses, WebRTC audio/video calls with screen share, blocks, and FCM push; the browser PWA provides web chat, text and photos.
 
 There is no coin wallet, store, gifting, matchmaking, or payments in this product — those
 belonged to the abandoned v2 social-network spec and were removed from the repo.
@@ -12,16 +11,17 @@ Android id: `app.kuchupuchu.android` (do not change).
 ## What talks to what
 
 ```
-native Android app (Kotlin + Jetpack Compose)  native-android/
-        │
-        └── HTTPS JSON  →  Cloudflare Worker   src/worker/index.ts
-                                ├── D1 database  kuchupuchu-v3
-                                └── R2 bucket    kp-media   (photos, voice notes, documents, videos)
+native Android app (Kotlin + Jetpack Compose)  native-android/ ─┐
+                                                                  ├─ HTTPS JSON / WebSocket ─→
+browser PWA (plain HTML/CSS/JS)              public/ ──────────────┘
+                                                                  Cloudflare Worker
+                                                                  src/worker/index.ts
+                                                                  ├── D1 database  kuchupuchu-v3
+                                                                  ├── R2 bucket    kp-media
+                                                                  └── Worker Assets (`./public`, same origin)
 ```
 
-There is no web client and no Express server in this repository. Earlier revisions had a
-Capacitor/React front end; it was replaced by the native app and the leftovers were removed.
-`src/shared/` holds only the limits the worker enforces, imported by the worker itself.
+The browser PWA is served by the same Cloudflare Worker as the API; there is no Express server or separate frontend deployment. Earlier Capacitor/React work was removed. `src/shared/` holds limits enforced by the Worker. The PWA has no build step, uses WebCrypto for personal-chat KP1 message E2EE, and caches only its static shell (never `/api/*` or `/ws/*`).
 
 ## Checks
 
@@ -31,7 +31,9 @@ npm run typecheck   # tsc --noEmit
 npm test            # drives the real worker against in-memory D1 and R2
 npm run format:check
 npm run security:secrets
-npm run ci          # all four
+npm run validate:android
+bash scripts/ktlint-check.sh # Kotlin import hygiene (also a CI step)
+npm run ci          # format, typecheck, tests, secrets, Android source validation
 ```
 
 `npm test` runs the cases in `test/cases/`. Each one boots `src/worker/index.ts` against
@@ -40,8 +42,11 @@ prints one `OK` / `BROKEN` line per assertion. Cases run in separate processes b
 worker keeps `schemaReady` and the rate-limit buckets in module scope. The runner exits
 non-zero if anything prints `BROKEN`.
 
-GitHub Actions (`.github/workflows/ci.yml`) has two jobs: `worker` runs the four checks above,
-and `apk` builds `app-debug.apk` and uploads it as an artifact.
+GitHub Actions (`.github/workflows/ci.yml`) has two jobs. `worker` runs typecheck, all tests, formatting, secret scan, Android source validation, and ktlint. `apk` runs Android unit tests and lint, then builds the release-only APK artifact `app-release.apk`.
+
+## Web client
+
+`public/` contains the dependency-free browser/PWA client (`index.html`, `app.js`, `sw.js`, manifest, country data). It is deployed together with the API by `wrangler deploy`, on the same origin. Browser REST calls use Bearer headers; because browser WebSockets cannot set headers, `?token=` is accepted only on `/ws/*` and is rejected for REST routes. Web login honestly reports `sim: UNAVAILABLE`; new-device login uses an in-app OTP or approval, and Google recovery remains available.
 
 ## Deploy the Worker
 
@@ -106,7 +111,8 @@ Source is `native-android/app/src/main/java/app/kuchupuchu/android/`. The pieces
 - `src/worker/index.ts` — the whole API
 - `src/shared/constants.ts` — the limits the worker enforces (message length, bio length, session TTL, presence window)
 - `native-android/` — the Android client
-- `test/` — worker test harness and cases
+- `public/` — same-origin browser/PWA client
+- `test/` — worker, Web parity and source-contract test harness/cases
 - `scripts/secret-scan.ts` — the `security:secrets` check
 - `docs/native-plan.md` — locked in-call UI decisions
 
@@ -117,10 +123,7 @@ brings it back if it is ever needed again.
 
 ## Known sharp edges
 
-- `native-android/app/debug.keystore` is committed and signs the release build. Anyone with
-  read access to this repository can produce an APK that Android treats as an update from the
-  same developer. Rotating it means existing installs cannot update in place, so it needs an
-  owner decision rather than a drive-by change.
+- `native-android/app/debug.keystore` remains tracked. v274 used it as a one-time, explicitly owner-approved signer to preserve v273 update compatibility. Future APK releases require a secure signing-key migration and separate owner approval; do not reuse the tracked key by default.
 - ICE relay uses the public `openrelay.metered.ca` TURN server with its published credentials.
   It has no capacity guarantee; a dedicated TURN provider is the fix if calls start failing to
   connect.
