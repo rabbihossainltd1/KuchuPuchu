@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   worker:
-    name: Worker + Web (typecheck, tests, format, secrets)
+    name: Worker + Web (typecheck, tests, browser QA, format, secrets)
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
@@ -32,6 +32,20 @@ jobs:
         run: npm run typecheck
       - name: Tests
         run: npm test
+      - name: Install Chromium for Web browser QA
+        run: npx playwright install --with-deps chromium
+      - name: Web browser and accessibility tests
+        run: npm run test:web:e2e
+      - name: Upload Web browser QA report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Formatting
         run: npm run format:check
       - name: Secret scan
