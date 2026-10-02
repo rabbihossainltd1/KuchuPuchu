@@ -417,6 +417,11 @@ input:disabled {
   box-shadow: none;
 }
 
+.connection-indicator.is-offline {
+  background: var(--kp-red);
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.16);
+}
+
 .list-footer__spacer {
   flex: 1;
 }

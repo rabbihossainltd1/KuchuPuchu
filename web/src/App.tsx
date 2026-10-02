@@ -1,6 +1,7 @@
 import { BrandMark, Icon, type IconName } from "./icons";
 import { RouteLink } from "./RouteLink";
 import { useBrowserRouter } from "./useBrowserRouter";
+import { useConnectivity } from "./useConnectivity";
 import type { SectionId } from "./router";
 
 type View = {
@@ -25,6 +26,7 @@ const viewDescriptions: Record<SectionId, string> = {
 
 export default function App() {
   const { route, navigate } = useBrowserRouter();
+  const isOnline = useConnectivity();
   const isNotFound = route.kind === "not-found";
   const isConversation = route.kind === "conversation";
   const activeViewId = route.kind === "section" ? route.section : isConversation ? "chats" : null;
@@ -148,9 +150,9 @@ export default function App() {
             )}
           </div>
 
-          <footer className="list-footer">
-            <span className="connection-indicator" />
-            <span>Preview only</span>
+          <footer className="list-footer" role="status" aria-live="polite">
+            <span className={`connection-indicator${isOnline ? "" : " is-offline"}`} />
+            <span>{isOnline ? "Preview only" : "Browser offline"}</span>
             <span className="list-footer__spacer" />
             <span className="footer-version">Web foundation</span>
           </footer>
