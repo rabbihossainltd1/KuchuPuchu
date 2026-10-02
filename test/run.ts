@@ -1,12 +1,12 @@
 /**
  * Test runner.
  *
- * Each file in test/cases is a self-contained scenario that drives the real
- * worker (src/worker/index.ts) against an in-memory D1-shaped SQLite shim and
- * an in-memory R2, and prints one OK / BROKEN line per assertion. A case is run
- * in its own child process on purpose: the worker keeps `schemaReady` and the
- * rate-limit buckets in module scope, so sharing one process across cases would
- * let one case's database leak into the next.
+ * Each file in test/cases is a self-contained scenario. Worker cases drive the
+ * real worker (src/worker/index.ts) against in-memory D1/R2 shims; focused Web
+ * contract cases may import pure client modules directly. Every case prints one
+ * OK / BROKEN line per assertion and runs in its own child process: the worker
+ * keeps `schemaReady` and rate-limit buckets in module scope, so sharing a
+ * process could let one case's state leak into the next.
  *
  * Exits non-zero if any case prints BROKEN or dies, so CI can gate on it.
  */

@@ -1,10 +1,10 @@
-import { useState } from "react";
 import { BrandMark, Icon, type IconName } from "./icons";
-
-type ViewId = "chats" | "statuses" | "calls" | "search";
+import { RouteLink } from "./RouteLink";
+import { useBrowserRouter } from "./useBrowserRouter";
+import type { SectionId } from "./router";
 
 type View = {
-  id: ViewId;
+  id: SectionId;
   label: string;
   icon: IconName;
 };
@@ -16,7 +16,7 @@ const views: View[] = [
   { id: "search", label: "Search", icon: "search" },
 ];
 
-const viewDescriptions: Record<ViewId, string> = {
+const viewDescriptions: Record<SectionId, string> = {
   chats: "Your conversations will appear here after account and API integration.",
   statuses: "Status feed and viewer integration is part of the next parity phase.",
   calls: "Call history and browser calling integration is part of a later phase.",
@@ -24,8 +24,12 @@ const viewDescriptions: Record<ViewId, string> = {
 };
 
 export default function App() {
-  const [activeView, setActiveView] = useState<ViewId>("chats");
-  const active = views.find((view) => view.id === activeView) ?? views[0]!;
+  const { route, navigate } = useBrowserRouter();
+  const isNotFound = route.kind === "not-found";
+  const isConversation = route.kind === "conversation";
+  const activeViewId = route.kind === "section" ? route.section : isConversation ? "chats" : null;
+  const active = views.find((view) => view.id === activeViewId) ?? views[0]!;
+  const sectionHeading = isNotFound ? "Not found" : active.label;
 
   return (
     <div className="kp-app">
@@ -47,18 +51,18 @@ export default function App() {
 
           <nav className="primary-nav" aria-label="Main sections">
             {views.map((view) => (
-              <button
+              <RouteLink
                 key={view.id}
-                type="button"
-                className={`nav-button${activeView === view.id ? " is-active" : ""}`}
+                route={{ kind: "section", section: view.id }}
+                navigate={navigate}
+                className={`nav-button${activeViewId === view.id ? " is-active" : ""}`}
                 aria-label={view.label}
-                aria-current={activeView === view.id ? "page" : undefined}
+                aria-current={activeViewId === view.id ? "page" : undefined}
                 title={view.label}
-                onClick={() => setActiveView(view.id)}
               >
                 <Icon name={view.icon} size={21} />
                 <span>{view.label}</span>
-              </button>
+              </RouteLink>
             ))}
           </nav>
 
@@ -80,11 +84,14 @@ export default function App() {
           </div>
         </aside>
 
-        <section className="list-pane" aria-labelledby="list-heading">
+        <section
+          className={`list-pane${isConversation ? " is-mobile-hidden" : ""}`}
+          aria-labelledby="list-heading"
+        >
           <header className="list-header">
             <div>
               <p className="eyebrow">KUCHUPUCHU WEB</p>
-              <h1 id="list-heading">{active.label}</h1>
+              <h1 id="list-heading">{sectionHeading}</h1>
             </div>
             <button
               type="button"
@@ -101,8 +108,12 @@ export default function App() {
             <Icon name="search" size={18} />
             <input
               type="search"
-              aria-label={`Search ${active.label.toLowerCase()}`}
-              placeholder={`Search ${active.label.toLowerCase()}`}
+              aria-label={
+                isNotFound ? "Search unavailable" : `Search ${active.label.toLowerCase()}`
+              }
+              placeholder={
+                isNotFound ? "Search unavailable" : `Search ${active.label.toLowerCase()}`
+              }
               disabled
             />
             <kbd>/</kbd>
@@ -110,14 +121,31 @@ export default function App() {
 
           <div className="list-content">
             <div className="empty-list-icon">
-              <Icon name={active.icon} size={22} />
+              <Icon name={isNotFound ? "search" : active.icon} size={22} />
             </div>
-            <h2>No {active.label.toLowerCase()} loaded</h2>
-            <p>{viewDescriptions[activeView]}</p>
-            <span className="integration-badge">
-              <Icon name="lock" size={13} />
-              <span>Waiting for account integration</span>
-            </span>
+            <h2>
+              {isNotFound ? "That page isn't here" : `No ${active.label.toLowerCase()} loaded`}
+            </h2>
+            <p>
+              {isNotFound
+                ? "This address does not match a page in the Web foundation preview."
+                : viewDescriptions[active.id]}
+            </p>
+            {isNotFound ? (
+              <RouteLink
+                route={{ kind: "section", section: "chats" }}
+                navigate={navigate}
+                className="route-action-link"
+              >
+                <span>Return to Chats</span>
+                <Icon name="arrow" size={15} />
+              </RouteLink>
+            ) : (
+              <span className="integration-badge">
+                <Icon name="lock" size={13} />
+                <span>Waiting for account integration</span>
+              </span>
+            )}
           </div>
 
           <footer className="list-footer">
@@ -128,15 +156,41 @@ export default function App() {
           </footer>
         </section>
 
-        <main className="conversation-pane" aria-labelledby="conversation-heading">
+        <main
+          className={`conversation-pane${isConversation ? " is-mobile-visible" : ""}`}
+          aria-labelledby="conversation-heading"
+        >
           <header className="conversation-header">
             <div className="conversation-header__identity">
+              {isConversation && (
+                <RouteLink
+                  route={{ kind: "section", section: "chats" }}
+                  navigate={navigate}
+                  className="conversation-back"
+                  aria-label="Back to Chats"
+                  title="Back to Chats"
+                >
+                  <Icon name="arrow" size={19} />
+                </RouteLink>
+              )}
               <div className="conversation-avatar conversation-avatar--empty">
                 <Icon name="message" size={20} />
               </div>
               <div className="conversation-header__copy">
-                <h2 id="conversation-heading">Choose a conversation</h2>
-                <p>No KuchuPuchu account is signed in</p>
+                <h2 id="conversation-heading">
+                  {isConversation
+                    ? "Conversation preview"
+                    : isNotFound
+                      ? "Page not found"
+                      : "Choose a conversation"}
+                </h2>
+                <p>
+                  {isConversation
+                    ? "The route is recognized; account data is not connected"
+                    : isNotFound
+                      ? "This address is not defined in the preview"
+                      : "No KuchuPuchu account is signed in"}
+                </p>
               </div>
             </div>
             <div className="conversation-actions" aria-label="Conversation actions">
@@ -159,7 +213,10 @@ export default function App() {
             </div>
           </header>
 
-          <section className="conversation-canvas" aria-label="Conversation preview">
+          <section
+            className="conversation-canvas"
+            aria-label={isNotFound ? "Not found preview" : "Conversation preview"}
+          >
             <div className="canvas-glow canvas-glow--blue" />
             <div className="canvas-glow canvas-glow--amber" />
             <div className="welcome-card">
@@ -169,23 +226,50 @@ export default function App() {
                   <Icon name="sparkle" size={19} />
                 </span>
               </div>
-              <p className="eyebrow">DESKTOP WORKSPACE</p>
-              <h3>Conversation, contacts and context—together.</h3>
-              <p className="welcome-card__body">
-                This first step establishes the responsive, keyboard-ready shell. Account, message
-                and media data will be wired in without changing the existing production Web client.
+              <p className="eyebrow">
+                {isConversation
+                  ? "DEEP LINK PREVIEW"
+                  : isNotFound
+                    ? "ROUTE NOT FOUND"
+                    : "DESKTOP WORKSPACE"}
               </p>
-              <div className="welcome-points" aria-label="Foundation goals">
-                <span>
-                  <i /> Multi-pane layout
-                </span>
-                <span>
-                  <i /> Keyboard-ready controls
-                </span>
-                <span>
-                  <i /> Same-origin API design
-                </span>
-              </div>
+              <h3>
+                {isConversation
+                  ? "Conversation route recognized."
+                  : isNotFound
+                    ? "This route isn't available."
+                    : "Conversation, contacts and context—together."}
+              </h3>
+              <p className="welcome-card__body">
+                {isConversation
+                  ? "This URL identifies a conversation route, but this preview has no account session or message data to load."
+                  : isNotFound
+                    ? "The requested address is not part of this preview. Return to Chats to continue exploring the shell."
+                    : "This step establishes the responsive, keyboard-ready shell. Account, message and media data will be wired in without changing the existing production Web client."}
+              </p>
+              {!isNotFound && (
+                <div className="welcome-points" aria-label="Foundation goals">
+                  <span>
+                    <i /> Multi-pane layout
+                  </span>
+                  <span>
+                    <i /> Keyboard-ready controls
+                  </span>
+                  <span>
+                    <i /> Same-origin API design
+                  </span>
+                </div>
+              )}
+              {isNotFound && (
+                <RouteLink
+                  route={{ kind: "section", section: "chats" }}
+                  navigate={navigate}
+                  className="route-action-link"
+                >
+                  <span>Go to Chats</span>
+                  <Icon name="arrow" size={15} />
+                </RouteLink>
+              )}
               <div className="welcome-card__note">
                 <Icon name="lock" size={15} />
                 <span>No messages or account data are shown in this preview.</span>
@@ -217,16 +301,16 @@ export default function App() {
 
       <nav className="mobile-nav" aria-label="Mobile sections">
         {views.map((view) => (
-          <button
+          <RouteLink
             key={view.id}
-            type="button"
-            className={`mobile-nav__item${activeView === view.id ? " is-active" : ""}`}
-            aria-current={activeView === view.id ? "page" : undefined}
-            onClick={() => setActiveView(view.id)}
+            route={{ kind: "section", section: view.id }}
+            navigate={navigate}
+            className={`mobile-nav__item${activeViewId === view.id ? " is-active" : ""}`}
+            aria-current={activeViewId === view.id ? "page" : undefined}
           >
             <Icon name={view.icon} size={20} />
             <span>{view.label}</span>
-          </button>
+          </RouteLink>
         ))}
       </nav>
     </div>

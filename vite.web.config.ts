@@ -7,7 +7,7 @@ import { defineConfig } from "vite";
  */
 export default defineConfig({
   root: "web",
-  base: "./",
+  base: "/",
   plugins: [react()],
   server: {
     host: "0.0.0.0",
