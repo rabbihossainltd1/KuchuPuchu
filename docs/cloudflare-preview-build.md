@@ -13,18 +13,17 @@ Configure only the `kuchupuchu` non-production trigger as follows:
 
 `wrangler.kuchupuchu-preview.toml` matches the `kuchupuchu` target without changing the root API Worker config. It disables both `workers_dev` and Version URLs. The command uploads an immutable Worker version only; it does not assign traffic or deploy to production. The `main` production trigger (`npx wrangler deploy`) is intentionally unchanged.
 
-The preview configuration retains the Worker entry point and current D1, R2, Durable Object, and asset bindings for build parity. Since the preview has no worker.dev route or public Version URL, it is not an externally reachable test environment.
+The preview configuration retains only the Worker entry point and static assets. It deliberately excludes production D1/R2/DO bindings, environment variables, cron triggers, and DO migrations. Wrangler rejects version uploads that include an unapplied Durable Object migration; this build-only target must not apply migrations or create triggers. With `workers_dev = false` and `preview_urls = false`, it is not an externally reachable runtime preview.
 
 ## Build token permissions
 
-The Workers Builds token must be backed by an active **user-scoped** API token scoped to this Cloudflare account. The build token is a user-scoped API token restricted to this Cloudflare account. The verified preview upload uses:
+The Workers Builds token wraps an active **user-scoped** API token restricted to this Cloudflare account. Its least-privilege permissions are:
 
 - User Details: Read; Memberships: Read.
 - Account Settings: Read.
 - Workers Scripts: Read and Write.
-- Workers R2 Storage: Read and Metadata Read.
 
-The version-upload command does not query or modify D1, so the preview token does not receive D1 permissions. Do not store the token secret in this repository or print it in logs. Store it only in Cloudflare Workers Builds. The token expires after one year and must be rotated before expiry. Do not update the `kuchupuchu-api` production trigger as part of this preview setup.
+The scoped token has been verified with Wrangler account discovery and read-only script checks. Do not store the token secret in this repository or print it in logs. Store it only in Cloudflare Workers Builds. The token expires after one year and must be rotated before expiry. Do not update the `kuchupuchu-api` production trigger as part of this preview setup.
 
 ## Local contract check
 

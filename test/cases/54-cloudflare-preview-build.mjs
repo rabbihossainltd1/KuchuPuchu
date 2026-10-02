@@ -22,11 +22,14 @@ const checks = [
     previewLines.has('main = "src/worker/index.ts"') && previewLines.has('directory = "./public"'),
   ],
   [
-    "preview retains the expected D1, R2, and Durable Object bindings",
-    previewLines.has('binding = "DB"') &&
-      previewLines.has('binding = "MEDIA"') &&
-      previewLines.has('name = "CHAT_ROOM"') &&
-      previewLines.has('name = "CALL_SIGNAL"'),
+    "preview config excludes production D1, R2, and Durable Object bindings",
+    !previewLines.has("[[d1_databases]]") &&
+      !previewLines.has("[[r2_buckets]]") &&
+      !previewLines.has("[[durable_objects.bindings]]"),
+  ],
+  [
+    "preview upload cannot apply Durable Object migrations or production cron triggers",
+    !previewLines.has("[[migrations]]") && !previewLines.has("[triggers]"),
   ],
 ];
 
