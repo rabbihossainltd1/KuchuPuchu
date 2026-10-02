@@ -1,11 +1,16 @@
+import { useState, type ReactNode } from "react";
+import { isWebFeatureEnabled } from "./featureFlags";
 import { BrandMark, Icon, type IconName } from "./icons";
 import { RouteLink } from "./RouteLink";
 import { useBrowserRouter } from "./useBrowserRouter";
 import { useConnectivity } from "./useConnectivity";
-import type { SectionId } from "./router";
+import { AccountSettingsPage } from "./auth/AccountSettingsPage";
+import { AuthScreen } from "./auth/AuthScreen";
+import { useAuth } from "./auth/AuthContext";
+import { routeRequiresAuthentication, type AppRoute, type SectionId } from "./router";
 
 type View = {
-  id: SectionId;
+  id: Exclude<SectionId, "account">;
   label: string;
   icon: IconName;
 };
@@ -17,21 +22,183 @@ const views: View[] = [
   { id: "search", label: "Search", icon: "search" },
 ];
 
-const viewDescriptions: Record<SectionId, string> = {
-  chats: "Your conversations will appear here after account and API integration.",
-  statuses: "Status feed and viewer integration is part of the next parity phase.",
-  calls: "Call history and browser calling integration is part of a later phase.",
-  search: "Search will connect to KuchuPuchu accounts and conversations in a later step.",
+const viewDescriptions: Record<Exclude<SectionId, "account">, string> = {
+  chats: "Messaging is not enabled in this Web rollout. No chats or messages are loaded here.",
+  statuses: "Status feed and viewer integration remain disabled in this Web rollout.",
+  calls: "Call history and browser calling remain disabled in this Web rollout.",
+  search: "Search is not connected to KuchuPuchu accounts or conversations in this build.",
 };
+
+function routeIsAccount(route: AppRoute): boolean {
+  return route.kind === "section" && route.section === "account";
+}
+
+function FullPageNotice({
+  eyebrow,
+  title,
+  body,
+  onBack,
+  action,
+}: {
+  eyebrow: string;
+  title: string;
+  body: string;
+  onBack: () => void;
+  action?: ReactNode;
+}) {
+  return (
+    <main className="auth-page">
+      <div className="auth-background-glow auth-background-glow--blue" />
+      <section className="auth-card notice-card" aria-labelledby="notice-heading">
+        <div className="notice-brand">
+          <BrandMark size={46} />
+        </div>
+        <p className="eyebrow">{eyebrow}</p>
+        <h1 id="notice-heading">{title}</h1>
+        <p className="auth-copy">{body}</p>
+        {action}
+        <button className="text-button" type="button" onClick={onBack}>
+          Back to Chats preview
+        </button>
+      </section>
+    </main>
+  );
+}
+
+function AccountRolloutGate({ onBack }: { onBack: () => void }) {
+  return (
+    <FullPageNotice
+      eyebrow="ACCOUNT ROLLOUT"
+      title="Account tools are off in this build"
+      body="Browser sign-in, profile and device settings are protected by the default-off account rollout flag. This page makes no account API calls while the flag is off. Messaging, status, media and calls are also disabled."
+      onBack={onBack}
+    />
+  );
+}
+
+function SessionRestoreFailure({
+  onBack,
+  onSignOut,
+}: {
+  onBack: () => void;
+  onSignOut: () => void;
+}) {
+  const { restoreError, retryRestore } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function retry() {
+    setBusy(true);
+    setError("");
+    const restored = await retryRestore();
+    if (!restored)
+      setError(
+        "The saved session could not be verified. Check your connection, retry, or sign in again.",
+      );
+    setBusy(false);
+  }
+
+  return (
+    <FullPageNotice
+      eyebrow="SESSION CHECK"
+      title="We could not verify this session"
+      body={
+        restoreError ||
+        "Protected account data will stay hidden until the saved session is verified."
+      }
+      onBack={onBack}
+      action={
+        <div className="notice-actions">
+          <button
+            className="primary-button"
+            type="button"
+            onClick={() => void retry()}
+            disabled={busy}
+          >
+            {busy ? "Checking…" : "Retry session check"}
+          </button>
+          <button className="secondary-button" type="button" onClick={onSignOut} disabled={busy}>
+            Sign out saved session
+          </button>
+          {error && (
+            <p className="settings-error" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
+      }
+    />
+  );
+}
 
 export default function App() {
   const { route, navigate } = useBrowserRouter();
+  const { status: authStatus, user, logout } = useAuth();
+  const [sessionNotice, setSessionNotice] = useState("");
   const isOnline = useConnectivity();
+  const accountEnabled = isWebFeatureEnabled("accountIntegration");
   const isNotFound = route.kind === "not-found";
   const isConversation = route.kind === "conversation";
-  const activeViewId = route.kind === "section" ? route.section : isConversation ? "chats" : null;
+  const isAccountRoute = routeIsAccount(route);
+  const protectedRoute = routeRequiresAuthentication(route);
+  const goToChats = () => navigate({ kind: "section", section: "chats" });
+  const logOutToChats = () => {
+    navigate({ kind: "section", section: "chats" }, { replace: true });
+    setSessionNotice("");
+    void logout().then((remoteRevoked) => {
+      setSessionNotice(
+        remoteRevoked
+          ? "This browser is signed out."
+          : "This browser was signed out locally, but the service could not confirm revocation. Reconnect and retry if needed.",
+      );
+    });
+  };
+
+  if (isAccountRoute && !accountEnabled) {
+    return <AccountRolloutGate onBack={goToChats} />;
+  }
+
+  if (accountEnabled && protectedRoute) {
+    if (authStatus === "restoring") {
+      return (
+        <main className="auth-page">
+          <section className="auth-card settings-surface--message" role="status" aria-live="polite">
+            <BrandMark size={46} />
+            <p className="eyebrow">SESSION CHECK</p>
+            <h1>Checking your session…</h1>
+            <p className="auth-copy">
+              Protected account data stays hidden until the Worker confirms this browser session.
+            </p>
+          </section>
+        </main>
+      );
+    }
+    if (authStatus === "unverified")
+      return <SessionRestoreFailure onBack={goToChats} onSignOut={logOutToChats} />;
+    if (authStatus !== "signed-in") return <AuthScreen onBackToChats={goToChats} />;
+
+    if (isAccountRoute) {
+      return <AccountSettingsPage onBackToChats={goToChats} onLogout={logOutToChats} />;
+    }
+  }
+
+  const activeViewId =
+    route.kind === "section" && route.section !== "account"
+      ? route.section
+      : isConversation
+        ? "chats"
+        : null;
   const active = views.find((view) => view.id === activeViewId) ?? views[0]!;
   const sectionHeading = isNotFound ? "Not found" : active.label;
+  const bannerCopy = accountEnabled
+    ? "Account flows are enabled for this opt-in build; messaging, status, media and calls remain disabled."
+    : "Account sign-in remains behind a default-off rollout flag; messaging, status, media and calls are disabled.";
+  const accountChipLabel = user
+    ? `${user.displayName || user.username} account signed in`
+    : "No account signed in";
+  const accountInitials = user
+    ? (user.displayName || user.username).trim().slice(0, 2).toUpperCase()
+    : "KP";
 
   return (
     <div className="kp-app">
@@ -39,9 +206,7 @@ export default function App() {
         <span className="preview-banner__dot" />
         <strong>Foundation preview</strong>
         <span className="preview-banner__divider" />
-        <span>
-          Sign-in and account data are not connected yet. The current Web app remains unchanged.
-        </span>
+        <span>{bannerCopy}</span>
       </div>
 
       <div className="workspace">
@@ -69,19 +234,20 @@ export default function App() {
           </nav>
 
           <div className="rail-bottom">
-            <button
-              type="button"
-              className="nav-button nav-button--muted"
-              aria-label="Settings integration is planned"
-              title="Settings · integration planned"
-              disabled
+            <RouteLink
+              route={{ kind: "section", section: "account" }}
+              navigate={navigate}
+              className={`nav-button nav-button--muted${isAccountRoute ? " is-active" : ""}`}
+              aria-label="Account settings"
+              aria-current={isAccountRoute ? "page" : undefined}
+              title="Account settings"
             >
               <Icon name="settings" size={20} />
               <span>Settings</span>
-            </button>
-            <div className="account-chip" role="img" aria-label="No account signed in">
-              <div className="account-chip__avatar">KP</div>
-              <span className="account-chip__status" />
+            </RouteLink>
+            <div className="account-chip" role="img" aria-label={accountChipLabel}>
+              <div className="account-chip__avatar">{accountInitials}</div>
+              <span className={`account-chip__status${user ? " is-signed-in" : ""}`} />
             </div>
           </div>
         </aside>
@@ -98,13 +264,19 @@ export default function App() {
             <button
               type="button"
               className="icon-button"
-              aria-label="Start a new chat after sign-in integration"
-              title="New chat · integration planned"
+              aria-label="Start a new chat; messaging is disabled"
+              title="Messaging is not enabled in this build"
               disabled
             >
               <Icon name="plus" size={21} />
             </button>
           </header>
+
+          {sessionNotice && (
+            <p className="workspace-notice" role="status">
+              {sessionNotice}
+            </p>
+          )}
 
           <label className="search-field">
             <Icon name="search" size={18} />
@@ -130,7 +302,7 @@ export default function App() {
             </h2>
             <p>
               {isNotFound
-                ? "This address does not match a page in the Web foundation preview."
+                ? "This address does not match a page in the Web preview."
                 : viewDescriptions[active.id]}
             </p>
             {isNotFound ? (
@@ -145,16 +317,22 @@ export default function App() {
             ) : (
               <span className="integration-badge">
                 <Icon name="lock" size={13} />
-                <span>Waiting for account integration</span>
+                <span>
+                  {user
+                    ? "Account connected; product data remains gated"
+                    : "No private account data loaded"}
+                </span>
               </span>
             )}
           </div>
 
           <footer className="list-footer" role="status" aria-live="polite">
             <span className={`connection-indicator${isOnline ? "" : " is-offline"}`} />
-            <span>{isOnline ? "Preview only" : "Browser offline"}</span>
+            <span>
+              {!isOnline ? "Browser offline" : user ? "Account connected" : "Preview only"}
+            </span>
             <span className="list-footer__spacer" />
-            <span className="footer-version">Web foundation</span>
+            <span className="footer-version">Web P2 preview</span>
           </footer>
         </section>
 
@@ -188,10 +366,14 @@ export default function App() {
                 </h2>
                 <p>
                   {isConversation
-                    ? "The route is recognized; account data is not connected"
+                    ? user
+                      ? "This protected route is open; messaging is still disabled"
+                      : "This address requires a signed-in account"
                     : isNotFound
                       ? "This address is not defined in the preview"
-                      : "No KuchuPuchu account is signed in"}
+                      : user
+                        ? "Account signed in; message data is not connected"
+                        : "No KuchuPuchu account is signed in"}
                 </p>
               </div>
             </div>
@@ -230,7 +412,7 @@ export default function App() {
               </div>
               <p className="eyebrow">
                 {isConversation
-                  ? "DEEP LINK PREVIEW"
+                  ? "PROTECTED DEEP LINK"
                   : isNotFound
                     ? "ROUTE NOT FOUND"
                     : "DESKTOP WORKSPACE"}
@@ -244,21 +426,23 @@ export default function App() {
               </h3>
               <p className="welcome-card__body">
                 {isConversation
-                  ? "This URL identifies a conversation route, but this preview has no account session or message data to load."
+                  ? user
+                    ? "This browser session is verified, but this rollout does not fetch chats or messages. No conversation content is displayed."
+                    : "This URL is protected. Sign in before any conversation data can be requested."
                   : isNotFound
                     ? "The requested address is not part of this preview. Return to Chats to continue exploring the shell."
-                    : "This step establishes the responsive, keyboard-ready shell. Account, message and media data will be wired in without changing the existing production Web client."}
+                    : "The browser account flow is separate from this production PWA. Messaging and conversation data remain disabled in this build."}
               </p>
               {!isNotFound && (
-                <div className="welcome-points" aria-label="Foundation goals">
+                <div className="welcome-points" aria-label="Current rollout status">
                   <span>
-                    <i /> Multi-pane layout
+                    <i /> Account settings
                   </span>
                   <span>
-                    <i /> Keyboard-ready controls
+                    <i /> Protected routes
                   </span>
                   <span>
-                    <i /> Same-origin API design
+                    <i /> No messages loaded
                   </span>
                 </div>
               )}
@@ -274,7 +458,7 @@ export default function App() {
               )}
               <div className="welcome-card__note">
                 <Icon name="lock" size={15} />
-                <span>No messages or account data are shown in this preview.</span>
+                <span>Messages, media, status and calls are not enabled.</span>
               </div>
             </div>
           </section>
@@ -288,7 +472,7 @@ export default function App() {
             >
               <Icon name="plus" size={20} />
             </button>
-            <div className="composer-preview__input">Message integration comes in a later step</div>
+            <div className="composer-preview__input">Messaging is not enabled in this rollout</div>
             <button
               type="button"
               className="send-button"
@@ -314,6 +498,17 @@ export default function App() {
             <span>{view.label}</span>
           </RouteLink>
         ))}
+        <RouteLink
+          route={{ kind: "section", section: "account" }}
+          navigate={navigate}
+          className={`mobile-nav__item${isAccountRoute ? " is-active" : ""}`}
+          aria-label="Account settings"
+          aria-current={isAccountRoute ? "page" : undefined}
+          title="Account settings"
+        >
+          <Icon name="settings" size={20} />
+          <span>Account</span>
+        </RouteLink>
       </nav>
     </div>
   );

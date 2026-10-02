@@ -16,13 +16,14 @@
     "typecheck:web": "tsc -p web/tsconfig.json --noEmit",
     "test": "tsx test/run.ts",
     "test:web:e2e": "playwright test --config playwright.config.ts",
+    "test:web:account:e2e": "playwright test --config playwright.account.config.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "security:secrets": "tsx scripts/secret-scan.ts",
     "security:deps": "npm audit --omit=dev --audit-level=critical",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
-    "ci": "npm run format:check && npm run typecheck && npm run typecheck:web && npm run build:web && npm run verify:web-sw && npm run test && npm run test:web:e2e && npm run security:secrets && npm run validate:android",
+    "ci": "npm run format:check && npm run typecheck && npm run typecheck:web && npm run build:web && npm run verify:web-sw && npm run test && npm run test:web:e2e && npm run test:web:account:e2e && npm run security:secrets && npm run validate:android",
     "validate:android": "tsx scripts/validate-android.ts"
   },
   "devDependencies": {

@@ -11,7 +11,9 @@ test.describe("Web foundation preview", () => {
     await expect(page.getByRole("navigation", { name: "Main sections" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Chats" })).toHaveAttribute("aria-current", "page");
     await expect(page.getByText("Foundation preview")).toBeVisible();
-    await expect(page.getByText("Sign-in and account data are not connected yet.")).toBeVisible();
+    await expect(
+      page.getByText("Account sign-in remains behind a default-off rollout flag;"),
+    ).toBeVisible();
     await expect(page.getByText("Preview only")).toBeVisible();
   });
 
@@ -32,12 +34,31 @@ test.describe("Web foundation preview", () => {
     ).toBeVisible();
   });
 
+  test("account route is explicit while its rollout flag stays off", async ({ page }) => {
+    let apiCalls = 0;
+    await page.route("**/api/**", async (route) => {
+      apiCalls++;
+      await route.fulfill({ status: 500, body: "unexpected account request" });
+    });
+    await page.goto("/account");
+
+    await expect(
+      page.getByRole("heading", { name: "Account tools are off in this build" }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("This page makes no account API calls while the flag is off."),
+    ).toBeVisible();
+    expect(apiCalls).toBe(0);
+    await page.getByRole("button", { name: "Back to Chats preview" }).click();
+    await expect(page).toHaveURL(/\/chats$/);
+  });
+
   test("unknown paths are explicit and provide a route back", async ({ page }) => {
     await page.goto("/not-a-feature");
 
     await expect(page.getByRole("heading", { level: 1, name: "Not found" })).toBeVisible();
     await expect(
-      page.getByText("This address does not match a page in the Web foundation preview."),
+      page.getByText("This address does not match a page in the Web preview."),
     ).toBeVisible();
     await page.getByRole("link", { name: "Return to Chats" }).click();
     await expect(page).toHaveURL(/\/chats$/);
@@ -76,7 +97,7 @@ test.describe("Web foundation preview", () => {
 });
 
 test("desktop and mobile previews have no axe WCAG 2.1/2.2 A/AA violations", async ({ page }) => {
-  const routes = ["/", "/chats/thread-42", "/calls", "/not-a-feature"];
+  const routes = ["/", "/chats/thread-42", "/calls", "/account", "/not-a-feature"];
   for (const path of routes) {
     await page.goto(path);
     const results = await new AxeBuilder({ page })

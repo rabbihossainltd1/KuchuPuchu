@@ -1,4 +1,4 @@
-export const SECTIONS = ["chats", "statuses", "calls", "search"] as const;
+export const SECTIONS = ["chats", "statuses", "calls", "search", "account"] as const;
 
 export type SectionId = (typeof SECTIONS)[number];
 
@@ -53,6 +53,11 @@ export function parseRoute(pathname: string): AppRoute {
   }
 
   return { kind: "not-found" };
+}
+
+/** Account and conversation URLs never expose private data before a valid session. */
+export function routeRequiresAuthentication(route: AppRoute): boolean {
+  return route.kind === "conversation" || (route.kind === "section" && route.section === "account");
 }
 
 /** Build a canonical same-origin path. Route IDs are opaque path segments. */
