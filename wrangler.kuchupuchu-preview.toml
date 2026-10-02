@@ -1,0 +1,41 @@
+# Cloudflare's non-production Workers Builds target for the separate `kuchupuchu`
+# Worker. Keep the root wrangler.toml pointed at `kuchupuchu-api`.
+name = "kuchupuchu"
+main = "src/worker/index.ts"
+compatibility_date = "2025-08-01"
+account_id = "92081fac7caf54a46a756c382081544b"
+workers_dev = false
+preview_urls = false
+
+[triggers]
+crons = ["* * * * *"]
+
+[[durable_objects.bindings]]
+name = "CHAT_ROOM"
+class_name = "ChatRoom"
+
+[[durable_objects.bindings]]
+name = "CALL_SIGNAL"
+class_name = "CallSignal"
+
+[[migrations]]
+tag = "v1-realtime-do"
+new_sqlite_classes = ["ChatRoom", "CallSignal"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "kuchupuchu-v3-apac"
+database_id = "28f6c033-4334-4fc0-ba1c-441ab42cf9a0"
+
+[vars]
+SELF_ORIGIN = "https://kuchupuchu-api.kuchupuchu.workers.dev"
+CF_ACCOUNT = "92081fac7caf54a46a756c382081544b"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "kp-media"
+
+[assets]
+directory = "./public"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*", "/ws/*"]
