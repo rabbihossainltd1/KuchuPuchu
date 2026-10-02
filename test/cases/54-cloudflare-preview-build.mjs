@@ -16,7 +16,10 @@ const checks = [
     previewLines.has('name = "kuchupuchu"'),
   ],
   ["preview config disables workers.dev routing", previewLines.has("workers_dev = false")],
-  ["preview config disables public version URLs", previewLines.has("preview_urls = false")],
+  [
+    "preview config requests Version URLs off, even though Workers Builds may override it",
+    previewLines.has("preview_urls = false"),
+  ],
   [
     "preview uses the existing Worker entry point and static assets",
     previewLines.has('main = "src/worker/index.ts"') && previewLines.has('directory = "./public"'),

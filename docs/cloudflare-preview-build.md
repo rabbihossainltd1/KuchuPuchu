@@ -11,9 +11,9 @@ Configure only the `kuchupuchu` non-production trigger as follows:
 - Build command: blank. Workers Builds installs the root npm dependencies; this repository has no root `npm run build` script.
 - Deploy command: `npx wrangler versions upload --config wrangler.kuchupuchu-preview.toml`.
 
-`wrangler.kuchupuchu-preview.toml` matches the `kuchupuchu` target without changing the root API Worker config. It disables both `workers_dev` and Version URLs. The command uploads an immutable Worker version only; it does not assign traffic or deploy to production. The `main` production trigger (`npx wrangler deploy`) is intentionally unchanged.
+`wrangler.kuchupuchu-preview.toml` matches the `kuchupuchu` target without changing the root API Worker config. It requests `workers_dev = false` and `preview_urls = false`. The command uploads an immutable Worker version only; it does not assign traffic or deploy to production. The `main` production trigger (`npx wrangler deploy`) is intentionally unchanged, and its active deployment remains unchanged after preview builds.
 
-The preview configuration retains only the Worker entry point and static assets. It deliberately excludes production D1/R2/DO bindings, environment variables, cron triggers, and DO migrations. Wrangler rejects version uploads that include an unapplied Durable Object migration; this build-only target must not apply migrations or create triggers. With `workers_dev = false` and `preview_urls = false`, it is not an externally reachable runtime preview.
+The preview configuration retains only the Worker entry point and static assets. It deliberately excludes production D1/R2/DO bindings, environment variables, cron triggers, and DO migrations. Wrangler rejects version uploads that include an unapplied Durable Object migration; this build-only target must not apply migrations or create triggers. **Cloudflare Workers Builds still emitted public Version Preview and alias URLs despite `preview_urls = false`; the generated root URL returned HTTP 200.** Those URLs expose only the static `public/` assets for this binding-free version; this is not a functional P2 account/API preview, and API paths may fail without bindings. No production resource bindings or live traffic are involved.
 
 ## Build token permissions
 
@@ -27,4 +27,4 @@ The scoped token has been verified with Wrangler account discovery and read-only
 
 ## Local contract check
 
-`npm test` includes `test/cases/54-cloudflare-preview-build.mjs`, which verifies that the API config remains named `kuchupuchu-api`, while the separate preview config targets `kuchupuchu` and cannot publish public preview URLs.
+`npm test` includes `test/cases/54-cloudflare-preview-build.mjs`, which verifies that the API config remains named `kuchupuchu-api`, while the separate config targets `kuchupuchu`, requests Version URLs off, and contains no production resource bindings, triggers, or migrations.
