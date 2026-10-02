@@ -2,13 +2,17 @@
   "name": "kuchupuchu",
   "version": "3.0.0",
   "private": true,
-  "description": "KuchuPuchu \u2014 Cloudflare Worker API + native Android client",
+  "description": "KuchuPuchu — Cloudflare Worker API + native Android client",
   "type": "module",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev:web": "vite --config vite.web.config.ts",
+    "build:web": "vite build --config vite.web.config.ts",
+    "preview:web": "vite preview --config vite.web.config.ts",
+    "typecheck:web": "tsc -p web/tsconfig.json --noEmit",
     "test": "tsx test/run.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -16,15 +20,23 @@
     "security:deps": "npm audit --omit=dev --audit-level=critical",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
-    "ci": "npm run format:check && npm run typecheck && npm run test && npm run security:secrets && npm run validate:android",
+    "ci": "npm run format:check && npm run typecheck && npm run typecheck:web && npm run build:web && npm run test && npm run security:secrets && npm run validate:android",
     "validate:android": "tsx scripts/validate-android.ts"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
     "better-sqlite3": "^12.2.0",
     "prettier": "^3.6.2",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
+    "vite": "8.3.2",
     "wrangler": "^4.33.1"
+  },
+  "dependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
   }
 }

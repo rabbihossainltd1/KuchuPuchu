@@ -1,0 +1,19 @@
+:root {
+  color-scheme: dark;
+  --kp-bg: #0d1524;
+  --kp-card: #16213a;
+  --kp-card-raised: #1b2943;
+  --kp-ink: #e9edf6;
+  --kp-muted: #8a97b2;
+  --kp-line: #233150;
+  --kp-blue: #2f6fed;
+  --kp-blue-light: #60a5fa;
+  --kp-amber: #f59e0b;
+  --kp-green: #16a34a;
+  --kp-red: #dc2626;
+  --kp-focus: #93c5fd;
+  --kp-radius-card: 18px;
+  --kp-radius-sheet: 22px;
+  --kp-motion-fast: 150ms;
+  --kp-motion-normal: 220ms;
+}

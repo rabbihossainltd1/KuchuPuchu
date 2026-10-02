@@ -261,7 +261,7 @@ Do not simply sprinkle CSS transitions over screens. Build a motion inventory an
 - Call client: existing Worker call lifecycle/signaling/`/ws/call/:id` reuse; browser RTCPeerConnection, offer/answer/ICE/reoffer, group mesh parity, permission revoke, ICE fail/reconnect, device change, page visibility, call cleanup. Re-architect to SFU only as explicit performance/product decision, not hidden within parity port.
 - Group call mesh peer-count ceiling/load test is a prerequisite; Android source shows one connection per joined peer, but audited source did not establish a safe target participant cap. Do not launch group video until it is measured/limited.
 
-## ૮. ধাপে ধাপে implementation sequence (এই turn-এ শুরু নয়)
+## ૮. ধাপে ধাপে implementation sequence
 
 | Phase | Logical deliverable | Dependencies / exit gate |
 |---|---|---|
@@ -274,13 +274,15 @@ Do not simply sprinkle CSS transitions over screens. Build a motion inventory an
 | **P6 — Visual/motion parity & hardening** | Fine-grained animation/effect match; `prefers-reduced-motion`; keyboard/screen reader/contrast; CSP/XSS/IDB/logout review; performance/bundle optimization; migration/offline/PWA update polish. | Screenshot comparisons at all breakpoints; security/accessibility review; no regressions in existing Worker/auth tests. |
 | **P7 — Controlled rollout** | Staged preview/QA, opt-in production rollout only after separate approval; telemetry limited to non-sensitive diagnostics; rollback to last static shell/Worker version. | No deploy/release is authorized by this planning document. |
 
+**চলমান implementation অবস্থা (২০২৬-১০-০২):** P1 শুরু হয়েছে, তবে phase সম্পূর্ণ নয়। প্রথম slice-এ `web/`-এ আলাদা React + TypeScript + Vite build, responsive desktop-first shell, theme tokens ও CI typecheck/build যোগ হয়েছে। বিদ্যমান `public/` client অক্ষত; production cutover, authentication/API integration, deep-route handling, offline/service-worker work এবং Playwright/a11y harness এখনও করা হয়নি।
+
 **Logical-change discipline:** প্রতিটি future PR/commit-এ একটি coherent feature/change; Worker contract, Android contract, Web UI আলাদা করে reviewable; test failure থেকে unrelated cleanup নয়। Production deploy, APK release, signing key/secret operation-এর জন্য এই plan যথেষ্ট অনুমতি নয়—আলাদা approval লাগবে।
 
 ## ৯. Automated test, manual QA ও regression plan
 
 ### ৯.১ Automated gates
 
-- Existing `test/cases/01–49`, `test/run.ts`, auth `48/49` contract coverage সবসময় চালু থাকবে; parity implementation এগুলোকে ভাঙলে feature complete নয়। Current turn-এ tests চালানো হয়নি।
+- Existing `test/cases/01–49`, `test/run.ts`, auth `48/49` contract coverage সবসময় চালু থাকবে; parity implementation এগুলোকে ভাঙলে feature complete নয়। এই slice শেষে `npm run ci` সফল: 49/49 test cases, 2046 assertions; secret scan ও Android static validation-ও pass করেছে।
 - Worker behavioral regression: REST auth header-only; WS authorization/member gate/ticket expiry; auth OTP/approval/session/refresh/logout; conversation privacy/hidden/archive; schedules; view-once exactly-once spend; file chunk/progress/caps; statuses/viewers; call group membership/offer/ICE/reaper; Web Push subscription and generic payload privacy।
 - Web unit/integration: E.164/country parity; reducers/state reconciliation; `clientId` retry; offline outbox; KP1/KP2 vectors; message escaping/XSS; media MIME/limit/chunk; settings optimistic rollback; route/back behavior.
 - Browser end-to-end: Chromium, Firefox, WebKit desktop; mobile emulation + Android Chrome installed/uninstalled PWA; feature-detect API branches rather than assume equal support. Mock worker for UI tests; local Worker/D1 harness for contract tests.
