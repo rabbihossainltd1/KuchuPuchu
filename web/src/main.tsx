@@ -14,3 +14,17 @@ createRoot(root).render(
     <App />
   </React.StrictMode>,
 );
+
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  const registerServiceWorker = () => {
+    void navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {
+      // The service worker is a progressive enhancement; the app still works online without it.
+    });
+  };
+
+  if (document.readyState === "complete") {
+    registerServiceWorker();
+  } else {
+    window.addEventListener("load", registerServiceWorker, { once: true });
+  }
+}
