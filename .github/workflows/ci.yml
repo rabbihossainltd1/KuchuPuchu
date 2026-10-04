@@ -14,7 +14,9 @@ jobs:
   worker:
     name: Worker + Web (typecheck, tests, browser QA, format, secrets)
     runs-on: ubuntu-22.04
-    timeout-minutes: 15
+    # Four browser suites, each with its own flagged build: the status suite
+    # pushed this past the old 15-minute ceiling.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -45,6 +47,8 @@ jobs:
         run: npm run test:web:account:e2e
       - name: Web messaging browser tests
         run: npm run test:web:messaging:e2e
+      - name: Web status browser tests
+        run: npm run test:web:status:e2e
       - name: Upload Web browser QA report
         if: failure()
         uses: actions/upload-artifact@v4

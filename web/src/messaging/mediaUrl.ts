@@ -11,6 +11,7 @@
 
 import { useEffect, useState } from "react";
 import type { ApiClient } from "../auth/authApi";
+import { fetchStatusMediaBlob } from "../status/statusMedia";
 import { fetchFileBlob, fetchMessageMediaBlob } from "./filesApi";
 
 /**
@@ -18,6 +19,13 @@ import { fetchFileBlob, fetchMessageMediaBlob } from "./filesApi";
  * prefix on the same string the hook already takes, so the cache stays one map.
  */
 export const MESSAGE_MEDIA_PREFIX = "msg:";
+
+/**
+ * A status's bytes come from `/api/statuses/:id/media`, which is authorized per
+ * viewer exactly like a message's — so it joins the same cache under its own
+ * prefix instead of growing a second one.
+ */
+export const STATUS_MEDIA_PREFIX = "status:";
 
 export type MediaSourceRow = {
   readonly id: string;
@@ -82,7 +90,9 @@ async function load(api: ApiClient, key: string, signal: AbortSignal): Promise<C
     try {
       const { blob, type } = key.startsWith(MESSAGE_MEDIA_PREFIX)
         ? await fetchMessageMediaBlob(api, key.slice(MESSAGE_MEDIA_PREFIX.length), signal)
-        : await fetchFileBlob(api, key, signal);
+        : key.startsWith(STATUS_MEDIA_PREFIX)
+          ? await fetchStatusMediaBlob(api, key.slice(STATUS_MEDIA_PREFIX.length), signal)
+          : await fetchFileBlob(api, key, signal);
       if (typeof URL?.createObjectURL !== "function") return null;
       const entry: CacheEntry = { url: URL.createObjectURL(blob), type, refs: 0 };
       remember(key, entry);
