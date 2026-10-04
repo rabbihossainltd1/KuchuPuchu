@@ -226,11 +226,31 @@ check(
 check("a blank type is an opaque download", safeMediaType("") === "application/octet-stream");
 check("a null type is an opaque download", safeMediaType(null) === "application/octet-stream");
 check(
-  "audio/webm is NOT servable — browser voice notes are slice E, not a silent lie",
-  !SAFE_MEDIA_TYPES.includes("audio/webm") &&
-    safeMediaType("audio/webm") === "application/octet-stream",
+  "audio/webm IS servable — a browser voice note keeps the type its bytes have",
+  SAFE_MEDIA_TYPES.includes("audio/webm") && safeMediaType("audio/webm") === "audio/webm",
+);
+check(
+  "a MediaRecorder's parameterised mime is stripped to the servable essence",
+  safeMediaType("audio/webm;codecs=opus") === "audio/webm",
+);
+check(
+  "the worker's own list carries audio/webm too (the mirror is not ahead of it)",
+  workerTypes.includes("audio/webm"),
 );
 check("video/webm IS servable", SAFE_MEDIA_TYPES.includes("video/webm"));
+check(
+  "a .webm voice note's server ceiling is the video one — and both clients agree",
+  // mediaLimitFor tests the NAME's extension inside the video branch before it
+  // ever reaches the audio branch, so `voice_1.webm` gets the 2 GB clip ceiling
+  // on the worker, on the web mirror AND on the phone (Api.mediaLimit orders the
+  // branches identically). The 100 MB voice rule is therefore enforced where
+  // Android enforces it — in the voice send path itself (see
+  // web/src/messaging/voice.ts VOICE_MAX_BYTES), not by the shared ceiling.
+  mediaLimitFor("audio/webm", "voice_1.webm") === VIDEO_MAX_BYTES &&
+    mediaLimitFor("audio/webm", "voice_1.webm") ===
+      workerMediaLimitFor("audio/webm", "voice_1.webm") &&
+    mediaLimitFor("audio/webm", "note.m4a") === VOICE_MAX_BYTES,
+);
 
 check("describeLimit speaks in GB above a gigabyte", describeLimit(DOC_MAX_BYTES) === "5 GB");
 check("describeLimit speaks in MB below it", describeLimit(IMAGE_MAX_BYTES) === "100 MB");
