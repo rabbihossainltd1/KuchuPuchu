@@ -42,10 +42,17 @@ export type MessagesQuery = {
  * `body` exactly like a TEXT send, which is what the phone does.
  */
 export type SendMessagePayload = {
-  kind: "TEXT" | "STICKER" | "FILE";
+  /** The four kinds the worker accepts (`ALLOWED_MESSAGE_KINDS`). */
+  kind: "TEXT" | "STICKER" | "IMAGE" | "FILE";
   /** Plaintext for groups/bots, a `KP1.` envelope in a personal chat. */
   body: string;
   clientId: string;
+  /**
+   * An inline `data:` image. Only used when forwarding a legacy IMAGE row that
+   * never had a file key: `forwardMessageTo` re-posts the data URL rather than
+   * downloading and re-uploading bytes it already holds.
+   */
+  imageData?: string;
   replyTo?: string;
   fileName?: string;
   fileType?: string;
@@ -142,6 +149,7 @@ export const messagingApi = {
       body: payload.body,
       clientId: payload.clientId,
     };
+    if (payload.imageData !== undefined) body.imageData = payload.imageData;
     if (payload.replyTo) body.replyTo = payload.replyTo;
     if (payload.fileName !== undefined) body.fileName = payload.fileName;
     if (payload.fileType !== undefined) body.fileType = payload.fileType;

@@ -24,6 +24,14 @@ export type ConversationPeer = {
   readonly displayName: string;
   readonly username: string;
   readonly e2eePublicKey: string;
+  /**
+   * Owner round 31 item 21: a private profile's chat, calls, pictures and
+   * videos are screenshot-blocked and NOT saveable / forwardable on the other
+   * phone too. A browser cannot block a screenshot — it says so — but the
+   * save / forward half of that rule is a client decision and this is the flag
+   * that carries it (`KpSecure.privatePeer` on the phone).
+   */
+  readonly privateProfile: boolean;
 };
 
 export type ConversationPreview = {
@@ -46,6 +54,19 @@ export type ConversationRow = {
   readonly lastMessage: string;
   readonly preview: ConversationPreview | null;
   readonly other: ConversationPeer | null;
+  /**
+   * The admin's "Private group" switch. While it is on the phone hides group
+   * media, add-members and call recording — and nothing may be forwarded out
+   * of the chat (`privateChat` in ChatScreen is `privatePeer(c) || privateGroup`).
+   */
+  readonly privateGroup: boolean;
+  /**
+   * r71-18: whether the OTHER side lets me keep what they send here. The
+   * worker answers `peerSave`; a false answer withholds Save and Forward on
+   * their rows, which is the client half of "save and forward follow the
+   * sender's consent".
+   */
+  readonly peerSave: boolean;
 };
 
 export type MessageRow = {
@@ -309,6 +330,7 @@ function parsePeer(value: unknown): ConversationPeer | null {
     displayName: text(value.displayName, 120),
     username: text(value.username, 64),
     e2eePublicKey: text(value.e2eePublicKey, 4096),
+    privateProfile: booleanish(value.privateProfile),
   };
 }
 
@@ -347,6 +369,10 @@ export function parseConversationRow(value: unknown): ConversationRow | null {
     lastMessage: text(value.lastMessage, 32),
     preview: parsePreview(value.lastMessagePreview),
     other: parsePeer(value.other),
+    privateGroup: booleanish(value.privateGroup),
+    // Withheld by an older payload means "allowed": the worker's own default is
+    // `otherSave ?? true`, and a missing flag must not silently disable Save.
+    peerSave: value.peerSave === undefined ? true : booleanish(value.peerSave),
   };
 }
 

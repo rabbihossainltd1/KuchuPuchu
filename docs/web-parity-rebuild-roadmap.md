@@ -46,8 +46,8 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 | **B** messaging core + KP1 E2EE | ✅ merged | PR #82 → `main` @ `d168a913` |
 | **C** message actions + durability | ✅ merged | PR #82 → `main` @ `d168a913` |
 | **D** attachments + photo editor | ✅ merged | PR #83 → `main` @ `d0a44ae0` |
-| **E1** viewers + shared media + view-once + albums | ✅ built | এই branch; নিচের হিসাব |
-| **E2** voice note + document preview + forward | ⏳ বাকি | voice-এর জন্য Worker-এ `audio/webm` allowlist লাগবে ⇒ আলাদা PR |
+| **E1** viewers + shared media + view-once + albums | ✅ merged | PR #84 → `main` @ `de54086` |
+| **E2** voice note + document preview + forward + multi-select | ✅ built | এই branch; নিচের হিসাব। Worker অংশটা আলাদা PR-এ আগেই merge হয়ে গেছে: #85 → `main` @ `5e77e2e` |
 | **F**–**I** | ⏳ বাকি | — |
 
 **Slice D-তে যা নামলো** (Worker বা Android-এ একটি লাইনও বদলায়নি):
@@ -65,6 +65,19 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 - View once: কোন fetch-টা opening spend করে সেটা আলাদা করে দেখা — inline `IMAGE` ⇒ `GET /api/messages/:id/media` (fetch-ই opening), uploaded `FILE` ⇒ `/api/files/:key` (spend করে না, তাই ফোনের মতো blur করে দেখানো যায়) + `POST /view` রিপোর্ট। 404/410 terminal, বাকি failure পরের viewing-এ আবার রিপোর্ট।
 - **আরেকটা আসল bug ধরা পড়লো:** Worker-এর `ALBUM_ID_RE = /^alb_[A-Za-z0-9_-]{4,36}$/` ছাড়া album id **চুপচাপ ফেলে দেয়**, আর web client পাঠাচ্ছিল `album_<ms>` ⇒ multi-photo send ফোনে কখনোই group হতো না, কোথাও কোনো error ছাড়াই। এখন `alb_` + 20 hex (Android-এর `UUID.replace("-","").take(20)`), আর case 57 সেই regex-ই Worker source থেকে parse করে মিলিয়ে দেখে।
 - Gates: contract **৫৮/৫৮ case, ২৬৫৪ assertion** (নতুন case 58 = ১২৭ check), browser **৫৭ test** (নতুন `viewer.spec.ts` = ১২), `npm run ci` EXIT=0, SW ১১টা precached file, entry bundle মাত্র +০.৮ kB (২৮৮.৭৫ / gzip ৮৮.৫৮) কারণ viewer-gallery দুটোই lazy।
+
+**Slice E2-তে যা নামলো** (Worker-এ মাত্র একটি লাইন, সেটা আলাদা PR #85-এ; Android/`public/` অপরিবর্তিত):
+
+- Worker (PR #85, আলাদা করে review করা): `SAFE_MEDIA_TYPES`-এ `"audio/webm"` — এটা ছাড়া browser-এর রেকর্ড করা voice note `application/octet-stream` হয়ে যেত, আর `/api/messages/:id/media`-র fallback তাকে `image/jpeg` লেবেল দিত। `uploadContract.ts`-এর mirror-ও একই ক্রমে বদলেছে (case 57 index মিলিয়ে দেখে)।
+- `web/src/messaging/` — `voice.ts` (সব সংখ্যা আর waveform-এর অঙ্ক DOM-free: `squash`/`pseudo`/`live`/`sanitize`, hold gesture, clock, mime বেছে নেওয়া), `voiceRecorder.ts` (`MediaRecorder` + `AnalyserNode`, pause/resume/cancel, mic refusal-এর ভাষা), `useVoiceRecorder.ts` (hold → release-এ সিদ্ধান্ত, typing ping), `useVoicePlayer.ts` (একটাই player, per-message speed, seek, cache), `VoiceBubble.tsx`, `VoiceRecorderBar.tsx`, `docPreview.ts` (kind/mime/size/notice, সব list Kotlin থেকে মেলানো), `DocViewer.tsx`, `forward.ts` (gate, shape, meta, selection facts, delete scope), `ForwardDialog.tsx`।
+- Voice note: ফোনের `VoiceNote.kt`-এর অঙ্ক হুবহু — `BARS 36`, `MAX_BARS 64`, `LIVE_CEIL 20000`, `pseudo`-র LCG আর `0.55f/0.45f/6.4f/0.3f/18f/0.62f` লিটারেলগুলো Float-এ rounding সহ, যাতে একই message id-তে দুই ক্লায়েন্ট একই ছবি আঁকে। Browser পাঠায় `audio/webm` + `voice_<ms>.webm`, ফোন পাঠায় `audio/mp4` + `.m4a` — দুটোই ফোনের `fileLooksVoice`-এ voice bubble হিসেবেই আঁকা হয় (কারণ `.webm` নাম দেখে video ধরার আগে audio type ধরা হয়)।
+- View-once voice (r71-19b): **প্রাপক** বাজায় `/api/messages/:id/media` দিয়ে (fetch-ই opening), **প্রেরক** নিজের কপি `/api/files/:key` থেকে শোনে আর কিছু spend করে না; once note-এ seeking নেই।
+- Document reader: PDF ⇒ browser-এর নিজের viewer (sandboxed iframe + নতুন tab-এ খোলার লিংক), text/code ⇒ প্রথম ৪০০ KB selectable monospace (ফোনের `ByteArray(400_000)` আর তার truncation লাইনসহ), ছবি/ক্লিপ ⇒ inline, **HTML/SVG/Markdown ⇒ শুধু source, কখনো render নয়**, TIFF/ZIP/RAR/Office ⇒ ফোনের কার্ড + download। Document row-র Download এখন **ক্লিকে fetch করে**, render-এ নয় (আগে চ্যাট খোলার সাথে সাথে সব ডকুমেন্ট ডাউনলোড হতো — গিগাবাইট ফাইলে সেটা বিপদ)।
+- Forward + multi-select: gate-এর ক্রম ফোনের মতো (echo ⇒ DELETED ⇒ private chat ⇒ view-once ⇒ r71-18 sender consent), shape-এর ক্রমও (fileKey reuse ⇒ `data:` repost ⇒ hosted media download+re-upload ⇒ TEXT), caption **টার্গেটের key দিয়ে আবার seal** হয় (group/keyless ⇒ plaintext), ২+ ছবি ⇒ **প্রতি টার্গেট চ্যাটে আলাদা নতুন `albumId()`**। Selection bar: back, count, Copy (শুধু TEXT, decrypt করা body), Forward, Edit (single/own/৬০ সেকেন্ড), আর **একটাই Delete** যার প্যানেল scope জিজ্ঞেস করে (`canDeleteForEveryone`, Ui.kt:1009)।
+- **আসল bug ধরা পড়লো:** `sendVoice` view-once ফ্ল্যাগটা শুধু top-level-এ পাঠাচ্ছিল, কিন্তু Worker-এর `viewOnceFlag` পড়ে **`meta.viewOnce`** ⇒ view-once ভয়েস নোট আসলে সাধারণ ভয়েস নোট হয়ে যেত, "একবারই খোলা যাবে" কেউ enforce করত না। এখন দুই জায়গাতেই যায় (ফোনের মতো), আর e2e সেটা POST body-তে যাচাই করে।
+- **দ্বিতীয় bug:** PR #85-এর আগে browser voice note servable-ই ছিল না।
+- Delete-for-me: ফোনের মতো লোকাল hide, কিন্তু browser-এর কোনো local message store নেই ⇒ in-memory, reload-এ ফিরে আসে — UI সেটা **স্পষ্ট ভাষায় বলে দেয়** (Worker-এ per-message delete-for-me endpoint নেই; `/api/conversations/:id/hide` পুরো চ্যাটের watermark)।
+- Gates: contract **৬০/৬০ case, ২৯৮১ assertion** (নতুন case 59 = ১৪৬ check, case 60 = ১৭৮), browser **৯৪ test** (shell ৮ + account ১০ + messaging ৭৬; নতুন `voice.spec.ts` ১৩, `docs.spec.ts` ১০, `forward.spec.ts` ১৪ — voice-এ Chromium-এর **আসল fake mic** ব্যবহার হয়েছে, তাই `MediaRecorder` সত্যিই webm/opus বানায়), `npm run ci` EXIT=0, SW ১৫টা precached file, entry +০.৫৫ kB (২৮৯.৩০ / gzip ৮৮.৭৭), নতুন lazy chunk `DocViewer` ১০.৪৮ kB আর `ForwardDialog` ২.৪২ kB।
 
 ### ইচ্ছাকৃতভাবে বাদ / placeholder (কাজ হবে না)
 

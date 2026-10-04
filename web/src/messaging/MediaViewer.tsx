@@ -13,8 +13,9 @@
  *   swipe between photos       Prev/Next buttons, `←` / `→`, Home / End
  *   swipe down to close        drag down past the threshold when at 1×, or
  *                              Escape, or the Close button
- *   ⋮ sheet: Save / Forward /  Save (a real download), Forward (disclosed as
- *     Delete                     not built yet), Delete (inline confirm)
+ *   ⋮ sheet: Save / Forward /  Save (a real download, withheld when the sender
+ *     Delete                     turned saving off), Forward (the chat picker),
+ *                                Delete (inline confirm)
  *
  * Zoom resets on every page flip, exactly as the phone does (owner round 34,
  * item 6), and a zoomed photo holds the drag gesture so a pan never turns into
@@ -58,6 +59,16 @@ export type ViewerItem = {
   readonly spent: boolean;
   /** False while the row is still a local echo — the Worker has nothing to delete. */
   readonly canDelete: boolean;
+  /**
+   * False when the sender turned off saving their media in this chat (r71-18).
+   * The bytes are already on screen — reading is allowed — but keeping them is
+   * the sender's decision, so Save is withheld rather than shown and refused.
+   */
+  readonly canSave: boolean;
+  /** False for a private chat, a view-once row, an echo, or a no-save sender. */
+  readonly canForward: boolean;
+  /** Why forwarding is withheld, in the reader's own words. */
+  readonly forwardReason: string;
   readonly width: number;
   readonly height: number;
 };
@@ -68,6 +79,8 @@ export type MediaViewerProps = {
   onIndexChange: (index: number) => void;
   onClose: () => void;
   onDelete?: (item: ViewerItem) => void;
+  /** Open the chat picker on this item. Withheld when `canForward` is false. */
+  onForward?: (item: ViewerItem) => void;
   /** The item is on screen. For a view-once row this is the single opening. */
   onShown?: (item: ViewerItem) => void;
   onAnnounce?: (message: string) => void;
@@ -79,6 +92,7 @@ export function MediaViewer({
   onIndexChange,
   onClose,
   onDelete,
+  onForward,
   onShown,
   onAnnounce,
 }: MediaViewerProps) {
@@ -353,25 +367,41 @@ export function MediaViewer({
           </p>
         </div>
         <div className="media-viewer__actions">
-          {item.url ? (
+          {item.url && item.canSave ? (
             <a
               className="text-button"
               href={item.url}
               download={item.title}
               onClick={() => announce("Saved to your downloads folder.")}
             >
-              <Icon name="message" size={16} /> Save
+              <Icon name="download" size={16} /> Save
             </a>
           ) : (
-            <span className="text-button is-disabled">Save</span>
+            <span
+              className="text-button is-disabled"
+              aria-disabled="true"
+              title={
+                item.canSave
+                  ? "Still loading"
+                  : "The sender turned off saving their media in this chat."
+              }
+            >
+              <Icon name="download" size={16} /> Save
+            </span>
           )}
-          <span
-            className="text-button is-disabled"
-            title="Forwarding arrives in a later slice; saving and deleting work now."
-            aria-disabled="true"
-          >
-            Forward
-          </span>
+          {item.canForward && onForward ? (
+            <button type="button" className="text-button" onClick={() => onForward(item)}>
+              <Icon name="send" size={16} /> Forward
+            </button>
+          ) : (
+            <span
+              className="text-button is-disabled"
+              aria-disabled="true"
+              title={item.forwardReason || "This cannot be forwarded."}
+            >
+              <Icon name="send" size={16} /> Forward
+            </span>
+          )}
           {item.canDelete && onDelete ? (
             <button
               type="button"

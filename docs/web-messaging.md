@@ -1,4 +1,4 @@
-# Web messaging (P3 slices A–E1)
+# Web messaging (P3 slices A–E2)
 
 Status: **implemented behind two default-off build flags**. Nothing in this document is enabled in the production `public/` PWA, and no Worker route changed.
 
@@ -40,6 +40,15 @@ VITE_KP_WEB_ACCOUNT_INTEGRATION=true VITE_KP_WEB_MESSAGING=true npm run build:we
 | `web/src/messaging/sharedMedia.ts` | The gallery payload, its order, its empty states and its refusals |
 | `web/src/messaging/viewOnce.ts` | The one-opening rule: which fetch spends it, the spend de-dupe, the text reveal timer |
 | `web/src/messaging/OnceText.tsx` | A view-once TEXT row: veiled, five-second reveal, then gone |
+| `web/src/messaging/voice.ts` | Every voice number and the waveform maths (DOM-free, so Node compares it with `VoiceNote.kt`) |
+| `web/src/messaging/voiceRecorder.ts` | `MediaRecorder` + `AnalyserNode`: start / pause / resume / cancel, the hold geometry, mic-refusal wording |
+| `web/src/messaging/useVoiceRecorder.ts` | The composer's recorder controller: hold → release decides, the clock, the live strip, typing pings |
+| `web/src/messaging/useVoicePlayer.ts` | One player for the whole transcript: per-message speed, seek, blob cache, `voiceSourceOf` |
+| `web/src/messaging/VoiceBubble.tsx`, `VoiceRecorderBar.tsx` | The note (play/pause, wave slider, duration, speed) and the hold/locked recorder panels |
+| `web/src/messaging/docPreview.ts` | Document kinds, mime table, size reading, notices — every list compared with `DocViewerScreen.kt` / `Files.kt` |
+| `web/src/messaging/DocViewer.tsx` | The full-screen reader: PDF frame, text pane, media player, honest card for the rest |
+| `web/src/messaging/forward.ts` | Forward gates and shapes, the meta a copy carries, selection facts, the delete-for-everyone predicate |
+| `web/src/messaging/ForwardDialog.tsx` | The full-screen chat picker: tick rows, subtitle, one Send that fires every target |
 | `scripts/generate-web-stickers.ts` | Kotlin → TypeScript catalog generator; `--check` compares data, not bytes |
 
 ## End-to-end encryption — precise claims
@@ -129,6 +138,50 @@ A view-once **clip or voice note fetches no bytes at all** until it is opened ("
 
 The `VANISHED` socket frame is an instruction, not a message: `applyMessageFrame` removes the row and can never insert the marker as a bubble.
 
+## Voice notes, documents, forwarding and multi-select (slice E2)
+
+### Voice notes
+
+The recorder is `MediaRecorder` + an `AnalyserNode`, and the maths is the phone's:
+
+- **The wave travels in the message**, not in a decoder. `meta.waveform` (≤64 ints, 0…100) is what both clients draw, so a note recorded on a phone looks the same here. `squashWaveform` is `VoiceWaveform.squash` bucket-for-bucket; `pseudoWaveform` is the LCG that seeds from Java's `String.hashCode` and keeps Kotlin's *Float* literals (`0.55f`, `0.45f`, `6.4f`, `0.3f`, `18f`, `0.62f`) — same seed, same 36 bars, on both clients. A note with no recorded bars draws the pseudo pattern from `clientId.ifBlank { id }`, so an optimistic echo and its confirmed row never redraw.
+- **The container is the browser's own.** `audio/webm;codecs=opus` first, `audio/mp4` in Safari, and the file name follows the container (`voice_<ms>.webm` / `.m4a` / `.ogg`). The Worker's `SAFE_MEDIA_TYPES` gained `audio/webm` (PR #85) — without it a browser note was served as `application/octet-stream` and the message-media fallback labelled it `image/jpeg`.
+- **Both clients still draw it as a note, not a clip.** Android's FILE bubble tests `fileLooksVoice` before `fileLooksVideo`, so a `.webm` name with an `audio/*` type is a voice note there too. The Worker files `audio/*` under *Docs* in shared media for both clients.
+- **The hold gesture decides on the release** (r75-1/r75-9/r76-19): a tap arms the locked panel, a drag left past the cancel arm throws the take away, a rise past the lock arm keeps the panel, anything else sends. On a desktop pointer the same three outcomes are also real labelled buttons — Send, Pause, Delete and View once — so nothing is gesture-only. Pause freezes the clock *and* the wave (`recorderElapsedMs` subtracts the paused total), which is what makes the stored `seconds` the words that were actually spoken.
+- **Speed is per message** (r76-16): 1× → 2× → 3× → 4× → 1×, keyed on the row id, so one note at 2× leaves every other note alone.
+- **Limits:** 100 MB (`Api.VOICE_MAX`), 600 s (the Worker's clamp), under one second is thrown away. `mediaLimitFor` matches a `.webm` *name* in its video branch before its audio branch, so a browser note measures against the 2 GB clip ceiling server-side — the 100 MB voice rule is enforced in `sendVoice`, and case 59 pins that fact rather than pretending the server does it.
+- While a take runs the chat pings `typing` with `kind: "voice"` once and then every 3 s against the Worker's ~6 s lease, so the other side sees a recording microphone instead of typing dots; finishing or cancelling sends `clear`.
+
+**View-once voice (r71-19b)** keeps the one-opening rule exact: the *recipient* plays through `GET /api/messages/:id/media`, where the fetch **is** the opening (and `POST /api/messages/:id/view` is reported), while the *sender* previews from their own `fileKey` and spends nothing. A once note cannot be seeked, has no speed control, and leaves the transcript on the server's `VANISHED` frame — never on the client's own say-so.
+
+### Documents
+
+`docPreview.ts` is the phone's `docKind` branch for branch, in the same order (pdf → svg → tiff → image → archive → text → other), with the same extension sets, the same ZIP-shaped exceptions (`docx`/`xlsx`/`pptx`/`apk`/`jar`/`odt`/`ods`/`odp`/`epub` are *not* archives) and the same magic-byte tests. Then the reader does what a browser honestly can:
+
+| Kind | What the reader does | Disclosed as |
+|---|---|---|
+| PDF | The browser's own viewer, in an `iframe sandbox="allow-same-origin allow-popups"` on a blob URL, plus "Open in a new tab" | "Rendered by your browser's own PDF viewer." |
+| text / code | Selectable monospace, first **400 000 bytes** cut *before* the UTF-8 decode, then the phone's own truncation line | "Plain text, selectable, first 400 KB of it." |
+| image | A picture | — |
+| a clip or an audio file sent as a document | The browser's own player | "The phone hands a file like this to its system player." |
+| **HTML / XHTML / SVG / Markdown** | **Source only, never rendered** | Why: this origin will not execute markup another person uploaded; the phone's offline WebView is a sandbox a browser tab does not have |
+| TIFF, ZIP/RAR, DOC(X)/XLS(X)/PPT(X) and everything else | The phone's card — badge, name, `type · size` — with the download as the way through | "No browser can decode a TIFF" / "download-only here" |
+
+A document row's **Download fetches on the click**, not on render: `/api/files/:key` is member-checked so an `<a href>` can never carry the Bearer header, and a document row can be gigabytes. Opening a chat used to download every document in it.
+
+### Forwarding and multi-select
+
+Gates, in the order the phone tests them: an echo that is still sending, a `DELETED` row, a **private chat** (`privateGroup`, or a 1:1 whose `other.privateProfile` is set), a **view-once** row, and somebody else's media when they turned off *Media Save permission* (r71-18). Each refusal is a labelled, `aria-disabled` element carrying its reason — never a button that silently does nothing.
+
+Shapes, in the same order: a stored `fileKey` is **reused** (no re-upload), a `data:` URL is reposted inline as an `IMAGE`, a server-hosted media URL is downloaded and re-uploaded as `photo.jpg` / `image/jpeg`, and anything else is a `TEXT` post. The `meta` a copy carries is exactly the phone's: `{voice, seconds, waveform?}`, or `{document: true}`, or `{album}` for a grouped photo — a reply quote, reactions and the view-once flag belong to the original and do not travel. Two or more photos forwarded together arrive as one grouped bubble again, with **a fresh `albumId()` per target chat** so two chats never share a group.
+
+The caption is **re-sealed for the target's** peer key (plaintext for a group or a keyless chat). Android falls back to plaintext when sealing fails; this client refuses instead (`SendRefusedError`) and reports that chat as not forwarded, because posting a readable copy of a sealed message is worse than posting nothing. Per-row failures are swallowed exactly as `runCatching` does, and the announcement says how many landed and which chat refused, with the chat's own name.
+
+The selection bar is the phone's: back, count, **Copy** (TEXT rows only, `
+`-joined *decrypted* bodies), **Forward**, **Edit** (single, own, inside the 60-second window) and **one Delete** whose panel asks the scope. `canDeleteForEveryone` is `Ui.kt`'s predicate: never an echo, always your own, never in a group, and for somebody else's row only in a 1:1 with a real person (not a bot). The panel's wording is `Also delete for <display name | username | "everyone">`.
+
+**Delete-for-me is session-only here, and says so.** Android hides the ids in its local store; a browser tab has no local message store and the Worker has no per-message delete-for-me route (`POST /api/conversations/:id/hide` is a whole-chat watermark), so the rows hide in memory, play the same vanish show, and the announcement states that they come back on a reload.
+
 ## Native-only gaps that are disclosed rather than faked
 
 | Android behaviour | Browser reality | How it surfaces |
@@ -136,10 +189,11 @@ The `VANISHED` socket frame is an instruction, not a message: `applyMessageFrame
 | `FLAG_SECURE` screenshot/recording block | Impossible in a page | `CAPABILITY_COPY.captureWarning` in *Privacy notes* |
 | Media sealed end-to-end | Not implemented server-side | `CAPABILITY_COPY.mediaNotEncrypted` in *Privacy notes* |
 | Photo/video/document attach | Live (slice D) | Gallery, Camera, Video and Document tiles with a real file input |
-| Voice note recording | Later slice (E) | Needs `audio/webm` allowlisted server-side; `CAPABILITY_COPY.mediaViewerPending` says it is coming, and no fake mic toggle exists |
+| Voice note recording + playback | Live (slice E2) | Real `MediaRecorder`; `CAPABILITY_COPY.voiceRecorderNotice` names the container, the 100 MB cap, the one-second floor and Safari's missing Pause |
 | Location / Contact share | Not possible in a browser | Tiles disabled, each with an `sr-only` reason read by `aria-describedby` |
 | Full-screen viewer, shared media, view-once | Live (slice E1) | Viewer, gallery and one-opening flow; Forward is a labelled, disabled row in the viewer, not a stub that pretends |
-| Document preview | Later slice (E2) | A document row says "Document preview arrives in a later slice; downloading works now." |
+| Document preview | Live (slice E2), with substitutions | `CAPABILITY_COPY.documentPreviewNotice` and a per-kind notice in the reader: HTML/SVG/Markdown as source only, TIFF and archives download-only |
+| Delete for me (durable) | Not possible in a browser | The hide is in-memory and the announcement says the rows return on a reload |
 | Full emoji reaction picker | Later slice | Only the six wired quick reactions are offered |
 | Drafts in app storage | Needs IndexedDB | When unavailable, a `role="status"` banner says drafts live in memory only |
 
@@ -150,7 +204,10 @@ The `VANISHED` socket frame is an instruction, not a message: `applyMessageFrame
 - Chat list and open conversation coexist at 1366×768 and 1920×1080; below 720 px the list collapses and a *Back to Chats* link returns.
 - Every gesture has a keyboard equivalent: `Enter` sends, `Shift+Enter` newline, `Escape` cancels a reply or an edit, `Tab` reaches every per-message action.
 - Per-message action rows are revealed by `:hover` **and** `:focus-within`, and are permanently visible under `prefers-reduced-motion`. No hover-only or unlabeled icon-only control exists.
-- Delete uses an inline confirm panel (*Delete for everyone* / *Keep message*), never `window.confirm`.
+- Delete uses an inline confirm panel (*Delete for everyone* / *Keep message*), never `window.confirm`; the selection bar's Delete asks the scope in the same panel, and only offers "also delete for …" when the server would accept it.
+- The composer's circle is a **microphone** while it is empty and a **Send** button the moment there is text or an attachment. A click arms the recorder panel (no drag needed), `Escape` is never required to reach Send, and the panel's Send / Pause / Delete / View-once are labelled buttons, so the hold gesture has a full keyboard-and-mouse equivalent.
+- A voice note's wave is a `role="slider"` with `aria-valuenow`/`aria-valuetext` and Arrow / Home / End keys; the value is always a finite number, never `NaN`.
+- Multi-select is reachable two ways (the row's tick and the action row's *Select*), an album ticks as one group, and the bar is a `role="toolbar"` whose count is a live `role="status"`.
 - Conversation rows are real `RouteLink` anchors to `/chats/:id`, so middle-click, Ctrl-click and "open in new tab" work.
 - Unread badges cap at `99+`; hidden conversations never render or contribute to counts; times render in `Asia/Dhaka`.
 
@@ -172,8 +229,11 @@ File bytes, read out of `src/worker/index.ts` and mirrored by `web/src/media/upl
 - `GET /api/messages/:id/media` — inline media bytes; **for a view-once row this fetch is the opening**.
 - `POST /api/messages/:id/view` — report the single opening; `400 NOT_VIEW_ONCE`, `403 OWN_MESSAGE`, `404`/`410 VIEWED` when it is already gone.
 - Ceilings: image 100 MB, video 2 GB, audio 100 MB, other 5 GB. `ALLOWED_MESSAGE_KINDS` is `{TEXT, STICKER, IMAGE, FILE}`.
+- Voice meta is normalised on the way in: `meta.voice`, `seconds` clamped 0…600, `waveform` at most `VOICE_WAVEFORM_MAX` (64) integers rounded and clamped 0…100; `clientId` is optional server-side and copied into `meta.clientId`.
+- **`viewOnceFlag` reads the flag from `meta`** (`meta.viewOnce !== true` returns false), so a client that sends only the top-level `viewOnce` stores an ordinary row. Android sends it in both places; so does this client — a voice note that omitted `meta.viewOnce` would have been a once note nobody enforced.
+- A `fileKey` belonging to somebody else's view-once message is refused for reuse: `403 VIEW_ONCE` ("This was sent as view once."), which is what makes forwarding a spent once-row impossible from a modified client too.
 
-No endpoint was invented for this increment, and no Worker route changed for slice D.
+No endpoint was invented for these increments. The only Worker change in slice E2 is the one-line `audio/webm` addition to `SAFE_MEDIA_TYPES` (PR #85, reviewed on its own); nothing else in the Worker, the Android client or `public/` moved.
 
 ## Tests
 
@@ -182,17 +242,31 @@ No endpoint was invented for this increment, and no Worker route changed for sli
 | `test/cases/55-web-messaging-e2ee.mjs` | `npm test` | 43 checks. Seals with an independent `node:crypto`/OpenSSL reference and opens in the client, and vice versa; KP2 blob via `pbkdf2(200 000)`; send-policy refusals; `HKDF_INFO` and iteration count pinned |
 | `test/cases/56-web-messaging-protocol.mjs` | `npm test` | 99 checks. Hostile payload parsing, previews, ticks, reducers, socket frames with a fake WebSocket and fake scheduler (open/frame/heartbeat/backoff 2500→5000/explicit close), outbox state machine, draft caps, copy catalogs |
 | `test/cases/57-web-media-attachments.mjs` | `npm test` | 238 checks. Every ceiling and `mediaLimitFor` branch against `src/shared/constants.ts`; the served-type list parsed back out of the Worker's own source; `planUpload`/`splitParts` coverage-exactness; `meta` parity with `ChatScreen.kt`; the sticker catalog re-derived from `StickerSheet.kt` and compared glyph-by-glyph; edit geometry and layer reducers; `fileGetPath` and the path guard |
+| `test/cases/59-web-voice-notes.mjs` | `npm test` | 146 checks. `SAMPLE_MS`/`BARS`/`MAX_BARS`/`LIVE_BARS`/`LIVE_CEIL` parsed out of `VoiceNote.kt` and compared with `voice.ts`; the golden `pseudo` pattern for `msg_1` and Java's `hashCode("abc")`; `squash`/`live`/`sanitize` behaviour including silence and over-long input; `VoiceHoldGesture.decide` branch for branch plus the desktop arms; the per-message speed cycle; the `%d:%02d` clock at every point on the dial; paused-clock arithmetic; `Api.VOICE_MAX` and the Worker's 600 s clamp; `fileLooksVoice` before `fileLooksVideo`; which fetch spends a view-once note for reader and sender; the 3 s typing ping against the Worker's lease and `typing.kind`; and the disclosed recorder copy |
+| `test/cases/60-web-forward-docs.mjs` | `npm test` | 178 checks. `privatePeer || privateGroup` out of `KpSecure.kt`/`ChatScreen.kt`; the five forward gates and their reasons; `forwardMessageTo`'s four branches in source order with its `ifBlank` fallbacks and the `photo.jpg`/`image/jpeg` re-upload; the meta a copy carries; one fresh album id per target, validated against the Worker's own `ALBUM_ID_RE`; the re-seal rule and the documented plaintext-fallback divergence; `ForwardDialog`'s title and subtitle; the selection bar's Copy/Edit/Unsend/Delete rules with `canEdit`'s 60 s window; `Ui.kt`'s `canDeleteForEveryone` and both delete labels; `DocViewerScreen.kt`'s 400 000-byte cap, its truncation line, `(empty file)`, the whole `docKind` branch order, the ZIP-shaped exceptions and the magic bytes; `Files.kt`'s `mimeFor` and `displaySize` against the composer's `formatBytes`; and the disclosed reader copy |
 | `test/cases/58-web-media-viewers.mjs` | `npm test` | 127 checks. The gallery's four lists, tab labels, title and empty states parsed out of `ChatMediaScreen.kt`; the Worker's link regex compared sample-by-sample with `firstLink`; `ONCE_TEXT_REVEAL_MS` and the four quote labels out of `ChatScreen.kt`; zoom/pan constants out of `MediaViewer.kt`; which fetch spends an opening; the spend de-dupe with terminal 404/410; `VANISHED` handling; album folding; and the send-side view-once gate |
+| `web/e2e-messaging/voice.spec.ts` | `npm run test:web:messaging:e2e` | 13 Chromium tests with a **real fake microphone** (`--use-fake-device-for-media-stream` + `--use-file-for-fake-audio-capture` of a generated WAV), so `MediaRecorder` produces genuine webm/opus bytes: a note drawn from `meta.waveform` with no fetch, play → one bearer-authenticated fetch → pause holding its position, per-message speed cycling, the wave as a keyboard slider, a view-once note that cannot be seeked and whose single opening is the play (then a second report is de-duplicated and a `VANISHED` frame removes the row), the sender's own preview spending nothing, tap-to-lock → Send posting a real note with `meta.voice`/`seconds`/`waveform`/`clientId`, the under-one-second take thrown away with a spoken reason, Delete discarding without a post, Pause freezing clock and wave, view-once arming reaching both `viewOnce` and `meta.viewOnce`, and the disclosed recorder copy |
+| `web/e2e-messaging/docs.spec.ts` | `npm run test:web:messaging:e2e` | 10 Chromium tests: a document row whose bytes do not move until Preview is pressed, a text document shown whole and selectable, Save as a real blob download, a PDF in a sandboxed frame (with the no-viewer branch), an SVG whose markup stays text and whose `<script>` never runs (asserted with a `dialog` listener), TIFF and ZIP as honest cards with their notices, forwarding a document by reusing its key, deleting your own document through an inline confirm, closing and Escape, and the disclosed reader copy |
+| `web/e2e-messaging/forward.spec.ts` | `npm run test:web:messaging:e2e` | 14 Chromium tests: Select replacing the composer and Back restoring it, an album ticking as one group, Copy putting the **decrypted** bodies on the clipboard, no Copy without a text row, a sealed message re-sealed for a 1:1 and posted as readable text to a group, two photos grouped with one album id per target, a view-once refusal on both the row and the bar, a private chat refusing everything, Edit's single-own-in-window rule, Delete asking the scope and really calling `DELETE /api/messages/:id`, hiding for me asking nothing of the server and returning on reload, a group never offering the other side's rows, labelled bar controls, and the r71-18 save-permission gate across the row, the viewer's Save and its Forward |
 | `web/e2e-messaging/viewer.spec.ts` | `npm run test:web:messaging:e2e` | 12 Chromium tests: the three tabs with real download and link anchors, a private group's refusal, the phone's empty states, keyboard zoom inside the 1×…6× clamp, album paging with zoom-reset, a blurred view-once photo that reports exactly once, a view-once clip that fetches nothing until opened, a VANISHED frame removing its row, a five-second text reveal, Save/Forward/Delete chrome, and axe on both surfaces |
 | `web/e2e-messaging/attachments.spec.ts` | `npm run test:web:messaging:e2e` | 13 Chromium tests with **real PNG bytes** (so decode → shrink → JPEG re-encode actually runs): 2048 px long edge and JPEG magic, sealed caption vs readable metadata, shared album id, document bytes preserved, "send as a document", editor rotation reaching the upload, chip removal, a sticker send that uploads nothing, a bearer-authenticated media download, a one-way account that cannot attach, axe on the sheet/picker/editor, and the disclosed limits |
 | `web/e2e-messaging/messaging.spec.ts` | `npm run test:web:messaging:e2e` | 14 Chromium tests against a mocked Worker and a mocked WebSocket (`page.routeWebSocket`), including a genuinely sealed body the browser must decrypt, the outgoing envelope reopened from the peer's key, hidden-chat exclusion, draft survival across reload, keyboard actions, live frames, a signed-out shell that makes zero conversation requests, axe WCAG 2.1/2.2 A/AA on both panes, and a 390×844 layout check |
 
 Honest test scope: Chromium only, synthetic events, mocked Worker and mocked sockets. This is **not** physical-device, cross-browser, real Worker↔Web↔Android or load QA. The real cross-client path is still proven by the existing Worker contract cases.
 
-`npm run ci` runs all four suites plus `check:web-stickers`. GitHub Actions runs the sticker-catalog check and the shell, account and messaging browser suites as separate steps; each builds with its own flags.
+`npm run ci` runs all six contract-suite groups plus `check:web-stickers`: **60/60 cases, 2 981 assertions**, and **94 browser tests** (shell 8 + account 10 + messaging 76). GitHub Actions runs the sticker-catalog check and the shell, account and messaging browser suites as separate steps; each builds with its own flags.
 
-Bundle shape after slice E1, with every heavy surface lazy-loaded: entry `index.js` 288.75 kB (gzip 88.58), `MessagingWorkspace` 74.07 kB (22.66), `protocol` 12.63 kB, `PhotoEditor` 12.04 kB, `StickerPicker` 10.27 kB, `MediaViewer` 7.01 kB (2.50), `MediaGallery` 4.51 kB (1.58), `uploadContract` 3.43 kB, CSS 25.78 kB + 26.81 kB, `sw.js` with 11 precached files. Adding the viewer and the gallery cost the entry bundle 0.8 kB.
+Bundle shape after slice E2, with every heavy surface lazy-loaded: entry `index.js` 289.30 kB (gzip 88.77), `MessagingWorkspace` 108.57 kB (33.06), `protocol` 12.80 kB, `PhotoEditor` 12.03 kB, **`DocViewer` 10.48 kB (3.94)**, `StickerPicker` 10.27 kB, `MediaViewer` 7.36 kB (2.56), `MediaGallery` 4.51 kB (1.58), `uploadContract` 3.44 kB, **`ForwardDialog` 2.42 kB (1.02)**, `viewOnce` 0.88 kB, `filesApi` 2.52 kB, CSS 25.78 kB + 37.68 kB, `sw.js` with 15 precached files.
 
-## Known follow-ups (slice E2, then F–I)
+The reader and the picker are lazy, so opening a chat still costs what it did before: slice E2 added **0.55 kB** to the entry bundle. `MessagingWorkspace` grew 34.5 kB because the recorder, the player, the waveform maths and the forward rules all live in the chat pane's own chunk — none of it is loaded by the shell, the account pages or the production PWA in `public/`.
 
-Voice-note recording and playback (needs `audio/webm` allowlisted server-side, so it is its own Worker-reviewable change), document preview, forwarding and multi-select, statuses, calls (flag stays default-off), Web Push (needs a VAPID design), and the hardening pass. See `docs/web-parity-rebuild-roadmap.md`.
+## Known follow-ups (F–I)
+
+Statuses, calls (the feature flag stays default-off), Web Push (needs a VAPID design) and the hardening pass. See `docs/web-parity-rebuild-roadmap.md`.
+
+Smaller things slice E2 deliberately left alone, so they are written down rather than discovered:
+
+- `MediaGallery`'s own download links still resolve their bytes when the panel renders, the way document rows used to. The transcript's are lazy now; the gallery's should follow the same rule.
+- A full emoji reaction picker (only the six wired quick reactions are offered).
+- Durable drafts: IndexedDB when it is available, with the `role="status"` banner when it is not.
+- Voice notes are recorded in whatever container the browser has. A `.webm` note plays in Chrome, Firefox and Edge; Safari plays an `.m4a` from a phone. Neither client transcodes, and the notice says which container this browser produced.

@@ -18,16 +18,24 @@
  *   • An inline IMAGE row is served by `/api/messages/:id/media`, where the
  *     fetch itself spends the opening, so it is deferred behind the same tap.
  *
- * Still not here, and still saying so: voice-note recording, and the
- * PDF/document previewer.
+ * A voice note (`meta.voice`) gets its own bubble — play / pause, the recorded
+ * waveform, the duration and a per-note speed — and a document row is a door
+ * into the full-screen reader (`onOpenDoc`).
+ *
+ * The sender's "Media Save permission" (r71-18) is honoured here too: when they
+ * turned it off, their file can be read in this chat but the download link is
+ * withheld with the reason, rather than shown and refused.
  */
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Icon } from "../icons";
 import type { ApiClient } from "../auth/authApi";
 import { attachmentCategory, formatBytes } from "../media/uploadContract";
+import { fetchFileBlob } from "./filesApi";
 import { mediaSourceKey, useMediaUrl, useMediaUrls } from "./mediaUrl";
 import type { MessageRow } from "./protocol";
+import { VoiceBubble } from "./VoiceBubble";
+import type { VoicePlayer } from "./useVoicePlayer";
 import { isViewOnce, openingCostsFetch, viewOnceSpent } from "./viewOnce";
 
 export type AttachmentRowProps = {
@@ -43,6 +51,16 @@ export type AttachmentRowProps = {
   locked?: boolean;
   /** Opens the full-screen viewer on this row (photos and clips). */
   onOpen?: (message: MessageRow) => void;
+  /** Opens the full-screen document reader (documents). */
+  onOpenDoc?: (message: MessageRow) => void;
+  /** The transcript's single voice player; without it a note falls back to <audio>. */
+  player?: VoicePlayer;
+  /** Whether this row is the signed-in account's own. */
+  own?: boolean;
+  /** The reader opened a view-once note: its single opening. */
+  onOpenedOnce?: (message: MessageRow) => void;
+  /** False when the sender turned off saving their media in this chat. */
+  canSave?: boolean;
 };
 
 function MediaFigure({
@@ -173,7 +191,8 @@ function MediaFigure({
       <>
         <audio className="attachment__audio" src={media.url} controls preload="metadata" />
         <p className="attachment__note">
-          Audio file playback. Voice-note recording and the voice UI arrive in a later slice.
+          An audio file, played by your browser. Voice notes recorded in KuchuPuchu get their own
+          bubble with a waveform and a speed control.
         </p>
       </>
     );
@@ -182,7 +201,18 @@ function MediaFigure({
   return null;
 }
 
-export function AttachmentRow({ message, api, body, locked, onOpen }: AttachmentRowProps) {
+export function AttachmentRow({
+  message,
+  api,
+  body,
+  locked,
+  onOpen,
+  onOpenDoc,
+  player,
+  own = false,
+  onOpenedOnce,
+  canSave = true,
+}: AttachmentRowProps) {
   const meta = (message.meta ?? {}) as Record<string, unknown>;
   const category = attachmentCategory(message.fileType, meta);
   const caption = locked ? "" : body;
@@ -216,6 +246,26 @@ export function AttachmentRow({ message, api, body, locked, onOpen }: Attachment
         ).padStart(2, "0")}`
       : "";
 
+  if (category === "voice") {
+    // The phone's voice branch: one card, whether or not it was recorded here.
+    return (
+      <span className="attachment attachment--voice">
+        {player ? (
+          <VoiceBubble
+            message={message}
+            api={api}
+            player={player}
+            own={own}
+            onOpened={onOpenedOnce}
+          />
+        ) : (
+          <MediaFigure message={message} api={api} category="audio" onOpen={onOpen} />
+        )}
+        {caption ? <span className="attachment__caption">{caption}</span> : null}
+      </span>
+    );
+  }
+
   if (category === "document") {
     return (
       <span className="attachment attachment--document">
@@ -230,10 +280,26 @@ export function AttachmentRow({ message, api, body, locked, onOpen }: Attachment
             {seconds ? ` · ${seconds}s` : ""}
           </span>
         </span>
-        <DownloadLink message={message} api={api} />
-        <span className="attachment__note">
-          Document preview arrives in a later slice; downloading works now.
-        </span>
+        {onOpenDoc ? (
+          <button
+            type="button"
+            className="attachment__preview"
+            onClick={() => onOpenDoc(message)}
+            aria-label={`Open ${message.fileName || "the document"} in the document reader`}
+          >
+            <Icon name="file" size={16} /> Preview
+          </button>
+        ) : null}
+        {canSave ? (
+          <DownloadLink message={message} api={api} />
+        ) : (
+          <span
+            className="attachment__download is-refused"
+            title="The sender turned off saving their media in this chat."
+          >
+            Saving is off in this chat
+          </span>
+        )}
       </span>
     );
   }
@@ -254,19 +320,62 @@ export function AttachmentRow({ message, api, body, locked, onOpen }: Attachment
   );
 }
 
+/**
+ * The document row's download.
+ *
+ * It fetches on the CLICK, not on render. `/api/files/:key` is member-checked,
+ * so an `<a href>` can never carry the session's Bearer header and the bytes
+ * have to be held here to hand the browser a blob URL — and a document row can
+ * be gigabytes. Downloading every document in a chat because it scrolled into
+ * view is not something the phone does, so this waits to be asked.
+ */
 function DownloadLink({ message, api }: { message: MessageRow; api: ApiClient | null }) {
-  const media = useMediaUrl(api, api !== null, message.localPreview || message.fileKey);
-  if (!media.url) {
-    return (
-      <span className="attachment__download is-pending" role="status">
-        Preparing download…
-      </span>
-    );
-  }
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const source = message.localPreview || message.fileKey;
+
+  const download = useCallback(async () => {
+    if (!api || !source || pending) return;
+    setPending(true);
+    setError("");
+    try {
+      const blob = source.startsWith("blob:")
+        ? await (await fetch(source)).blob()
+        : (await fetchFileBlob(api, source)).blob;
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = message.fileName || "file";
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      // Long enough for the browser to have taken the bytes, short enough that
+      // a document-sized blob does not live for the rest of the page.
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch {
+      setError("That file could not be downloaded right now.");
+    } finally {
+      setPending(false);
+    }
+  }, [api, message.fileName, pending, source]);
+
   return (
-    <a className="attachment__download" href={media.url} download={message.fileName || "file"}>
-      Download
-    </a>
+    <>
+      <button
+        type="button"
+        className={`attachment__download${pending ? " is-pending" : ""}`}
+        onClick={() => void download()}
+        disabled={pending || !api || !source}
+        aria-busy={pending || undefined}
+      >
+        {pending ? "Preparing download…" : "Download"}
+      </button>
+      {error ? (
+        <span className="attachment__note" role="alert">
+          {error}
+        </span>
+      ) : null}
+    </>
   );
 }
 
