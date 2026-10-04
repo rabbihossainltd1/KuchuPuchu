@@ -47,8 +47,9 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 | **C** message actions + durability | ✅ merged | PR #82 → `main` @ `d168a913` |
 | **D** attachments + photo editor | ✅ merged | PR #83 → `main` @ `d0a44ae0` |
 | **E1** viewers + shared media + view-once + albums | ✅ merged | PR #84 → `main` @ `de54086` |
-| **E2** voice note + document preview + forward + multi-select | ✅ built | এই branch; নিচের হিসাব। Worker অংশটা আলাদা PR-এ আগেই merge হয়ে গেছে: #85 → `main` @ `5e77e2e` |
-| **F**–**I** | ⏳ বাকি | — |
+| **E2** voice note + document preview + forward + multi-select | ✅ merged | PR #86 → `main` @ `aaa206d` |
+| **F** status (feed + composer + viewer + privacy) | ✅ built | এই branch; নিচের হিসাব |
+| **G**–**I** | ⏳ বাকি | — |
 
 **Slice D-তে যা নামলো** (Worker বা Android-এ একটি লাইনও বদলায়নি):
 
@@ -78,6 +79,18 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 - **দ্বিতীয় bug:** PR #85-এর আগে browser voice note servable-ই ছিল না।
 - Delete-for-me: ফোনের মতো লোকাল hide, কিন্তু browser-এর কোনো local message store নেই ⇒ in-memory, reload-এ ফিরে আসে — UI সেটা **স্পষ্ট ভাষায় বলে দেয়** (Worker-এ per-message delete-for-me endpoint নেই; `/api/conversations/:id/hide` পুরো চ্যাটের watermark)।
 - Gates: contract **৬০/৬০ case, ২৯৮১ assertion** (নতুন case 59 = ১৪৬ check, case 60 = ১৭৮), browser **৯৪ test** (shell ৮ + account ১০ + messaging ৭৬; নতুন `voice.spec.ts` ১৩, `docs.spec.ts` ১০, `forward.spec.ts` ১৪ — voice-এ Chromium-এর **আসল fake mic** ব্যবহার হয়েছে, তাই `MediaRecorder` সত্যিই webm/opus বানায়), `npm run ci` EXIT=0, SW ১৫টা precached file, entry +০.৫৫ kB (২৮৯.৩০ / gzip ৮৮.৭৭), নতুন lazy chunk `DocViewer` ১০.৪৮ kB আর `ForwardDialog` ২.৪২ kB।
+
+**Slice F-তে যা নামলো** (Worker/Android/`public/` — একটি লাইনও বদলায়নি):
+
+- `web/src/status/` — `statusModel.ts` (সব সংখ্যা আর copy DOM-free), `statusQuote.ts` + `statusMedia.ts` (messaging chunk-এর একমাত্র দুটো status import, যাতে chat bundle status-এর জন্য ভারী না হয়), `statusApi.ts` (Worker-এর ছয়টা route, নতুন কিছু নয়), `useStatuses.ts`, `StatusFeed.tsx`, `StatusViewer.tsx`, `ViewersSheet.tsx`, `StatusComposer.tsx`, `StatusWorkspace.tsx`, `status.css`।
+- Feed: আমার row আগে, তারপর contact-রা **নতুন update আগে** ক্রমে (সার্ভার author ক্রমে দেয়, sort টা client-এর — StatusScreens.kt:124); ring-এ প্রতি status-এ একটা segment, সব দেখা হয়ে গেলে ধূসর (`StatusRingAvatar`-এর 2.5dp/5dp/বারোটা-几何 SVG arc হিসেবে); hidden author-দের list এই browser-এর নিজের (`localStorage["kp.status.hidden"]`), parse-এর সময়ই বাদ যাতে কোনো count/ring/fetch-এ না ঢোকে।
+- Viewer-এর ঘড়ি ফোনের হুবহু: photo/text ৫ সেকেন্ড, clip নিজের দৈর্ঘ্য (5…120 s-এর ভিতরে), দৈর্ঘ্য না এলে ৩০ সেকেন্ড, আটকে গেলে hold+৮ সেকেন্ড পর নিজে থেকে এগোনো; pause-এর পাঁচটা কারণ (viewers sheet, menu, reply focus, hold, আর browser-এর অর্ধেক — `visibilityState`) — background tab-এ ঘড়ি চললে ফিরে এসে দেখা যাবে পুরো list শেষ, ফোন round 27-এ যেটা ঠিক করেছিল সেটাই।
+- দুই অর্ধেক tap zone = back/next, শেষটা পেরোলে viewer বন্ধ (ফোনের popBackStack); arrow key, hold-to-pause, Escape, আর একটা label-করা pause বাটন — keyboard-এর হাত ধরে mesmas জিনিস।
+- `/view` ping প্রতি status-এ একবার, নিজের status-এ কখনো নয়; reaction-এর সাতটা emoji ফোনের ক্রমে, `meta.status` সহ reply = সাধারণ 1:1 message যা author-এর key দিয়ে **seal** হয় (plaintext কখনো নয়), box পাঠানোর মুহূর্তে খালি হয়।
+- Browser যা পারে না তা লিখে বলা: clip trim/re-encode নেই (পুরো ফাইল যায়, সার্ভার 120 s-এ cap করে), decode না হওয়া clip কালো আয়তক্ষেত্র নয় — "That clip could not be loaded."; photo browser-এ চার ধাপের ladder-এ ছোট হয় Worker-এর 450 000 char inline cap-এ ঢোকা পর্যন্ত, না ঢুকলে upload হয়ে `fileKey` দিয়ে যায়; Report-এর কোনো route নেই, ফোনের মতো স্বীকৃতি toast।
+- Delete নিজেরটা: confirm sheet ("Delete status?" / "Removed for everyone."), viewer সাথে সাথে বন্ধ, network পেছনে (ডাবল-ক্লিক crash-এর ফোনের fix); viewers sheet cache থেকে সাথে সাথে আঁকে, পেছনে refresh; eye-এর পাশের সংখ্যা = feed আর list-এর বড়টা।
+- Chat-এ status reply-এর quote: `MessageRow.statusQuote` + ChatPane-এ reply quote-এর উপরে, ফোনের ক্রমে।
+- Gates: contract **৬১/৬১ case, ৩১৯৮ assertion** (নতুন case 61 = ২১৭ check), browser **১১৭ test** (shell ৮ + account ১০ + messaging ৭৬ + status ২৩), `npm run ci` EXIT=0, SW ১৮টা precached file, entry ২৯১.৪৩ kB (gzip ৮৯.৩৮) — StatusWorkspace ৩৯.২৫ kB আলাদা lazy chunk, messaging chunk মাত্র +০.৫৬ kB।
 
 ### ইচ্ছাকৃতভাবে বাদ / placeholder (কাজ হবে না)
 

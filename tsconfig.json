@@ -22,8 +22,10 @@
     "web/e2e",
     "web/e2e-account",
     "web/e2e-messaging",
+    "web/e2e-status",
     "playwright.config.ts",
     "playwright.account.config.ts",
-    "playwright.messaging.config.ts"
+    "playwright.messaging.config.ts",
+    "playwright.status.config.ts"
   ]
 }

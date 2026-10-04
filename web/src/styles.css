@@ -907,3 +907,19 @@ a:focus-visible {
     height: 100%;
   }
 }
+
+/* Screen-reader-only text: a fact that is also painted (or a label for a
+   control that already says it another way) must not be dropped, and must not
+   be painted twice. This lives here, not in a feature chunk, because every
+   surface uses it. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}

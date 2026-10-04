@@ -110,6 +110,25 @@ export const messagingApi = {
     return parseConversationDetail(payload);
   },
 
+  /**
+   * Open (or fetch) the 1:1 chat with a user. `POST /api/conversations`
+   * `{userId}` is idempotent server-side — it returns the existing pair chat —
+   * which is what a status reply and the viewer's "Message" row both need.
+   */
+  async createConversation(
+    api: ApiClient,
+    userId: string,
+    signal?: AbortSignal,
+  ): Promise<ConversationRow | null> {
+    const payload = await api.request<unknown>("/api/conversations", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId }),
+      ...(signal ? { signal } : {}),
+    });
+    return parseConversationDetail(payload);
+  },
+
   async getMessages(
     api: ApiClient,
     conversationId: string,

@@ -53,6 +53,7 @@ import { AttachMenu, type AttachSource } from "./AttachMenu";
 import { AlbumGrid, AttachmentRow } from "./AttachmentRow";
 import { OnceText } from "./OnceText";
 import { VoiceRecorderBar } from "./VoiceRecorderBar";
+import { StatusQuoteChip } from "../status/StatusQuoteChip";
 import { useVoiceRecorder } from "./useVoiceRecorder";
 import { useVoicePlayer } from "./useVoicePlayer";
 import {
@@ -817,6 +818,12 @@ export function ChatPane({
                       {!own && conversation.isGroup && (
                         <p className="bubble__sender">{senderLabel(message, conversation, meId)}</p>
                       )}
+
+                      {/* A reply to a status quotes the status first, exactly
+                          as the phone's bubble does (StatusQuote above replyTo). */}
+                      {message.statusQuote ? (
+                        <StatusQuoteChip quote={message.statusQuote} api={api} />
+                      ) : null}
 
                       {message.replyTo && (
                         <blockquote className="bubble__reply">

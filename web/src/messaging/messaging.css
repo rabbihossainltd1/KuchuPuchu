@@ -7,18 +7,6 @@
  * reduced-motion collapses transitions to instant state changes.
  */
 
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-  border: 0;
-}
-
 /* ------------------------------------------------------------ list header */
 
 .list-header__count {
@@ -2790,4 +2778,74 @@ button.attachment__expand {
 .recorder--locked {
   grid-template-columns: 1fr;
   gap: 12px;
+}
+
+/* ------------------------------------------------------------ slice F: a
+   status quote inside a chat bubble. The phone draws a stripe, a "Status"
+   label, the caption and (for a picture or a clip) a 34 dp thumbnail. */
+.bubble__status-quote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 3px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 12%);
+}
+
+.bubble-row:not(.bubble-row--own) .bubble__status-quote {
+  background: color-mix(in srgb, var(--kp-amber) 16%, transparent);
+}
+
+.bubble__status-stripe {
+  width: 2.5px;
+  height: 30px;
+  border-radius: 2px;
+  background: var(--kp-blue-light);
+}
+
+.bubble__status-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.bubble__status-copy strong {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.bubble__status-copy span {
+  overflow: hidden;
+  font-size: 11px;
+  opacity: 0.86;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bubble__status-thumb {
+  position: relative;
+  display: block;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  overflow: hidden;
+  border-radius: 6px;
+  background: rgb(0 0 0 / 14%);
+}
+
+.bubble__status-thumb img,
+.bubble__status-thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.bubble__status-play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
 }

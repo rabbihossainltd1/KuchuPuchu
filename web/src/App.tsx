@@ -22,6 +22,17 @@ const MessagingWorkspace = lazy(() =>
   })),
 );
 
+/**
+ * The status surfaces are their own lazy chunk for the same reason: a build
+ * with the status flag off never downloads the feed, the viewer or the
+ * composer, and `public/` — the production PWA — is untouched by any of it.
+ */
+const StatusWorkspace = lazy(() =>
+  import("./status/StatusWorkspace").then((module) => ({
+    default: module.StatusWorkspace,
+  })),
+);
+
 type View = {
   id: Exclude<SectionId, "account">;
   label: string;
@@ -151,15 +162,20 @@ export default function App() {
   const isOnline = useConnectivity();
   const accountEnabled = isWebFeatureEnabled("accountIntegration");
   const messagingEnabled = isWebFeatureEnabled("messaging");
+  const statusesEnabled = isWebFeatureEnabled("statuses");
   const isNotFound = route.kind === "not-found";
   const isConversation = route.kind === "conversation";
   const isAccountRoute = routeIsAccount(route);
   const protectedRoute = routeRequiresAuthentication(route);
   const isChatsArea =
     route.kind === "conversation" || (route.kind === "section" && route.section === "chats");
+  const isStatusArea = route.kind === "section" && route.section === "statuses";
   // With messaging on, the chat list itself carries private data, so it needs a
-  // verified session too — not just the deep-link and account routes.
-  const needsSession = protectedRoute || (messagingEnabled && isChatsArea);
+  // verified session too — not just the deep-link and account routes. A status
+  // feed is other people's pictures and a reply is a sealed message, so it is
+  // the same rule.
+  const needsSession =
+    protectedRoute || (messagingEnabled && isChatsArea) || (statusesEnabled && isStatusArea);
   const goToChats = () => navigate({ kind: "section", section: "chats" });
   const logOutToChats = () => {
     navigate({ kind: "section", section: "chats" }, { replace: true });
@@ -177,18 +193,18 @@ export default function App() {
     return <AccountRolloutGate onBack={goToChats} />;
   }
 
-  if (messagingEnabled && needsSession && !accountEnabled) {
+  if ((messagingEnabled || statusesEnabled) && needsSession && !accountEnabled) {
     return (
       <FullPageNotice
         eyebrow="MESSAGING ROLLOUT"
-        title="Chats need account access"
-        body="Messaging loads private conversation data, so it requires a verified browser session. That session lives behind the account rollout flag, which is off in this build. No conversation request is made until both flags are on."
+        title="Chats and status need account access"
+        body="Messaging and status load private conversation data, so they require a verified browser session. That session lives behind the account rollout flag, which is off in this build. No conversation or status request is made until both flags are on."
         onBack={goToChats}
       />
     );
   }
 
-  if ((accountEnabled || messagingEnabled) && needsSession) {
+  if ((accountEnabled || messagingEnabled || statusesEnabled) && needsSession) {
     if (authStatus === "restoring") {
       return (
         <main className="auth-page">
@@ -220,11 +236,16 @@ export default function App() {
         : null;
   const active = views.find((view) => view.id === activeViewId) ?? views[0]!;
   const sectionHeading = isNotFound ? "Not found" : active.label;
-  const bannerCopy = messagingEnabled
-    ? "Messaging is enabled for this opt-in build: chats, live updates and sealed text are on. Status, media and calls remain disabled."
-    : accountEnabled
-      ? "Account flows are enabled for this opt-in build; messaging, status, media and calls remain disabled."
-      : "Account sign-in remains behind a default-off rollout flag; messaging, status, media and calls are disabled.";
+  const bannerCopy =
+    messagingEnabled && statusesEnabled
+      ? "Messaging and status are enabled for this opt-in build: chats, live updates, sealed text and 24-hour statuses are on. Calls remain disabled."
+      : messagingEnabled
+        ? "Messaging is enabled for this opt-in build: chats, live updates and sealed text are on. Status, media and calls remain disabled."
+        : statusesEnabled
+          ? "Status is enabled for this opt-in build: the feed, the viewer and the composers are on. Messaging, media and calls remain disabled."
+          : accountEnabled
+            ? "Account flows are enabled for this opt-in build; messaging, status, media and calls remain disabled."
+            : "Account sign-in remains behind a default-off rollout flag; messaging, status, media and calls are disabled.";
   const accountChipLabel = user
     ? `${user.displayName || user.username} account signed in`
     : "No account signed in";
@@ -284,7 +305,17 @@ export default function App() {
           </div>
         </aside>
 
-        {messagingEnabled && isChatsArea ? (
+        {statusesEnabled && isStatusArea ? (
+          <Suspense fallback={<p className="welcome-card__body">Loading statuses…</p>}>
+            <StatusWorkspace
+              onOpenChat={
+                messagingEnabled
+                  ? (conversationId) => navigate({ kind: "conversation", conversationId })
+                  : undefined
+              }
+            />
+          </Suspense>
+        ) : messagingEnabled && isChatsArea ? (
           <Suspense fallback={<p className="welcome-card__body">Loading chats…</p>}>
             <MessagingWorkspace route={route} navigate={navigate} isOnline={isOnline} />
           </Suspense>

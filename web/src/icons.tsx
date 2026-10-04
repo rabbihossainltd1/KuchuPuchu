@@ -22,7 +22,13 @@ export type IconName =
   | "send"
   | "check"
   | "close"
-  | "trash";
+  | "trash"
+  | "photo"
+  | "video"
+  | "pencil"
+  | "eye"
+  | "hide"
+  | "flag";
 
 const shapes: Record<IconName, ReactNode> = {
   chats: (
@@ -125,6 +131,44 @@ const shapes: Record<IconName, ReactNode> = {
     <>
       <path d="M5.5 7.5h13M10 7.5V5h4v2.5" />
       <path d="M7 7.5 8 20h8l1-12.5M10.5 11v5.5M13.5 11v5.5" />
+    </>
+  ),
+  photo: (
+    <>
+      <path d="M4 6.5h16v11H4z" />
+      <path d="m5.5 15.5 4-4 3 3 2.5-2.5 3.5 3.5" />
+      <circle cx="9" cy="9.8" r="1.2" />
+    </>
+  ),
+  video: (
+    <>
+      <path d="M3.5 7.5h11v9h-11z" />
+      <path d="m14.5 11 5-3v8l-5-3z" />
+    </>
+  ),
+  pencil: (
+    <>
+      <path d="M5 19h3.2L19 8.2a2 2 0 0 0-2.8-2.8L5.4 16.2 5 19Z" />
+      <path d="m14.6 6.8 2.6 2.6" />
+    </>
+  ),
+  eye: (
+    <>
+      <path d="M2.8 12S6 6.8 12 6.8 21.2 12 21.2 12 18 17.2 12 17.2 2.8 12 2.8 12Z" />
+      <circle cx="12" cy="12" r="2.6" />
+    </>
+  ),
+  hide: (
+    <>
+      <path d="M4 4.5 20 19.5" />
+      <path d="M9.6 9.9A2.6 2.6 0 0 0 12 14.6c.7 0 1.3-.3 1.8-.7" />
+      <path d="M6.4 7.4C4.2 8.8 2.8 12 2.8 12S6 17.2 12 17.2c1.6 0 3-.4 4.2-1M18.6 15c1.6-1.3 2.6-3 2.6-3S18 6.8 12 6.8c-.7 0-1.4.1-2 .2" />
+    </>
+  ),
+  flag: (
+    <>
+      <path d="M6 20V4.5" />
+      <path d="M6 5.2h11l-2 3.4 2 3.4H6z" />
     </>
   ),
 };

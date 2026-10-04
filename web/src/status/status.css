@@ -1,0 +1,941 @@
+/**
+ * Status surfaces (slice F).
+ *
+ * The feed takes the workspace's two content columns as one surface and keeps
+ * its rows in a readable column; the viewer and the sheets are full-screen
+ * overlays on top of it, the way the phone stacks screens. Dark by design: a
+ * status viewer is a dark room whatever the rest of the app is doing, which is
+ * also what makes the white progress segments readable on a bright photo
+ * (owner round 33, item 10 — the phone stopped dimming the picture for this).
+ */
+
+/* ------------------------------------------------------------------- feed */
+
+.status-feed {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  grid-column: 2 / -1;
+  height: 100%;
+  border-left: 1px solid var(--kp-line);
+  background: var(--kp-bg);
+}
+
+.status-feed__head {
+  padding: 18px 24px 10px;
+  border-bottom: 1px solid var(--kp-line);
+}
+
+.status-feed__head h2 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+
+.status-feed__head p {
+  margin: 4px 0 0;
+  color: var(--kp-muted);
+  font-size: 12.5px;
+}
+
+.status-feed__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 24px 16px;
+}
+
+.status-feed__section {
+  margin: 14px 4px 6px;
+  color: var(--kp-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.status-feed__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One row is one button: the whole row is the target, as it is on the phone. */
+.status-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--kp-motion-fast) ease;
+}
+
+.status-row:hover {
+  background: var(--kp-card);
+}
+
+.status-row:focus-visible {
+  outline: 2px solid var(--kp-focus);
+  outline-offset: 2px;
+}
+
+.status-row__copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.status-row__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15.5px;
+  font-weight: 600;
+}
+
+.status-row--seen .status-row__name {
+  color: var(--kp-muted);
+}
+
+.status-row__meta {
+  color: var(--kp-muted);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-row__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--kp-blue) 22%, transparent);
+  color: var(--kp-blue-light);
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.status-row__add {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--kp-bg);
+  border-radius: 50%;
+  background: var(--kp-blue);
+  color: #fff;
+}
+
+.status-feed__state {
+  margin: 18px 4px;
+  color: var(--kp-muted);
+  font-size: 13px;
+}
+
+.status-feed__state--error {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #fca5a5;
+}
+
+.status-feed__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 22px 4px;
+  padding: 18px;
+  border: 1px dashed var(--kp-line);
+  border-radius: var(--kp-radius-card);
+  color: var(--kp-muted);
+}
+
+.status-feed__empty strong {
+  color: var(--kp-ink);
+  font-size: 15px;
+}
+
+.status-feed__empty p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.status-feed__actions {
+  display: flex;
+  gap: 10px;
+  padding: 12px 24px;
+  border-top: 1px solid var(--kp-line);
+  background: var(--kp-card);
+}
+
+.status-notes {
+  margin: 18px 4px 4px;
+  padding: 10px 14px;
+  border: 1px solid var(--kp-line);
+  border-radius: 14px;
+  background: var(--kp-card);
+  color: var(--kp-muted);
+  font-size: 12.5px;
+}
+
+.status-notes summary {
+  cursor: pointer;
+  color: var(--kp-ink);
+  font-weight: 600;
+}
+
+.status-notes ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  line-height: 1.55;
+}
+
+.status-identity {
+  margin: 0;
+  padding: 10px 24px;
+  border-top: 1px solid var(--kp-line);
+  background: color-mix(in srgb, var(--kp-amber) 14%, var(--kp-card));
+  color: var(--kp-ink);
+  font-size: 12.5px;
+}
+
+/* ------------------------------------------------------------------- ring */
+
+.status-ring {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+}
+
+.status-ring__svg {
+  position: absolute;
+  inset: 0;
+}
+
+.status-ring__avatar {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--kp-card-raised);
+  color: var(--kp-ink);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.status-ring__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.status-ring--plain .status-ring__avatar--plain {
+  width: 48px;
+  height: 48px;
+  border: 1px dashed var(--kp-line);
+}
+
+/* --------------------------------------------------------------- composer */
+
+.status-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(4 8 16 / 72%);
+}
+
+.status-composer {
+  display: flex;
+  width: min(560px, 100%);
+  max-height: calc(100vh - 48px);
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  padding: 16px;
+  border: 1px solid var(--kp-line);
+  border-radius: var(--kp-radius-sheet);
+  background: var(--kp-card);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 45%);
+}
+
+.status-composer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.status-composer__head h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.status-composer__card {
+  display: grid;
+  min-height: 190px;
+  place-items: center;
+  padding: 24px;
+  border-radius: 20px;
+}
+
+.status-composer__preview {
+  margin: 0;
+  color: #fff;
+  font-size: 24px;
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.35;
+}
+
+.status-composer__hint {
+  margin: 0;
+  color: rgb(255 255 255 / 78%);
+  font-size: 16px;
+  text-align: center;
+}
+
+.status-composer__styles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.status-composer__swatch {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.status-composer__swatch.is-on {
+  border-color: var(--kp-ink);
+  box-shadow: 0 0 0 2px var(--kp-card) inset;
+}
+
+.status-composer__swatch:focus-visible {
+  outline: 2px solid var(--kp-focus);
+  outline-offset: 2px;
+}
+
+.status-composer__field {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--kp-line);
+  border-radius: 14px;
+  background: var(--kp-bg);
+  color: var(--kp-ink);
+  font: inherit;
+  font-size: 14.5px;
+  resize: vertical;
+}
+
+.status-composer__count {
+  margin: -4px 0 0;
+  color: var(--kp-muted);
+  font-size: 12px;
+}
+
+.status-composer__chooser {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: var(--kp-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.status-composer__chooser p {
+  margin: 0;
+}
+
+.status-composer__media {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.status-composer__media img,
+.status-composer__media video {
+  width: 100%;
+  max-height: 46vh;
+  border-radius: 16px;
+  background: #000;
+  object-fit: contain;
+}
+
+.status-composer__facts {
+  margin: 0;
+  color: var(--kp-ink);
+  font-size: 13px;
+}
+
+.status-composer__note {
+  margin: 0;
+  color: var(--kp-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.status-composer__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.status-composer__error {
+  margin: 0;
+  color: #fca5a5;
+  font-size: 13px;
+}
+
+.status-composer__foot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ----------------------------------------------------------------- viewer */
+
+.status-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  overflow: hidden;
+  background: #05070c;
+  color: #fff;
+}
+
+.status-viewer__stage {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  touch-action: none;
+}
+
+.status-viewer__image,
+.status-viewer__video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.status-viewer__card {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  padding: 40px;
+}
+
+.status-viewer__text {
+  margin: 0;
+  color: #fff;
+  font-size: clamp(22px, 3.4vw, 34px);
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.35;
+}
+
+.status-viewer__waiting,
+.status-viewer__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  color: rgb(255 255 255 / 78%);
+  font-size: 14px;
+}
+
+.status-viewer__empty {
+  position: absolute;
+  inset: 0;
+  justify-content: center;
+}
+
+/* Soft gradients instead of a dim over the whole picture. */
+.status-viewer__shade {
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 150px;
+  pointer-events: none;
+}
+
+.status-viewer__shade--top {
+  top: 0;
+  background: linear-gradient(180deg, rgb(0 0 0 / 65%), transparent);
+}
+
+.status-viewer__shade--bottom {
+  bottom: 0;
+  height: 190px;
+  background: linear-gradient(0deg, rgb(0 0 0 / 62%), transparent);
+}
+
+.status-viewer__chrome {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+}
+
+.status-viewer__chrome > * {
+  pointer-events: auto;
+}
+
+.status-viewer__segments {
+  display: flex;
+  gap: 4px;
+  padding: 12px 12px 0;
+}
+
+.status-viewer__segment {
+  position: relative;
+  flex: 1;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgb(255 255 255 / 35%);
+}
+
+.status-viewer__fill {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: #fff;
+}
+
+.status-viewer__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.status-viewer__avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 16%);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.status-viewer__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.status-viewer__who {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.status-viewer__who strong {
+  overflow: hidden;
+  font-size: 13.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-viewer__who span {
+  color: rgb(255 255 255 / 75%);
+  font-size: 11.5px;
+}
+
+.status-viewer__menu {
+  color: #fff;
+}
+
+/* The two halves: transparent buttons over the picture. */
+.status-viewer__zones {
+  position: absolute;
+  top: 92px;
+  right: 0;
+  bottom: 150px;
+  left: 0;
+  display: flex;
+}
+
+.status-viewer__zone {
+  flex: 1;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.status-viewer__zone:focus-visible {
+  outline: 2px solid var(--kp-focus);
+  outline-offset: -4px;
+}
+
+.status-viewer__zone:disabled {
+  cursor: default;
+}
+
+.status-viewer__foot {
+  display: flex;
+  margin-top: auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+}
+
+.status-viewer__views {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid rgb(255 255 255 / 24%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 10%);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.status-viewer__reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.status-viewer__reaction {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  font-size: 20px;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: transform var(--kp-motion-fast) ease;
+}
+
+.status-viewer__reaction.is-pulsing {
+  transform: scale(1.45);
+}
+
+.status-viewer__reaction:focus-visible {
+  outline: 2px solid var(--kp-focus);
+  outline-offset: 2px;
+}
+
+.status-viewer__reply {
+  display: flex;
+  min-width: 220px;
+  flex: 1;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 4px 14px;
+  border-radius: 22px;
+  background: rgb(255 255 255 / 20%);
+}
+
+.status-viewer__reply input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: none;
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+}
+
+.status-viewer__reply input::placeholder {
+  color: rgb(255 255 255 / 70%);
+}
+
+.status-viewer__reply input:focus-visible {
+  outline: none;
+}
+
+.status-viewer__reply .icon-button {
+  color: #fff;
+}
+
+.status-viewer__error {
+  flex-basis: 100%;
+  margin: 0;
+  color: #ffcdd2;
+  font-size: 12.5px;
+}
+
+.status-viewer__controls {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.status-viewer__controls .icon-button {
+  color: #fff;
+}
+
+/* ------------------------------------------------------------------ sheets */
+
+.status-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.status-sheet__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / 45%);
+}
+
+.status-sheet__body {
+  position: relative;
+  display: flex;
+  width: min(520px, 100%);
+  max-height: 70vh;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  padding: 10px 10px 16px;
+  border-radius: var(--kp-radius-sheet) var(--kp-radius-sheet) 0 0;
+  background: var(--kp-card);
+  color: var(--kp-ink);
+}
+
+.status-sheet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+}
+
+.status-sheet__head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.status-sheet__body strong {
+  padding: 8px 8px 0;
+  font-size: 15.5px;
+}
+
+.status-sheet__body p {
+  margin: 0;
+  padding: 0 8px 8px;
+  color: var(--kp-muted);
+  font-size: 13px;
+}
+
+.status-sheet__row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 14px;
+  border: 0;
+  border-radius: 14px;
+  background: none;
+  color: var(--kp-ink);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.status-sheet__row:hover {
+  background: var(--kp-card-raised);
+}
+
+.status-sheet__row:focus-visible {
+  outline: 2px solid var(--kp-focus);
+  outline-offset: -2px;
+}
+
+.status-sheet__row--danger {
+  color: #fca5a5;
+}
+
+.status-sheet__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 8px;
+}
+
+.danger-button {
+  padding: 9px 16px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: var(--kp-red);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.danger-button:hover {
+  filter: brightness(1.08);
+}
+
+.danger-button:focus-visible {
+  outline: 2px solid var(--kp-focus);
+  outline-offset: 2px;
+}
+
+.status-sheet__state,
+.status-sheet__error {
+  margin: 0;
+  padding: 12px 14px;
+  color: var(--kp-muted);
+  font-size: 13.5px;
+}
+
+.status-sheet__error {
+  color: #fca5a5;
+}
+
+.status-sheet__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.status-sheet__viewer {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.status-sheet__viewer:hover {
+  background: var(--kp-card-raised);
+}
+
+.status-sheet__viewer:focus-visible {
+  outline: 2px solid var(--kp-focus);
+  outline-offset: -2px;
+}
+
+.status-sheet__avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--kp-card-raised);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.status-sheet__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.status-sheet__who {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.status-sheet__who strong {
+  padding: 0;
+  font-size: 14.5px;
+}
+
+.status-sheet__who span {
+  color: var(--kp-muted);
+  font-size: 11.5px;
+}
+
+.status-sheet__reaction {
+  font-size: 19px;
+}
+
+/* -------------------------------------------------------------- breakpoints */
+
+@media (max-width: 900px) {
+  .status-feed {
+    grid-column: 1 / -1;
+    border-left: 0;
+  }
+
+  .status-feed__head,
+  .status-feed__scroll,
+  .status-feed__actions {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+}
+
+@media (max-width: 720px) {
+  .status-viewer__foot {
+    padding-bottom: 20px;
+  }
+
+  .status-viewer__reply {
+    min-width: 0;
+    flex-basis: 100%;
+  }
+
+  .status-composer {
+    width: 100%;
+    max-height: calc(100vh - 24px);
+    border-radius: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-viewer__reaction,
+  .status-row {
+    transition: none;
+  }
+}

@@ -12,6 +12,7 @@
  */
 
 import { BOT_IDS, OFFICIAL_BOT_ID, isEnvelope } from "./e2ee";
+import { parseStatusQuote, type StatusQuote } from "../status/statusQuote";
 
 export const MESSAGE_PAGE_SIZE = 50;
 /** `MESSAGE_MAX` in src/shared/constants.ts — the Worker rejects longer bodies. */
@@ -113,6 +114,13 @@ export type MessageRow = {
    * Empty for every row that is not a folded album head.
    */
   readonly albumMembers: readonly MessageRow[];
+  /**
+   * A reply to a STATUS carries the status it answers (`meta.status`, expanded
+   * server-side to `{id, kind, text}`). Both clients draw a small quote for it
+   * in the bubble — `StatusQuote` in ChatScreen.kt — so the reader can see what
+   * the words are answering without leaving the chat.
+   */
+  readonly statusQuote: StatusQuote | null;
 };
 
 export type ReplyTarget = {
@@ -233,6 +241,7 @@ export function parseMessageRow(value: unknown): MessageRow | null {
     localPreview: "",
     localProgress: 0,
     albumMembers: [],
+    statusQuote: parseStatusQuote(meta.status),
   };
 }
 
@@ -274,6 +283,7 @@ export function createLocalEcho(input: {
     localPreview: "",
     localProgress: 0,
     albumMembers: [],
+    statusQuote: null,
   };
 }
 
@@ -568,6 +578,7 @@ export function createLocalAttachmentEcho(input: {
     localPreview: input.localPreview ?? "",
     localProgress: 0,
     albumMembers: [],
+    statusQuote: null,
   };
 }
 
