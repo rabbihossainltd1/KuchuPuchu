@@ -44,6 +44,7 @@ export const SAFE_MEDIA_TYPES: readonly string[] = Object.freeze([
   "audio/aac",
   "audio/ogg",
   "audio/wav",
+  "audio/webm",
   "video/mp4",
   "video/webm",
   "application/pdf",
@@ -52,10 +53,12 @@ export const SAFE_MEDIA_TYPES: readonly string[] = Object.freeze([
 ]);
 
 /**
- * What the Worker will store a given type as. Note that `audio/webm` — what a
- * browser MediaRecorder produces — is NOT on the list, so browser voice notes
- * would come back as an opaque download. That is a server-side decision and is
- * tracked as slice E work, not papered over here.
+ * What the Worker will store a given type as. `audio/webm` — what a browser
+ * MediaRecorder produces for a voice note — is on the list, so a note recorded
+ * on the web is served back with the type its bytes really have and a browser
+ * `<audio>` element can play it. Anything outside the list still becomes an
+ * opaque download, which is how the API origin refuses to hand back executable
+ * markup (`text/html`, `image/svg+xml`) that an uploader stored.
  */
 export function safeMediaType(raw: string | null | undefined): string {
   const type = (String(raw ?? "").split(";")[0] ?? "").trim().toLowerCase().slice(0, 100);

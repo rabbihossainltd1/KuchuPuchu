@@ -2757,6 +2757,14 @@ const SAFE_MEDIA_TYPES = new Set([
   "audio/aac",
   "audio/ogg",
   "audio/wav",
+  // A browser's MediaRecorder only offers webm/opus (Chrome, Edge, Firefox) or
+  // mp4/aac (Safari), so a voice note recorded on the web arrives as
+  // audio/webm. Without it here the note is stored and served as an opaque
+  // download: the phone's MediaPlayer would still sniff the container, but a
+  // browser `<audio>` handed `application/octet-stream` refuses to play, and
+  // the row's own type stops describing its bytes. webm is a media container,
+  // not executable markup — `video/webm` has been on this list all along.
+  "audio/webm",
   "video/mp4",
   "video/webm",
   "application/pdf",
