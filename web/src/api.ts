@@ -184,5 +184,46 @@ export function createApiClient(fetcher: ApiFetcher = globalThis.fetch) {
         throw new ApiError({ kind: "invalid-response", status: response.status });
       }
     },
+
+    /**
+     * Binary transport: the same path validation, credentials, no-store and
+     * redirect rules as `request`, but the body is handed back raw. File
+     * uploads and downloads need it — a JPEG is not `application/json`, and
+     * refusing to parse one is not the same as refusing to serve it.
+     *
+     * It never retries: a mutation is a mutation, and a GET that already
+     * produced a body stream is not safe to replay behind the caller's back.
+     */
+    async requestRaw(path: string, init: RequestInit = {}): Promise<Response> {
+      const requestPath = validateApiPath(path);
+      const headers = new Headers(init.headers);
+      const method = (init.method ?? "GET").trim().toUpperCase();
+
+      let response: Response;
+      try {
+        response = await fetcher(requestPath, {
+          ...init,
+          headers,
+          method,
+          credentials: "same-origin",
+          cache: "no-store",
+          redirect: "error",
+        });
+      } catch (error) {
+        if (isAbortError(error)) throw new ApiError({ kind: "aborted" });
+        throw new ApiError({ kind: "network", retryable: false });
+      }
+
+      if (!response.ok) {
+        throw new ApiError({
+          kind: "http",
+          status: response.status,
+          code: await readSafeErrorCode(response),
+          retryable: false,
+        });
+      }
+
+      return response;
+    },
   };
 }

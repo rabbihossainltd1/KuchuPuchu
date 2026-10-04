@@ -12,6 +12,8 @@
  */
 
 import {
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useId,
@@ -30,6 +32,21 @@ import {
   QUICK_REACTIONS,
   type QuickReaction,
 } from "./chatCopy";
+import type { ApiClient } from "../auth/authApi";
+import type { EditModel } from "../media/imageEdit";
+
+import { formatBytes, isAttachmentKind } from "../media/uploadContract";
+import { AttachMenu, type AttachSource } from "./AttachMenu";
+import { AttachmentRow } from "./AttachmentRow";
+import {
+  applyRenderedEdit,
+  describeAttachment,
+  hasEdits,
+  prepareAttachments,
+  revokeAttachment,
+  type AttachmentRejection,
+  type PendingAttachment,
+} from "./attachments";
 import {
   MESSAGE_BODY_LIMIT,
   TICK_LABELS,
@@ -44,6 +61,13 @@ import {
 } from "./protocol";
 import type { MessagingController } from "./useMessaging";
 
+const PhotoEditor = lazy(() =>
+  import("../media/PhotoEditor").then((module) => ({ default: module.PhotoEditor })),
+);
+const StickerPicker = lazy(() =>
+  import("../media/StickerPicker").then((module) => ({ default: module.StickerPicker })),
+);
+
 type Props = {
   controller: MessagingController;
   selectedId: string;
@@ -55,6 +79,8 @@ type Props = {
   onDismissIdentityNotice: () => void;
   meId: string;
   meName: string;
+  /** Attachment bytes are Bearer-gated, so the transcript needs the client. */
+  api: ApiClient | null;
 };
 
 function senderLabel(message: MessageRow, conversation: ConversationRow, meId: string): string {
@@ -74,6 +100,7 @@ export function ChatPane({
   onDismissIdentityNotice,
   meId,
   meName,
+  api,
 }: Props) {
   const composerId = useId();
   const transcriptRef = useRef<HTMLOListElement | null>(null);
@@ -85,6 +112,14 @@ export function ChatPane({
   const [passphrase, setPassphrase] = useState("");
   const [unlockBusy, setUnlockBusy] = useState(false);
   const [unlockError, setUnlockError] = useState("");
+  const [pending, setPending] = useState<readonly PendingAttachment[]>([]);
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [stickerOpen, setStickerOpen] = useState(false);
+  const [editorTarget, setEditorTarget] = useState<PendingAttachment | null>(null);
+  const [rejections, setRejections] = useState<readonly AttachmentRejection[]>([]);
+  // The bytes as picked, kept so re-opening the editor never re-compresses an
+  // already-baked JPEG (each bake would cost another generation of quality).
+  const originals = useRef<Map<string, { blob: Blob; width: number; height: number }>>(new Map());
 
   const conversation = controller.selected;
   const isEditing = editingId !== "";
@@ -101,6 +136,17 @@ export function ChatPane({
     setConfirmDeleteId("");
     setEditingId("");
     setEditText("");
+    setAttachOpen(false);
+    setStickerOpen(false);
+    setEditorTarget(null);
+    setRejections([]);
+    // An unsent attachment belongs to the chat it was picked in: leaving the
+    // conversation drops it rather than leaking it into another person's chat.
+    setPending((current) => {
+      current.forEach(revokeAttachment);
+      return [];
+    });
+    originals.current.clear();
   }, [selectedId]);
 
   useEffect(() => {
@@ -158,6 +204,69 @@ export function ChatPane({
     [onUnlock, passphrase],
   );
 
+  /* ---------------------------------------------------------- attachments */
+
+  const onPickFiles = useCallback(
+    async (files: readonly File[], source: AttachSource, asDocument: boolean) => {
+      const result = await prepareAttachments(files, {
+        asDocument: asDocument || source === "document",
+        alreadyQueued: pending.length,
+      });
+      setRejections(result.rejected);
+      if (!result.items.length) return;
+      result.items.forEach((item) => {
+        if (item.intent === "photo") {
+          originals.current.set(item.id, {
+            blob: item.blob,
+            width: item.width,
+            height: item.height,
+          });
+        }
+      });
+      setPending((current) => [...current, ...result.items]);
+    },
+    [pending.length],
+  );
+
+  const removeAttachment = useCallback((id: string) => {
+    setPending((current) => {
+      const target = current.find((item) => item.id === id);
+      if (target) revokeAttachment(target);
+      return current.filter((item) => item.id !== id);
+    });
+    originals.current.delete(id);
+  }, []);
+
+  const onEditorDone = useCallback(
+    (rendered: { blob: Blob; width: number; height: number }, edit: EditModel) => {
+      const target = editorTarget;
+      setEditorTarget(null);
+      if (!target) return;
+      setPending((current) =>
+        current.map((row) => (row.id === target.id ? applyRenderedEdit(row, rendered, edit) : row)),
+      );
+      controller.announce(`Photo edited. It sends at ${rendered.width} by ${rendered.height}.`);
+    },
+    [controller, editorTarget],
+  );
+
+  const submit = useCallback(async () => {
+    if (pending.length) {
+      const items = pending;
+      const caption = controller.draft;
+      // Object URLs deliberately survive this: the optimistic rows keep showing
+      // the local bytes while the upload runs, so revoking here would blank
+      // every thumbnail in the transcript mid-send.
+      setPending([]);
+      setRejections([]);
+      originals.current.clear();
+      controller.setDraft("");
+      await controller.sendAttachments(items, caption);
+      return;
+    }
+    await controller.send();
+  }, [controller, pending]);
+
   const onComposerKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       if (event.key === "Escape") {
@@ -171,14 +280,14 @@ export function ChatPane({
       }
       if (event.key === "Enter" && !event.shiftKey && !editingId) {
         event.preventDefault();
-        void controller.send();
+        void submit();
       }
       if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && editingId) {
         event.preventDefault();
         void commitEdit();
       }
     },
-    [commitEdit, controller, editingId],
+    [commitEdit, controller, editingId, submit],
   );
 
   if (!conversation) {
@@ -256,7 +365,7 @@ export function ChatPane({
             <ul>
               <li>{CAPABILITY_COPY.mediaNotEncrypted}</li>
               <li>{CAPABILITY_COPY.captureWarning}</li>
-              <li>{CAPABILITY_COPY.attachmentsDisabled}</li>
+              <li>{CAPABILITY_COPY.mediaViewerPending}</li>
             </ul>
           </details>
         </div>
@@ -384,6 +493,8 @@ export function ChatPane({
                     <article
                       className={`bubble${own ? " bubble--own" : ""}${
                         message.localState === "failed" ? " bubble--failed" : ""
+                      }${message.kind === "STICKER" ? " bubble--sticker" : ""}${
+                        isAttachmentKind(message.kind) ? " bubble--attachment" : ""
                       }`}
                       aria-label={`${senderLabel(message, conversation, meId)} at ${clockTime(
                         message.createdAt,
@@ -408,16 +519,17 @@ export function ChatPane({
 
                       {message.kind === "DELETED" ? (
                         <p className="bubble__deleted">This message was deleted.</p>
+                      ) : isAttachmentKind(message.kind) || message.kind === "STICKER" ? (
+                        <AttachmentRow
+                          message={message}
+                          api={api}
+                          body={body}
+                          locked={isPlaceholder}
+                        />
                       ) : (
                         <p className="bubble__body">
                           {isPlaceholder && <Icon name="lock" size={13} className="bubble__lock" />}
                           {body}
-                        </p>
-                      )}
-
-                      {message.kind !== "TEXT" && message.kind !== "DELETED" && (
-                        <p className="bubble__media-note">
-                          {message.kind} attachment — media viewing arrives in a later slice.
                         </p>
                       )}
 
@@ -436,7 +548,15 @@ export function ChatPane({
 
                       <footer className="bubble__meta">
                         {message.edited && <span>Edited</span>}
-                        {message.localState === "pending" && <span>Sending…</span>}
+                        {message.localState === "pending" && (
+                          <span>
+                            {message.kind === "FILE"
+                              ? message.localProgress > 0
+                                ? `Uploading… ${message.localProgress}%`
+                                : "Uploading…"
+                              : "Sending…"}
+                          </span>
+                        )}
                         <time dateTime={message.createdAt}>{clockTime(message.createdAt)}</time>
                         {own && message.kind !== "DELETED" && (
                           <span className={`bubble__tick bubble__tick--${ticks}`}>
@@ -638,19 +758,132 @@ export function ChatPane({
           </div>
         )}
 
-        <div className="composer__row">
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Attachments arrive in a later slice"
-            title={CAPABILITY_COPY.attachmentsDisabled}
-            disabled
+        {rejections.length > 0 && (
+          <ul
+            className="composer__rejections"
+            role="alert"
+            aria-label="Files that could not be attached"
           >
-            <Icon name="plus" size={20} />
-          </button>
+            {rejections.map((item) => (
+              <li key={`${item.name}-${item.reason}`}>
+                <strong>{item.name}</strong> {item.reason}
+              </li>
+            ))}
+            <li>
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => setRejections([])}
+                aria-label="Dismiss attachment warnings"
+              >
+                Dismiss
+              </button>
+            </li>
+          </ul>
+        )}
+
+        {pending.length > 0 && (
+          <ul className="composer__attachments" aria-label="Attachments ready to send">
+            {pending.map((item) => (
+              <li key={item.id} className="composer-attachment">
+                {item.previewUrl ? (
+                  <img className="composer-attachment__thumb" src={item.previewUrl} alt="" />
+                ) : (
+                  <span className="composer-attachment__icon" aria-hidden="true">
+                    {item.intent === "video" ? "🎬" : item.intent === "audio" ? "🎵" : "📄"}
+                  </span>
+                )}
+                <span className="composer-attachment__copy">
+                  <strong>{item.pickedName}</strong>
+                  <span>
+                    {formatBytes(item.size)}
+                    {item.width ? ` · ${item.width}×${item.height}` : ""}
+                    {hasEdits(item) ? " · edited" : ""}
+                  </span>
+                  <span className="sr-only">{describeAttachment(item)}</span>
+                </span>
+                {item.intent === "photo" && (
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => setEditorTarget(item)}
+                    aria-label={`Edit photo ${item.pickedName}`}
+                  >
+                    {hasEdits(item) ? "Edit again" : "Edit"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => removeAttachment(item.id)}
+                  aria-label={`Remove ${item.pickedName} from this message`}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="composer__row">
+          <div className="composer__attach">
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Attach a photo, video or document"
+              aria-expanded={attachOpen}
+              aria-haspopup="dialog"
+              disabled={oneWay}
+              onClick={() => {
+                setStickerOpen(false);
+                setAttachOpen((value) => !value);
+              }}
+            >
+              <Icon name="plus" size={20} />
+            </button>
+            <AttachMenu
+              open={attachOpen && !oneWay}
+              onClose={() => setAttachOpen(false)}
+              onFiles={(files, source, asDocument) => void onPickFiles(files, source, asDocument)}
+              disabled={oneWay}
+              onAnnounce={controller.announce}
+            />
+          </div>
+
+          <div className="composer__attach">
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Send a sticker"
+              aria-expanded={stickerOpen}
+              disabled={oneWay}
+              onClick={() => {
+                setAttachOpen(false);
+                setStickerOpen((value) => !value);
+              }}
+            >
+              <span aria-hidden="true">🙂</span>
+            </button>
+            {stickerOpen && !oneWay && (
+              <Suspense fallback={<p className="attach-loading">Loading stickers…</p>}>
+                <StickerPicker
+                  onPick={(glyph) => {
+                    setStickerOpen(false);
+                    void controller.sendSticker(glyph);
+                  }}
+                  onClose={() => setStickerOpen(false)}
+                  onAnnounce={controller.announce}
+                />
+              </Suspense>
+            )}
+          </div>
 
           <label className="sr-only" htmlFor={composerId}>
-            {oneWay ? "This account does not accept replies" : "Message text"}
+            {oneWay
+              ? "This account does not accept replies"
+              : pending.length > 0
+                ? "Caption for the attached files"
+                : "Message text"}
           </label>
           <textarea
             id={composerId}
@@ -662,7 +895,9 @@ export function ChatPane({
             placeholder={
               oneWay
                 ? "Notification account — replies are not accepted"
-                : "Type a message. Enter sends, Shift+Enter adds a line."
+                : pending.length > 0
+                  ? "Add a caption… (optional, sealed in a personal chat)"
+                  : "Type a message. Enter sends, Shift+Enter adds a line."
             }
             maxLength={MESSAGE_BODY_LIMIT}
             onChange={(event) => {
@@ -690,9 +925,15 @@ export function ChatPane({
             <button
               type="button"
               className="send-button"
-              onClick={() => void controller.send()}
-              disabled={oneWay || !controller.draft.trim()}
-              aria-label={oneWay ? "Replies are not accepted" : "Send message"}
+              onClick={() => void submit()}
+              disabled={oneWay || (!controller.draft.trim() && pending.length === 0)}
+              aria-label={
+                oneWay
+                  ? "Replies are not accepted"
+                  : pending.length > 0
+                    ? `Send ${pending.length} attachment${pending.length === 1 ? "" : "s"}`
+                    : "Send message"
+              }
             >
               <Icon name="message" size={18} />
             </button>
@@ -714,6 +955,23 @@ export function ChatPane({
       <p className="sr-only" role="status" aria-live="polite">
         {`Signed in as ${meName}. ${controller.messages.length} messages loaded.`}
       </p>
+
+      {editorTarget && (
+        <div className="editor-overlay">
+          <Suspense fallback={<p className="attach-loading">Loading the photo editor…</p>}>
+            <PhotoEditor
+              file={originals.current.get(editorTarget.id)?.blob ?? editorTarget.blob}
+              fileName={editorTarget.pickedName}
+              sourceWidth={originals.current.get(editorTarget.id)?.width ?? editorTarget.width}
+              sourceHeight={originals.current.get(editorTarget.id)?.height ?? editorTarget.height}
+              initialEdit={editorTarget.edit}
+              onCancel={() => setEditorTarget(null)}
+              onDone={onEditorDone}
+              onAnnounce={controller.announce}
+            />
+          </Suspense>
+        </div>
+      )}
     </main>
   );
 }

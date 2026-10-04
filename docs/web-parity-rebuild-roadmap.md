@@ -38,6 +38,24 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 | **H** | Web Push | VAPID subscription schema, Worker delivery pipeline, SW click routing, settings opt-in/revoke | আলাদা backend design + test দরকার (plan §১১.২); private plaintext payload নয় |
 | **I** | Hardening (P6) | theme picker, motion/`prefers-reduced-motion`, contrast/axe, CSP/XSS review, IDB quota + logout isolation, bundle optimization | 4 breakpoint × theme screenshot matrix; security review |
 
+### অগ্রগতি
+
+| Slice | অবস্থা | কোথায় |
+| --- | --- | --- |
+| **A** conversation list + chat shell | ✅ merged | PR #82 → `main` @ `d168a913` |
+| **B** messaging core + KP1 E2EE | ✅ merged | PR #82 → `main` @ `d168a913` |
+| **C** message actions + durability | ✅ merged | PR #82 → `main` @ `d168a913` |
+| **D** attachments + photo editor | ✅ built | এই branch; নিচের হিসাব |
+| **E**–**I** | ⏳ বাকি | — |
+
+**Slice D-তে যা নামলো** (Worker বা Android-এ একটি লাইনও বদলায়নি):
+
+- `web/src/media/` — `uploadContract.ts` (সব ceiling/plan/meta নিয়ম, DOM ছাড়া), `imageEdit.ts` + `renderEdits.ts` (editor geometry আর canvas bake), `stickerPacks.ts` (**GENERATED**, `npm run generate:web-stickers`), `StickerPicker.tsx`, `PhotoEditor.tsx`।
+- `web/src/messaging/` — `filesApi.ts` (single + multipart upload, download), `attachments.ts` (pick → prepare → send pipeline), `mediaUrl.ts` (bearer-gated bytes → object URL, bounded cache), `AttachMenu.tsx`, `AttachmentRow.tsx`; `ChatPane.tsx` আর `useMessaging.ts` সেগুলোতে wired।
+- Lazy chunks: `MessagingWorkspace`, `PhotoEditor`, `StickerPicker` আলাদা bundle — entry ৩৩২.৯৪ kB থেকে **২৮৭.৯৫ kB (gzip ৮৮.৩২)**, অর্থাৎ messaging চালুর আগের baseline-এরও কম।
+- Gates: contract **৫৭/৫৭ case, ২৫২১ assertion** (নতুন case 57 = ২৩৮ check), browser **৪৪ test** (shell ৮ + account ১০ + messaging ২৬), `npm run ci` EXIT=0, `check:web-stickers` CI step-এ যোগ, service worker ৭টা precached file।
+- E2E-তে ধরা পড়া আসল bug: `fetchFileBlob` পুরো key-কে `encodeURIComponent` করত, ফলে `f/x.jpg` → `f%2Fx.jpg` হতো আর `api.ts`-এর path guard encoded slash refuse করত — অর্থাৎ **production-এ কোনো received ছবি/ভিডিও/ডকুমেন্টই download হতো না**। এখন Android-এর `Api.encodePath`-এর মতো segment-wise encoding + `FILE_KEY_RE` যাচাই (`fileGetPath`)।
+
 ### ইচ্ছাকৃতভাবে বাদ / placeholder (কাজ হবে না)
 
 `Add call`, Poll, Event, AI images — Android-এও "coming in a future update"।

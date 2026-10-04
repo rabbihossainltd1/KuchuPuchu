@@ -4,3 +4,8 @@ package-lock.json
 *.md
 native-android
 .github
+
+# GENERATED from native-android/.../StickerSheet.kt by scripts/generate-web-stickers.ts.
+# Formatting it here would be undone by the next regeneration; parity is checked by
+# `npm run check:web-stickers` and test/cases/57-web-media-attachments.mjs instead.
+web/src/media/stickerPacks.ts

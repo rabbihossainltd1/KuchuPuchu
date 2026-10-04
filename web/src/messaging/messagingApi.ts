@@ -33,11 +33,23 @@ export type MessagesQuery = {
   marker?: string;
 };
 
+/**
+ * The Worker accepts TEXT / STICKER / FILE kinds. Every attachment — photo,
+ * clip, document — travels as FILE with a fileKey; STICKER carries the glyph in
+ * `body` exactly like a TEXT send, which is what the phone does.
+ */
 export type SendMessagePayload = {
-  kind: "TEXT";
+  kind: "TEXT" | "STICKER" | "FILE";
+  /** Plaintext for groups/bots, a `KP1.` envelope in a personal chat. */
   body: string;
   clientId: string;
   replyTo?: string;
+  fileName?: string;
+  fileType?: string;
+  fileSize?: number;
+  fileKey?: string;
+  meta?: Record<string, unknown>;
+  viewOnce?: boolean;
 };
 
 export type SendMessageResult = {
@@ -128,6 +140,12 @@ export const messagingApi = {
       clientId: payload.clientId,
     };
     if (payload.replyTo) body.replyTo = payload.replyTo;
+    if (payload.fileName !== undefined) body.fileName = payload.fileName;
+    if (payload.fileType !== undefined) body.fileType = payload.fileType;
+    if (payload.fileSize !== undefined) body.fileSize = payload.fileSize;
+    if (payload.fileKey !== undefined) body.fileKey = payload.fileKey;
+    if (payload.meta && Object.keys(payload.meta).length > 0) body.meta = payload.meta;
+    if (payload.viewOnce) body.viewOnce = true;
 
     const response = await postJson(api, conversationPath(conversationId, "/messages"), body);
     const record = (response ?? {}) as Record<string, unknown>;

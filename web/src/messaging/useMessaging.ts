@@ -30,6 +30,7 @@ import {
   conversationPeerId,
   conversationPeerKey,
   conversationTitle,
+  createLocalAttachmentEcho,
   createLocalEcho,
   isOneWayConversation,
   isTypingActive,
@@ -55,6 +56,9 @@ import {
   type OutboxStore,
 } from "./outbox";
 import { createManagedSocket, type ManagedSocket, type SocketStatus } from "./sockets";
+import { uploadFile } from "./filesApi";
+import { attachmentMeta, type PendingAttachment } from "./attachments";
+import { albumId } from "../media/uploadContract";
 
 const TYPING_THROTTLE_MS = 2_000;
 const TYPING_IDLE_MS = 3_000;
@@ -95,6 +99,8 @@ export type MessagingActions = {
   setDraft: (text: string) => void;
   composerChanged: () => void;
   send: () => Promise<void>;
+  sendSticker: (glyph: string) => Promise<void>;
+  sendAttachments: (items: readonly PendingAttachment[], caption: string) => Promise<void>;
   retry: (clientId: string) => Promise<void>;
   discard: (clientId: string) => Promise<void>;
   setReplyTo: (target: ReplyTarget | null) => void;
@@ -567,6 +573,205 @@ export function useMessaging(options: Options): MessagingController {
     await attemptItem(item);
   }, [announce, api, attemptItem, draft, identity, meId, replyTo, stores.drafts, stores.outbox]);
 
+  /**
+   * A sticker is a TEXT-shaped send with `kind: "STICKER"` and the glyph in the
+   * body — what Android's `sendText(content, "STICKER")` posts — so it goes
+   * through the same seal path and the same optimistic echo, minus the upload.
+   */
+  const sendSticker = useCallback(
+    async (glyph: string) => {
+      const conversation = selectedRef.current;
+      if (!conversation || !meId || !glyph) return;
+      if (isOneWayConversation(conversation)) {
+        announce("This account only sends notifications; replies are not accepted.");
+        return;
+      }
+
+      let wireBody: string;
+      try {
+        wireBody = await protectOutgoingBody(
+          glyph,
+          { isGroup: conversation.isGroup, otherId: conversationPeerId(conversation) },
+          conversationPeerKey(conversation),
+          identity,
+        );
+      } catch (error) {
+        announce((error as Error).message || SECURE_CHAT_WAITING);
+        return;
+      }
+
+      const clientId = newClientId();
+      const echo = createLocalAttachmentEcho({
+        clientId,
+        senderId: meId,
+        kind: "STICKER",
+        body: glyph,
+        fileName: "",
+        fileType: "",
+        fileSize: 0,
+        replyTo,
+      });
+      setMessages((current) => [...current, echo].sort(compareMessages));
+
+      try {
+        const result = await messagingApi.sendMessage(api, conversation.id, {
+          kind: "STICKER",
+          body: wireBody,
+          clientId,
+          replyTo: replyTo?.id || undefined,
+        });
+        if (result.message) {
+          const confirmed = result.message;
+          setMessages((current) => applyMessageFrame(current, confirmed, meId).messages);
+        } else {
+          setMessages((current) =>
+            current.map((row) =>
+              row.clientId === clientId ? { ...row, localState: "" as const } : row,
+            ),
+          );
+        }
+        setReplyTo(null);
+        void refreshList();
+      } catch (error) {
+        setMessages((current) =>
+          current.map((row) =>
+            row.clientId === clientId
+              ? { ...row, localState: "failed" as const, localError: apiErrorMessage(error) }
+              : row,
+          ),
+        );
+        announce("Sticker not sent. Retry from the message actions.");
+      }
+    },
+    [announce, api, identity, meId, refreshList, replyTo],
+  );
+
+  /**
+   * Upload and post composer attachments, one row per file.
+   *
+   * Attachments do not join the durable outbox: a Blob cannot be reliably
+   * resurrected from IndexedDB in every browser, so an unsent file stays in the
+   * composer and a failed upload marks its own bubble. The caption rides on the
+   * first row only — repeating it on every row of a multi-photo send would
+   * render it four times on the phone.
+   */
+  const sendAttachments = useCallback(
+    async (items: readonly PendingAttachment[], caption: string) => {
+      const conversation = selectedRef.current;
+      if (!conversation || !meId || items.length === 0) return;
+      if (isOneWayConversation(conversation)) {
+        announce("This account only sends notifications; replies are not accepted.");
+        return;
+      }
+
+      const trimmed = caption.trim();
+      let sealedCaption = "";
+      if (trimmed) {
+        try {
+          sealedCaption = await protectOutgoingBody(
+            trimmed,
+            { isGroup: conversation.isGroup, otherId: conversationPeerId(conversation) },
+            conversationPeerKey(conversation),
+            identity,
+          );
+        } catch (error) {
+          announce((error as Error).message || SECURE_CHAT_WAITING);
+          return;
+        }
+      }
+
+      // One album id for a multi-photo send, so the phone groups them.
+      const photos = items.filter((item) => item.intent === "photo");
+      const album = photos.length > 1 ? albumId() : "";
+
+      for (const [index, item] of items.entries()) {
+        const clientId = newClientId();
+        const meta = attachmentMeta(item, album || undefined);
+        const preview = item.previewUrl ?? "";
+        const echo = createLocalAttachmentEcho({
+          clientId,
+          senderId: meId,
+          kind: "FILE",
+          body: index === 0 ? trimmed : "",
+          fileName: item.name,
+          fileType: item.type,
+          fileSize: item.size,
+          mediaWidth: item.width,
+          mediaHeight: item.height,
+          meta,
+          localPreview: preview,
+          replyTo: index === 0 ? replyTo : null,
+        });
+        setMessages((current) => [...current, echo].sort(compareMessages));
+
+        try {
+          const uploaded = await uploadFile(api, {
+            name: item.name,
+            type: item.type,
+            blob: item.blob,
+            onProgress: (progress) => {
+              const percent = progress.total
+                ? Math.min(99, Math.round((progress.sent / progress.total) * 100))
+                : 0;
+              setMessages((current) =>
+                current.map((row) =>
+                  row.clientId === clientId ? { ...row, localProgress: percent } : row,
+                ),
+              );
+            },
+          });
+
+          const result = await messagingApi.sendMessage(api, conversation.id, {
+            kind: "FILE",
+            body: index === 0 ? sealedCaption : "",
+            clientId,
+            replyTo: index === 0 ? replyTo?.id || undefined : undefined,
+            fileName: item.name,
+            fileType: item.type,
+            fileSize: uploaded.size,
+            fileKey: uploaded.fileKey,
+            meta,
+          });
+
+          if (result.message) {
+            const confirmed = result.message;
+            setMessages((current) => {
+              const next = applyMessageFrame(current, confirmed, meId).messages;
+              // Keep the local object URL on the confirmed row: otherwise the
+              // thumbnail blanks while the Bearer-gated download restarts.
+              return next.map((row) =>
+                row.id === confirmed.id && !row.localPreview
+                  ? { ...row, localPreview: preview, localProgress: 100 }
+                  : row,
+              );
+            });
+          } else {
+            setMessages((current) =>
+              current.map((row) =>
+                row.clientId === clientId
+                  ? { ...row, localState: "" as const, localProgress: 100 }
+                  : row,
+              ),
+            );
+          }
+        } catch (error) {
+          setMessages((current) =>
+            current.map((row) =>
+              row.clientId === clientId
+                ? { ...row, localState: "failed" as const, localError: apiErrorMessage(error) }
+                : row,
+            ),
+          );
+          announce(`${item.pickedName} did not send.`);
+        }
+      }
+
+      setReplyTo(null);
+      void refreshList();
+    },
+    [announce, api, identity, meId, refreshList, replyTo],
+  );
+
   const retry = useCallback(
     async (clientId: string) => {
       const item = outboxRef.current.find((row) => row.clientId === clientId);
@@ -732,6 +937,8 @@ export function useMessaging(options: Options): MessagingController {
     setDraft,
     composerChanged,
     send,
+    sendSticker,
+    sendAttachments,
     retry,
     discard,
     setReplyTo,

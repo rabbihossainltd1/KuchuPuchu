@@ -8,6 +8,7 @@
  */
 
 import { webcrypto } from "node:crypto";
+import { deflateSync } from "node:zlib";
 import type { Page, Route } from "@playwright/test";
 
 const subtle = webcrypto.subtle;
@@ -111,6 +112,80 @@ export function plaintextBackupBlob(identity: TestIdentity): string {
   return toBase64(new TextEncoder().encode(JSON.stringify({ p: identity.p, u: identity.u })));
 }
 
+/* ------------------------------------------------------- a real PNG file */
+
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type: string, data: Uint8Array): Uint8Array {
+  const length = new Uint8Array(4);
+  new DataView(length.buffer).setUint32(0, data.length);
+  const body = new Uint8Array(4 + data.length);
+  new TextEncoder().encodeInto(type, body);
+  body.set(data, 4);
+  const crc = new Uint8Array(4);
+  new DataView(crc.buffer).setUint32(0, crc32(body));
+  const out = new Uint8Array(length.length + body.length + crc.length);
+  out.set(length, 0);
+  out.set(body, length.length);
+  out.set(crc, length.length + body.length);
+  return out;
+}
+
+/**
+ * A genuine PNG of the given size and colour. The browser tests need real
+ * pixels: `createImageBitmap`, the canvas shrink and the JPEG re-encode all
+ * refuse to run against a text file wearing an image extension.
+ */
+export function makePng(width: number, height: number, rgb: [number, number, number]): Uint8Array {
+  const ihdr = new Uint8Array(13);
+  const view = new DataView(ihdr.buffer);
+  view.setUint32(0, width);
+  view.setUint32(4, height);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 2; // truecolour
+  ihdr[10] = 0;
+  ihdr[11] = 0;
+  ihdr[12] = 0;
+
+  const stride = width * 3;
+  const raw = new Uint8Array((stride + 1) * height);
+  for (let y = 0; y < height; y += 1) {
+    const rowStart = y * (stride + 1);
+    raw[rowStart] = 0; // no filter
+    for (let x = 0; x < width; x += 1) {
+      const at = rowStart + 1 + x * 3;
+      raw[at] = rgb[0];
+      raw[at + 1] = rgb[1];
+      raw[at + 2] = rgb[2];
+    }
+  }
+
+  const signature = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const chunks = [
+    pngChunk("IHDR", ihdr),
+    pngChunk("IDAT", new Uint8Array(deflateSync(raw))),
+    pngChunk("IEND", new Uint8Array(0)),
+  ];
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const out = new Uint8Array(signature.length + total);
+  out.set(signature, 0);
+  let offset = signature.length;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------ mock worker */
 
 export type SentMessage = {
@@ -118,10 +193,22 @@ export type SentMessage = {
   body: Record<string, unknown>;
 };
 
+export type CapturedUpload = {
+  path: string;
+  method: string;
+  type: string;
+  name: string;
+  bytes: Uint8Array;
+};
+
 export type MockWorker = {
   me: TestIdentity;
   peer: TestIdentity;
   sent: SentMessage[];
+  uploads: CapturedUpload[];
+  fileDownloads: string[];
+  mediaAuthHeaders: string[];
+  mpu: { started: number; parts: number[]; completed: number; aborted: number };
   readCalls: string[];
   typingCalls: { conversationId: string; kind: string }[];
   deletedMessageIds: string[];
@@ -141,7 +228,12 @@ export const GROUP_ID = "c_group";
 export const HIDDEN_ID = "c_hidden";
 export const BOT_ID = "c_official";
 
-export async function createMockWorker(): Promise<MockWorker> {
+export type MockWorkerOptions = {
+  /** Add a FILE row to the direct chat, so received media can be asserted. */
+  withAttachment?: boolean;
+};
+
+export async function createMockWorker(options: MockWorkerOptions = {}): Promise<MockWorker> {
   const me = await generateTestIdentity();
   const peer = await generateTestIdentity();
 
@@ -194,7 +286,26 @@ export async function createMockWorker(): Promise<MockWorker> {
 
   const messagesFor = (conversationId: string) => {
     if (conversationId === CHAT_ID) {
+      const photo = options.withAttachment
+        ? [
+            {
+              id: "m_4",
+              senderId: PEER_ID,
+              senderName: PEER_NAME,
+              kind: "FILE",
+              body: "",
+              fileName: "peer_photo.png",
+              fileType: "image/png",
+              fileSize: 1234,
+              fileKey: "f/peer_photo.png",
+              meta: { w: 80, h: 60 },
+              createdAt: new Date(Date.now() - 45_000).toISOString(),
+              rowid: 4,
+            },
+          ]
+        : [];
       return [
+        ...photo,
         {
           id: "m_3",
           senderId: PEER_ID,
@@ -251,10 +362,16 @@ export async function createMockWorker(): Promise<MockWorker> {
     ];
   };
 
+  const storedFiles = new Map<string, { bytes: Uint8Array; type: string }>();
+
   const worker: MockWorker = {
     me,
     peer,
     sent: [],
+    uploads: [],
+    fileDownloads: [],
+    mediaAuthHeaders: [],
+    mpu: { started: 0, parts: [], completed: 0, aborted: 0 },
     readCalls: [],
     typingCalls: [],
     deletedMessageIds: [],
@@ -288,6 +405,69 @@ export async function createMockWorker(): Promise<MockWorker> {
 
       await page.route("**/api/conversations", (route) => json(route, { conversations }));
 
+      /* --- uploads: single POST, multipart lifecycle, authenticated GET --- */
+
+      const recordUpload = (route: Route, path: string) => {
+        const url = new URL(route.request().url());
+        const bytes = route.request().postDataBuffer();
+        worker.uploads.push({
+          path,
+          method: route.request().method(),
+          type: url.searchParams.get("type") ?? route.request().headers()["content-type"] ?? "",
+          name: url.searchParams.get("name") ?? "",
+          bytes: new Uint8Array(bytes ?? Buffer.alloc(0)),
+        });
+      };
+
+      await page.route(/\/api\/files\/mpu\/start/, (route) => {
+        recordUpload(route, "mpu/start");
+        worker.mpu.started += 1;
+        return json(route, { uploadId: "up_1", partSize: 8 * 1024 * 1024, key: "f/mpu.png" }, 201);
+      });
+      await page.route(/\/api\/files\/mpu\/part/, (route) => {
+        recordUpload(route, "mpu/part");
+        const n = Number(new URL(route.request().url()).searchParams.get("n") ?? 0);
+        worker.mpu.parts.push(n);
+        return json(route, { ok: true, n, etag: `etag-${n}` });
+      });
+      await page.route(/\/api\/files\/mpu\/complete/, (route) => {
+        worker.mpu.completed += 1;
+        return json(route, { fileKey: "f/mpu.png", size: 26 * 1024 * 1024 }, 201);
+      });
+      await page.route(/\/api\/files\/mpu\/abort/, (route) => {
+        worker.mpu.aborted += 1;
+        return json(route, { ok: true });
+      });
+
+      await page.route(/\/api\/files\/(?!mpu\/).+$/, (route) => {
+        const key = decodeURIComponent(
+          new URL(route.request().url()).pathname.replace("/api/files/", ""),
+        );
+        worker.fileDownloads.push(key);
+        worker.mediaAuthHeaders.push(String(route.request().headers()["authorization"] ?? ""));
+        const stored = storedFiles.get(key);
+        const bytes = stored?.bytes ?? makePng(80, 60, [40, 120, 200]);
+        return route.fulfill({
+          status: 200,
+          contentType: stored?.type || "image/png",
+          body: Buffer.from(bytes),
+        });
+      });
+
+      await page.route(/\/api\/files(\?|$)/, (route) => {
+        if (route.request().method() !== "POST") {
+          return route.fallback();
+        }
+        recordUpload(route, "single");
+        const key = `f/up${worker.uploads.length}.bin`;
+        const bytes = new Uint8Array(route.request().postDataBuffer() ?? Buffer.alloc(0));
+        storedFiles.set(key, {
+          bytes,
+          type: new URL(route.request().url()).searchParams.get("type") ?? "",
+        });
+        return json(route, { fileKey: key, size: bytes.length }, 201);
+      });
+
       await page.route("**/api/conversations/*/messages", async (route) => {
         const url = new URL(route.request().url());
         const conversationId = decodeURIComponent(url.pathname.split("/")[3] ?? "");
@@ -300,12 +480,17 @@ export async function createMockWorker(): Promise<MockWorker> {
               message: {
                 id: `srv_${worker.sent.length}`,
                 senderId: ME.id,
-                kind: "TEXT",
+                kind: String(body.kind ?? "TEXT"),
                 body: String(body.body ?? ""),
                 clientId: String(body.clientId ?? ""),
                 replyTo: body.replyTo ? { id: String(body.replyTo), body: "quoted" } : null,
                 createdAt: new Date().toISOString(),
                 rowid: 100 + worker.sent.length,
+                fileName: body.fileName ?? null,
+                fileType: body.fileType ?? null,
+                fileSize: body.fileSize ?? null,
+                fileKey: body.fileKey ?? null,
+                meta: body.meta ?? null,
               },
             },
             201,

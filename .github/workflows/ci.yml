@@ -24,6 +24,8 @@ jobs:
       - run: npm ci
       - name: Web typecheck
         run: npm run typecheck:web
+      - name: Sticker catalog matches the Android source
+        run: npm run check:web-stickers
       - name: Web production build
         run: npm run build:web
       - name: Web service worker artifact
