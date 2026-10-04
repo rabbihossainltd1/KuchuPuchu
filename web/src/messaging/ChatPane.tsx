@@ -35,9 +35,13 @@ import {
 import type { ApiClient } from "../auth/authApi";
 import type { EditModel } from "../media/imageEdit";
 
-import { formatBytes, isAttachmentKind } from "../media/uploadContract";
+import { attachmentCategory, formatBytes, isAttachmentKind } from "../media/uploadContract";
 import { AttachMenu, type AttachSource } from "./AttachMenu";
-import { AttachmentRow } from "./AttachmentRow";
+import { AlbumGrid, AttachmentRow } from "./AttachmentRow";
+import { OnceText } from "./OnceText";
+import { mediaSourceKey, useMediaUrls } from "./mediaUrl";
+import { isViewOnce, viewOnceSpent } from "./viewOnce";
+import { rowsForTab, visibleMedia, type SharedMediaTab } from "./sharedMedia";
 import {
   applyRenderedEdit,
   describeAttachment,
@@ -53,6 +57,7 @@ import {
   clockTime,
   conversationInitial,
   conversationTitle,
+  foldAlbums,
   groupByDay,
   isOneWayConversation,
   tickState,
@@ -60,6 +65,19 @@ import {
   type MessageRow,
 } from "./protocol";
 import type { MessagingController } from "./useMessaging";
+
+// Both surfaces are heavy (a zoom/pan stage, a thumbnail grid that resolves
+// every media URL) and neither is needed to read a chat, so they load on
+// demand like the photo editor and the sticker picker do.
+const MediaViewer = lazy(() =>
+  import("./MediaViewer").then((module) => ({ default: module.MediaViewer })),
+);
+const MediaGallery = lazy(() =>
+  import("./MediaGallery").then((module) => ({ default: module.MediaGallery })),
+);
+
+/** A stable empty list, so the viewer's URL hook has a constant dependency. */
+const NO_ROWS: readonly MessageRow[] = Object.freeze([]);
 
 const PhotoEditor = lazy(() =>
   import("../media/PhotoEditor").then((module) => ({ default: module.PhotoEditor })),
@@ -116,6 +134,11 @@ export function ChatPane({
   const [attachOpen, setAttachOpen] = useState(false);
   const [stickerOpen, setStickerOpen] = useState(false);
   const [editorTarget, setEditorTarget] = useState<PendingAttachment | null>(null);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  // The full-screen viewer: the rows it pages through, and which one is current.
+  const [viewer, setViewer] = useState<{ items: readonly MessageRow[]; index: number } | null>(
+    null,
+  );
   const [rejections, setRejections] = useState<readonly AttachmentRejection[]>([]);
   // The bytes as picked, kept so re-opening the editor never re-compresses an
   // already-baked JPEG (each bake would cost another generation of quality).
@@ -123,7 +146,20 @@ export function ChatPane({
 
   const conversation = controller.selected;
   const isEditing = editingId !== "";
-  const days = useMemo(() => groupByDay(controller.messages), [controller.messages]);
+  // Photos that share an album id and a sender fold into one row, exactly as
+  // the phone's `foldAlbums` does, so a five-photo send is one bubble.
+  const days = useMemo(() => groupByDay(foldAlbums(controller.messages)), [controller.messages]);
+
+  // One hook resolves every URL the viewer needs; it stays mounted (with an
+  // empty list) so the hook order never changes when the viewer opens.
+  const viewerUrls = useMediaUrls(api, viewer?.items ?? NO_ROWS);
+
+  // Rows that have left the transcript (deleted, or a spent view-once) must
+  // leave the media panel too: the panel has to agree with the chat.
+  const goneIds = useMemo(
+    () => new Set(controller.hiddenMessageIds),
+    [controller.hiddenMessageIds],
+  );
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
     const list = transcriptRef.current;
@@ -140,6 +176,8 @@ export function ChatPane({
     setStickerOpen(false);
     setEditorTarget(null);
     setRejections([]);
+    setGalleryOpen(false);
+    setViewer(null);
     // An unsent attachment belongs to the chat it was picked in: leaving the
     // conversation drops it rather than leaking it into another person's chat.
     setPending((current) => {
@@ -207,9 +245,15 @@ export function ChatPane({
   /* ---------------------------------------------------------- attachments */
 
   const onPickFiles = useCallback(
-    async (files: readonly File[], source: AttachSource, asDocument: boolean) => {
+    async (
+      files: readonly File[],
+      source: AttachSource,
+      asDocument: boolean,
+      viewOnce: boolean,
+    ) => {
       const result = await prepareAttachments(files, {
         asDocument: asDocument || source === "document",
+        viewOnce,
         alreadyQueued: pending.length,
       });
       setRejections(result.rejected);
@@ -322,6 +366,50 @@ export function ChatPane({
   const editableWindowMs = 60_000;
   const groupedOwn = (message: MessageRow) => message.senderId === meId;
 
+  /**
+   * Open the viewer on one row — or on its whole album, so the reader can page
+   * between photos that were sent together. The album arrives either from the
+   * folded head row or from the grid cell that was clicked.
+   */
+  const openViewerAt = (message: MessageRow, album?: readonly MessageRow[]) => {
+    const items =
+      album && album.length > 1
+        ? album
+        : message.albumMembers.length > 1
+          ? message.albumMembers
+          : [message];
+    const found = items.findIndex((row) => row.id === message.id);
+    setViewer({ items, index: found < 0 ? 0 : found });
+  };
+
+  const galleryRows = visibleMedia(controller.sharedMedia, goneIds);
+
+  const openGalleryItem = (message: MessageRow, tab: SharedMediaTab) => {
+    if (tab !== "Media") return;
+    const items = rowsForTab(galleryRows, "Media");
+    const found = items.findIndex((row) => row.id === message.id);
+    setViewer({ items, index: found < 0 ? 0 : found });
+  };
+
+  const viewerItems = (viewer?.items ?? NO_ROWS).map((row) => {
+    const category = attachmentCategory(row.fileType, row.meta);
+    return {
+      id: row.id,
+      url: viewerUrls[row.id]?.url ?? "",
+      category: category === "video" ? ("video" as const) : ("photo" as const),
+      title: row.fileName || (category === "video" ? "Video" : "Photo"),
+      createdAt: row.createdAt,
+      senderName: senderLabel(row, conversation, meId),
+      own: row.senderId === meId,
+      viewOnce: isViewOnce(row),
+      spent: viewOnceSpent(row),
+      // The Worker deletes for everyone; a local echo has nothing to delete.
+      canDelete: row.senderId === meId && row.localState === "",
+      width: row.mediaWidth,
+      height: row.mediaHeight,
+    };
+  });
+
   return (
     <main
       className={`conversation-pane${selectedId ? " is-mobile-visible" : ""}`}
@@ -360,12 +448,23 @@ export function ChatPane({
           </span>
           {/* Native-only gaps are disclosed, not silently dropped: the browser
               cannot block screen capture, and media bytes are not sealed. */}
+          <button
+            type="button"
+            className="text-button"
+            aria-haspopup="dialog"
+            onClick={() => {
+              setGalleryOpen(true);
+              void controller.openSharedMedia();
+            }}
+          >
+            Media, links and docs
+          </button>
           <details className="chat-notes">
             <summary>Privacy notes</summary>
             <ul>
               <li>{CAPABILITY_COPY.mediaNotEncrypted}</li>
               <li>{CAPABILITY_COPY.captureWarning}</li>
-              <li>{CAPABILITY_COPY.mediaViewerPending}</li>
+              <li>{CAPABILITY_COPY.voiceAndPreviewPending}</li>
             </ul>
           </details>
         </div>
@@ -488,7 +587,7 @@ export function ChatPane({
                     key={message.id}
                     className={`bubble-row${own ? " bubble-row--own" : ""}${
                       message.kind === "DELETED" ? " bubble-row--deleted" : ""
-                    }`}
+                    }${controller.vanishingIds.includes(message.id) ? " bubble-row--vanishing" : ""}`}
                   >
                     <article
                       className={`bubble${own ? " bubble--own" : ""}${
@@ -519,12 +618,20 @@ export function ChatPane({
 
                       {message.kind === "DELETED" ? (
                         <p className="bubble__deleted">This message was deleted.</p>
+                      ) : message.albumMembers.length > 1 ? (
+                        <AlbumGrid rows={message.albumMembers} api={api} onOpen={openViewerAt} />
                       ) : isAttachmentKind(message.kind) || message.kind === "STICKER" ? (
                         <AttachmentRow
                           message={message}
                           api={api}
                           body={body}
                           locked={isPlaceholder}
+                          onOpen={openViewerAt}
+                        />
+                      ) : isViewOnce(message) && !viewOnceSpent(message) && !isPlaceholder ? (
+                        <OnceText
+                          body={body}
+                          onSpent={() => controller.spendViewOnce(message.id)}
                         />
                       ) : (
                         <p className="bubble__body">
@@ -844,7 +951,9 @@ export function ChatPane({
             <AttachMenu
               open={attachOpen && !oneWay}
               onClose={() => setAttachOpen(false)}
-              onFiles={(files, source, asDocument) => void onPickFiles(files, source, asDocument)}
+              onFiles={(files, source, asDocument, viewOnce) =>
+                void onPickFiles(files, source, asDocument, viewOnce)
+              }
               disabled={oneWay}
               onAnnounce={controller.announce}
             />
@@ -955,6 +1064,45 @@ export function ChatPane({
       <p className="sr-only" role="status" aria-live="polite">
         {`Signed in as ${meName}. ${controller.messages.length} messages loaded.`}
       </p>
+
+      {galleryOpen && (
+        <div className="gallery-overlay">
+          <Suspense fallback={<p className="attach-loading">Loading shared media…</p>}>
+            <MediaGallery
+              api={api}
+              media={galleryRows}
+              loading={controller.sharedMediaStatus === "loading"}
+              error={controller.sharedMediaStatus === "error" ? controller.sharedMediaError : ""}
+              onRetry={() => void controller.retrySharedMedia()}
+              onClose={() => setGalleryOpen(false)}
+              onOpen={openGalleryItem}
+              onAnnounce={controller.announce}
+            />
+          </Suspense>
+        </div>
+      )}
+
+      {viewer && (
+        <div className="viewer-overlay">
+          <Suspense fallback={<p className="attach-loading">Loading the viewer…</p>}>
+            <MediaViewer
+              items={viewerItems}
+              index={viewer.index}
+              onIndexChange={(index) => setViewer({ items: viewer.items, index })}
+              onClose={() => setViewer(null)}
+              onDelete={(item) => {
+                setViewer(null);
+                void controller.deleteMessage(item.id);
+              }}
+              onShown={(item) => {
+                // The single opening: the picture is on screen, so report it.
+                if (item.viewOnce && !item.spent) controller.spendViewOnce(item.id);
+              }}
+              onAnnounce={controller.announce}
+            />
+          </Suspense>
+        </div>
+      )}
 
       {editorTarget && (
         <div className="editor-overlay">

@@ -220,7 +220,10 @@ export function buildAttachmentMeta(
   }
 
   if (!facts.asDocument && facts.viewOnce) meta.viewOnce = true;
-  if (!facts.asDocument && facts.album) meta.album = facts.album;
+  // A view-once photo never joins an album — one tap is one opening — and the
+  // Worker drops the id on such a row (`album && !viewOnce`), so sending both
+  // would only be a meta the server has to rewrite.
+  if (!facts.asDocument && !facts.viewOnce && facts.album) meta.album = facts.album;
 
   return meta;
 }
@@ -264,9 +267,44 @@ export function photoFileName(now = Date.now()): string {
   return `photo_${now}.jpg`;
 }
 
-/** One album id shared by every photo in a single multi-pick send. */
-export function albumId(now = Date.now()): string {
-  return `album_${now}`;
+/**
+ * The Worker only keeps an album id shaped like this (`ALBUM_ID_RE` in
+ * `src/worker/index.ts`); anything else is dropped silently, so a multi-photo
+ * send would arrive on the phone as separate pictures with nothing tying them
+ * together. Contract-tested against that source.
+ */
+export const ALBUM_ID_RE = /^alb_[A-Za-z0-9_-]{4,36}$/;
+
+/**
+ * One album id shared by every photo in a single multi-pick send.
+ *
+ * Android mints `"alb_" + UUID.randomUUID().toString().replace("-", "").take(20)`
+ * — 20 hex chars after the prefix. Same shape here, with the entropy source
+ * injectable so a test can pin it.
+ */
+export function albumId(random: () => string = defaultAlbumRandom): string {
+  // Android: UUID.toString().replace("-", "").take(20) — the dashes go, 20 hex
+  // characters stay. `_` survives because ALBUM_ID_RE allows it.
+  const cleaned = String(random() ?? "")
+    .replace(/[^A-Za-z0-9_]/g, "")
+    .slice(0, 20);
+  const suffix =
+    cleaned.length >= 4 ? cleaned : `${cleaned}${Date.now().toString(36)}`.slice(0, 20);
+  return `alb_${suffix}`;
+}
+
+function defaultAlbumRandom(): string {
+  const cryptoObject = globalThis.crypto as Crypto | undefined;
+  if (cryptoObject && typeof cryptoObject.randomUUID === "function") {
+    return cryptoObject.randomUUID();
+  }
+  // No WebCrypto (an old worker or a locked-down frame): still a valid shape,
+  // just less entropy than a UUID.
+  let out = "";
+  for (let index = 0; index < 20; index += 1) {
+    out += Math.floor(Math.random() * 36).toString(36);
+  }
+  return out;
 }
 
 /**

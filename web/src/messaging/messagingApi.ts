@@ -5,10 +5,12 @@
  *
  *   GET    /api/conversations
  *   GET    /api/conversations/:id
+ *   GET    /api/conversations/:id/media     (shared media: images/videos/docs/links)
  *   GET    /api/conversations/:id/messages?before=&beforeRowid=&marker=
  *   POST   /api/conversations/:id/messages
  *   POST   /api/conversations/:id/read
  *   POST   /api/conversations/:id/typing
+ *   POST   /api/messages/:id/view           (report a view-once opening)
  *   POST   /api/messages/:id/react
  *   PATCH  /api/messages/:id            (edit own TEXT within 60s)
  *   DELETE /api/messages/:id            (permanent delete)
@@ -26,6 +28,7 @@ import {
   type MessageRow,
   type MessagesPage,
 } from "./protocol";
+import { parseSharedMedia, type SharedMedia } from "./sharedMedia";
 
 export type MessagesQuery = {
   before?: string;
@@ -186,6 +189,37 @@ export const messagingApi = {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ backup }),
+    });
+  },
+
+  /**
+   * The shared-media gallery: one payload of four newest-first lists. There is
+   * no cursor — the Worker caps it at 400 rows and has already applied the
+   * delete-for-me watermark, dropped view-once rows, and refused a private
+   * group (`403 PRIVATE_GROUP`) or an unaccepted request (`403 REQUEST_PENDING`).
+   */
+  async fetchSharedMedia(
+    api: ApiClient,
+    conversationId: string,
+    signal?: AbortSignal,
+  ): Promise<SharedMedia> {
+    const payload = await api.request<unknown>(
+      `/api/conversations/${encodeURIComponent(conversationId)}/media`,
+      { signal },
+    );
+    return parseSharedMedia(payload);
+  },
+
+  /**
+   * Report the single opening of a view-once message, exactly as the phone does
+   * (`Api.post("/api/messages/$id/view", JSONObject())`). A 404 or 410 means the
+   * row is already gone for everyone — terminal, not a blip.
+   */
+  async reportViewOnce(api: ApiClient, messageId: string): Promise<void> {
+    await api.request<unknown>(`/api/messages/${encodeURIComponent(messageId)}/view`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
     });
   },
 

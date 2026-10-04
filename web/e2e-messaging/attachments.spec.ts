@@ -415,6 +415,46 @@ test.describe("Web attachments", () => {
     expect(editorResults.violations).toEqual([]);
   });
 
+  test("view once can be sent, and it is the only thing that can be", async ({ page }) => {
+    await openAttachMenu(page);
+
+    // The two options contradict each other, so the sheet resolves it instead of
+    // letting the reader pick something the Worker would silently drop.
+    await page.getByRole("checkbox", { name: /View once/ }).check();
+    await page.getByRole("checkbox", { name: /Send as a document/ }).check();
+    await expect(page.getByRole("checkbox", { name: /View once/ })).not.toBeChecked();
+    await page.getByRole("checkbox", { name: /Send as a document/ }).uncheck();
+    await page.getByRole("checkbox", { name: /View once/ }).check();
+
+    await tileInput(page, "Gallery").setInputFiles({
+      name: "once.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(makePng(500, 400, [120, 30, 160])),
+    });
+
+    // The chip says what is about to be sent, out loud.
+    await expect(page.locator(".composer-attachment").locator(".sr-only")).toContainText(
+      "view once",
+    );
+
+    await page.getByRole("button", { name: "Send 1 attachment" }).click();
+    await expect.poll(() => worker.sent.length).toBe(1);
+    const sent = worker.sent[0]!;
+    const meta = sent.body.meta as { viewOnce?: boolean; album?: string; w?: number };
+    expect(meta.viewOnce).toBe(true);
+    expect(meta.album).toBeFalsy();
+    expect(meta.w).toBe(500);
+    // Android sends the flag in both places; the Worker reads `meta`.
+    expect(sent.body.viewOnce).toBe(true);
+
+    // The sender keeps a preview of their own once-message, blurred like the
+    // recipient's, until the other side opens it.
+    await expect(page.locator(".bubble--own .attachment__image--once")).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "View once — open" })).toBeVisible();
+    // Opening your own send is not an opening to report.
+    expect(worker.viewOnceReports).toEqual([]);
+  });
+
   test("the attach sheet states its limits instead of hiding them", async ({ page }) => {
     await openAttachMenu(page);
     await expect(page.locator(".attach-menu__note")).toContainText("2048 px");

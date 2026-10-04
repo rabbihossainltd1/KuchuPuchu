@@ -157,6 +157,32 @@ export async function uploadFile(api: ApiClient, input: UploadInput): Promise<Up
 }
 
 /** Download a stored file's bytes. The route is Bearer-gated and member-checked. */
+/**
+ * The bytes of an inline media row: `GET /api/messages/:id/media`.
+ *
+ * WARNING — for a view-once row this fetch **is** the opening. The Worker
+ * deletes the row for everyone, collects the object from the bucket and
+ * broadcasts VANISHED before it streams the body (audit H3: a fetch-free route
+ * plus a spend-on-`/view` report let a modified client pull the bytes any
+ * number of times and never admit to opening them). So nothing may call this
+ * while merely rendering a transcript; `openingCostsFetch` marks the rows that
+ * have to wait for the reader.
+ *
+ * For the sender's own row the route streams free and spends nothing.
+ */
+export async function fetchMessageMediaBlob(
+  api: ApiClient,
+  messageId: string,
+  signal?: AbortSignal,
+): Promise<{ blob: Blob; type: string }> {
+  const response = await api.requestRaw(`/api/messages/${encodeURIComponent(messageId)}/media`, {
+    method: "GET",
+    ...(signal ? { signal } : {}),
+  });
+  const blob = await response.blob();
+  return { blob, type: response.headers.get("content-type") || "application/octet-stream" };
+}
+
 export async function fetchFileBlob(
   api: ApiClient,
   fileKey: string,

@@ -208,6 +208,8 @@ export type MockWorker = {
   uploads: CapturedUpload[];
   fileDownloads: string[];
   mediaAuthHeaders: string[];
+  viewOnceReports: string[];
+  sharedMediaCalls: string[];
   mpu: { started: number; parts: number[]; completed: number; aborted: number };
   readCalls: string[];
   typingCalls: { conversationId: string; kind: string }[];
@@ -231,6 +233,10 @@ export const BOT_ID = "c_official";
 export type MockWorkerOptions = {
   /** Add a FILE row to the direct chat, so received media can be asserted. */
   withAttachment?: boolean;
+  /** Add view-once rows (photo, clip, text) and a two-photo album. */
+  withOnce?: boolean;
+  /** Serve `GET /api/conversations/:id/media`; the group answers 403. */
+  withSharedMedia?: boolean;
 };
 
 export async function createMockWorker(options: MockWorkerOptions = {}): Promise<MockWorker> {
@@ -238,6 +244,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
   const peer = await generateTestIdentity();
 
   const sealedFromPeer = await sealFor("এই মেসেজটি ফোন থেকে এনক্রিপ্টেড", peer, me);
+  const sealedOnceText = await sealFor("গোপন মেসেজ", peer, me);
 
   const conversations = [
     {
@@ -286,6 +293,83 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
 
   const messagesFor = (conversationId: string) => {
     if (conversationId === CHAT_ID) {
+      const album = options.withOnce
+        ? [
+            {
+              id: "alb_a",
+              senderId: PEER_ID,
+              senderName: PEER_NAME,
+              kind: "FILE",
+              body: "",
+              fileName: "album_a.png",
+              fileType: "image/png",
+              fileSize: 900,
+              fileKey: "f/album_a.png",
+              meta: { w: 320, h: 240, album: "alb_0123456789abcdef0123" },
+              createdAt: new Date(Date.now() - 40_000).toISOString(),
+              rowid: 5,
+            },
+            {
+              id: "alb_b",
+              senderId: PEER_ID,
+              senderName: PEER_NAME,
+              kind: "FILE",
+              body: "",
+              fileName: "album_b.png",
+              fileType: "image/png",
+              fileSize: 910,
+              fileKey: "f/album_b.png",
+              meta: { w: 240, h: 320, album: "alb_0123456789abcdef0123" },
+              createdAt: new Date(Date.now() - 39_000).toISOString(),
+              rowid: 6,
+            },
+          ]
+        : [];
+      const once = options.withOnce
+        ? [
+            {
+              id: "once_photo",
+              senderId: PEER_ID,
+              senderName: PEER_NAME,
+              kind: "FILE",
+              body: "",
+              fileName: "once.png",
+              fileType: "image/png",
+              fileSize: 700,
+              fileKey: "f/once_photo.png",
+              viewOnce: true,
+              meta: { w: 60, h: 40, viewOnce: true },
+              createdAt: new Date(Date.now() - 30_000).toISOString(),
+              rowid: 7,
+            },
+            {
+              id: "once_clip",
+              senderId: PEER_ID,
+              senderName: PEER_NAME,
+              kind: "FILE",
+              body: "",
+              fileName: "once.mp4",
+              fileType: "video/mp4",
+              fileSize: 9000,
+              fileKey: "f/once_clip.mp4",
+              viewOnce: true,
+              meta: { w: 320, h: 180, durMs: 4200, viewOnce: true },
+              createdAt: new Date(Date.now() - 25_000).toISOString(),
+              rowid: 8,
+            },
+            {
+              id: "once_text",
+              senderId: PEER_ID,
+              senderName: PEER_NAME,
+              kind: "TEXT",
+              body: sealedOnceText,
+              viewOnce: true,
+              meta: { viewOnce: true },
+              createdAt: new Date(Date.now() - 20_000).toISOString(),
+              rowid: 9,
+            },
+          ]
+        : [];
       const photo = options.withAttachment
         ? [
             {
@@ -306,6 +390,8 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         : [];
       return [
         ...photo,
+        ...album,
+        ...once,
         {
           id: "m_3",
           senderId: PEER_ID,
@@ -371,6 +457,8 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
     uploads: [],
     fileDownloads: [],
     mediaAuthHeaders: [],
+    viewOnceReports: [],
+    sharedMediaCalls: [],
     mpu: { started: 0, parts: [], completed: 0, aborted: 0 },
     readCalls: [],
     typingCalls: [],
@@ -507,6 +595,92 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
           hasMore: false,
           priv: {},
         });
+      });
+
+      await page.route("**/api/conversations/*/media", (route) => {
+        const url = new URL(route.request().url());
+        const conversationId = decodeURIComponent(url.pathname.split("/")[3] ?? "");
+        worker.sharedMediaCalls.push(conversationId);
+        if (!options.withSharedMedia) {
+          return json(route, { images: [], videos: [], docs: [], links: [] });
+        }
+        // A private group has no gallery at all — the Worker refuses it.
+        if (conversationId === GROUP_ID) {
+          return route.fulfill({
+            status: 403,
+            contentType: "application/json",
+            body: JSON.stringify({
+              error: { message: "This group is private.", code: "PRIVATE_GROUP" },
+            }),
+          });
+        }
+        const at = (secondsAgo: number) => new Date(Date.now() - secondsAgo * 1000).toISOString();
+        return json(route, {
+          images: [
+            {
+              id: "sm_photo",
+              senderId: PEER_ID,
+              senderName: PEER_NAME,
+              kind: "FILE",
+              body: "",
+              fileName: "shared_photo.png",
+              fileType: "image/png",
+              fileSize: 2048,
+              fileKey: "f/shared_photo.png",
+              meta: { w: 640, h: 480 },
+              createdAt: at(300),
+              rowid: 21,
+            },
+          ],
+          videos: [
+            {
+              id: "sm_clip",
+              senderId: ME.id,
+              kind: "FILE",
+              body: "",
+              fileName: "shared_clip.mp4",
+              fileType: "video/mp4",
+              fileSize: 4096,
+              fileKey: "f/shared_clip.mp4",
+              meta: { w: 640, h: 360, durMs: 7000 },
+              createdAt: at(900),
+              rowid: 22,
+            },
+          ],
+          docs: [
+            {
+              id: "sm_doc",
+              senderId: PEER_ID,
+              senderName: PEER_NAME,
+              kind: "FILE",
+              body: "",
+              fileName: "report.pdf",
+              fileType: "application/pdf",
+              fileSize: 8192,
+              fileKey: "f/report.pdf",
+              meta: { document: true },
+              createdAt: at(1200),
+              rowid: 23,
+            },
+          ],
+          links: [
+            {
+              id: "sm_link",
+              senderId: PEER_ID,
+              senderName: PEER_NAME,
+              kind: "TEXT",
+              body: "এই লিঙ্কটা দেখো https://kuchupuchu.app/privacy সবাই",
+              createdAt: at(1500),
+              rowid: 24,
+            },
+          ],
+        });
+      });
+
+      await page.route("**/api/messages/*/view", (route) => {
+        const url = new URL(route.request().url());
+        worker.viewOnceReports.push(decodeURIComponent(url.pathname.split("/")[3] ?? ""));
+        return json(route, { ok: true });
       });
 
       await page.route("**/api/conversations/*/read", (route) => {

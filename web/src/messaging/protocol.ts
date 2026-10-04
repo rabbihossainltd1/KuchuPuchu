@@ -85,6 +85,13 @@ export type MessageRow = {
   readonly localPreview: string;
   /** Local-only upload progress, 0..100, for the bubble's ring. */
   readonly localProgress: number;
+  /**
+   * Local-only: the photos this row stands for. Android folds rows that share
+   * `meta.album` and a sender into ONE list row (`foldAlbums`), so a five-photo
+   * send is one bubble with five thumbs and one viewer that pages between them.
+   * Empty for every row that is not a folded album head.
+   */
+  readonly albumMembers: readonly MessageRow[];
 };
 
 export type ReplyTarget = {
@@ -204,6 +211,7 @@ export function parseMessageRow(value: unknown): MessageRow | null {
     localError: "",
     localPreview: "",
     localProgress: 0,
+    albumMembers: [],
   };
 }
 
@@ -244,6 +252,7 @@ export function createLocalEcho(input: {
     localError: "",
     localPreview: "",
     localProgress: 0,
+    albumMembers: [],
   };
 }
 
@@ -532,6 +541,7 @@ export function createLocalAttachmentEcho(input: {
     localError: "",
     localPreview: input.localPreview ?? "",
     localProgress: 0,
+    albumMembers: [],
   };
 }
 
@@ -603,6 +613,13 @@ export function applyMessageFrame(
   incoming: MessageRow,
   meId: string,
 ): { messages: MessageRow[]; appended: boolean } {
+  // Defensive: a VANISHED marker is a removal instruction, not a row. Android
+  // returns early on it; folding it into the list would leave a bubble that
+  // says nothing and can never be opened.
+  if (isVanishedMarker(incoming)) {
+    return { messages: current.filter((message) => message.id !== incoming.id), appended: false };
+  }
+
   const byId = current.findIndex((message) => message.id === incoming.id);
   const isOwn = incoming.senderId === meId;
 
@@ -685,6 +702,80 @@ export function groupByDay(messages: readonly MessageRow[]): {
 }
 
 /* -------------------------------------------------------------- socket I/O */
+
+/**
+ * The Worker's vanish marker: a view-once row whose single opening happened is
+ * DELETED for everyone, and every open chat receives `{kind:"VANISHED"}` so the
+ * row can leave without a tombstone (owner round 34, item 16a). It is not a
+ * message and must never be inserted into a transcript.
+ */
+export function isVanishedMarker(message: MessageRow): boolean {
+  return message.kind === "VANISHED";
+}
+
+/** A photo row, by the Worker's own rule: IMAGE, or a FILE whose type is an image and is not a document. */
+export function isPhotoMessage(message: MessageRow): boolean {
+  if (message.kind === "IMAGE") return true;
+  if (message.kind !== "FILE") return false;
+  return message.fileType.startsWith("image/") && message.meta.document !== true;
+}
+
+/**
+ * The album a row belongs to — "" for anything else.
+ *
+ * Android: `if (a.isNotBlank() && isPhotoMsg(m) && !isViewOnce(m)) a else ""`.
+ * A view-once photo never joins an album (one tap = one opening), and the
+ * Worker agrees: it refuses to store `meta.album` on a view-once row.
+ */
+export function albumIdOf(message: MessageRow): string {
+  const raw = typeof message.meta.album === "string" ? message.meta.album : "";
+  if (!raw) return "";
+  if (!isPhotoMessage(message)) return "";
+  if (message.viewOnce || message.meta.viewOnce === true) return "";
+  return raw;
+}
+
+/**
+ * Fold album siblings into their first row.
+ *
+ * A group of one (the rest still unsent, or the rest deleted) stays a plain
+ * photo, and rows outside any album keep their identity — so a transcript with
+ * no albums at all is returned untouched, byte for byte.
+ */
+export function foldAlbums(rows: readonly MessageRow[]): readonly MessageRow[] {
+  if (!rows.some((row) => albumIdOf(row) !== "")) return rows;
+
+  const groups = new Map<string, MessageRow[]>();
+  for (const row of rows) {
+    const album = albumIdOf(row);
+    if (!album) continue;
+    const key = `${row.senderId}|${album}`;
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(row);
+    else groups.set(key, [row]);
+  }
+
+  const out: MessageRow[] = [];
+  const emitted = new Set<string>();
+  for (const row of rows) {
+    const album = albumIdOf(row);
+    if (!album) {
+      out.push(row);
+      continue;
+    }
+    const key = `${row.senderId}|${album}`;
+    const group = groups.get(key);
+    if (!group) continue;
+    if (group.length < 2) {
+      out.push(row);
+      continue;
+    }
+    if (emitted.has(key)) continue;
+    emitted.add(key);
+    out.push({ ...row, albumMembers: group });
+  }
+  return out;
+}
 
 export function socketUrl(path: string, token: string): string {
   if (typeof window === "undefined") return "";
