@@ -264,7 +264,7 @@ test.describe("Web media viewers", () => {
     await expect(page.locator(".once-text__count")).toContainText("gone");
   });
 
-  test("the viewer saves for real, and says why forwarding is not there", async ({ page }) => {
+  test("the viewer saves for real, and forwards through the chat picker", async ({ page }) => {
     await openChat(page);
     await openGallery(page);
     await page.getByRole("button", { name: "Open Video shared_clip.mp4" }).click();
@@ -274,11 +274,27 @@ test.describe("Web media viewers", () => {
     await expect(save).toHaveAttribute("href", /^blob:/);
     await expect(save).toHaveAttribute("download", "shared_clip.mp4");
 
-    const forward = viewer(page).getByText("Forward", { exact: true });
-    await expect(forward).toHaveAttribute("aria-disabled", "true");
-    await expect(forward).toHaveAttribute("title", /later slice/);
+    // Slice E2: Forward is a real button now, and it opens the chat picker.
+    await viewer(page).getByRole("button", { name: "Forward" }).click();
+    const picker = page.getByRole("dialog", { name: "Forward to" });
+    await expect(picker).toBeVisible();
+    // The subtitle counts the chats until one is ticked, as the phone's does.
+    await expect(picker.getByText(/^\d+ chats$/)).toBeVisible();
+    await picker.getByRole("checkbox", { name: /Squad/ }).click();
+    await picker.getByRole("button", { name: "Send" }).click();
+    await expect.poll(() => worker.sent.length).toBe(1);
+    expect(worker.sent[0]?.conversationId).toBe(GROUP_ID);
+    // A clip the worker already holds is forwarded by key, not re-uploaded.
+    expect((worker.sent[0]?.body ?? {}).fileKey).toBe("f/shared_clip.mp4");
+    expect(worker.uploads).toHaveLength(0);
+    await expect(picker).toHaveCount(0);
+    // Forwarding closes the viewer behind it: one full-screen surface at a
+    // time, with the gallery still open underneath.
+    await expect(viewer(page)).toHaveCount(0);
 
     // Deleting uses an inline confirm, never window.confirm.
+    await page.getByRole("button", { name: "Open Video shared_clip.mp4" }).click();
+    await expect(viewer(page)).toBeVisible();
     await viewer(page).getByRole("button", { name: "Delete" }).click();
     await expect(page.getByRole("group", { name: "Confirm delete" })).toContainText(
       "Delete this video for everyone?",
@@ -306,7 +322,13 @@ test.describe("Web media viewers", () => {
 
   test("the transcript still discloses what is not built yet", async ({ page }) => {
     await openChat(page);
-    await expect(page.locator(".chat-notes")).toContainText("Voice-note recording");
+    // Slice E2: voice notes, documents and forwarding are built now, so the
+    // notes say what THEY do — and keep naming what is still to come.
+    await expect(page.locator(".chat-notes")).toContainText("voice notes");
+    await expect(page.locator(".chat-notes")).toContainText("webm/opus");
+    await expect(page.locator(".chat-notes")).toContainText("PDF");
+    await expect(page.locator(".chat-notes")).toContainText("never rendered");
+    await expect(page.locator(".chat-notes")).toContainText("re-sealed");
     await expect(page.locator(".chat-notes")).toContainText("arrive in a later slice");
   });
 });

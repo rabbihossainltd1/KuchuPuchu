@@ -6,9 +6,22 @@
  * hover-only and gesture-only affordances, so the per-message action row is
  * always in the tab order and revealed visually on hover *or* keyboard focus.
  *
- * Capability limits are stated rather than hidden: attachments arrive in a
- * later slice, a browser cannot block screen capture, and an envelope that
- * cannot be opened says so instead of rendering ciphertext.
+ * Capability limits are stated rather than hidden: a browser cannot block
+ * screen capture, media bytes are not sealed, and an envelope that cannot be
+ * opened says so instead of rendering ciphertext.
+ *
+ * Slice E2 adds three surfaces the phone has had all along, each with its
+ * desktop equivalent of the gesture that opens it on a phone:
+ *
+ *   • voice notes — the mic button records (a click arms the locked panel, a
+ *     hold-and-release sends, a drag left cancels), and a note plays in its own
+ *     bubble with a seekable waveform and a per-note speed;
+ *   • document preview — a document row opens a full-screen reader (browser PDF
+ *     viewer, selectable text, pictures, clips) which says plainly what a
+ *     browser cannot render;
+ *   • selection and forwarding — every row has a Select button, the selection
+ *     bar carries Copy / Forward / Edit / Delete, and Forward opens the chat
+ *     picker the phone uses.
  */
 
 import {
@@ -39,6 +52,20 @@ import { attachmentCategory, formatBytes, isAttachmentKind } from "../media/uplo
 import { AttachMenu, type AttachSource } from "./AttachMenu";
 import { AlbumGrid, AttachmentRow } from "./AttachmentRow";
 import { OnceText } from "./OnceText";
+import { VoiceRecorderBar } from "./VoiceRecorderBar";
+import { useVoiceRecorder } from "./useVoiceRecorder";
+import { useVoicePlayer } from "./useVoicePlayer";
+import {
+  canDeleteForEveryone,
+  canForwardRow,
+  canForwardSelection,
+  canSaveMedia,
+  deleteAlsoLabel,
+  selectionCanDeleteForEveryone,
+  forwardContextOf,
+  selectionFacts,
+  type ForwardItem,
+} from "./forward";
 import { mediaSourceKey, useMediaUrls } from "./mediaUrl";
 import { isViewOnce, viewOnceSpent } from "./viewOnce";
 import { rowsForTab, visibleMedia, type SharedMediaTab } from "./sharedMedia";
@@ -75,9 +102,21 @@ const MediaViewer = lazy(() =>
 const MediaGallery = lazy(() =>
   import("./MediaGallery").then((module) => ({ default: module.MediaGallery })),
 );
+// The document reader pulls a whole file's bytes and the forward picker renders
+// the entire conversation list; neither belongs in the chat's first paint.
+const DocViewer = lazy(() => import("./DocViewer").then((m) => ({ default: m.DocViewer })));
+const ForwardDialog = lazy(() =>
+  import("./ForwardDialog").then((module) => ({ default: module.ForwardDialog })),
+);
 
 /** A stable empty list, so the viewer's URL hook has a constant dependency. */
 const NO_ROWS: readonly MessageRow[] = Object.freeze([]);
+
+/**
+ * How long a sent TEXT row stays editable — Android's `canEdit` allows under 60
+ * seconds, and the Worker enforces its own window on the PATCH.
+ */
+const EDITABLE_WINDOW_MS = 60_000;
 
 const PhotoEditor = lazy(() =>
   import("../media/PhotoEditor").then((module) => ({ default: module.PhotoEditor })),
@@ -140,6 +179,11 @@ export function ChatPane({
     null,
   );
   const [rejections, setRejections] = useState<readonly AttachmentRejection[]>([]);
+  // Multi-select: the ids ticked in the transcript, and the rows waiting for a
+  // chat to be picked. Android keeps `selected` and `forwarding` the same way.
+  const [selectedIds, setSelectedIds] = useState<readonly string[]>([]);
+  const [forwardFor, setForwardFor] = useState<readonly ForwardItem[] | null>(null);
+  const [docTarget, setDocTarget] = useState<MessageRow | null>(null);
   // The bytes as picked, kept so re-opening the editor never re-compresses an
   // already-baked JPEG (each bake would cost another generation of quality).
   const originals = useRef<Map<string, { blob: Blob; width: number; height: number }>>(new Map());
@@ -153,6 +197,122 @@ export function ChatPane({
   // One hook resolves every URL the viewer needs; it stays mounted (with an
   // empty list) so the hook order never changes when the viewer opens.
   const viewerUrls = useMediaUrls(api, viewer?.items ?? NO_ROWS);
+
+  // One player for every voice note in the transcript: starting a note stops
+  // the one before it, and each note keeps its own speed (r76-16).
+  const player = useVoicePlayer(api);
+
+  /** What this chat allows, before any single row is considered. */
+  const forwardContext = useMemo(() => forwardContextOf(conversation), [conversation]);
+
+  /** Every row the transcript can act on, albums unfolded. */
+  const rowsById = useMemo(() => {
+    const map = new Map<string, MessageRow>();
+    controller.messages.forEach((row) => {
+      map.set(row.id, row);
+      row.albumMembers.forEach((member) => map.set(member.id, member));
+    });
+    return map;
+  }, [controller.messages]);
+
+  const selectedRows = useMemo(
+    () =>
+      selectedIds
+        .map((id) => rowsById.get(id))
+        .filter((row): row is MessageRow => row !== undefined),
+    [rowsById, selectedIds],
+  );
+
+  const isOwnRow = useCallback((row: MessageRow) => row.senderId === meId, [meId]);
+
+  const displayBodyOf = useCallback(
+    (row: MessageRow) => controller.displayBodies[row.id] ?? row.body,
+    [controller.displayBodies],
+  );
+
+  const toggleSelect = useCallback((row: MessageRow) => {
+    // Selecting one photo of an album selects the whole group: an album is one
+    // bubble, and the phone adds `albumIds` to the selection for the same reason.
+    const ids =
+      row.albumMembers.length > 1 ? row.albumMembers.map((member) => member.id) : [row.id];
+    setSelectedIds((current) => {
+      const allIn = ids.every((id) => current.includes(id));
+      if (allIn) return current.filter((id) => !ids.includes(id));
+      return [...new Set([...current, ...ids])];
+    });
+    setConfirmDeleteId("");
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds([]);
+    setConfirmDeleteId("");
+  }, []);
+
+  /**
+   * Arm the forward picker for these rows.
+   *
+   * A body this device cannot open is not forwarded: the row's own `body` is a
+   * `KP1.` envelope in a personal chat, and re-sealing needs the plaintext. A
+   * TEXT row with nothing readable is dropped; an attachment keeps its bytes
+   * and loses only a caption nobody here can read.
+   */
+  const openForward = useCallback(
+    (rows: readonly MessageRow[]) => {
+      const readable = (value: string) =>
+        value !== LOCKED_BODY_PLACEHOLDER && !value.startsWith("KP1.");
+      const items: ForwardItem[] = [];
+      let dropped = 0;
+      rows.forEach((row) => {
+        const body = displayBodyOf(row);
+        const ok = readable(body);
+        if (!ok) dropped += 1;
+        if (row.kind === "TEXT" && !ok) return;
+        items.push({ row, plaintext: ok ? body : "" });
+      });
+      if (items.length === 0) {
+        controller.announce(
+          "Those messages cannot be opened on this device, so there is nothing to forward.",
+        );
+        return;
+      }
+      if (dropped > 0) {
+        controller.announce(
+          "A caption this device cannot open will not be forwarded with its file.",
+        );
+      }
+      setForwardFor(items);
+    },
+    [controller, displayBodyOf],
+  );
+
+  /**
+   * What the selection bar may draw, from the same predicates the phone uses:
+   * Copy when any selected row is a readable TEXT row, Forward when every row
+   * clears the chat's and the sender's gates, Edit for a single own TEXT row
+   * inside the window, and one Delete whose confirm panel asks the scope.
+   */
+  const selection = useMemo(
+    () =>
+      selectionFacts(selectedRows, controller.displayBodies, forwardContext, {
+        isOwn: isOwnRow,
+        canEditRow: (row) =>
+          isOwnRow(row) &&
+          row.kind === "TEXT" &&
+          row.localState === "" &&
+          Date.now() - Date.parse(row.createdAt) <= EDITABLE_WINDOW_MS &&
+          displayBodyOf(row) !== LOCKED_BODY_PLACEHOLDER &&
+          !displayBodyOf(row).startsWith("KP1."),
+      }),
+    [controller.displayBodies, displayBodyOf, forwardContext, isOwnRow, selectedRows],
+  );
+
+  /** The recorder: a finished take goes straight to the voice send. */
+  const recorder = useVoiceRecorder({
+    enabled: conversation !== null && !isOneWayConversation(conversation),
+    onTake: (take, once) => controller.sendVoice(take, once),
+    onTyping: (kind) => controller.pingTyping(kind),
+    onError: (message) => controller.announce(message),
+  });
 
   // Rows that have left the transcript (deleted, or a spent view-once) must
   // leave the media panel too: the panel has to agree with the chat.
@@ -178,6 +338,9 @@ export function ChatPane({
     setRejections([]);
     setGalleryOpen(false);
     setViewer(null);
+    setSelectedIds([]);
+    setForwardFor(null);
+    setDocTarget(null);
     // An unsent attachment belongs to the chat it was picked in: leaving the
     // conversation drops it rather than leaking it into another person's chat.
     setPending((current) => {
@@ -363,7 +526,7 @@ export function ChatPane({
   }
 
   const oneWay = isOneWayConversation(conversation);
-  const editableWindowMs = 60_000;
+  const editableWindowMs = EDITABLE_WINDOW_MS;
   const groupedOwn = (message: MessageRow) => message.senderId === meId;
 
   /**
@@ -384,6 +547,14 @@ export function ChatPane({
 
   const galleryRows = visibleMedia(controller.sharedMedia, goneIds);
 
+  /**
+   * Whether the whole selection may be deleted for everyone: own rows always,
+   * somebody else's only in a 1:1 with a real person (Ui.kt's
+   * `canDeleteForEveryone`). When it is false the panel offers the local hide
+   * alone, rather than a button the server would refuse.
+   */
+  const canDeleteEverything = selectionCanDeleteForEveryone(selectedRows, conversation, isOwnRow);
+
   const openGalleryItem = (message: MessageRow, tab: SharedMediaTab) => {
     if (tab !== "Media") return;
     const items = rowsForTab(galleryRows, "Media");
@@ -393,6 +564,8 @@ export function ChatPane({
 
   const viewerItems = (viewer?.items ?? NO_ROWS).map((row) => {
     const category = attachmentCategory(row.fileType, row.meta);
+    const own = row.senderId === meId;
+    const verdict = canForwardRow(row, forwardContext, own);
     return {
       id: row.id,
       url: viewerUrls[row.id]?.url ?? "",
@@ -400,11 +573,16 @@ export function ChatPane({
       title: row.fileName || (category === "video" ? "Video" : "Photo"),
       createdAt: row.createdAt,
       senderName: senderLabel(row, conversation, meId),
-      own: row.senderId === meId,
+      own,
       viewOnce: isViewOnce(row),
       spent: viewOnceSpent(row),
       // The Worker deletes for everyone; a local echo has nothing to delete.
-      canDelete: row.senderId === meId && row.localState === "",
+      canDelete: own && row.localState === "",
+      // r71-18: the sender's "Media Save permission" decides whether their
+      // media may be kept or copied out of this chat. Reading it is allowed.
+      canSave: canSaveMedia(row, forwardContext, own),
+      canForward: verdict.allowed,
+      forwardReason: verdict.reason,
       width: row.mediaWidth,
       height: row.mediaHeight,
     };
@@ -433,7 +611,9 @@ export function ChatPane({
             <h2 id="conversation-heading">{conversationTitle(conversation)}</h2>
             <p>
               {controller.typingActive
-                ? "টাইপ করছে… typing"
+                ? controller.typingKind === "voice"
+                  ? "ভয়েস রেকর্ড করছে… recording a voice note"
+                  : "টাইপ করছে… typing"
                 : oneWay
                   ? "Notification account · one-way"
                   : conversation.isGroup
@@ -464,7 +644,10 @@ export function ChatPane({
             <ul>
               <li>{CAPABILITY_COPY.mediaNotEncrypted}</li>
               <li>{CAPABILITY_COPY.captureWarning}</li>
-              <li>{CAPABILITY_COPY.voiceAndPreviewPending}</li>
+              <li>{CAPABILITY_COPY.stillPending}</li>
+              <li>{CAPABILITY_COPY.voiceRecorderNotice}</li>
+              <li>{CAPABILITY_COPY.documentPreviewNotice}</li>
+              <li>{CAPABILITY_COPY.forwardingNotice}</li>
             </ul>
           </details>
         </div>
@@ -581,14 +764,46 @@ export function ChatPane({
                   Date.now() - Date.parse(message.createdAt) <= editableWindowMs &&
                   !isPlaceholder;
                 const reactions = Object.entries(message.reactions);
+                const selected = selectedIds.includes(message.id);
+                // An album forwards and selects as one group, as it does on the
+                // phone (`selected.addAll(albumIds)`).
+                const groupRows =
+                  message.albumMembers.length > 1 ? message.albumMembers : [message];
+                const forwardVerdict = canForwardSelection(groupRows, forwardContext, isOwnRow);
+                const rowCategory = attachmentCategory(
+                  message.fileType,
+                  (message.meta ?? {}) as Record<string, unknown>,
+                );
 
                 return (
                   <li
                     key={message.id}
+                    /* A stable hook: the browser tests address one row by id,
+                       which is what an accessible name cannot do when three
+                       notes in a row all say "Play voice message". */
+                    data-message-id={message.id}
                     className={`bubble-row${own ? " bubble-row--own" : ""}${
                       message.kind === "DELETED" ? " bubble-row--deleted" : ""
-                    }${controller.vanishingIds.includes(message.id) ? " bubble-row--vanishing" : ""}`}
+                    }${controller.vanishingIds.includes(message.id) ? " bubble-row--vanishing" : ""}${
+                      selected ? " bubble-row--selected" : ""
+                    }`}
                   >
+                    {selectedIds.length > 0 && message.kind !== "DELETED" ? (
+                      <button
+                        type="button"
+                        role="checkbox"
+                        aria-checked={selected}
+                        className={`row-select${selected ? " is-on" : ""}`}
+                        onClick={() => toggleSelect(message)}
+                        aria-label={
+                          selected
+                            ? `Unselect the message from ${senderLabel(message, conversation, meId)}`
+                            : `Select the message from ${senderLabel(message, conversation, meId)}`
+                        }
+                      >
+                        {selected ? <Icon name="check" size={13} /> : null}
+                      </button>
+                    ) : null}
                     <article
                       className={`bubble${own ? " bubble--own" : ""}${
                         message.localState === "failed" ? " bubble--failed" : ""
@@ -627,6 +842,11 @@ export function ChatPane({
                           body={body}
                           locked={isPlaceholder}
                           onOpen={openViewerAt}
+                          onOpenDoc={setDocTarget}
+                          player={player}
+                          own={own}
+                          onOpenedOnce={(row) => controller.spendViewOnce(row.id)}
+                          canSave={canSaveMedia(message, forwardContext, own)}
                         />
                       ) : isViewOnce(message) && !viewOnceSpent(message) && !isPlaceholder ? (
                         <OnceText
@@ -713,6 +933,25 @@ export function ChatPane({
                           >
                             Copy
                           </button>
+                          {forwardVerdict.allowed ? (
+                            <button
+                              type="button"
+                              onClick={() => openForward(groupRows)}
+                              aria-label={`Forward ${
+                                groupRows.length > 1 ? `${groupRows.length} photos` : "this message"
+                              } to another chat`}
+                            >
+                              Forward
+                            </button>
+                          ) : (
+                            <span
+                              className="message-actions__refused"
+                              title={forwardVerdict.reason}
+                              aria-disabled="true"
+                            >
+                              Forward
+                            </span>
+                          )}
                           {canEdit && (
                             <button
                               type="button"
@@ -722,6 +961,14 @@ export function ChatPane({
                               Edit
                             </button>
                           )}
+                          <button
+                            type="button"
+                            onClick={() => toggleSelect(message)}
+                            aria-pressed={selected}
+                            aria-label={selected ? "Unselect this message" : "Select this message"}
+                          >
+                            Select
+                          </button>
                           {own && (
                             <button
                               type="button"
@@ -831,235 +1078,398 @@ export function ChatPane({
         </p>
       )}
 
-      <footer className="composer">
-        {controller.replyTo && (
-          <div className="composer__reply">
-            <span className="composer__reply-copy">
-              Replying to {controller.replyTo.senderName || "message"}
-            </span>
-            <button
-              type="button"
-              className="text-button"
-              onClick={() => controller.setReplyTo(null)}
-              aria-label="Cancel reply"
-            >
-              Cancel
-            </button>
-          </div>
-        )}
-
-        {isEditing && (
-          <div className="composer__reply">
-            <span className="composer__reply-copy">Editing your message</span>
+      {selectedIds.length > 0 ? (
+        /* The phone puts the selection bar in the header's seat; here it takes
+           the composer's, which is where a desktop reader's hands already are.
+           One Delete, and the panel that opens asks the scope — r68-8. */
+        <div
+          className="selection-bar"
+          role="toolbar"
+          aria-label="Actions for the selected messages"
+        >
+          <button
+            type="button"
+            className="icon-button"
+            onClick={clearSelection}
+            aria-label="Clear the selection"
+          >
+            <Icon name="close" size={18} />
+          </button>
+          <span className="selection-bar__count" role="status">
+            {selectedIds.length} selected
+          </span>
+          <span className="selection-bar__spacer" />
+          {selection.canCopy ? (
             <button
               type="button"
               className="text-button"
               onClick={() => {
-                setEditingId("");
-                setEditText("");
+                void copyText(selection.copyText);
+                clearSelection();
               }}
-              aria-label="Cancel edit"
             >
-              Cancel
+              Copy
             </button>
-          </div>
-        )}
-
-        {rejections.length > 0 && (
-          <ul
-            className="composer__rejections"
-            role="alert"
-            aria-label="Files that could not be attached"
+          ) : null}
+          {selection.canForward ? (
+            <button type="button" className="text-button" onClick={() => openForward(selectedRows)}>
+              <Icon name="send" size={16} /> Forward
+            </button>
+          ) : (
+            <span
+              className="text-button is-disabled"
+              aria-disabled="true"
+              title={selection.forwardReason || "These cannot be forwarded."}
+            >
+              <Icon name="send" size={16} /> Forward
+            </span>
+          )}
+          {selection.canEdit ? (
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => {
+                const row = selectedRows[0];
+                clearSelection();
+                if (row) beginEdit(row);
+              }}
+            >
+              Edit
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="text-button is-danger"
+            onClick={() => setConfirmDeleteId(confirmDeleteId === "selection" ? "" : "selection")}
+            aria-expanded={confirmDeleteId === "selection"}
           >
-            {rejections.map((item) => (
-              <li key={`${item.name}-${item.reason}`}>
-                <strong>{item.name}</strong> {item.reason}
-              </li>
-            ))}
-            <li>
+            <Icon name="trash" size={16} /> Delete
+          </button>
+          {confirmDeleteId === "selection" ? (
+            <div className="confirm-panel" role="group" aria-label="Confirm delete">
+              <p>
+                Delete {selectedIds.length} message{selectedIds.length === 1 ? "" : "s"}?
+              </p>
+              {canDeleteEverything ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => {
+                    const rows = selectedRows;
+                    clearSelection();
+                    rows.forEach((row) => {
+                      if (row.localState === "") void controller.deleteMessage(row.id);
+                      else controller.hideMessages([row.id]);
+                    });
+                  }}
+                >
+                  {deleteAlsoLabel(conversation)}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  const ids = selectedRows.map((row) => row.id);
+                  clearSelection();
+                  controller.hideMessages(ids);
+                  controller.announce(
+                    "Hidden on this device for this session. A browser has no local message store, so they come back if you reload.",
+                  );
+                }}
+              >
+                Hide for me (this session)
+              </button>
+              <button type="button" className="text-button" onClick={() => setConfirmDeleteId("")}>
+                Cancel
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <footer className="composer">
+          {controller.replyTo && (
+            <div className="composer__reply">
+              <span className="composer__reply-copy">
+                Replying to {controller.replyTo.senderName || "message"}
+              </span>
               <button
                 type="button"
                 className="text-button"
-                onClick={() => setRejections([])}
-                aria-label="Dismiss attachment warnings"
+                onClick={() => controller.setReplyTo(null)}
+                aria-label="Cancel reply"
               >
-                Dismiss
+                Cancel
               </button>
-            </li>
-          </ul>
-        )}
+            </div>
+          )}
 
-        {pending.length > 0 && (
-          <ul className="composer__attachments" aria-label="Attachments ready to send">
-            {pending.map((item) => (
-              <li key={item.id} className="composer-attachment">
-                {item.previewUrl ? (
-                  <img className="composer-attachment__thumb" src={item.previewUrl} alt="" />
-                ) : (
-                  <span className="composer-attachment__icon" aria-hidden="true">
-                    {item.intent === "video" ? "🎬" : item.intent === "audio" ? "🎵" : "📄"}
-                  </span>
-                )}
-                <span className="composer-attachment__copy">
-                  <strong>{item.pickedName}</strong>
-                  <span>
-                    {formatBytes(item.size)}
-                    {item.width ? ` · ${item.width}×${item.height}` : ""}
-                    {hasEdits(item) ? " · edited" : ""}
-                  </span>
-                  <span className="sr-only">{describeAttachment(item)}</span>
-                </span>
-                {item.intent === "photo" && (
-                  <button
-                    type="button"
-                    className="text-button"
-                    onClick={() => setEditorTarget(item)}
-                    aria-label={`Edit photo ${item.pickedName}`}
-                  >
-                    {hasEdits(item) ? "Edit again" : "Edit"}
-                  </button>
-                )}
+          {isEditing && (
+            <div className="composer__reply">
+              <span className="composer__reply-copy">Editing your message</span>
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => {
+                  setEditingId("");
+                  setEditText("");
+                }}
+                aria-label="Cancel edit"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+
+          {rejections.length > 0 && (
+            <ul
+              className="composer__rejections"
+              role="alert"
+              aria-label="Files that could not be attached"
+            >
+              {rejections.map((item) => (
+                <li key={`${item.name}-${item.reason}`}>
+                  <strong>{item.name}</strong> {item.reason}
+                </li>
+              ))}
+              <li>
                 <button
                   type="button"
                   className="text-button"
-                  onClick={() => removeAttachment(item.id)}
-                  aria-label={`Remove ${item.pickedName} from this message`}
+                  onClick={() => setRejections([])}
+                  aria-label="Dismiss attachment warnings"
                 >
-                  Remove
+                  Dismiss
                 </button>
               </li>
-            ))}
-          </ul>
-        )}
+            </ul>
+          )}
 
-        <div className="composer__row">
-          <div className="composer__attach">
-            <button
-              type="button"
-              className="icon-button"
-              aria-label="Attach a photo, video or document"
-              aria-expanded={attachOpen}
-              aria-haspopup="dialog"
-              disabled={oneWay}
-              onClick={() => {
-                setStickerOpen(false);
-                setAttachOpen((value) => !value);
-              }}
-            >
-              <Icon name="plus" size={20} />
-            </button>
-            <AttachMenu
-              open={attachOpen && !oneWay}
-              onClose={() => setAttachOpen(false)}
-              onFiles={(files, source, asDocument, viewOnce) =>
-                void onPickFiles(files, source, asDocument, viewOnce)
-              }
-              disabled={oneWay}
-              onAnnounce={controller.announce}
-            />
-          </div>
+          {pending.length > 0 && (
+            <ul className="composer__attachments" aria-label="Attachments ready to send">
+              {pending.map((item) => (
+                <li key={item.id} className="composer-attachment">
+                  {item.previewUrl ? (
+                    <img className="composer-attachment__thumb" src={item.previewUrl} alt="" />
+                  ) : (
+                    <span className="composer-attachment__icon" aria-hidden="true">
+                      {item.intent === "video" ? "🎬" : item.intent === "audio" ? "🎵" : "📄"}
+                    </span>
+                  )}
+                  <span className="composer-attachment__copy">
+                    <strong>{item.pickedName}</strong>
+                    <span>
+                      {formatBytes(item.size)}
+                      {item.width ? ` · ${item.width}×${item.height}` : ""}
+                      {hasEdits(item) ? " · edited" : ""}
+                    </span>
+                    <span className="sr-only">{describeAttachment(item)}</span>
+                  </span>
+                  {item.intent === "photo" && (
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => setEditorTarget(item)}
+                      aria-label={`Edit photo ${item.pickedName}`}
+                    >
+                      {hasEdits(item) ? "Edit again" : "Edit"}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => removeAttachment(item.id)}
+                    aria-label={`Remove ${item.pickedName} from this message`}
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
 
-          <div className="composer__attach">
-            <button
-              type="button"
-              className="icon-button"
-              aria-label="Send a sticker"
-              aria-expanded={stickerOpen}
-              disabled={oneWay}
-              onClick={() => {
-                setAttachOpen(false);
-                setStickerOpen((value) => !value);
-              }}
-            >
-              <span aria-hidden="true">🙂</span>
-            </button>
-            {stickerOpen && !oneWay && (
-              <Suspense fallback={<p className="attach-loading">Loading stickers…</p>}>
-                <StickerPicker
-                  onPick={(glyph) => {
+          {recorder.recording ? (
+            <VoiceRecorderBar controller={recorder} onAnnounce={controller.announce} />
+          ) : (
+            <div className="composer__row">
+              <div className="composer__attach">
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Attach a photo, video or document"
+                  aria-expanded={attachOpen}
+                  aria-haspopup="dialog"
+                  disabled={oneWay}
+                  onClick={() => {
                     setStickerOpen(false);
-                    void controller.sendSticker(glyph);
+                    setAttachOpen((value) => !value);
                   }}
-                  onClose={() => setStickerOpen(false)}
+                >
+                  <Icon name="plus" size={20} />
+                </button>
+                <AttachMenu
+                  open={attachOpen && !oneWay}
+                  onClose={() => setAttachOpen(false)}
+                  onFiles={(files, source, asDocument, viewOnce) =>
+                    void onPickFiles(files, source, asDocument, viewOnce)
+                  }
+                  disabled={oneWay}
                   onAnnounce={controller.announce}
                 />
-              </Suspense>
-            )}
-          </div>
+              </div>
 
-          <label className="sr-only" htmlFor={composerId}>
-            {oneWay
-              ? "This account does not accept replies"
-              : pending.length > 0
-                ? "Caption for the attached files"
-                : "Message text"}
-          </label>
-          <textarea
-            id={composerId}
-            ref={composerRef}
-            className="composer__input"
-            rows={1}
-            value={isEditing ? editText : controller.draft}
-            disabled={oneWay}
-            placeholder={
-              oneWay
-                ? "Notification account — replies are not accepted"
-                : pending.length > 0
-                  ? "Add a caption… (optional, sealed in a personal chat)"
-                  : "Type a message. Enter sends, Shift+Enter adds a line."
-            }
-            maxLength={MESSAGE_BODY_LIMIT}
-            onChange={(event) => {
-              if (isEditing) {
-                setEditText(event.target.value);
-                return;
-              }
-              controller.setDraft(event.target.value);
-              controller.composerChanged();
-            }}
-            onKeyDown={onComposerKeyDown}
-          />
+              <div className="composer__attach">
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Send a sticker"
+                  aria-expanded={stickerOpen}
+                  disabled={oneWay}
+                  onClick={() => {
+                    setAttachOpen(false);
+                    setStickerOpen((value) => !value);
+                  }}
+                >
+                  <span aria-hidden="true">🙂</span>
+                </button>
+                {stickerOpen && !oneWay && (
+                  <Suspense fallback={<p className="attach-loading">Loading stickers…</p>}>
+                    <StickerPicker
+                      onPick={(glyph) => {
+                        setStickerOpen(false);
+                        void controller.sendSticker(glyph);
+                      }}
+                      onClose={() => setStickerOpen(false)}
+                      onAnnounce={controller.announce}
+                    />
+                  </Suspense>
+                )}
+              </div>
 
-          {isEditing ? (
-            <button
-              type="button"
-              className="send-button"
-              onClick={() => void commitEdit()}
-              disabled={!editText.trim()}
-              aria-label="Save edited message"
-            >
-              Save
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="send-button"
-              onClick={() => void submit()}
-              disabled={oneWay || (!controller.draft.trim() && pending.length === 0)}
-              aria-label={
-                oneWay
-                  ? "Replies are not accepted"
+              <label className="sr-only" htmlFor={composerId}>
+                {oneWay
+                  ? "This account does not accept replies"
                   : pending.length > 0
-                    ? `Send ${pending.length} attachment${pending.length === 1 ? "" : "s"}`
-                    : "Send message"
-              }
-            >
-              <Icon name="message" size={18} />
-            </button>
-          )}
-        </div>
+                    ? "Caption for the attached files"
+                    : "Message text"}
+              </label>
+              <textarea
+                id={composerId}
+                ref={composerRef}
+                className="composer__input"
+                rows={1}
+                value={isEditing ? editText : controller.draft}
+                disabled={oneWay}
+                placeholder={
+                  oneWay
+                    ? "Notification account — replies are not accepted"
+                    : pending.length > 0
+                      ? "Add a caption… (optional, sealed in a personal chat)"
+                      : "Type a message. Enter sends, Shift+Enter adds a line."
+                }
+                maxLength={MESSAGE_BODY_LIMIT}
+                onChange={(event) => {
+                  if (isEditing) {
+                    setEditText(event.target.value);
+                    return;
+                  }
+                  controller.setDraft(event.target.value);
+                  controller.composerChanged();
+                }}
+                onKeyDown={onComposerKeyDown}
+              />
 
-        <p className="composer__hint">
-          {oneWay
-            ? "One-way notification account."
-            : identityStatus === "ready"
-              ? "Personal chat bodies are sealed on this device (KP1). Times are Asia/Dhaka."
-              : "Secure chat is not ready yet, so personal messages cannot be sent."}
-          <span className="composer__counter" aria-hidden="true">
-            {(isEditing ? editText : controller.draft).length}/{MESSAGE_BODY_LIMIT}
-          </span>
-        </p>
-      </footer>
+              {isEditing ? (
+                <button
+                  type="button"
+                  className="send-button"
+                  onClick={() => void commitEdit()}
+                  disabled={!editText.trim()}
+                  aria-label="Save edited message"
+                >
+                  Save
+                </button>
+              ) : controller.draft.trim() || pending.length > 0 ? (
+                <button
+                  type="button"
+                  className="send-button"
+                  onClick={() => void submit()}
+                  disabled={oneWay}
+                  aria-label={
+                    oneWay
+                      ? "Replies are not accepted"
+                      : pending.length > 0
+                        ? `Send ${pending.length} attachment${pending.length === 1 ? "" : "s"}`
+                        : "Send message"
+                  }
+                >
+                  <Icon name="message" size={18} />
+                </button>
+              ) : (
+                /* The mic/send swap the phone has: with nothing typed and nothing
+               attached the circle records. A click arms the locked panel (the
+               phone's tap-is-lock rule), a hold sends on release, and a drag to
+               the left throws the take away — all three also exist as labelled
+               buttons once the panel is up, so none of them is gesture-only. */
+                <button
+                  type="button"
+                  className="send-button send-button--mic"
+                  disabled={oneWay || !recorder.supported}
+                  aria-label={
+                    oneWay
+                      ? "Replies are not accepted"
+                      : recorder.supported
+                        ? "Record a voice note — click to open the recording panel, or hold and release to send"
+                        : "This browser cannot record audio"
+                  }
+                  title={
+                    recorder.supported
+                      ? "Hold and release to send · click to lock the panel · drag left to cancel"
+                      : "This browser has no MediaRecorder, so voice notes cannot be recorded here"
+                  }
+                  onPointerDown={(event) => {
+                    if (!recorder.supported || oneWay) return;
+                    event.currentTarget.setPointerCapture?.(event.pointerId);
+                    recorder.press({ clientX: event.clientX, clientY: event.clientY });
+                  }}
+                  onPointerMove={(event) =>
+                    recorder.move({ clientX: event.clientX, clientY: event.clientY })
+                  }
+                  onPointerUp={(event) =>
+                    recorder.release({ clientX: event.clientX, clientY: event.clientY })
+                  }
+                  onPointerCancel={() => recorder.cancel()}
+                  onClick={(event) => {
+                    // detail 0 = a keyboard activation, which never fired pointer
+                    // events; the pointer path already decided by the time a mouse
+                    // click lands here.
+                    if (event.detail === 0) recorder.activate();
+                  }}
+                >
+                  <Icon name="mic" size={18} />
+                </button>
+              )}
+            </div>
+          )}
+
+          {recorder.error && !recorder.recording ? (
+            <p className="composer__error" role="alert">
+              {recorder.error}
+            </p>
+          ) : null}
+
+          <p className="composer__hint">
+            {oneWay
+              ? "One-way notification account."
+              : identityStatus === "ready"
+                ? "Personal chat bodies are sealed on this device (KP1). Times are Asia/Dhaka."
+                : "Secure chat is not ready yet, so personal messages cannot be sent."}
+            <span className="composer__counter" aria-hidden="true">
+              {(isEditing ? editText : controller.draft).length}/{MESSAGE_BODY_LIMIT}
+            </span>
+          </p>
+        </footer>
+      )}
 
       <p className="sr-only" role="status" aria-live="polite">
         {`Signed in as ${meName}. ${controller.messages.length} messages loaded.`}
@@ -1094,11 +1504,70 @@ export function ChatPane({
                 setViewer(null);
                 void controller.deleteMessage(item.id);
               }}
+              onForward={(item) => {
+                // A row opened from the shared-media panel is not in the
+                // transcript's index, so the viewer's own rows are the fallback.
+                const row =
+                  rowsById.get(item.id) ??
+                  viewer?.items.find((candidate) => candidate.id === item.id);
+                setViewer(null);
+                if (row) openForward(row.albumMembers.length > 1 ? row.albumMembers : [row]);
+              }}
               onShown={(item) => {
                 // The single opening: the picture is on screen, so report it.
                 if (item.viewOnce && !item.spent) controller.spendViewOnce(item.id);
               }}
               onAnnounce={controller.announce}
+            />
+          </Suspense>
+        </div>
+      )}
+
+      {docTarget && (
+        <div className="doc-overlay">
+          <Suspense fallback={<p className="attach-loading">Loading the document…</p>}>
+            <DocViewer
+              message={docTarget}
+              api={api}
+              own={docTarget.senderId === meId}
+              onClose={() => setDocTarget(null)}
+              onDelete={
+                canDeleteForEveryone(docTarget, conversation, docTarget.senderId === meId)
+                  ? (row) => {
+                      setDocTarget(null);
+                      void controller.deleteMessage(row.id);
+                    }
+                  : undefined
+              }
+              onForward={
+                canForwardRow(docTarget, forwardContext, docTarget.senderId === meId).allowed
+                  ? (row) => {
+                      setDocTarget(null);
+                      openForward([row]);
+                    }
+                  : undefined
+              }
+              onAnnounce={controller.announce}
+            />
+          </Suspense>
+        </div>
+      )}
+
+      {forwardFor && (
+        <div className="forward-overlay">
+          <Suspense fallback={<p className="attach-loading">Loading your chats…</p>}>
+            <ForwardDialog
+              conversations={controller.conversations}
+              count={forwardFor.length}
+              onClose={() => setForwardFor(null)}
+              onSend={(targets) => {
+                const items = forwardFor;
+                setForwardFor(null);
+                clearSelection();
+                setViewer(null);
+                setDocTarget(null);
+                if (items) void controller.forwardMessages(items, [...targets]);
+              }}
             />
           </Suspense>
         </div>

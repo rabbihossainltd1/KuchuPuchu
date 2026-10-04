@@ -385,6 +385,10 @@ test.describe("Web messaging", () => {
     await expect(page.getByRole("link", { name: "Back to Chats" })).toBeVisible();
     const composer = page.getByLabel("Message text", { exact: true });
     await expect(composer).toBeVisible();
+    // An empty composer shows the microphone (slice E2); typing swaps it for
+    // Send. Both have to be reachable at 390px.
+    await expect(page.getByRole("button", { name: /Record a voice note/ })).toBeVisible();
+    await composer.fill("hello");
     await expect(page.getByRole("button", { name: "Send message" })).toBeVisible();
 
     // The fixed mobile navigation must not cover the composer.

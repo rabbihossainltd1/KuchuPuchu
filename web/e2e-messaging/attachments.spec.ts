@@ -323,9 +323,12 @@ test.describe("Web attachments", () => {
 
     await page.getByRole("button", { name: "Remove keep.png from this message" }).click();
     await expect(page.locator(".composer-attachment")).toHaveCount(0);
-    // With nothing left to send the composer returns to its plain-text state.
+    // With nothing left to send the composer returns to its plain-text state —
+    // which, since slice E2, means the circle is a microphone again, not a
+    // disabled Send (the phone's own swap).
     await expect(page.getByLabel("Message text", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Send message" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Send message" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Record a voice note/ })).toBeEnabled();
     expect(worker.uploads.length).toBe(0);
     expect(worker.sent.length).toBe(0);
   });

@@ -17,6 +17,11 @@ export type IconName =
   | "link"
   | "file"
   | "play"
+  | "pause"
+  | "mic"
+  | "send"
+  | "check"
+  | "close"
   | "trash";
 
 const shapes: Record<IconName, ReactNode> = {
@@ -101,6 +106,21 @@ const shapes: Record<IconName, ReactNode> = {
     </>
   ),
   play: <path d="M8.5 5.5v13l10-6.5-10-6.5Z" />,
+  pause: (
+    <>
+      <path d="M9.5 5.5v13" />
+      <path d="M14.5 5.5v13" />
+    </>
+  ),
+  mic: (
+    <>
+      <path d="M12 4.5a2.5 2.5 0 0 1 2.5 2.5v5a2.5 2.5 0 0 1-5 0V7A2.5 2.5 0 0 1 12 4.5Z" />
+      <path d="M6.5 11.5a5.5 5.5 0 0 0 11 0M12 17v3M9 20h6" />
+    </>
+  ),
+  send: <path d="M4.5 12 20 5l-6.2 14.5-2-6.3-7.3-1.2Z" />,
+  check: <path d="m5 12.5 4.5 4.5L19 7" />,
+  close: <path d="M6 6l12 12M18 6 6 18" />,
   trash: (
     <>
       <path d="M5.5 7.5h13M10 7.5V5h4v2.5" />

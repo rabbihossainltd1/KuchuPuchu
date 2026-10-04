@@ -207,6 +207,8 @@ export type MockWorker = {
   sent: SentMessage[];
   uploads: CapturedUpload[];
   fileDownloads: string[];
+  /** Ids fetched through `/api/messages/:id/media` — a view-once opening. */
+  messageMediaFetches: string[];
   mediaAuthHeaders: string[];
   viewOnceReports: string[];
   sharedMediaCalls: string[];
@@ -230,6 +232,69 @@ export const GROUP_ID = "c_group";
 export const HIDDEN_ID = "c_hidden";
 export const BOT_ID = "c_official";
 
+/** The rows the voice-note and document specs drive. */
+export const VOICE_PEER_ID = "voice_peer";
+export const VOICE_OWN_ID = "voice_own";
+export const VOICE_ONCE_ID = "voice_once";
+export const DOC_TEXT_ID = "doc_text";
+export const DOC_OWN_ID = "doc_own";
+export const DOC_PDF_ID = "doc_pdf";
+export const DOC_SVG_ID = "doc_svg";
+export const DOC_TIFF_ID = "doc_tiff";
+export const DOC_ZIP_ID = "doc_zip";
+
+/** The first line of the seeded text document, for the reader's assertions. */
+export const DOC_TEXT_FIRST_LINE = "প্রথম লাইন — the first line of the seeded document";
+/** The script the seeded SVG carries, which must never run in the reader. */
+export const DOC_SVG_SCRIPT = "alert('never runs')";
+
+/**
+ * A real, decodable WAV: a voice bubble in a browser test has to have audio it
+ * can actually play, or every assertion about the transport would be about a
+ * decoder error instead. 16-bit mono PCM, a quiet 440 Hz tone.
+ */
+export function makeWav(seconds = 1.2, sampleRate = 8000): Uint8Array {
+  const frames = Math.max(1, Math.round(seconds * sampleRate));
+  const buffer = new ArrayBuffer(44 + frames * 2);
+  const view = new DataView(buffer);
+  const text = (offset: number, value: string) => {
+    for (let index = 0; index < value.length; index += 1) {
+      view.setUint8(offset + index, value.charCodeAt(index));
+    }
+  };
+  text(0, "RIFF");
+  view.setUint32(4, 36 + frames * 2, true);
+  text(8, "WAVE");
+  text(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  text(36, "data");
+  view.setUint32(40, frames * 2, true);
+  for (let index = 0; index < frames; index += 1) {
+    const sample = Math.sin((index / sampleRate) * 440 * Math.PI * 2) * 700;
+    view.setInt16(44 + index * 2, Math.round(sample), true);
+  }
+  return new Uint8Array(buffer);
+}
+
+/** The smallest PDF a browser's own viewer will open. */
+const MINIMAL_PDF = [
+  "%PDF-1.4",
+  "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj",
+  "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj",
+  "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 220 120]/Contents 4 0 R>>endobj",
+  "4 0 obj<</Length 44>>stream",
+  "BT /F1 18 Tf 20 60 Td (KuchuPuchu) Tj ET",
+  "endstream endobj",
+  "trailer<</Root 1 0 R/Size 5>>",
+  "%%EOF",
+].join("\n");
+
 export type MockWorkerOptions = {
   /** Add a FILE row to the direct chat, so received media can be asserted. */
   withAttachment?: boolean;
@@ -237,6 +302,12 @@ export type MockWorkerOptions = {
   withOnce?: boolean;
   /** Serve `GET /api/conversations/:id/media`; the group answers 403. */
   withSharedMedia?: boolean;
+  /** Add voice notes to the direct chat: the peer's, my own, and a view-once one. */
+  withVoice?: boolean;
+  /** Add documents to the direct chat: text, PDF, SVG, TIFF, ZIP and my own. */
+  withDocuments?: boolean;
+  /** The peer turned off "Media Save permission" for the direct chat (r71-18). */
+  peerSaveOff?: boolean;
 };
 
 export async function createMockWorker(options: MockWorkerOptions = {}): Promise<MockWorker> {
@@ -262,6 +333,9 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         createdAt: new Date().toISOString(),
       },
       other: { id: PEER_ID, displayName: PEER_NAME, username: "rahi", e2eePublicKey: peer.u },
+      // r76-18: the server answers with the EFFECTIVE value, so a switched-off
+      // permission arrives as an explicit false rather than as a missing flag.
+      ...(options.peerSaveOff ? { peerSave: false } : {}),
     },
     {
       id: GROUP_ID,
@@ -291,8 +365,164 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
     },
   ];
 
+  const encode = (value: string) => new TextEncoder().encode(value);
+  const voiceBytes = makeWav(1.2);
+  const voiceOwnBytes = makeWav(0.9);
+  const voiceOnceBytes = makeWav(0.7);
+  const docTextBytes = encode(`${DOC_TEXT_FIRST_LINE}\nthe second line\n`);
+  const docOwnBytes = encode("my own document\n");
+  const docPdfBytes = encode(MINIMAL_PDF);
+  const docSvgBytes = encode(
+    `<svg xmlns="http://www.w3.org/2000/svg"><script>${DOC_SVG_SCRIPT}</script><rect width="12" height="12"/></svg>`,
+  );
+  const docTiffBytes = new Uint8Array([0x49, 0x49, 0x2a, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00]);
+  const docZipBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00]);
+
   const messagesFor = (conversationId: string) => {
     if (conversationId === CHAT_ID) {
+      const voice = options.withVoice
+        ? [
+            {
+              id: VOICE_PEER_ID,
+              senderId: PEER_ID,
+              senderName: PEER_NAME,
+              kind: "FILE",
+              body: "",
+              fileName: "voice_peer.wav",
+              fileType: "audio/wav",
+              fileSize: voiceBytes.byteLength,
+              fileKey: "f/voice_peer.wav",
+              meta: {
+                voice: true,
+                seconds: 4,
+                clientId: "cid_voice_peer",
+                waveform: [12, 40, 88, 30, 55, 20, 64, 90, 33, 18, 47, 26],
+              },
+              createdAt: new Date(Date.now() - 15_000).toISOString(),
+              rowid: 11,
+            },
+            {
+              id: VOICE_OWN_ID,
+              senderId: ME.id,
+              kind: "FILE",
+              body: "",
+              fileName: "voice_own.wav",
+              fileType: "audio/wav",
+              fileSize: voiceOwnBytes.byteLength,
+              fileKey: "f/voice_own.wav",
+              meta: {
+                voice: true,
+                seconds: 2,
+                clientId: "cid_voice_own",
+                waveform: [30, 60, 90, 45],
+              },
+              createdAt: new Date(Date.now() - 14_000).toISOString(),
+              rowid: 12,
+            },
+            {
+              id: VOICE_ONCE_ID,
+              senderId: PEER_ID,
+              senderName: PEER_NAME,
+              kind: "FILE",
+              body: "",
+              fileName: "voice_once.wav",
+              fileType: "audio/wav",
+              fileSize: voiceOnceBytes.byteLength,
+              fileKey: "f/voice_once.wav",
+              viewOnce: true,
+              meta: { voice: true, seconds: 3, viewOnce: true },
+              createdAt: new Date(Date.now() - 13_000).toISOString(),
+              rowid: 13,
+            },
+          ]
+        : [];
+      const docs = options.withDocuments
+        ? [
+            {
+              id: DOC_TEXT_ID,
+              senderId: PEER_ID,
+              senderName: PEER_NAME,
+              kind: "FILE",
+              body: "",
+              fileName: "notes.txt",
+              fileType: "text/plain",
+              fileSize: docTextBytes.byteLength,
+              fileKey: "f/notes.txt",
+              meta: { document: true },
+              createdAt: new Date(Date.now() - 12_000).toISOString(),
+              rowid: 14,
+            },
+            {
+              id: DOC_OWN_ID,
+              senderId: ME.id,
+              kind: "FILE",
+              body: "",
+              fileName: "mine.txt",
+              fileType: "text/plain",
+              fileSize: docOwnBytes.byteLength,
+              fileKey: "f/mine.txt",
+              meta: { document: true },
+              createdAt: new Date(Date.now() - 11_000).toISOString(),
+              rowid: 15,
+            },
+            {
+              id: DOC_PDF_ID,
+              senderId: PEER_ID,
+              senderName: PEER_NAME,
+              kind: "FILE",
+              body: "",
+              fileName: "report.pdf",
+              fileType: "application/pdf",
+              fileSize: docPdfBytes.byteLength,
+              fileKey: "f/report.pdf",
+              meta: { document: true },
+              createdAt: new Date(Date.now() - 10_000).toISOString(),
+              rowid: 16,
+            },
+            {
+              id: DOC_SVG_ID,
+              senderId: PEER_ID,
+              senderName: PEER_NAME,
+              kind: "FILE",
+              body: "",
+              fileName: "drawing.svg",
+              fileType: "image/svg+xml",
+              fileSize: docSvgBytes.byteLength,
+              fileKey: "f/drawing.svg",
+              meta: { document: true },
+              createdAt: new Date(Date.now() - 9_000).toISOString(),
+              rowid: 17,
+            },
+            {
+              id: DOC_TIFF_ID,
+              senderId: PEER_ID,
+              senderName: PEER_NAME,
+              kind: "FILE",
+              body: "",
+              fileName: "scan.tif",
+              fileType: "image/tiff",
+              fileSize: docTiffBytes.byteLength,
+              fileKey: "f/scan.tif",
+              meta: { document: true },
+              createdAt: new Date(Date.now() - 8_000).toISOString(),
+              rowid: 18,
+            },
+            {
+              id: DOC_ZIP_ID,
+              senderId: PEER_ID,
+              senderName: PEER_NAME,
+              kind: "FILE",
+              body: "",
+              fileName: "bundle.zip",
+              fileType: "application/zip",
+              fileSize: docZipBytes.byteLength,
+              fileKey: "f/bundle.zip",
+              meta: { document: true },
+              createdAt: new Date(Date.now() - 7_000).toISOString(),
+              rowid: 19,
+            },
+          ]
+        : [];
       const album = options.withOnce
         ? [
             {
@@ -392,6 +622,8 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         ...photo,
         ...album,
         ...once,
+        ...voice,
+        ...docs,
         {
           id: "m_3",
           senderId: PEER_ID,
@@ -449,6 +681,25 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
   };
 
   const storedFiles = new Map<string, { bytes: Uint8Array; type: string }>();
+  for (const [key, bytes, type] of [
+    ["f/voice_peer.wav", voiceBytes, "audio/wav"],
+    ["f/voice_own.wav", voiceOwnBytes, "audio/wav"],
+    ["f/voice_once.wav", voiceOnceBytes, "audio/wav"],
+    ["f/notes.txt", docTextBytes, "text/plain"],
+    ["f/mine.txt", docOwnBytes, "text/plain"],
+    ["f/report.pdf", docPdfBytes, "application/pdf"],
+    ["f/drawing.svg", docSvgBytes, "image/svg+xml"],
+    ["f/scan.tif", docTiffBytes, "image/tiff"],
+    ["f/bundle.zip", docZipBytes, "application/zip"],
+  ] as [string, Uint8Array, string][]) {
+    storedFiles.set(key, { bytes, type });
+  }
+
+  /** What `/api/messages/:id/media` serves, by message id. */
+  const mediaById = new Map<string, { bytes: Uint8Array; type: string }>([
+    [VOICE_ONCE_ID, { bytes: voiceOnceBytes, type: "audio/wav" }],
+    [VOICE_PEER_ID, { bytes: voiceBytes, type: "audio/wav" }],
+  ]);
 
   const worker: MockWorker = {
     me,
@@ -456,6 +707,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
     sent: [],
     uploads: [],
     fileDownloads: [],
+    messageMediaFetches: [],
     mediaAuthHeaders: [],
     viewOnceReports: [],
     sharedMediaCalls: [],
@@ -674,6 +926,19 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
               rowid: 24,
             },
           ],
+        });
+      });
+
+      await page.route("**/api/messages/*/media", (route) => {
+        const url = new URL(route.request().url());
+        const id = decodeURIComponent(url.pathname.split("/")[3] ?? "");
+        worker.messageMediaFetches.push(id);
+        worker.mediaAuthHeaders.push(String(route.request().headers()["authorization"] ?? ""));
+        const stored = mediaById.get(id);
+        return route.fulfill({
+          status: 200,
+          contentType: stored?.type ?? "application/octet-stream",
+          body: Buffer.from(stored?.bytes ?? makeWav(0.4)),
         });
       });
 

@@ -56,9 +56,22 @@ import {
   type OutboxStore,
 } from "./outbox";
 import { createManagedSocket, type ManagedSocket, type SocketStatus } from "./sockets";
-import { uploadFile } from "./filesApi";
+import { fetchMessageMediaBlob, uploadFile } from "./filesApi";
 import { attachmentMeta, type PendingAttachment } from "./attachments";
 import { albumId } from "../media/uploadContract";
+import { VOICE_MAX_BYTES, VOICE_MAX_SECONDS, voiceTooBigMessage } from "./voice";
+import type { VoiceTake } from "./voiceRecorder";
+import {
+  REUPLOAD_PHOTO_NAME,
+  REUPLOAD_PHOTO_TYPE,
+  albumForForward,
+  forwardFileName,
+  forwardFileType,
+  forwardMetaOf,
+  forwardNotice,
+  forwardShapeOf,
+  type ForwardItem,
+} from "./forward";
 import { EMPTY_SHARED_MEDIA, sharedMediaRefusal, type SharedMedia } from "./sharedMedia";
 import { VANISH_GRACE_MS, createViewOnceSpender } from "./viewOnce";
 import { isVanishedMarker } from "./protocol";
@@ -84,6 +97,11 @@ export type MessagingState = {
   loadingOlder: boolean;
   otherReadAt: string;
   typingActive: boolean;
+  /**
+   * What the other side is doing: "" / "text" / "voice". A voice note being
+   * recorded shows a microphone instead of typing dots (r55, r56 item 2).
+   */
+  typingKind: string;
   draft: string;
   replyTo: ReplyTarget | null;
   outbox: readonly OutboxItem[];
@@ -111,12 +129,20 @@ export type MessagingActions = {
   send: () => Promise<void>;
   sendSticker: (glyph: string) => Promise<void>;
   sendAttachments: (items: readonly PendingAttachment[], caption: string) => Promise<void>;
+  /** Upload and post a recorded voice note (`sendVoice` on the phone). */
+  sendVoice: (take: VoiceTake, once: boolean) => Promise<void>;
+  /** Copy selected rows into other chats (`forwardSelected` / `forwardMessageTo`). */
+  forwardMessages: (items: readonly ForwardItem[], targetIds: readonly string[]) => Promise<void>;
+  /** Ping `typing` with a kind: "text" | "voice" | "clear". */
+  pingTyping: (kind: "text" | "voice" | "clear") => void;
   retry: (clientId: string) => Promise<void>;
   discard: (clientId: string) => Promise<void>;
   setReplyTo: (target: ReplyTarget | null) => void;
   react: (messageId: string, emoji: string) => Promise<void>;
   editMessage: (messageId: string, text: string) => Promise<void>;
   deleteMessage: (messageId: string) => Promise<void>;
+  /** Hide rows on this device only (the phone's "Delete for me"). */
+  hideMessages: (messageIds: readonly string[]) => void;
   /** Report the single opening of a view-once message. */
   spendViewOnce: (messageId: string) => void;
   openSharedMedia: () => Promise<void>;
@@ -172,6 +198,8 @@ export function useMessaging(options: Options): MessagingController {
   });
   const [otherReadAt, setOtherReadAt] = useState("");
   const [typingActive, setTypingActive] = useState(false);
+  const [typingKind, setTypingKind] = useState("");
+  const conversationsRef = useRef<readonly ConversationRow[]>([]);
   const [draft, setDraftState] = useState("");
   const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
   const [outbox, setOutbox] = useState<readonly OutboxItem[]>([]);
@@ -181,6 +209,7 @@ export function useMessaging(options: Options): MessagingController {
 
   const selectedRef = useRef<ConversationRow | null>(null);
   selectedRef.current = selected;
+  conversationsRef.current = conversations;
   const messagesRef = useRef<readonly MessageRow[]>([]);
   messagesRef.current = messages;
   const identityRef = useRef(identity);
@@ -246,6 +275,31 @@ export function useMessaging(options: Options): MessagingController {
     (messageId: string) => viewOnceSpender.spend(messageId),
     [viewOnceSpender],
   );
+
+  /**
+   * Hide rows on THIS device only — the phone's "Delete for me".
+   *
+   * Android keeps the ids in its local store; a browser tab keeps them in
+   * memory, so the rows come back on a reload and the selection bar says so
+   * instead of implying a durable delete. The vanish show plays first, exactly
+   * as it does for a server VANISHED frame, so rows do not pop out of the list.
+   */
+  const hideMessages = useCallback((messageIds: readonly string[]) => {
+    const ids = messageIds.filter((id) => id.length > 0);
+    if (ids.length === 0) return;
+    setVanishingIds((current) => [...new Set([...current, ...ids])]);
+    ids.forEach((id) => {
+      const existing = vanishTimers.current.get(`hide:${id}`);
+      if (existing) window.clearTimeout(existing);
+      const timer = window.setTimeout(() => {
+        setMessages((current) => current.filter((row) => row.id !== id));
+        setHiddenMessageIds((current) => (current.includes(id) ? current : [...current, id]));
+        setVanishingIds((current) => current.filter((row) => row !== id));
+        vanishTimers.current.delete(`hide:${id}`);
+      }, VANISH_GRACE_MS);
+      vanishTimers.current.set(`hide:${id}`, timer);
+    });
+  }, []);
 
   /* ---------------------------------------------------------- shared media */
 
@@ -499,7 +553,9 @@ export function useMessaging(options: Options): MessagingController {
         }
 
         if (frame.type === "typing" && frame.userId !== meId) {
-          setTypingActive(frame.at !== "" && isTypingActive(frame.at));
+          const active = frame.at !== "" && isTypingActive(frame.at);
+          setTypingActive(active);
+          setTypingKind(active ? frame.kind || "text" : "");
           return;
         }
 
@@ -882,6 +938,273 @@ export function useMessaging(options: Options): MessagingController {
     [announce, api, identity, meId, refreshList, replyTo],
   );
 
+  /**
+   * A recorded voice note: the phone's `sendVoice`.
+   *
+   * Same shape as an attachment send, with three voice-specific rules:
+   *   • the ceiling is `VOICE_MAX_BYTES`, checked here and not by
+   *     `mediaLimitFor` — that function's video branch matches a `.webm` NAME
+   *     before its audio branch runs, so it would answer 2 GB for a voice note
+   *     (the phone's `Api.mediaLimit` orders the branches the same way, and
+   *     `sendVoice` checks `Api.VOICE_MAX` for exactly this reason);
+   *   • `meta` carries `voice`, whole `seconds` and the recorded `waveform`, so
+   *     every client draws the same bars without decoding the audio. The worker
+   *     clamps seconds to 0…600 and keeps at most 64 bars;
+   *   • the recorded blob becomes the echo's `localPreview`, so the sender's own
+   *     bubble plays instantly instead of downloading what it just uploaded.
+   *     That object URL lives as long as the page — the row keeps pointing at
+   *     it after the server confirms, exactly as a photo echo keeps its thumb.
+   */
+  const sendVoice = useCallback(
+    async (take: VoiceTake, once: boolean) => {
+      const conversation = selectedRef.current;
+      if (!conversation || !meId) return;
+      if (isOneWayConversation(conversation)) {
+        announce("This account only sends notifications; replies are not accepted.");
+        return;
+      }
+      if (take.size > VOICE_MAX_BYTES) {
+        announce(voiceTooBigMessage(take.size));
+        return;
+      }
+
+      const clientId = newClientId();
+      const meta: Record<string, unknown> = {
+        voice: true,
+        seconds: Math.max(0, Math.min(VOICE_MAX_SECONDS, take.seconds)),
+        // The echo and the confirmed row share this seed, so the bars do not
+        // redraw when the server's id replaces the local one (Android's E3).
+        clientId,
+      };
+      if (take.waveform.length > 0) meta.waveform = take.waveform;
+      // The Worker's `viewOnceFlag` reads the flag from META (`meta.viewOnce !==
+      // true` returns false), so a note sent with only the top-level flag would
+      // be stored as an ordinary voice note — one opening nobody enforces.
+      // Android sends it in both places for the same reason.
+      if (once) meta.viewOnce = true;
+
+      const preview =
+        typeof URL !== "undefined" && typeof URL.createObjectURL === "function"
+          ? URL.createObjectURL(take.blob)
+          : "";
+      const currentReply = replyTo;
+      const echo = createLocalAttachmentEcho({
+        clientId,
+        senderId: meId,
+        kind: "FILE",
+        body: "",
+        fileName: take.name,
+        fileType: take.mime,
+        fileSize: take.size,
+        meta,
+        viewOnce: once,
+        localPreview: preview,
+        replyTo: currentReply,
+      });
+      setMessages((current) => [...current, echo].sort(compareMessages));
+      setReplyTo(null);
+
+      try {
+        const uploaded = await uploadFile(api, {
+          name: take.name,
+          type: take.mime,
+          blob: take.blob,
+          onProgress: (progress) => {
+            const percent = progress.total
+              ? Math.min(99, Math.round((progress.sent / progress.total) * 100))
+              : 0;
+            setMessages((current) =>
+              current.map((row) =>
+                row.clientId === clientId ? { ...row, localProgress: percent } : row,
+              ),
+            );
+          },
+        });
+
+        const result = await messagingApi.sendMessage(api, conversation.id, {
+          kind: "FILE",
+          body: "",
+          clientId,
+          replyTo: currentReply?.id || undefined,
+          fileName: take.name,
+          fileType: take.mime,
+          fileSize: uploaded.size,
+          fileKey: uploaded.fileKey,
+          meta,
+          // Android sends the flag in both places; the Worker reads `meta`.
+          ...(once ? { viewOnce: true } : {}),
+        });
+
+        if (result.message) {
+          const confirmed = result.message;
+          setMessages((current) => {
+            const next = applyMessageFrame(current, confirmed, meId).messages;
+            return next.map((row) =>
+              row.id === confirmed.id && !row.localPreview
+                ? { ...row, localPreview: preview, localProgress: 100 }
+                : row,
+            );
+          });
+        } else {
+          setMessages((current) =>
+            current.map((row) =>
+              row.clientId === clientId
+                ? { ...row, localState: "" as const, localProgress: 100 }
+                : row,
+            ),
+          );
+        }
+        void refreshList();
+      } catch (error) {
+        setMessages((current) =>
+          current.map((row) =>
+            row.clientId === clientId
+              ? { ...row, localState: "failed" as const, localError: apiErrorMessage(error) }
+              : row,
+          ),
+        );
+        announce("That voice note did not send. Retry from the message actions.");
+      }
+    },
+    [announce, api, meId, refreshList, replyTo],
+  );
+
+  /**
+   * Copy selected rows into other chats: the phone's `forwardSelected` loop
+   * around `forwardMessageTo`.
+   *
+   * Per target chat, one fresh album id when two or more photos are being
+   * forwarded together (each chat owns its own group). Per row, the branch the
+   * phone takes: a stored `fileKey` is re-used — the worker explicitly allows a
+   * key to be referenced by more than one row, and refuses a key that belongs
+   * to somebody else's view-once message — a `data:` row re-posts its inline
+   * bytes, a server-hosted IMAGE row is downloaded and re-uploaded as a JPEG so
+   * both chats own their own copy, and anything else is a TEXT post.
+   *
+   * The body is re-sealed for the TARGET's key: in a personal chat the source
+   * row's `body` is an envelope only its own recipient can open, so forwarding
+   * it verbatim would hand the new chat something unreadable. Where sealing is
+   * not possible (no identity yet) the forward is refused for that chat and
+   * said out loud — the phone falls back to plaintext here, and this client
+   * does not send a body it cannot protect.
+   */
+  const forwardMessages = useCallback(
+    async (items: readonly ForwardItem[], targetIds: readonly string[]) => {
+      if (items.length === 0 || targetIds.length === 0) return;
+      const grouped = albumForForward(items.map((item) => item.row)) !== "";
+      const refused: string[] = [];
+      let delivered = 0;
+
+      for (const targetId of targetIds) {
+        const target = conversationsRef.current.find((row) => row.id === targetId) ?? null;
+        const isGroup = target ? target.isGroup : false;
+        const otherId = target ? conversationPeerId(target) : "";
+        const peerKey = target ? conversationPeerKey(target) : "";
+        const album = grouped ? albumId() : "";
+        let blocked = "";
+
+        for (const item of items) {
+          const row = item.row;
+          let body = item.plaintext;
+          if (body) {
+            try {
+              body = await protectOutgoingBody(body, { isGroup, otherId }, peerKey, identity);
+            } catch (error) {
+              blocked = (error as Error).message || SECURE_CHAT_WAITING;
+              break;
+            }
+          }
+          const shape = forwardShapeOf(row);
+          try {
+            if (shape === "fileKey") {
+              await messagingApi.sendMessage(api, targetId, {
+                kind: "FILE",
+                body,
+                clientId: newClientId(),
+                fileName: forwardFileName(row),
+                fileType: forwardFileType(row),
+                fileSize: row.fileSize,
+                fileKey: row.fileKey,
+                meta: forwardMetaOf(row, album || undefined),
+              });
+            } else if (shape === "dataUrl") {
+              await messagingApi.sendMessage(api, targetId, {
+                kind: "IMAGE",
+                body,
+                clientId: newClientId(),
+                imageData: row.mediaUrl,
+                meta: forwardMetaOf(row, album || undefined),
+              });
+            } else if (shape === "reupload") {
+              const fetched = await fetchMessageMediaBlob(api, row.id);
+              const uploaded = await uploadFile(api, {
+                name: row.fileName || REUPLOAD_PHOTO_NAME,
+                type: REUPLOAD_PHOTO_TYPE,
+                blob: fetched.blob,
+              });
+              await messagingApi.sendMessage(api, targetId, {
+                kind: "FILE",
+                body,
+                clientId: newClientId(),
+                fileName: row.fileName || REUPLOAD_PHOTO_NAME,
+                fileType: REUPLOAD_PHOTO_TYPE,
+                fileSize: uploaded.size,
+                fileKey: uploaded.fileKey,
+                meta: forwardMetaOf(row, album || undefined),
+              });
+            } else {
+              await messagingApi.sendMessage(api, targetId, {
+                kind: "TEXT",
+                body,
+                clientId: newClientId(),
+              });
+            }
+            delivered += 1;
+          } catch {
+            // One row's failure does not stop the rest: the phone runs each
+            // forward inside its own `runCatching` for the same reason.
+          }
+        }
+
+        if (blocked) {
+          refused.push(`${target ? conversationTitle(target) : targetId}: ${blocked}`);
+        }
+      }
+
+      const expected = items.length * targetIds.length;
+      if (refused.length > 0) {
+        announce(
+          `Forwarded ${delivered} of ${expected} message${expected === 1 ? "" : "s"}. Not forwarded — ${refused.join("; ")}`,
+        );
+      } else if (delivered === expected) {
+        announce(
+          forwardNotice(
+            items.map((item) => item.row),
+            targetIds,
+          ),
+        );
+      } else {
+        announce(`Forwarded ${delivered} of ${expected} messages; the rest were refused.`);
+      }
+      void refreshList();
+    },
+    [announce, api, identity, refreshList],
+  );
+
+  /**
+   * A `typing` ping with a kind. "voice" is what the recorder sends while a
+   * take is running (once on start, then every 3 s against the Worker's 6 s
+   * lease) so the other side shows a microphone instead of typing dots.
+   */
+  const pingTyping = useCallback(
+    (kind: "text" | "voice" | "clear") => {
+      const conversation = selectedRef.current;
+      if (!conversation || isOneWayConversation(conversation)) return;
+      void messagingApi.setTyping(api, conversation.id, kind);
+    },
+    [api],
+  );
+
   const retry = useCallback(
     async (clientId: string) => {
       const item = outboxRef.current.find((row) => row.clientId === clientId);
@@ -1034,6 +1357,7 @@ export function useMessaging(options: Options): MessagingController {
     loadingOlder,
     otherReadAt,
     typingActive,
+    typingKind,
     draft,
     replyTo,
     outbox,
@@ -1056,6 +1380,9 @@ export function useMessaging(options: Options): MessagingController {
     send,
     sendSticker,
     sendAttachments,
+    sendVoice,
+    forwardMessages,
+    pingTyping,
     retry,
     discard,
     setReplyTo,
@@ -1063,6 +1390,7 @@ export function useMessaging(options: Options): MessagingController {
     editMessage,
     deleteMessage,
     spendViewOnce,
+    hideMessages,
     openSharedMedia,
     retrySharedMedia,
     closeSharedMedia,
