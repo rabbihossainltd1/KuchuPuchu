@@ -36,6 +36,13 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Web browser and accessibility tests
         run: npm run test:web:e2e
+      # The account and messaging suites build with their rollout flags on, so
+      # they are separate runs rather than a flag inside the shell suite. Both
+      # were previously only reachable through `npm run ci`.
+      - name: Web account browser tests
+        run: npm run test:web:account:e2e
+      - name: Web messaging browser tests
+        run: npm run test:web:messaging:e2e
       - name: Upload Web browser QA report
         if: failure()
         uses: actions/upload-artifact@v4

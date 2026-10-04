@@ -23,8 +23,9 @@
     "security:deps": "npm audit --omit=dev --audit-level=critical",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
-    "ci": "npm run format:check && npm run typecheck && npm run typecheck:web && npm run build:web && npm run verify:web-sw && npm run test && npm run test:web:e2e && npm run test:web:account:e2e && npm run security:secrets && npm run validate:android",
-    "validate:android": "tsx scripts/validate-android.ts"
+    "ci": "npm run format:check && npm run typecheck && npm run typecheck:web && npm run build:web && npm run verify:web-sw && npm run test && npm run test:web:e2e && npm run test:web:account:e2e && npm run test:web:messaging:e2e && npm run security:secrets && npm run validate:android",
+    "validate:android": "tsx scripts/validate-android.ts",
+    "test:web:messaging:e2e": "playwright test --config playwright.messaging.config.ts"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",

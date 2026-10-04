@@ -21,7 +21,9 @@
     "scripts",
     "web/e2e",
     "web/e2e-account",
+    "web/e2e-messaging",
     "playwright.config.ts",
-    "playwright.account.config.ts"
+    "playwright.account.config.ts",
+    "playwright.messaging.config.ts"
   ]
 }

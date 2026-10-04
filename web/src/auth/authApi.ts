@@ -28,6 +28,8 @@ export type AuthUser = {
   verified?: boolean;
   moderator?: boolean;
   badge?: string | null;
+  /** Published KP1 public key; absent until the account adopts an identity. */
+  e2eePublicKey?: string | null;
 };
 
 export type SessionPayload = {
