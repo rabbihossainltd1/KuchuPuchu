@@ -65,6 +65,7 @@ export function MessagingWorkspace({ route, navigate, isOnline }: Props) {
         onDismissIdentityNotice={identity.dismissNotice}
         meId={meId}
         meName={meName}
+        api={token ? api : null}
       />
     </>
   );

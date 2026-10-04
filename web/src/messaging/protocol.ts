@@ -71,9 +71,20 @@ export type MessageRow = {
   readonly deliveredAt: string;
   readonly edited: boolean;
   readonly viewOnce: boolean;
+  /** Set once a view-once attachment has been opened; the bytes are then gone. */
+  readonly viewedAt: string;
+  readonly viewedBy: string;
   /** Local-only: this row has not been confirmed by the server yet. */
   readonly localState: "pending" | "failed" | "";
   readonly localError: string;
+  /**
+   * Local-only object URL for an attachment this browser is still uploading.
+   * The row has no fileKey yet, so the transcript shows the bytes it already
+   * has instead of a spinner for the whole upload.
+   */
+  readonly localPreview: string;
+  /** Local-only upload progress, 0..100, for the bubble's ring. */
+  readonly localProgress: number;
 };
 
 export type ReplyTarget = {
@@ -186,9 +197,13 @@ export function parseMessageRow(value: unknown): MessageRow | null {
     rowid: number(value.rowid ?? value.kp_rowid),
     deliveredAt: isoTimestamp(value.deliveredAt),
     edited: booleanish(value.edited ?? meta.edited),
-    viewOnce: booleanish(value.viewOnce),
+    viewOnce: booleanish(value.viewOnce ?? meta.viewOnce),
+    viewedAt: isoTimestamp(value.viewedAt),
+    viewedBy: text(value.viewedBy, 256),
     localState: "",
     localError: "",
+    localPreview: "",
+    localProgress: 0,
   };
 }
 
@@ -223,8 +238,12 @@ export function createLocalEcho(input: {
     deliveredAt: "",
     edited: false,
     viewOnce: false,
+    viewedAt: "",
+    viewedBy: "",
     localState: "pending",
     localError: "",
+    localPreview: "",
+    localProgress: 0,
   };
 }
 
@@ -457,6 +476,63 @@ export function isLocalMessage(message: MessageRow): boolean {
 
 export function localClientIdPrefix(): string {
   return "c_w";
+}
+
+/**
+ * The optimistic row for an attachment send.
+ *
+ * It carries everything the bubble needs to render before the server answers:
+ * the file name and type, the measured box, the meta the phone will read, and a
+ * local object URL so a photo is visible while its bytes are still going up.
+ * `id` is the clientId, which is how `applyMessageFrame` swaps in the confirmed
+ * row later — the same trick `createLocalEcho` uses for text.
+ */
+export function createLocalAttachmentEcho(input: {
+  clientId: string;
+  senderId: string;
+  kind: "FILE" | "STICKER";
+  body: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  mediaWidth?: number;
+  mediaHeight?: number;
+  meta?: Readonly<Record<string, unknown>>;
+  viewOnce?: boolean;
+  localPreview?: string;
+  replyTo?: ReplyTarget | null;
+  createdAt?: string;
+}): MessageRow {
+  return {
+    id: input.clientId,
+    clientId: input.clientId,
+    senderId: input.senderId,
+    senderName: "",
+    kind: input.kind,
+    body: input.body,
+    replyTo: input.replyTo ?? null,
+    hasImage: input.fileType.startsWith("image/"),
+    mediaUrl: "",
+    fileKey: "",
+    fileName: input.fileName,
+    fileType: input.fileType,
+    fileSize: input.fileSize,
+    mediaWidth: input.mediaWidth ?? 0,
+    mediaHeight: input.mediaHeight ?? 0,
+    meta: input.meta ?? {},
+    reactions: {},
+    createdAt: input.createdAt ?? new Date().toISOString(),
+    rowid: 0,
+    deliveredAt: "",
+    edited: false,
+    viewOnce: input.viewOnce ?? false,
+    viewedAt: "",
+    viewedBy: "",
+    localState: "pending",
+    localError: "",
+    localPreview: input.localPreview ?? "",
+    localProgress: 0,
+  };
 }
 
 export function newClientId(

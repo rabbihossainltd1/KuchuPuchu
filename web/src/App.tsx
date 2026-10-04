@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { Suspense, lazy, useState, type ReactNode } from "react";
 import { isWebFeatureEnabled } from "./featureFlags";
 import { BrandMark, Icon, type IconName } from "./icons";
 import { RouteLink } from "./RouteLink";
@@ -7,8 +7,20 @@ import { useConnectivity } from "./useConnectivity";
 import { AccountSettingsPage } from "./auth/AccountSettingsPage";
 import { AuthScreen } from "./auth/AuthScreen";
 import { useAuth } from "./auth/AuthContext";
-import { MessagingWorkspace } from "./messaging/MessagingWorkspace";
+
 import { routeRequiresAuthentication, type AppRoute, type SectionId } from "./router";
+
+/**
+ * The messaging workspace is a lazy chunk: a build with the messaging flag off
+ * — which is every production build today — never downloads or parses the chat
+ * list, the crypto or the 1,150-glyph sticker catalog. The service worker
+ * precaches every emitted chunk, so an opt-in build still works offline.
+ */
+const MessagingWorkspace = lazy(() =>
+  import("./messaging/MessagingWorkspace").then((module) => ({
+    default: module.MessagingWorkspace,
+  })),
+);
 
 type View = {
   id: Exclude<SectionId, "account">;
@@ -273,7 +285,9 @@ export default function App() {
         </aside>
 
         {messagingEnabled && isChatsArea ? (
-          <MessagingWorkspace route={route} navigate={navigate} isOnline={isOnline} />
+          <Suspense fallback={<p className="welcome-card__body">Loading chats…</p>}>
+            <MessagingWorkspace route={route} navigate={navigate} isOnline={isOnline} />
+          </Suspense>
         ) : (
           <>
             <section

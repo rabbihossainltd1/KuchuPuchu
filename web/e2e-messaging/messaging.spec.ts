@@ -311,11 +311,42 @@ test.describe("Web messaging", () => {
     ).toBeVisible();
     await expect(page.locator(".chat-notes")).toContainText("arrive in a later slice");
 
-    // The attach control is present but honestly disabled rather than a stub
-    // that pretends to open a picker.
-    const attach = page.getByRole("button", { name: "Attachments arrive in a later slice" });
-    await expect(attach).toBeDisabled();
-    await expect(attach).toHaveAttribute("title", /arrive in a later slice/);
+    // Attaching is live now; what is still missing is stated, not stubbed.
+    await expect(
+      page.getByRole("button", { name: "Attach a photo, video or document" }),
+    ).toBeEnabled();
+  });
+
+  test("attach tiles that cannot work in a browser say why", async ({ page }) => {
+    await page.getByRole("link", { name: new RegExp(PEER_NAME) }).click();
+    await expect(page.getByText("এই মেসেজটি ফোন থেকে এনক্রিপ্টেড")).toBeVisible();
+
+    await page.getByRole("button", { name: "Attach a photo, video or document" }).click();
+
+    // The live tiles open a real file input.
+    for (const label of ["Gallery", "Camera", "Video", "Document"]) {
+      await expect(page.getByRole("button", { name: label, exact: true })).toBeEnabled();
+    }
+
+    // The inert ones are disabled AND carry a spoken reason: an icon that does
+    // nothing is the failure mode this guards against.
+    const inert: [string, RegExp][] = [
+      ["Location", /location provider/],
+      ["Contact", /contacts app/],
+      ["Poll", /coming soon on Android too/],
+      ["Event", /coming soon on Android too/],
+      ["AI images", /coming soon on Android too/],
+    ];
+    for (const [label, reason] of inert) {
+      const tile = page.getByRole("button", { name: label, exact: true });
+      await expect(tile).toBeDisabled();
+      const describedBy = await tile.getAttribute("aria-describedby");
+      expect(describedBy).toBeTruthy();
+      await expect(page.locator(`#${describedBy}`)).toHaveText(reason);
+    }
+
+    await expect(page.getByText("Send as a document")).toBeVisible();
+    await page.getByRole("button", { name: "Close attach menu" }).click();
   });
 
   test("the signed-out shell makes no conversation requests", async ({ page, context }) => {
