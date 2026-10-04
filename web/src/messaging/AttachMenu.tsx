@@ -29,7 +29,12 @@ export type AttachSource = "gallery" | "camera" | "video" | "document";
 export type AttachMenuProps = {
   open: boolean;
   onClose: () => void;
-  onFiles: (files: readonly File[], source: AttachSource, asDocument: boolean) => void;
+  onFiles: (
+    files: readonly File[],
+    source: AttachSource,
+    asDocument: boolean,
+    viewOnce: boolean,
+  ) => void;
   /** A one-way account cannot send anything, so the whole sheet is inert. */
   disabled?: boolean;
   onAnnounce?: (message: string) => void;
@@ -83,6 +88,10 @@ export function AttachMenu({ open, onClose, onFiles, disabled, onAnnounce }: Att
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [asDocument, setAsDocument] = useState(false);
+  // "View once" and "send as a document" cannot both be true: the Worker drops
+  // the flag on a document, so the second checkbox turns the first off rather
+  // than letting the reader choose something that silently will not happen.
+  const [viewOnce, setViewOnce] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -105,11 +114,16 @@ export function AttachMenu({ open, onClose, onFiles, disabled, onAnnounce }: Att
       // Reset so picking the same file twice still fires a change event.
       event.target.value = "";
       if (!files.length || !tile.source) return;
-      onFiles(files, tile.source, tile.id === "document" ? asDocument : false);
+      onFiles(
+        files,
+        tile.source,
+        tile.id === "document" ? asDocument : false,
+        tile.id === "document" ? false : viewOnce,
+      );
       onAnnounce?.(`${files.length} file${files.length === 1 ? "" : "s"} attached.`);
       onClose();
     },
-    [asDocument, onAnnounce, onClose, onFiles],
+    [asDocument, onAnnounce, onClose, onFiles, viewOnce],
   );
 
   if (!open) return null;
@@ -181,11 +195,30 @@ export function AttachMenu({ open, onClose, onFiles, disabled, onAnnounce }: Att
         <input
           type="checkbox"
           checked={asDocument}
-          onChange={(event) => setAsDocument(event.target.checked)}
+          onChange={(event) => {
+            setAsDocument(event.target.checked);
+            if (event.target.checked) setViewOnce(false);
+          }}
           disabled={disabled}
         />
         <span>
           Send as a document — keeps a photo or clip's own bytes and name, with no re-encoding.
+        </span>
+      </label>
+
+      <label className="attach-menu__option">
+        <input
+          type="checkbox"
+          checked={viewOnce}
+          onChange={(event) => {
+            setViewOnce(event.target.checked);
+            if (event.target.checked) setAsDocument(false);
+          }}
+          disabled={disabled}
+        />
+        <span>
+          View once — the reader opens a photo or clip exactly once, then it is gone for both of
+          you. A document cannot be view-once.
         </span>
       </label>
 

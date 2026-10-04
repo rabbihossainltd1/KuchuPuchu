@@ -12,7 +12,12 @@ export type IconName =
   | "arrow"
   | "message"
   | "lock"
-  | "sparkle";
+  | "sparkle"
+  | "download"
+  | "link"
+  | "file"
+  | "play"
+  | "trash";
 
 const shapes: Record<IconName, ReactNode> = {
   chats: (
@@ -74,6 +79,32 @@ const shapes: Record<IconName, ReactNode> = {
     <>
       <path d="m12 3 1.6 5.4L19 10l-5.4 1.6L12 17l-1.6-5.4L5 10l5.4-1.6L12 3Z" />
       <path d="m19 16 .8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8L19 16Z" />
+    </>
+  ),
+  download: (
+    <>
+      <path d="M12 4v10" />
+      <path d="m8 11 4 4 4-4" />
+      <path d="M5 19h14" />
+    </>
+  ),
+  link: (
+    <>
+      <path d="M10.5 13.5a3.5 3.5 0 0 0 5 0l3-3a3.5 3.5 0 0 0-5-5l-1 1" />
+      <path d="M13.5 10.5a3.5 3.5 0 0 0-5 0l-3 3a3.5 3.5 0 0 0 5 5l1-1" />
+    </>
+  ),
+  file: (
+    <>
+      <path d="M7 3.8h7L18.5 8v12.2H7z" />
+      <path d="M13.8 4v4.2h4.5M9.6 12.5h6.8M9.6 15.8h4.6" />
+    </>
+  ),
+  play: <path d="M8.5 5.5v13l10-6.5-10-6.5Z" />,
+  trash: (
+    <>
+      <path d="M5.5 7.5h13M10 7.5V5h4v2.5" />
+      <path d="M7 7.5 8 20h8l1-12.5M10.5 11v5.5M13.5 11v5.5" />
     </>
   ),
 };

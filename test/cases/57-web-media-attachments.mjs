@@ -38,6 +38,7 @@ import {
   UPLOAD_PART_BYTES,
   VIDEO_MAX_BYTES,
   VOICE_MAX_BYTES,
+  ALBUM_ID_RE,
   albumId,
   attachmentCategory,
   buildAttachmentMeta,
@@ -419,7 +420,39 @@ check(
   "photo file names follow the shared shape",
   /^photo_\d+\.jpg$/.test(photoFileName(1_700_000_000_000)),
 );
-check("album ids follow the shared shape", /^album_\d+$/.test(albumId(1_700_000_000_000)));
+// The Worker drops any album id that is not `alb_` + 4..36 [A-Za-z0-9_-]
+// (ALBUM_ID_RE), so a client-side shape that merely agreed with itself would
+// have silently un-grouped every multi-photo send on the phone.
+const albumReMatch = workerSource.match(/const ALBUM_ID_RE = \/(.+)\/([a-z]*);/);
+check("the worker's album-id pattern was found in its source", Boolean(albumReMatch));
+const workerAlbumRe = albumReMatch ? new RegExp(albumReMatch[1], albumReMatch[2]) : null;
+check(
+  "the client's ALBUM_ID_RE is the worker's, character for character",
+  workerAlbumRe !== null && ALBUM_ID_RE.source === workerAlbumRe.source,
+  `${ALBUM_ID_RE.source} vs ${workerAlbumRe?.source ?? "?"}`,
+);
+const minted = albumId();
+check(
+  "a minted album id survives the worker's pattern",
+  workerAlbumRe?.test(minted) === true,
+  minted,
+);
+check(
+  "an album id is alb_ plus 20 characters, like the phone's",
+  /^alb_[0-9a-f]{20}$/.test(albumId(() => "3f2b9c14-7a58-4d6e-9b01-2c3d4e5f6a78")),
+  albumId(() => "3f2b9c14-7a58-4d6e-9b01-2c3d4e5f6a78"),
+);
+const albumBatch = new Set(Array.from({ length: 500 }, () => albumId()));
+check("500 minted album ids are all distinct", albumBatch.size === 500, `${albumBatch.size}`);
+check(
+  "500 minted album ids all survive the worker's pattern",
+  [...albumBatch].every((id) => workerAlbumRe?.test(id)),
+);
+check(
+  "a random source with no usable characters still yields a valid id",
+  workerAlbumRe?.test(albumId(() => "----")) === true,
+  albumId(() => "----"),
+);
 check("FILE is an attachment kind", isAttachmentKind("FILE"));
 check("IMAGE is an attachment kind", isAttachmentKind("IMAGE"));
 check("TEXT is not an attachment kind", !isAttachmentKind("TEXT"));

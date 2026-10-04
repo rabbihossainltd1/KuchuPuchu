@@ -11,7 +11,38 @@
 
 import { useEffect, useState } from "react";
 import type { ApiClient } from "../auth/authApi";
-import { fetchFileBlob } from "./filesApi";
+import { fetchFileBlob, fetchMessageMediaBlob } from "./filesApi";
+
+/**
+ * A media source that is a message route rather than a file key. Kept as a
+ * prefix on the same string the hook already takes, so the cache stays one map.
+ */
+export const MESSAGE_MEDIA_PREFIX = "msg:";
+
+export type MediaSourceRow = {
+  readonly id: string;
+  readonly localPreview: string;
+  readonly fileKey: string;
+  readonly mediaUrl: string;
+};
+
+/**
+ * Which bytes a row shows, in the order the phone resolves them
+ * (`photoUrlOf`: local echo → `mediaUrl` → `fileKey` as an `/api/files` path).
+ *
+ * An uploaded photo or clip is a FILE row and carries only a `fileKey`; the
+ * legacy inline IMAGE rows carry `mediaUrl = /api/messages/:id/media` instead.
+ * Both are answered here, and `msg:` tells the hook which route to spend a
+ * request on.
+ */
+export function mediaSourceKey(message: MediaSourceRow): string {
+  if (message.localPreview) return message.localPreview;
+  if (message.fileKey) return message.fileKey;
+  if (message.mediaUrl.startsWith("/api/messages/") && message.mediaUrl.endsWith("/media")) {
+    return message.id ? `${MESSAGE_MEDIA_PREFIX}${message.id}` : "";
+  }
+  return "";
+}
 
 const MAX_CACHED_URLS = 60;
 
@@ -49,7 +80,9 @@ async function load(api: ApiClient, key: string, signal: AbortSignal): Promise<C
 
   const started = (async () => {
     try {
-      const { blob, type } = await fetchFileBlob(api, key, signal);
+      const { blob, type } = key.startsWith(MESSAGE_MEDIA_PREFIX)
+        ? await fetchMessageMediaBlob(api, key.slice(MESSAGE_MEDIA_PREFIX.length), signal)
+        : await fetchFileBlob(api, key, signal);
       if (typeof URL?.createObjectURL !== "function") return null;
       const entry: CacheEntry = { url: URL.createObjectURL(blob), type, refs: 0 };
       remember(key, entry);
@@ -109,6 +142,74 @@ export function useMediaUrl(
       controller.abort();
     };
   }, [api, enabled, fileKey]);
+
+  return state;
+}
+
+export type MediaUrlMap = Readonly<Record<string, MediaUrlState>>;
+
+const IDLE_URL: MediaUrlState = { url: null, type: "", status: "idle" };
+
+/**
+ * Resolve a whole list of rows at once — what the viewer and the shared-media
+ * grid need, since a component cannot call a hook per array item.
+ *
+ * Callers must only pass rows the reader has actually asked to see: a
+ * `msg:`-source row is fetched from `/api/messages/:id/media`, and for a
+ * view-once row that fetch **is** the opening. Album groups are safe because a
+ * view-once photo never joins an album; a single once-row is the reader's own
+ * explicit tap.
+ *
+ * Resolution is sequential on purpose: one request at a time through the shared
+ * cache, so opening a twenty-photo album does not fire twenty parallel
+ * downloads at the Worker.
+ */
+export function useMediaUrls(api: ApiClient | null, rows: readonly MediaSourceRow[]): MediaUrlMap {
+  const [state, setState] = useState<MediaUrlMap>({});
+  // Keyed on the resolved source keys, not the row identities: a list refresh
+  // hands back new objects for the same media, and depending on them would
+  // restart every fetch (and re-spend an opening) on each poll.
+  const signature = rows.map((row) => `${row.id}:${mediaSourceKey(row)}`).join("|");
+
+  useEffect(() => {
+    if (!api || rows.length === 0) {
+      setState({});
+      return;
+    }
+    const controller = new AbortController();
+    let live = true;
+
+    const initial: Record<string, MediaUrlState> = {};
+    for (const row of rows) {
+      const key = mediaSourceKey(row);
+      if (!key) initial[row.id] = IDLE_URL;
+      else if (key.startsWith("blob:") || key.startsWith("data:")) {
+        initial[row.id] = { url: key, type: "", status: "ready" };
+      } else initial[row.id] = { url: null, type: "", status: "loading" };
+    }
+    setState(initial);
+
+    void (async () => {
+      for (const row of rows) {
+        const key = mediaSourceKey(row);
+        if (!key || key.startsWith("blob:") || key.startsWith("data:")) continue;
+        const entry = await load(api, key, controller.signal);
+        if (!live) return;
+        setState((current) => ({
+          ...current,
+          [row.id]: entry
+            ? { url: entry.url, type: entry.type, status: "ready" }
+            : { url: null, type: "", status: "error" },
+        }));
+      }
+    })();
+
+    return () => {
+      live = false;
+      controller.abort();
+    };
+    // `signature` stands in for `rows`: same ids and same sources, no restart.
+  }, [api, signature]);
 
   return state;
 }

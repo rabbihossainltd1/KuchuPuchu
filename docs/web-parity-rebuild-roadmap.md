@@ -45,8 +45,10 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 | **A** conversation list + chat shell | ✅ merged | PR #82 → `main` @ `d168a913` |
 | **B** messaging core + KP1 E2EE | ✅ merged | PR #82 → `main` @ `d168a913` |
 | **C** message actions + durability | ✅ merged | PR #82 → `main` @ `d168a913` |
-| **D** attachments + photo editor | ✅ built | এই branch; নিচের হিসাব |
-| **E**–**I** | ⏳ বাকি | — |
+| **D** attachments + photo editor | ✅ merged | PR #83 → `main` @ `d0a44ae0` |
+| **E1** viewers + shared media + view-once + albums | ✅ built | এই branch; নিচের হিসাব |
+| **E2** voice note + document preview + forward | ⏳ বাকি | voice-এর জন্য Worker-এ `audio/webm` allowlist লাগবে ⇒ আলাদা PR |
+| **F**–**I** | ⏳ বাকি | — |
 
 **Slice D-তে যা নামলো** (Worker বা Android-এ একটি লাইনও বদলায়নি):
 
@@ -55,6 +57,14 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 - Lazy chunks: `MessagingWorkspace`, `PhotoEditor`, `StickerPicker` আলাদা bundle — entry ৩৩২.৯৪ kB থেকে **২৮৭.৯৫ kB (gzip ৮৮.৩২)**, অর্থাৎ messaging চালুর আগের baseline-এরও কম।
 - Gates: contract **৫৭/৫৭ case, ২৫২১ assertion** (নতুন case 57 = ২৩৮ check), browser **৪৪ test** (shell ৮ + account ১০ + messaging ২৬), `npm run ci` EXIT=0, `check:web-stickers` CI step-এ যোগ, service worker ৭টা precached file।
 - E2E-তে ধরা পড়া আসল bug: `fetchFileBlob` পুরো key-কে `encodeURIComponent` করত, ফলে `f/x.jpg` → `f%2Fx.jpg` হতো আর `api.ts`-এর path guard encoded slash refuse করত — অর্থাৎ **production-এ কোনো received ছবি/ভিডিও/ডকুমেন্টই download হতো না**। এখন Android-এর `Api.encodePath`-এর মতো segment-wise encoding + `FILE_KEY_RE` যাচাই (`fileGetPath`)।
+
+**Slice E1-এ যা নামলো** (Worker/Android/`public/` অপরিবর্তিত):
+
+- `web/src/messaging/` — `MediaViewer.tsx` (paging/zoom/pan/drag-to-close/save/delete), `viewerGeometry.ts` (সব সংখ্যা DOM-free, যাতে Kotlin-এর সাথে মেলানো যায়), `MediaGallery.tsx` + `sharedMedia.ts` (Media/Docs/Links), `viewOnce.ts` + `OnceText.tsx` (one-opening নিয়ম), `AttachmentRow.tsx`-এ album grid আর blurred once-card।
+- Album folding (`foldAlbums`) — একই `meta.album` + একই sender-এর ছবিগুলো এক bubble-এ, Android-এর মতো; viewer পুরো group-এর মধ্যে page করে।
+- View once: কোন fetch-টা opening spend করে সেটা আলাদা করে দেখা — inline `IMAGE` ⇒ `GET /api/messages/:id/media` (fetch-ই opening), uploaded `FILE` ⇒ `/api/files/:key` (spend করে না, তাই ফোনের মতো blur করে দেখানো যায়) + `POST /view` রিপোর্ট। 404/410 terminal, বাকি failure পরের viewing-এ আবার রিপোর্ট।
+- **আরেকটা আসল bug ধরা পড়লো:** Worker-এর `ALBUM_ID_RE = /^alb_[A-Za-z0-9_-]{4,36}$/` ছাড়া album id **চুপচাপ ফেলে দেয়**, আর web client পাঠাচ্ছিল `album_<ms>` ⇒ multi-photo send ফোনে কখনোই group হতো না, কোথাও কোনো error ছাড়াই। এখন `alb_` + 20 hex (Android-এর `UUID.replace("-","").take(20)`), আর case 57 সেই regex-ই Worker source থেকে parse করে মিলিয়ে দেখে।
+- Gates: contract **৫৮/৫৮ case, ২৬৫৪ assertion** (নতুন case 58 = ১২৭ check), browser **৫৭ test** (নতুন `viewer.spec.ts` = ১২), `npm run ci` EXIT=0, SW ১১টা precached file, entry bundle মাত্র +০.৮ kB (২৮৮.৭৫ / gzip ৮৮.৫৮) কারণ viewer-gallery দুটোই lazy।
 
 ### ইচ্ছাকৃতভাবে বাদ / placeholder (কাজ হবে না)
 

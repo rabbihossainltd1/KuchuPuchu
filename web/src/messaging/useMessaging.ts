@@ -59,6 +59,9 @@ import { createManagedSocket, type ManagedSocket, type SocketStatus } from "./so
 import { uploadFile } from "./filesApi";
 import { attachmentMeta, type PendingAttachment } from "./attachments";
 import { albumId } from "../media/uploadContract";
+import { EMPTY_SHARED_MEDIA, sharedMediaRefusal, type SharedMedia } from "./sharedMedia";
+import { VANISH_GRACE_MS, createViewOnceSpender } from "./viewOnce";
+import { isVanishedMarker } from "./protocol";
 
 const TYPING_THROTTLE_MS = 2_000;
 const TYPING_IDLE_MS = 3_000;
@@ -90,6 +93,13 @@ export type MessagingState = {
   notice: string;
   oneWay: boolean;
   durable: boolean;
+  /** Rows playing their vanish animation after a spent view-once opening. */
+  vanishingIds: readonly string[];
+  /** Ids that have left the transcript, so the media panel can agree with it. */
+  hiddenMessageIds: readonly string[];
+  sharedMedia: SharedMedia;
+  sharedMediaStatus: LoadStatus;
+  sharedMediaError: string;
 };
 
 export type MessagingActions = {
@@ -107,6 +117,11 @@ export type MessagingActions = {
   react: (messageId: string, emoji: string) => Promise<void>;
   editMessage: (messageId: string, text: string) => Promise<void>;
   deleteMessage: (messageId: string) => Promise<void>;
+  /** Report the single opening of a view-once message. */
+  spendViewOnce: (messageId: string) => void;
+  openSharedMedia: () => Promise<void>;
+  retrySharedMedia: () => Promise<void>;
+  closeSharedMedia: () => void;
   dismissNotice: () => void;
   announce: (message: string) => void;
 };
@@ -138,6 +153,11 @@ export function useMessaging(options: Options): MessagingController {
   }, []);
 
   const [conversations, setConversations] = useState<readonly ConversationRow[]>([]);
+  const [vanishingIds, setVanishingIds] = useState<readonly string[]>([]);
+  const [hiddenMessageIds, setHiddenMessageIds] = useState<readonly string[]>([]);
+  const [sharedMedia, setSharedMedia] = useState<SharedMedia>(EMPTY_SHARED_MEDIA);
+  const [sharedMediaStatus, setSharedMediaStatus] = useState<LoadStatus>("idle");
+  const [sharedMediaError, setSharedMediaError] = useState("");
   const [listStatus, setListStatus] = useState<LoadStatus>("idle");
   const [listError, setListError] = useState("");
   const [selected, setSelected] = useState<ConversationRow | null>(null);
@@ -171,6 +191,7 @@ export function useMessaging(options: Options): MessagingController {
   const typingSentAt = useRef(0);
   const typingIdleTimer = useRef<number | null>(null);
   const retryTimers = useRef(new Map<string, number>());
+  const vanishTimers = useRef(new Map<string, number>());
 
   const announce = useCallback((message: string) => {
     setNotice(message);
@@ -210,6 +231,59 @@ export function useMessaging(options: Options): MessagingController {
   useEffect(() => {
     void refreshList();
   }, [refreshList]);
+
+  /* ------------------------------------------------------------- view once */
+
+  const viewOnceSpender = useMemo(
+    () =>
+      createViewOnceSpender((messageId) => messagingApi.reportViewOnce(api, messageId), {
+        onSettled: () => void refreshList(),
+      }),
+    [api, refreshList],
+  );
+
+  const spendViewOnce = useCallback(
+    (messageId: string) => viewOnceSpender.spend(messageId),
+    [viewOnceSpender],
+  );
+
+  /* ---------------------------------------------------------- shared media */
+
+  const fetchSharedMedia = useCallback(async () => {
+    if (!enabled || !selectedId) return;
+    const conversationId = selectedId;
+    setSharedMediaStatus("loading");
+    setSharedMediaError("");
+    try {
+      const payload = await messagingApi.fetchSharedMedia(api, conversationId);
+      // A late answer for a chat the reader has already left is dropped.
+      if (selectedRef.current?.id !== conversationId) return;
+      setSharedMedia(payload);
+      setSharedMediaStatus("ready");
+    } catch (error) {
+      if (selectedRef.current?.id !== conversationId) return;
+      const code = error instanceof ApiError && error.code ? error.code : "";
+      setSharedMedia(EMPTY_SHARED_MEDIA);
+      setSharedMediaError(
+        code ? sharedMediaRefusal(code, apiErrorMessage(error)) : apiErrorMessage(error),
+      );
+      setSharedMediaStatus("error");
+    }
+  }, [api, enabled, selectedId]);
+
+  const openSharedMedia = useCallback(async () => {
+    await fetchSharedMedia();
+  }, [fetchSharedMedia]);
+
+  const retrySharedMedia = useCallback(async () => {
+    await fetchSharedMedia();
+  }, [fetchSharedMedia]);
+
+  const closeSharedMedia = useCallback(() => {
+    setSharedMedia(EMPTY_SHARED_MEDIA);
+    setSharedMediaStatus("idle");
+    setSharedMediaError("");
+  }, []);
 
   useEffect(() => {
     if (!enabled || !token) return;
@@ -258,6 +332,11 @@ export function useMessaging(options: Options): MessagingController {
       setOtherReadAt("");
       setTypingActive(false);
       setReplyTo(null);
+      // Another chat's gallery must never survive the switch: a panel showing
+      // the previous conversation's photos is a privacy bug, not a stale view.
+      setSharedMedia(EMPTY_SHARED_MEDIA);
+      setSharedMediaStatus("idle");
+      setSharedMediaError("");
       setHasMore(false);
       setCursor({ before: "", beforeRowid: 0 });
 
@@ -365,6 +444,31 @@ export function useMessaging(options: Options): MessagingController {
 
           if (incoming.kind === "DELETED") {
             setMessages((current) => current.filter((row) => row.id !== incoming.id));
+            setHiddenMessageIds((current) =>
+              current.includes(incoming.id) ? current : [...current, incoming.id],
+            );
+            return;
+          }
+
+          // A spent view-once row is gone for everyone: play the short vanish,
+          // then drop it. No tombstone is left behind, on either side.
+          if (isVanishedMarker(incoming)) {
+            const vanishedId = incoming.id;
+            setVanishingIds((current) =>
+              current.includes(vanishedId) ? current : [...current, vanishedId],
+            );
+            setHiddenMessageIds((current) =>
+              current.includes(vanishedId) ? current : [...current, vanishedId],
+            );
+            vanishTimers.current.set(
+              `vanish:${vanishedId}`,
+              window.setTimeout(() => {
+                setMessages((current) => current.filter((row) => row.id !== vanishedId));
+                setVanishingIds((current) => current.filter((id) => id !== vanishedId));
+                vanishTimers.current.delete(`vanish:${vanishedId}`);
+              }, VANISH_GRACE_MS),
+            );
+            void refreshList();
             return;
           }
 
@@ -680,9 +784,12 @@ export function useMessaging(options: Options): MessagingController {
         }
       }
 
-      // One album id for a multi-photo send, so the phone groups them.
+      // One album id for a multi-photo send, so the phone groups them. A
+      // view-once photo never joins an album — one tap is one opening, and the
+      // Worker drops the id on such a row anyway.
       const photos = items.filter((item) => item.intent === "photo");
-      const album = photos.length > 1 ? albumId() : "";
+      const once = items.some((item) => item.viewOnce);
+      const album = photos.length > 1 && !once ? albumId() : "";
 
       for (const [index, item] of items.entries()) {
         const clientId = newClientId();
@@ -699,6 +806,7 @@ export function useMessaging(options: Options): MessagingController {
           mediaWidth: item.width,
           mediaHeight: item.height,
           meta,
+          viewOnce: item.viewOnce,
           localPreview: preview,
           replyTo: index === 0 ? replyTo : null,
         });
@@ -731,6 +839,8 @@ export function useMessaging(options: Options): MessagingController {
             fileSize: uploaded.size,
             fileKey: uploaded.fileKey,
             meta,
+            // Android sends the flag in both places; the Worker reads `meta`.
+            ...(item.viewOnce ? { viewOnce: true } : {}),
           });
 
           if (result.message) {
@@ -896,6 +1006,8 @@ export function useMessaging(options: Options): MessagingController {
     () => () => {
       for (const timer of retryTimers.current.values()) window.clearTimeout(timer);
       retryTimers.current.clear();
+      for (const timer of vanishTimers.current.values()) window.clearTimeout(timer);
+      vanishTimers.current.clear();
       if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
       if (typingIdleTimer.current) window.clearTimeout(typingIdleTimer.current);
     },
@@ -931,6 +1043,11 @@ export function useMessaging(options: Options): MessagingController {
     notice,
     oneWay: selected ? isOneWayConversation(selected) : false,
     durable: stores.durable,
+    vanishingIds,
+    hiddenMessageIds,
+    sharedMedia,
+    sharedMediaStatus,
+    sharedMediaError,
     refreshList,
     selectConversation,
     loadOlder,
@@ -945,6 +1062,10 @@ export function useMessaging(options: Options): MessagingController {
     react,
     editMessage,
     deleteMessage,
+    spendViewOnce,
+    openSharedMedia,
+    retrySharedMedia,
+    closeSharedMedia,
     dismissNotice,
     announce,
   };

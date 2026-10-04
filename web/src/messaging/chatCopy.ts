@@ -34,12 +34,12 @@ export const QUICK_REACTION_EMOJI = Object.freeze(QUICK_REACTIONS.map((item) => 
 /** Copy that must stay truthful about what this slice can and cannot do. */
 export const CAPABILITY_COPY = {
   /**
-   * Attachments send now; what is still missing is the viewing surface around
-   * them. Stating the gap is the point — a thumbnail that cannot be opened
-   * full-screen must not look like a finished feature.
+   * What is still missing, stated plainly. The viewer, the shared-media panel
+   * and view-once are built now; naming them as pending would be as dishonest
+   * as hiding the gaps that remain.
    */
-  mediaViewerPending:
-    "Photos, clips, audio and documents send and display inline. The full-screen viewer with zoom and swipe, the shared-media tab, view-once reveal, voice-note recording and document preview arrive in a later slice.",
+  voiceAndPreviewPending:
+    "Photos and clips open in a full-screen viewer, shared media has its own panel, and a view-once message opens exactly once. Voice-note recording, document preview and forwarding arrive in a later slice.",
   captureWarning:
     "A browser cannot block or detect screenshots or screen recording. Save and forward still follow the sender's consent.",
   draftsNotDurable:

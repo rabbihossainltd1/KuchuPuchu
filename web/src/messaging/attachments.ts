@@ -47,6 +47,12 @@ export type PendingAttachment = {
   readonly durationMs: number;
   readonly edit: EditModel;
   readonly asDocument: boolean;
+  /**
+   * "View once": the reader opens it a single time and then it is gone for both
+   * sides. Only a photo or a clip can carry it — the Worker refuses the flag on
+   * a document and on an audio file that is not a voice note.
+   */
+  readonly viewOnce: boolean;
   readonly state: AttachmentState;
   readonly error: string;
   readonly progress: UploadProgress | null;
@@ -103,6 +109,8 @@ export function revokeAttachments(items: readonly PendingAttachment[]): void {
 export type PrepareOptions = {
   /** "Send as document" from the picker: keeps the file's own bytes and name. */
   asDocument?: boolean;
+  /** "View once" from the picker. Mutually exclusive with `asDocument`. */
+  viewOnce?: boolean;
   /** How many attachments the composer already holds. */
   alreadyQueued?: number;
   random?: () => string;
@@ -139,6 +147,11 @@ export async function prepareAttachments(
     const intent: AttachmentIntent = asDocument
       ? "document"
       : classifyAttachment(file.type || "", file.name || "");
+    // The Worker's own gate (`viewOnceFlag`): a document never is, and neither
+    // is an audio file that is not a voice note. Offering the flag where the
+    // server would drop it would be a toggle that lies.
+    const viewOnce =
+      options.viewOnce === true && !asDocument && (intent === "photo" || intent === "video");
     const type = safeMediaType(file.type || "");
     const limit = mediaLimitFor(type, file.name || "");
     if (file.size > limit) {
@@ -155,6 +168,7 @@ export async function prepareAttachments(
       pickedName: file.name || "file",
       type,
       asDocument,
+      viewOnce,
       edit: EMPTY_EDIT,
       state: "ready" as AttachmentState,
       error: "",
@@ -283,6 +297,7 @@ export function attachmentMeta(item: PendingAttachment, album?: string): Record<
     height: item.height,
     durationMs: item.durationMs,
     asDocument: item.asDocument,
+    viewOnce: item.viewOnce,
     ...(album ? { album } : {}),
   });
 }
@@ -293,12 +308,15 @@ export function hasEdits(item: PendingAttachment): boolean {
 
 /** Accessible label for a composer chip or a transcript row. */
 export function describeAttachment(item: PendingAttachment): string {
+  // "view once" is part of the description, not a decoration: the reader has to
+  // be able to hear what they are about to send before they send it.
+  const once = item.viewOnce ? ", view once" : "";
   if (item.intent === "photo") {
-    return `Photo ${item.pickedName}, ${item.width} by ${item.height} pixels, ${formatBytes(item.size)}`;
+    return `Photo ${item.pickedName}, ${item.width} by ${item.height} pixels, ${formatBytes(item.size)}${once}`;
   }
   if (item.intent === "video") {
     const seconds = Math.round(item.durationMs / 1000);
-    return `Video ${item.pickedName}, ${formatBytes(item.size)}${seconds ? `, ${seconds} seconds` : ""}`;
+    return `Video ${item.pickedName}, ${formatBytes(item.size)}${seconds ? `, ${seconds} seconds` : ""}${once}`;
   }
   if (item.intent === "audio") {
     const seconds = Math.round(item.durationMs / 1000);
