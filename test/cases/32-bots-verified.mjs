@@ -1141,32 +1141,35 @@ const convBetween = (db, a, b) =>
       !chat.includes("replyThreshold * 1.8f, 0f)\n                                    } else {"),
   );
   check(
-    "r17-13/r31-8 (r68-8): long-press opens ONE action sheet — reaction row on top ('+' = full emoji sheet), then Reply/Copy/Forward/Edit/Delete/Select — ONE Delete, its scope asked by the shared popup; reacting deselects; no floating bar",
+    "r17-13/r31-8 (r68-8): long-press opens ONE focused action sheet — reaction row on top, then Reply/Copy/Forward/Edit/Delete/Select; one Delete popup; same live bubble returns after dismissal",
     !chat.includes("listState.layoutInfo.visibleItemsInfo.firstOrNull") &&
       chat.includes("if (mid in selected) selected.remove(mid)") &&
-      chat.includes("ModalBottomSheet(") &&
-      chat.includes("KpRememberModalBottomSheetState(blurRegistration)") &&
+      chat.includes("KpFocusSheetState.open(") &&
+      chat.includes("KpFocusSheetRequest(") &&
+      chat.includes('key = "message-actions:$focusKey"') &&
+      chat.includes("focusKey = focusKey.takeIf { KpModalFocusState.focusedItem?.key == it }") &&
       chat.includes("var actionFor by remember { mutableStateOf<JSONObject?>(null) }") &&
       chat.includes("actionFor?.let { m ->") &&
       chat.includes('listOf("👍", "❤️", "😂", "😮", "😢", "🙏").forEach { e ->') &&
+      chat.includes("close { applyReaction(m, e) }") &&
+      chat.includes("showEmojiSheet = true") &&
+      chat.includes("KpMessageFocusSlot(focusKey) { requestFocus ->") &&
+      chat.includes("val onFocusedLongPress: (JSONObject) -> Unit = { pressed ->") &&
+      chat.includes('if (pressed.optString("kind") != "DELETED") requestFocus()') &&
+      chat.includes("onLongPress(pressed)") &&
       // r32-16: "Unsend" is "Delete for everyone" now.
       // r68-8 moved the scope question into the popup, so the sheet carries ONE
-      // Delete (and the selection bar one icon) for own AND the other side's
-      // messages alike.
+      // Delete for own AND the other side's messages alike.
       ['"Reply"', '"Copy"', '"Forward"', '"Edit"', '"Delete"', '"Select"'].every((l) =>
         chat.includes(
           `KpSheetRow(Icons.${l === '"Reply"' ? "AutoMirrored.Filled.Reply" : l === '"Forward"' ? "AutoMirrored.Filled.Send" : l === '"Copy"' ? "Filled.ContentCopy" : l === '"Edit"' ? "Filled.Edit" : l === '"Delete"' ? "Filled.Delete" : "Filled.CheckCircle"}, ${l}`,
         ),
       ) &&
-      // r31-29: text, photo, video AND the grouped photo bubble (4 sites);
-      // r32-17: + the view-once card (5); r33-17: + the tappable quote inside
-      // a bubble, whose long-press still opens the bubble's sheet (6).
-      // v206: + emoji single/multiple + sticker (9) - long-press shows actions for emoji too
-      (
-        chat.match(
-          /if \(selectedIds\.isNotEmpty\(\)\) onToggleSelect\(m\) else onLongPress\(m\)/g,
-        ) || []
-      ).length >= 6,
+      // A single live focus slot feeds the root host; the reserved anchor is
+      // inserted before the emoji row/options, and the same composition returns.
+      chat.includes('actionFocusKey = "message:$rowKey"') &&
+      (chat.match(/KpSheetRow\(Icons\.Filled\.Delete, \"Delete\", tint = Red\)/g) || []).length ===
+        1,
   );
   check(
     "r17-14: restoreChrome follows the theme (dark-blue keeps light icons)",
@@ -1713,7 +1716,7 @@ const convBetween = (db, a, b) =>
       chat.includes("if (mine) replyThreshold * 1.5f else replyThreshold") &&
       // v163: the row also hands the ✕ (cancel send) down.
       chat.includes(
-        "ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend, onDoubleTapHeart)",
+        'ImageMessageRow(\n                    m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect,\n                    onOpenImage, onReply,\n                    onLongPress = { pressed ->\n                        if (pressed.optString("kind") != "DELETED") requestFocus()\n                        onLongPress(pressed)\n                    },\n                    theme = theme,\n                    onCancelSend = onCancelSend,\n                    onDoubleTapHeart = onDoubleTapHeart,\n                )',
       ),
   );
   check(
@@ -3000,7 +3003,7 @@ const convBetween = (db, a, b) =>
         // r31-27: the call site now also hands the chat theme down (voice bars).
         // v163: the doc row also hands the ✕ (cancel send) down.
         chat.includes(
-          '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)',
+          '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onFocusedLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)',
         ) &&
         readFileSync("src/worker/index.ts", "utf8").includes(
           "...(incomingMeta.document === true ? { document: true } : {}),",
@@ -3726,7 +3729,9 @@ const convBetween = (db, a, b) =>
             cl.includes(
               'convs.filter { ScreenStore.isArchived(it.optString("id")) && !it.optBoolean("hidden") }',
             ) &&
-            cl.includes('convs.count { !it.optBoolean("hidden") && it.optInt("unread", 0) > 0 }'),
+            kt("KpApp.kt").includes(
+              'unreadChats = ScreenStore.convs.count { !it.optBoolean("hidden") && it.optInt("unread", 0) > 0 }',
+            ),
         );
         // r33-6: the owner's new system. No gesture, no Hidden screen, no
         // `hidden` route: EVERY hide asks for a free-form secret key (sheet
@@ -4117,7 +4122,7 @@ const convBetween = (db, a, b) =>
             '.also { mm -> vm.optJSONArray("waveform")?.let { mm.put("waveform", it) } },',
           ) &&
           chat.includes(
-            '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)',
+            '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onFocusedLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)',
           ),
       );
     }
@@ -6530,8 +6535,15 @@ const convBetween = (db, a, b) =>
       "r34-16a: app — a view-once message renders ViewOnceRow: the photo at its original ratio (ImageRatios-cached) blurred past recognition via ViewOnceBlur, the ViewOnceOneIcon mark in the middle, a dark tile for video / uploads; the recipient opens it (sender's tap does nothing), reply-drag + long-press intact, no 'Opened' state anywhere; the album fold, resend and the media grid never take it",
       // r71-20: the once-TEXT bubble sits in front of the tile.
       chat.includes(
-        'if (isViewOnce(m)) {\n        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {\n            // r71-20: a view-once TEXT is its own bubble (veiled, one tap to\n            // reveal, five seconds, then gone for both) — the photo / video /\n            // voice flavours keep the tile.\n            if (kind == "TEXT" && m.optText("body").isNotBlank()) {\n                OnceTextRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, theme, onDoubleTapHeart)\n            } else {\n                ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme, onDoubleTapHeart)\n            }',
+        "if (isViewOnce(m)) {\n        KpMessageFocusSlot(focusKey) { requestFocus ->\n            Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {",
       ) &&
+        chat.includes('if (pressed.optString("kind") != "DELETED") requestFocus()') &&
+        chat.includes(
+          "OnceTextRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onFocusedLongPress, theme, onDoubleTapHeart)",
+        ) &&
+        chat.includes(
+          "ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onFocusedLongPress, theme, onDoubleTapHeart)",
+        ) &&
         chat.indexOf("if (isViewOnce(m)) {") <
           chat.indexOf(
             'if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {',
@@ -8072,7 +8084,7 @@ const convBetween = (db, a, b) =>
       "r33-19: video bubble — VideoMessageRow takes pendingEcho + otherReadAt, reads UploadProgress for its clientId, decodes the pending frame from the local copy (docPath), swaps the play circle for a determinate ring + percentage while sending (indeterminate during the POST), ignores taps on the echo, and draws a scrim with the time and TickIcon (sending / sent / delivered / seen) like a photo; the duration moves to the top-start corner",
       // v163: the row also hands the ✕ (cancel send) down.
       chat.includes(
-        "VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend, onDoubleTapHeart)",
+        'VideoMessageRow(\n                    m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect,\n                    onReply,\n                    onLongPress = { pressed ->\n                        if (pressed.optString("kind") != "DELETED") requestFocus()\n                        onLongPress(pressed)\n                    },\n                    onOpen = onOpenVideo,\n                    theme = theme,\n                    onCancelSend = onCancelSend,\n                    onDoubleTapHeart = onDoubleTapHeart,\n                )',
       ) &&
         vid.includes(
           "    pendingEcho: Boolean,\n    otherReadAt: String?,\n    selectedIds: List<String>,",
@@ -8183,7 +8195,7 @@ const convBetween = (db, a, b) =>
         chat14.includes("onClick = {\n                        if (selecting && !pendingEcho) {") &&
         chat14.includes("selecting: Boolean = false,") &&
         chat14.includes(
-          "theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)",
+          "theme, onOpenDoc, onToggleSelect, onFocusedLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)",
         ),
     );
   }
@@ -8854,7 +8866,9 @@ const convBetween = (db, a, b) =>
         ) &&
         card.includes('else -> nav.navigate("chat/$id")') &&
         card.includes("val longPress = {") &&
-        card.includes("ListSelect.sheetFor = conv"),
+        card.includes("onFocusRequest()") &&
+        cl.includes("onFocusRequest = {") &&
+        cl.includes("ListSelect.sheetFor = conv"),
     );
     check(
       "r33-9: ProfilePeekSheet — KpSheet (no dialog) with an 84 dp avatar, name + badges, @handle or member count, about (2 lines), and icon-only raised actions Message / Voice call / Video call / Profile-or-Group info; calls hidden for bots and open message requests; a group gets group calls + group/<id>",

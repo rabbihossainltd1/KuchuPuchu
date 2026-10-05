@@ -437,8 +437,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
         "lineHeight = 20.sp,\n                                modifier = Modifier.padding(vertical = 6.dp),",
       ) &&
       chat.includes("Modifier.heightIn(min = 44.dp)") &&
+      chat.includes("KpMessageFocusSlot(focusKey) { requestFocus ->") &&
       chat.includes(
-        "ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme, onDoubleTapHeart)",
+        "ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onFocusedLongPress, theme, onDoubleTapHeart)",
       ),
   );
   check(
@@ -484,8 +485,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     "r71-20: the once-text row is dispatched to its own bubble (never the blurred-photo tile), and that row keeps the reply swipe, the long press and the heart",
     chat.includes('if (kind == "TEXT" && m.optText("body").isNotBlank()) {') &&
+      chat.includes("KpMessageFocusSlot(focusKey) { requestFocus ->") &&
+      chat.includes("val onFocusedLongPress: (JSONObject) -> Unit = { pressed ->") &&
       chat.includes(
-        "OnceTextRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, theme, onDoubleTapHeart)",
+        "OnceTextRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onFocusedLongPress, theme, onDoubleTapHeart)",
       ) &&
       chat.includes(
         "@Composable\n@OptIn(ExperimentalFoundationApi::class)\nprivate fun OnceTextRow(",
