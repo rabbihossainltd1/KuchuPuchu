@@ -83,7 +83,7 @@ check(
       "dialogWindow.setBackgroundBlurRadius(if (windowVisible) blurRadiusPx else 0)",
     ) &&
     chatList.includes("val windowVisible = visible && !modalOpen") &&
-    chatList.includes("alpha = if (modalOpen) 0f else 1f - hideProgress"),
+    chatList.includes("alpha = if (modalOpen) 0f else 1f"),
 );
 
 for (const line of lines) console.log(line);

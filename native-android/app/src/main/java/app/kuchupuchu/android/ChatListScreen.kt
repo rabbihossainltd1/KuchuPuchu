@@ -1076,7 +1076,7 @@ private fun FloatingBottomNav(
                 .size(capsuleWidth, capsuleHeight)
                 .graphicsLayer {
                     translationY = if (modalOpen) hideDistancePx else hideDistancePx * hideProgress
-                    alpha = if (modalOpen) 0f else 1f - hideProgress
+                    alpha = if (modalOpen) 0f else 1f
                 }
                 .then(if (windowVisible) Modifier else Modifier.clearAndSetSemantics {})
                 .clip(CircleShape)
