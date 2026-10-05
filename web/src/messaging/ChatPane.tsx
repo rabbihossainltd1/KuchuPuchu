@@ -84,15 +84,23 @@ import {
   TICK_LABELS,
   clockTime,
   conversationInitial,
+  conversationPeerId,
   conversationTitle,
   foldAlbums,
   groupByDay,
+  isBotConversation,
   isOneWayConversation,
   tickState,
   type ConversationRow,
   type MessageRow,
 } from "./protocol";
 import type { MessagingController } from "./useMessaging";
+import { isWebFeatureEnabled } from "../featureFlags";
+/* The two tiny calls modules the messaging chunk is allowed to import — a gate
+   and a launcher bridge, no engine, no peer runtime, no call CSS. The engine
+   itself stays in the lazy calls chunk. */
+import { callPlacement } from "../calls/callGate";
+import { launchCall } from "../calls/callBus";
 
 // Both surfaces are heavy (a zoom/pan stage, a thumbnail grid that resolves
 // every media URL) and neither is needed to read a chat, so they load on
@@ -528,6 +536,35 @@ export function ChatPane({
 
   const oneWay = isOneWayConversation(conversation);
   const editableWindowMs = EDITABLE_WINDOW_MS;
+
+  /**
+   * ChatScreen.kt:3799 decides whether a chat header carries the two call
+   * buttons, and the Web asks the same question of the same facts: not a group,
+   * not a bot, no open message request, no block wall, not muted for calls, and a
+   * peer to call. A group gets the pair drawn but DISABLED with the reason —
+   * the Web runs no mesh yet, and a button that silently did nothing would be
+   * worse than one that says why.
+   */
+  const callGate = callPlacement({
+    isGroup: conversation.isGroup,
+    botChat: isBotConversation(conversation) || oneWay,
+    requestOpen: conversation.requestPending,
+    blockWall: conversation.blockedByMe || conversation.blockedMe,
+    callMuted: conversation.mutedCall,
+    peerId: conversationPeerId(conversation),
+    callsEnabled: isWebFeatureEnabled("calls"),
+  });
+  const peerName = conversationTitle(conversation);
+  const startCall = (kind: "AUDIO" | "VIDEO") => {
+    const launched = launchCall({ id: conversationPeerId(conversation), name: peerName }, kind);
+    if (!launched) {
+      controller.announce(
+        callGate.group
+          ? "Group calls are not on the Web yet — start them from the phone."
+          : "Calling is not available in this browser session.",
+      );
+    }
+  };
   const groupedOwn = (message: MessageRow) => message.senderId === meId;
 
   /**
@@ -627,6 +664,48 @@ export function ChatPane({
           <span className={`socket-pill${controller.chatSocket === "open" ? " is-open" : ""}`}>
             {controller.chatSocket === "open" ? "Live" : "Reconnecting"}
           </span>
+          {/* The phone's two header glyphs. Disabled-with-reason for a group,
+              absent for every case ChatScreen.kt leaves absent. */}
+          {callGate.show ? (
+            <>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={
+                  callGate.group
+                    ? "Group voice call is not available on the Web"
+                    : `Voice call ${peerName}`
+                }
+                title={
+                  callGate.group
+                    ? "Group calls are not on the Web yet — start them from the phone."
+                    : undefined
+                }
+                disabled={callGate.group}
+                onClick={() => startCall("AUDIO")}
+              >
+                <Icon name="phone" size={19} />
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={
+                  callGate.group
+                    ? "Group video call is not available on the Web"
+                    : `Video call ${peerName}`
+                }
+                title={
+                  callGate.group
+                    ? "Group calls are not on the Web yet — start them from the phone."
+                    : undefined
+                }
+                disabled={callGate.group}
+                onClick={() => startCall("VIDEO")}
+              >
+                <Icon name="videoCall" size={21} />
+              </button>
+            </>
+          ) : null}
           {/* Native-only gaps are disclosed, not silently dropped: the browser
               cannot block screen capture, and media bytes are not sealed. */}
           <button
@@ -649,6 +728,15 @@ export function ChatPane({
               <li>{CAPABILITY_COPY.voiceRecorderNotice}</li>
               <li>{CAPABILITY_COPY.documentPreviewNotice}</li>
               <li>{CAPABILITY_COPY.forwardingNotice}</li>
+              {conversation.mutedCall ? (
+                <li>
+                  Calls are muted for this chat, so its call buttons are hidden — the phone does the
+                  same. Unmute it in the chat's mute chooser to bring them back.
+                </li>
+              ) : null}
+              {callGate.group ? (
+                <li>Group calls stay on the phone: the Web runs no group mesh yet.</li>
+              ) : null}
             </ul>
           </details>
         </div>

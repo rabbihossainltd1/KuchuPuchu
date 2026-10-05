@@ -21,10 +21,10 @@ export const MAX_RECONNECT_MS = 30_000;
 
 export type TimerHandle = { cancel(): void };
 
-export type ManagedSocketOptions = {
+export type ManagedSocketOptions<TFrame = SocketFrame> = {
   readonly path: string;
   readonly token: string;
-  readonly onFrame: (frame: SocketFrame) => void;
+  readonly onFrame: (frame: TFrame) => void;
   readonly onStatus?: (status: SocketStatus) => void;
   readonly webSocketImpl?: typeof WebSocket;
   readonly now?: () => number;
@@ -34,6 +34,14 @@ export type ManagedSocketOptions = {
   readonly maxReconnectMs?: number;
   /** Called before a reconnect attempt; return false to stop retrying. */
   readonly shouldReconnect?: () => boolean;
+  /**
+   * How a raw socket frame becomes a typed one. Defaults to the messaging
+   * parser; `/ws/call/:id` carries a different frame vocabulary but needs the
+   * SAME heartbeat and backoff — the CallSignal Durable Object counts a socket
+   * as alive only if it sent a data frame inside its own 45 s window, so a
+   * second hand-rolled socket would be a second way to get that wrong.
+   */
+  readonly parseFrame?: (raw: unknown) => TFrame | null;
 };
 
 export type ManagedSocket = {
@@ -63,13 +71,17 @@ function browserInterval(callback: () => void, delayMs: number): TimerHandle {
   return { cancel: () => window.clearInterval(id) };
 }
 
-export function createManagedSocket(options: ManagedSocketOptions): ManagedSocket {
+export function createManagedSocket<TFrame = SocketFrame>(
+  options: ManagedSocketOptions<TFrame>,
+): ManagedSocket {
   const WebSocketImpl = options.webSocketImpl ?? WebSocket;
   const now = options.now ?? (() => Date.now());
   const schedule = options.schedule ?? browserScheduler();
   const heartbeatMs = options.heartbeatMs ?? HEARTBEAT_INTERVAL_MS;
   const baseReconnectMs = options.baseReconnectMs ?? BASE_RECONNECT_MS;
   const maxReconnectMs = options.maxReconnectMs ?? MAX_RECONNECT_MS;
+  const parseFrame =
+    options.parseFrame ?? ((raw: unknown) => parseSocketFrame(raw) as TFrame | null);
 
   let current: WebSocket | null = null;
   let status: SocketStatus = "idle";
@@ -128,7 +140,7 @@ export function createManagedSocket(options: ManagedSocketOptions): ManagedSocke
 
     socket.onmessage = (event: MessageEvent) => {
       if (current !== socket) return;
-      const frame = parseSocketFrame(event.data);
+      const frame = parseFrame(event.data);
       if (frame) options.onFrame(frame);
     };
 

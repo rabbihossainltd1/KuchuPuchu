@@ -957,3 +957,10 @@ Owner: "ager session ei kaj korte korte dead hoye geche … kota kaj hoyeche" �
 - GATES: contract **61/61 cases, 3198 assertions** (case 61 = 217 checks); browser **117 tests** (8+10+76+23); npm run ci EXIT=0; SW 18 precached; entry 291.43 kB gzip 89.38; StatusWorkspace CSS 12.09 kB.
 - E2E NOTE: the status mock reuses the messaging helpers (signIn/ME/generateTestIdentity/sealFor/openFrom/makePng) so a reply is sealed with the same keys the chat tests use and the spec DECRYPTS the posted body to prove it opens to the typed words. Status ids in fixtures must be UUID-shaped: the client's statusPath guard refuses anything outside [0-9a-fA-F-].
 - NEXT: G calls (flag default-off; only with a measured participant cap for groups), H Web Push (VAPID design), I hardening.
+
+
+## Web P3 slice G — calls (2026-10-05)
+- Implemented flag-default-off 1:1 voice/video calls in `web/src/calls/`; Worker contract case 62 is green (252 checks), web typecheck is clean, and `docs/web-calls.md` records scope and native-only disclosures.
+- Fixed real WebRTC defects found by two-context testing: platform event forwarding/raw track unwrapping, SDP CRLF preservation, MediaStream association for tracks/transceivers, and ICE cursor advancement only after candidate application.
+- Added `test:web:calls:e2e` to package scripts and CI. Production `public/` remains unchanged.
+- Browser execution in this sandbox was blocked by missing host `libnspr4.so` for Playwright Chromium; the CI workflow installs Chromium with dependencies.

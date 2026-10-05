@@ -62,6 +62,24 @@ export type ConversationRow = {
    */
   readonly privateGroup: boolean;
   /**
+   * r69: MY mute choice, split the way the Worker stores it. `mutedCall` hides
+   * the chat header's call buttons entirely and silences the ring for this chat
+   * (the server withholds the push and the relay too); `mutedMsg` silences only
+   * the message tone. An older payload carries neither, and a missing flag means
+   * "not muted" — never the other way round.
+   */
+  readonly mutedCall: boolean;
+  readonly mutedMsg: boolean;
+  /**
+   * Owner round 32 (item 38) + round 34 (item 15): a stranger's unaccepted
+   * message request, and the directional block wall. Both kill the composer on
+   * the phone, and both remove the call buttons — `POST /api/calls` refuses with
+   * REQUEST_PENDING or BLOCKED, so a button that could only fail is not drawn.
+   */
+  readonly requestPending: boolean;
+  readonly blockedByMe: boolean;
+  readonly blockedMe: boolean;
+  /**
    * r71-18: whether the OTHER side lets me keep what they send here. The
    * worker answers `peerSave`; a false answer withholds Save and Forward on
    * their rows, which is the client half of "save and forward follow the
@@ -383,6 +401,13 @@ export function parseConversationRow(value: unknown): ConversationRow | null {
     // Withheld by an older payload means "allowed": the worker's own default is
     // `otherSave ?? true`, and a missing flag must not silently disable Save.
     peerSave: value.peerSave === undefined ? true : booleanish(value.peerSave),
+    // A missing mute/wall flag means "not muted, no wall": the Worker sends all
+    // four on every conversation payload, so an older one only predates them.
+    mutedCall: booleanish(value.mutedCall),
+    mutedMsg: booleanish(value.mutedMsg),
+    requestPending: booleanish(value.requestPending),
+    blockedByMe: booleanish(value.blockedByMe),
+    blockedMe: booleanish(value.blockedMe),
   };
 }
 

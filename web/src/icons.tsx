@@ -28,7 +28,16 @@ export type IconName =
   | "pencil"
   | "eye"
   | "hide"
-  | "flag";
+  | "flag"
+  | "phone"
+  | "phoneOff"
+  | "videoCall"
+  | "videoOff"
+  | "micOff"
+  | "screenShare"
+  | "callIn"
+  | "callOut"
+  | "speaker";
 
 const shapes: Record<IconName, ReactNode> = {
   chats: (
@@ -169,6 +178,64 @@ const shapes: Record<IconName, ReactNode> = {
     <>
       <path d="M6 20V4.5" />
       <path d="M6 5.2h11l-2 3.4 2 3.4H6z" />
+    </>
+  ),
+  /* The call glyphs. `phone` is the handset the phone app uses for a voice
+     call; `phoneOff` is the same handset on its side with the strike the end
+     button carries, so the destructive action reads as destructive. */
+  phone: (
+    <path d="M7.2 4.8 9.4 8l-1.5 1.7a14.4 14.4 0 0 0 6.4 6.4l1.7-1.5 3.2 2.2-.7 3a1.7 1.7 0 0 1-1.8 1.3C9.4 20.3 3.7 14.6 3 7.3a1.7 1.7 0 0 1 1.3-1.8l2.9-.7Z" />
+  ),
+  phoneOff: (
+    <>
+      <path d="M3.5 9.5c3-2.4 6.4-3.4 8.5-3.4s5.5 1 8.5 3.4l-1.4 2.4a2 2 0 0 1-2.2.9l-1.9-.5a2 2 0 0 1-1.4-1.3l-.3-1h-2.6l-.3 1a2 2 0 0 1-1.4 1.3l-1.9.5a2 2 0 0 1-2.2-.9L3.5 9.5Z" />
+      <path d="M4 4l16 16" />
+    </>
+  ),
+  videoCall: (
+    <>
+      <path d="M3.5 7.5h11v9h-11z" />
+      <path d="m14.5 11 5-3v8l-5-3z" />
+    </>
+  ),
+  videoOff: (
+    <>
+      <path d="M3.5 7.5h8M14.5 16.5h-11v-9h1.5" />
+      <path d="m14.5 11 5-3v8l-5-3v-2" />
+      <path d="M4 4l16 16" />
+    </>
+  ),
+  micOff: (
+    <>
+      <path d="M9.5 9.6V7a2.5 2.5 0 0 1 4.9-.7" />
+      <path d="M14.5 11.3v.7a2.5 2.5 0 0 1-4.3 1.8" />
+      <path d="M6.5 11.5a5.5 5.5 0 0 0 8.4 4.8M12 17v3M9 20h6" />
+      <path d="M4 4l16 16" />
+    </>
+  ),
+  screenShare: (
+    <>
+      <path d="M3.5 5.5h17v10.5h-17z" />
+      <path d="M8.5 19.5h7M12 16v3.5" />
+      <path d="M12 8.5v5M9.8 10.7 12 8.5l2.2 2.2" />
+    </>
+  ),
+  callIn: (
+    <>
+      <path d="M7.2 4.8 9.4 8l-1.5 1.7a14.4 14.4 0 0 0 6.4 6.4l1.7-1.5 3.2 2.2-.7 3a1.7 1.7 0 0 1-1.8 1.3C9.4 20.3 3.7 14.6 3 7.3a1.7 1.7 0 0 1 1.3-1.8l2.9-.7Z" />
+      <path d="M20.5 3.5 15 9M15 4.6V9h4.4" />
+    </>
+  ),
+  callOut: (
+    <>
+      <path d="M7.2 4.8 9.4 8l-1.5 1.7a14.4 14.4 0 0 0 6.4 6.4l1.7-1.5 3.2 2.2-.7 3a1.7 1.7 0 0 1-1.8 1.3C9.4 20.3 3.7 14.6 3 7.3a1.7 1.7 0 0 1 1.3-1.8l2.9-.7Z" />
+      <path d="M15 9l5.5-5.5M20.5 7.9V3.5h-4.4" />
+    </>
+  ),
+  speaker: (
+    <>
+      <path d="M4.5 9.5h3l4-3.5v12l-4-3.5h-3z" />
+      <path d="M15 9.2a4 4 0 0 1 0 5.6M17.6 6.8a7.6 7.6 0 0 1 0 10.4" />
     </>
   ),
 };

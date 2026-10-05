@@ -17,6 +17,15 @@
  *   src/worker/index.ts                    /api/statuses and its four sub-routes
  */
 
+import {
+  clockLabel,
+  daysBetween,
+  dhakaParts,
+  listStamp,
+  monthLabel,
+  weekdayLabel,
+} from "../time/dhakaTime";
+
 /* ------------------------------------------------------------ the numbers */
 
 /** The composer takes 500 chars and the Worker slices to 500 (`text.slice(0, 500)`). */
@@ -397,74 +406,12 @@ function describeArc(cx: number, cy: number, r: number, from: number, to: number
 
 /* -------------------------------------------------------------- the stamps */
 
-const DHAKA = "Asia/Dhaka";
-
-type DhakaParts = {
-  year: number;
-  month: number;
-  day: number;
-  hour: number;
-  minute: number;
-  weekday: number;
-};
-
-function dhakaParts(isoText: string): DhakaParts | null {
-  const time = Date.parse(isoText);
-  if (!Number.isFinite(time)) return null;
-  const format = new Intl.DateTimeFormat("en-US", {
-    timeZone: DHAKA,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    weekday: "short",
-    hour12: false,
-  });
-  const parts: Record<string, string> = {};
-  for (const part of format.formatToParts(new Date(time))) parts[part.type] = part.value;
-  const hour24 = Number(parts.hour ?? "0") % 24;
-  return {
-    year: Number(parts.year ?? 0),
-    month: Number(parts.month ?? 0),
-    day: Number(parts.day ?? 0),
-    hour: hour24,
-    minute: Number(parts.minute ?? 0),
-    weekday: weekdayIndex(parts.weekday ?? ""),
-  };
-}
-
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-function weekdayIndex(short: string): number {
-  const index = WEEKDAYS.indexOf(short.slice(0, 3));
-  return index < 0 ? 0 : index;
-}
-
-/** `z.dayOfWeek.toString().take(3)` with only the first letter capitalised. */
-function weekdayLabel(index: number): string {
-  const short = WEEKDAYS[index] ?? "Mon";
-  return short[0]! + short.slice(1).toLowerCase();
-}
-
-function monthLabel(month: number): string {
-  const short = MONTHS[month - 1] ?? "Jan";
-  return short[0]! + short.slice(1).toLowerCase();
-}
-
-/** The phone's `%d:%02d %s` with a 12-hour clock: "4:39 PM". */
-function clockLabel(hour: number, minute: number): string {
-  const twelve = hour % 12 === 0 ? 12 : hour % 12;
-  return `${twelve}:${String(minute).padStart(2, "0")} ${hour >= 12 ? "PM" : "AM"}`;
-}
-
-/** Calendar days between two Dhaka dates, from the epoch-day difference. */
-function daysBetween(from: DhakaParts, to: DhakaParts): number {
-  const epochDay = (parts: DhakaParts) =>
-    Date.UTC(parts.year, parts.month - 1, parts.day) / 86_400_000;
-  return Math.round(epochDay(to) - epochDay(from));
-}
+/**
+ * The Dhaka-zone primitives live in `time/dhakaTime.ts`: the Calls tab needs the
+ * very same `listStamp` the viewers sheet uses, and one `Theme.kt` function on
+ * the phone must not become two copies here. `listStamp` is re-exported below so
+ * every existing importer keeps its path.
+ */
 
 /**
  * The viewer header's stamp — `statusStamp`: "Today at 4:39 PM", "Yes at 4:39
@@ -491,21 +438,14 @@ export function statusStamp(isoText: string, nowMs: number = Date.now()): string
  * "Today at" prefix, so "3 updates · 4:39 PM" never wraps.
  */
 export function statusStampShort(isoText: string, nowMs: number = Date.now()): string {
-  if (!isoText) return "";
-  const then = dhakaParts(isoText);
-  const now = dhakaParts(new Date(nowMs).toISOString());
-  if (!then || !now) return "";
-  const days = daysBetween(then, now);
-  if (days === 0) return clockLabel(then.hour, then.minute);
-  if (days === 1) return "Yes";
-  if (days < 7) return weekdayLabel(then.weekday);
-  return `${then.day} ${monthLabel(then.month)}`;
+  return listStamp(isoText, nowMs);
 }
 
-/** The viewers sheet's stamp — `listStamp` in Theme.kt: same buckets, no prefix. */
-export function listStamp(isoText: string, nowMs: number = Date.now()): string {
-  return statusStampShort(isoText, nowMs);
-}
+/**
+ * The viewers sheet's stamp — `listStamp` in Theme.kt: same buckets, no prefix.
+ * Shared with the Calls tab, which prints the identical string on a history row.
+ */
+export { listStamp } from "../time/dhakaTime";
 
 /**
  * When a status expires, for the "expires in" line the phone does not have but a
