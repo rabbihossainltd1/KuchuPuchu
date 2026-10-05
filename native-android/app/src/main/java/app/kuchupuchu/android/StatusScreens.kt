@@ -1345,12 +1345,13 @@ private fun StatusMenuSheet(
     onHide: () -> Unit,
     onReport: () -> Unit,
 ) {
-    KpRegisterModalBlur()
+    val blurRegistration = KpRegisterModalBlur()
+    val sheetState = KpRememberModalBottomSheetState(blurRegistration)
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = GlassSheetSurface,
         scrimColor = Color.Black.copy(alpha = 0.10f),
-        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheetState,
     ) {
         Column(
             Modifier

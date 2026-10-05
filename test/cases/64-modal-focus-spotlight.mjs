@@ -60,16 +60,18 @@ check(
     deleteAnim.includes("val targetWidth = maxWidthPx.coerceAtLeast(1)"),
 );
 check(
-  "spotlight bitmap overlays the source at exact bounds, clips to its stored shape, and is not scaled into a crop",
+  "spotlight bitmap uses a non-touchable window above sheets, zooms while opening, and returns to exact source bounds",
   kpApp.indexOf("Surface(Modifier.fillMaxSize().blur(modalBlurRadius)") <
     kpApp.indexOf("KpModalFocusOverlay(") &&
     focusOverlay.includes("snapshot.boundsInRoot.left.roundToInt()") &&
     focusOverlay.includes("snapshot.boundsInRoot.top.roundToInt()") &&
     focusOverlay.includes(".size(width, height)") &&
     focusOverlay.includes(".clip(snapshot.shape)") &&
-    focusOverlay.includes(".graphicsLayer { alpha = t }") &&
-    !focusOverlay.includes("scaleX") &&
-    !focusOverlay.includes("translationY") &&
+    focusOverlay.includes("androidx.compose.ui.window.Dialog(") &&
+    focusOverlay.includes("FLAG_NOT_TOUCHABLE") &&
+    focusOverlay.includes("scaleX = zoom") &&
+    focusOverlay.includes("translationY = -with(density) { 6.dp.toPx() } * t") &&
+    focusOverlay.includes("alpha = t") &&
     ui.includes("val shape: Shape") &&
     deleteAnim.includes("val bubbleShapes = mutableMapOf<String, Shape>()") &&
     !focusOverlay.includes(".shadow("),

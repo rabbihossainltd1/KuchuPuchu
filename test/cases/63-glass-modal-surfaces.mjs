@@ -29,25 +29,41 @@ check(
     theme.includes("val GlassSheetEdge: Color"),
 );
 check(
-  "shared modal state blurs the entire app background at high strength and releases cleanly",
+  "modal blur is reference-counted, releases as a sheet targets Hidden, and reacquires if a swipe reverses",
   ui.includes("internal object KpModalBlurState") &&
+    ui.includes("internal class KpModalBlurRegistration") &&
+    ui.includes("visibleWindowCount") &&
+    ui.includes("hasVisibleWindow") &&
     ui.includes("fun register()") &&
     ui.includes("fun unregister()") &&
+    ui.includes("fun unregisterWindow()") &&
+    ui.includes("fun acquire()") &&
+    ui.includes("fun release()") &&
+    ui.includes("fun retain()") &&
+    ui.includes("fun dispose()") &&
+    ui.includes("DisposableEffect(registration)") &&
+    ui.includes("target == androidx.compose.material3.SheetValue.Hidden") &&
     ui.includes("KpModalBlurState.unregister()") &&
+    ui.includes("internal fun KpRememberModalBottomSheetState(") &&
     kpApp.includes(".blur(modalBlurRadius)") &&
     kpApp.includes("modalBlur.animateTo(30f, tween(220))") &&
     kpApp.includes("else modalBlur.snapTo(0f)"),
 );
 check(
-  "the pressed chat/message crop stays sharp at its source bounds and source shape without a drop shadow",
+  "the source crop draws above a separate modal window, zooms slightly, returns to source bounds, and adds no shadow",
   ui.includes("internal object KpModalFocusState") &&
     ui.includes("DeleteAnim.capture(") &&
     ui.includes("forceFresh = true") &&
-    ui.includes(".graphicsLayer { alpha = t }") &&
-    !ui.includes("scaleX = 1f + 0.035f * t") &&
-    !ui.includes("translationY = -with(density) { 8.dp.toPx() } * t") &&
+    ui.includes("androidx.compose.ui.window.Dialog(") &&
+    ui.includes("FLAG_NOT_TOUCHABLE") &&
+    ui.includes("scaleX = zoom") &&
+    ui.includes("translationY = -with(density) { 6.dp.toPx() } * t") &&
+    ui.includes("alpha = t") &&
+    ui.includes(".clip(snapshot.shape)") &&
     kpApp.indexOf("Surface(Modifier.fillMaxSize().blur(modalBlurRadius)") <
       kpApp.indexOf("KpModalFocusOverlay(") &&
+    kpApp.includes("animateFloatAsState(") &&
+    kpApp.includes("targetValue = if (modalActive && focusedItem != null) 1f else 0f") &&
     kpApp.includes("KpModalFocusState.clear()") &&
     !ui.includes(".shadow("),
 );
@@ -104,7 +120,7 @@ check(
 );
 check(
   "home nav native window is removed while any sheet is open, preventing the extra blur box",
-  chatList.includes("val modalOpen = KpModalBlurState.isActive") &&
+  chatList.includes("val modalOpen = KpModalBlurState.hasVisibleWindow") &&
     chatList.includes(
       "val dialogAttached = !modalOpen && (windowVisible || slideProgress.value < 1f)",
     ) &&
@@ -113,6 +129,9 @@ check(
     chatList.includes(
       "dialogWindow.setBackgroundBlurRadius((blurRadiusPx * fraction).roundToInt())",
     ) &&
+    chatList.includes("decorFitsSystemWindows = true") &&
+    chatList.includes("params.y = windowYOffsetPx") &&
+    !chatList.includes("translationY = hideDistancePx") &&
     chatList.includes(
       "if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dialogWindow?.setBackgroundBlurRadius(0)",
     ),

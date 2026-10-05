@@ -78,7 +78,7 @@ check(
     chatList.includes("val gap = 4.dp") &&
     chatList.includes("val capsulePadding = 6.dp") &&
     chatList.includes("if (navVisible) 84.dp else 2.dp") &&
-    chatList.includes("(capsuleHeight + 18.dp).toPx()"),
+    chatList.includes("val exitTravelPx = capsuleHeightPx + with(density) { 18.dp.roundToPx() }"),
 );
 check(
   "profile stays inside the home shell, remains selected there, and returns to Chats without losing the bar",
@@ -114,6 +114,11 @@ check(
     chatList.includes("copy(alpha = 0.28f)") &&
     chatList.includes("setColor(glassFill.toArgb())") &&
     chatList.includes("params.format = PixelFormat.TRANSLUCENT") &&
+    chatList.includes("decorFitsSystemWindows = true") &&
+    chatList.includes("params.x = 0") &&
+    chatList.includes("params.y = windowYOffsetPx") &&
+    chatList.includes("params.setFitInsetsSides(0)") &&
+    chatList.includes("params.setFitInsetsTypes(0)") &&
     !chatList.includes(".background(glassFill)") &&
     chatList.includes(
       "dialogWindow.setBackgroundBlurRadius((blurRadiusPx * fraction).roundToInt())",
@@ -132,7 +137,13 @@ check(
     chatList.includes("if (dialogAttached) {") &&
     chatList.includes("dialogWindow.decorView.elevation = 0f") &&
     chatList.includes("dialogWindow?.setBackgroundBlurRadius(0)") &&
-    chatList.includes("translationY = hideDistancePx * slideProgress.value") &&
+    chatList.includes(
+      "val windowYOffsetPx = bottomOffsetPx - (exitTravelPx * slideProgress.value).roundToInt()",
+    ) &&
+    chatList.includes("positionChanged") &&
+    chatList.includes("params.x = 0") &&
+    chatList.includes("params.y = windowYOffsetPx") &&
+    !chatList.includes("translationY = hideDistancePx") &&
     chatList.includes("slideProgress.snapTo(1f)") &&
     chatList.includes("params.windowAnimations = 0") &&
     chatList.indexOf("FloatingBottomNav(") < chatList.indexOf("E2eeRestoreGate()") &&
@@ -147,7 +158,7 @@ check(
     ) &&
     chatRoute.includes('composable("chat/{id}") { entry ->') &&
     kpApp.includes('if (targetState.destination.route == "main") fadeOut(tween(180))') &&
-    chatList.includes("translationY = hideDistancePx * slideProgress.value") &&
+    chatList.includes("params.y = windowYOffsetPx") &&
     chatList.includes("targetValue = if (windowVisible) 0f else 1f") &&
     chatList.includes("tween(if (windowVisible) 450 else 320, easing = slideEasing)"),
 );

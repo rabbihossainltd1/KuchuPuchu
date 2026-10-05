@@ -63,11 +63,16 @@ check(
     nav.includes(".offset(x = indicatorX, y = indicatorY)"),
 );
 check(
-  "the pill rises from below whenever shown and reverses downward when hidden",
+  "the native pill window moves vertically into and out of view with a fixed horizontal anchor",
   nav.includes("val slideProgress = remember { Animatable(1f) }") &&
     nav.includes("targetValue = if (windowVisible) 0f else 1f") &&
     nav.includes("tween(if (windowVisible) 450 else 320, easing = slideEasing)") &&
-    nav.includes("translationY = hideDistancePx * slideProgress.value"),
+    nav.includes(
+      "val windowYOffsetPx = bottomOffsetPx - (exitTravelPx * slideProgress.value).roundToInt()",
+    ) &&
+    nav.includes("params.x = 0") &&
+    nav.includes("params.y = windowYOffsetPx") &&
+    !nav.includes("translationY = hideDistancePx"),
 );
 check(
   "a native nav Dialog is gated to the home route and hidden during a non-minimized CallGate",
@@ -93,6 +98,11 @@ check(
   "the capsule uses its translucent rounded window background as the real local blur mask, with no Compose double-tint or border",
   nav.includes("setColor(glassFill.toArgb())") &&
     nav.includes("params.format = PixelFormat.TRANSLUCENT") &&
+    nav.includes("decorFitsSystemWindows = true") &&
+    nav.includes("params.x = 0") &&
+    nav.includes("params.y = windowYOffsetPx") &&
+    nav.includes("params.setFitInsetsSides(0)") &&
+    nav.includes("params.setFitInsetsTypes(0)") &&
     nav.includes("val fraction = (1f - slideProgress.value).coerceIn(0f, 1f)") &&
     !nav.includes(".background(glassFill)") &&
     nav.includes(".background(indicatorColor)") &&
@@ -122,7 +132,7 @@ check(
       .includes(".border("),
 );
 check(
-  "the focused message is redrawn at the captured source bounds and clipped to its actual shape without scale-cropping",
+  "the focused message uses an above-sheet touch-through window and reverses its slight zoom back to the captured source bounds",
   deleteAnim.includes("val bubbleShapes = mutableMapOf<String, Shape>()") &&
     chat.includes("DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), bubbleShape)") &&
     chat.includes(
@@ -132,20 +142,29 @@ check(
     ui.includes("val shape: Shape") &&
     focusOverlay.includes(".size(width, height)") &&
     focusOverlay.includes(".clip(snapshot.shape)") &&
-    focusOverlay.includes(".graphicsLayer { alpha = t }") &&
-    !focusOverlay.includes("scaleX") &&
-    !focusOverlay.includes("translationY"),
+    focusOverlay.includes("androidx.compose.ui.window.Dialog(") &&
+    focusOverlay.includes("FLAG_NOT_TOUCHABLE") &&
+    focusOverlay.includes("scaleX = zoom") &&
+    focusOverlay.includes("translationY = -with(density) { 6.dp.toPx() } * t") &&
+    focusOverlay.includes("alpha = t"),
 );
 check(
-  "backdrop blur keeps the 220ms opening tween and snaps off at the sheet owner boundary on dismiss",
+  "backdrop blur releases as sheets target Hidden while nav stays suppressed until the modal window disposes",
   kpApp.includes("modalBlur.animateTo(30f, tween(220))") &&
     kpApp.includes("else modalBlur.snapTo(0f)") &&
+    sharedSheet.includes("KpRememberModalBottomSheetState(blurRegistration)") &&
     sharedSheet.indexOf("KpRegisterModalBlur()") >= 0 &&
     sharedSheet.indexOf("KpRegisterModalBlur()") < sharedSheet.indexOf("ModalBottomSheet(") &&
     sharedSheet.slice(sharedSheet.indexOf("ModalBottomSheet(")).indexOf("KpRegisterModalBlur()") <
       0 &&
+    emojiSheet.includes("KpRememberModalBottomSheetState(blurRegistration)") &&
     emojiSheet.indexOf("KpRegisterModalBlur()") >= 0 &&
-    emojiSheet.indexOf("KpRegisterModalBlur()") < emojiSheet.indexOf("ModalBottomSheet("),
+    emojiSheet.indexOf("KpRegisterModalBlur()") < emojiSheet.indexOf("ModalBottomSheet(") &&
+    ui.includes("target == androidx.compose.material3.SheetValue.Hidden") &&
+    ui.includes("registration.release()") &&
+    ui.includes("registration.retain()") &&
+    ui.includes("fun unregisterWindow()") &&
+    chatList.includes("val modalOpen = KpModalBlurState.hasVisibleWindow"),
 );
 
 for (const line of lines) console.log(line);

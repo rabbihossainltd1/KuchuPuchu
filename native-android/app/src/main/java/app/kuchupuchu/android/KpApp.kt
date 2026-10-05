@@ -13,6 +13,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -166,6 +167,12 @@ fun KpApp() {
     }
 
     val modalActive = KpModalBlurState.isActive
+    val focusedItem = KpModalFocusState.focusedItem
+    val focusProgress by animateFloatAsState(
+        targetValue = if (modalActive && focusedItem != null) 1f else 0f,
+        animationSpec = tween(if (modalActive) 220 else 180),
+        label = "modalFocusZoom",
+    )
     val modalBlur = remember { Animatable(0f) }
     LaunchedEffect(modalActive) {
         if (modalActive) modalBlur.animateTo(30f, tween(220)) else modalBlur.snapTo(0f)
@@ -173,6 +180,8 @@ fun KpApp() {
     val modalBlurRadius = modalBlur.value.dp
     LaunchedEffect(modalActive) {
         if (!modalActive) {
+            // Keep the captured crop alive for the full return animation even
+            // though blur itself is released as soon as a sheet targets Hidden.
             kotlinx.coroutines.delay(260)
             if (!KpModalBlurState.isActive) KpModalFocusState.clear()
         }
@@ -377,8 +386,8 @@ fun KpApp() {
             KpUpdateGate()
         }
     }
-    if (modalBlurRadius > 0.dp) {
-        KpModalFocusOverlay((modalBlurRadius / 30.dp).coerceIn(0f, 1f))
+    if (focusedItem != null && focusProgress > 0f) {
+        KpModalFocusOverlay(focusProgress)
     }
 }
 }

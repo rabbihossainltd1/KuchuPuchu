@@ -101,27 +101,96 @@ import kotlin.math.roundToInt
  */
 internal object KpModalBlurState {
     private var activeCount by mutableIntStateOf(0)
+    private var visibleWindowCount by mutableIntStateOf(0)
 
+    /** Drives the app's RenderEffect blur. */
     val isActive: Boolean
         get() = activeCount > 0
+
+    /** Keeps the home nav removed until the native modal window has left composition. */
+    val hasVisibleWindow: Boolean
+        get() = visibleWindowCount > 0
 
     fun register() {
         if (activeCount == 0) KpModalFocusState.onModalOpening()
         activeCount += 1
+        visibleWindowCount += 1
     }
 
+    /** Reopen a sheet that reversed a hide gesture without discarding its focus crop. */
+    fun retain() {
+        activeCount += 1
+    }
+
+    /** Release just the backdrop blur when a sheet first targets Hidden. */
     fun unregister() {
         activeCount = (activeCount - 1).coerceAtLeast(0)
+    }
+
+    fun unregisterWindow() {
+        visibleWindowCount = (visibleWindowCount - 1).coerceAtLeast(0)
+    }
+}
+
+/** Idempotent owner token: blur may release before its modal window is disposed. */
+internal class KpModalBlurRegistration {
+    private var blurRegistered = false
+    private var windowRegistered = false
+
+    fun acquire() {
+        if (windowRegistered) return
+        windowRegistered = true
+        blurRegistered = true
+        KpModalBlurState.register()
+    }
+
+    fun release() {
+        if (!blurRegistered) return
+        blurRegistered = false
+        KpModalBlurState.unregister()
+    }
+
+    fun retain() {
+        if (!windowRegistered || blurRegistered) return
+        blurRegistered = true
+        KpModalBlurState.retain()
+    }
+
+    fun dispose() {
+        release()
+        if (!windowRegistered) return
+        windowRegistered = false
+        KpModalBlurState.unregisterWindow()
     }
 }
 
 @Composable
-internal fun KpRegisterModalBlur() {
-    DisposableEffect(Unit) {
-        KpModalBlurState.register()
-        onDispose { KpModalBlurState.unregister() }
+internal fun KpRegisterModalBlur(): KpModalBlurRegistration {
+    val registration = remember { KpModalBlurRegistration() }
+    DisposableEffect(registration) {
+        registration.acquire()
+        onDispose { registration.dispose() }
     }
+    return registration
 }
+
+/**
+ * Sheet blur tracks the sheet's actual target, not its later onDismiss callback.
+ * Hidden releases as the exit begins; reversing the gesture reacquires the blur.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+internal fun KpRememberModalBottomSheetState(
+    registration: KpModalBlurRegistration,
+): androidx.compose.material3.SheetState =
+    androidx.compose.material3.rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+        confirmValueChange = { target ->
+            if (target == androidx.compose.material3.SheetValue.Hidden) registration.release()
+            else registration.retain()
+            true
+        },
+    )
 
 /** A sharp, source-aligned copy of the item that opened a modal sheet. */
 internal data class KpModalFocusSnapshot(
@@ -165,7 +234,13 @@ internal object KpModalFocusState {
     }
 }
 
-/** Draw the source crop sharply above the app blur, without shifting or shrinking it. */
+/**
+ * Draws the captured source crop in a transparent, non-touchable window above
+ * modal sheets. An Activity-layer child cannot overdraw Compose's separate
+ * Dialog window, so the dedicated window is required when a sheet covers the
+ * selected bubble. The crop zooms slightly on entry and scales back to its
+ * exact source bounds on dismissal.
+ */
 @Composable
 internal fun KpModalFocusOverlay(progress: Float) {
     val snapshot = KpModalFocusState.focusedItem ?: return
@@ -173,22 +248,81 @@ internal fun KpModalFocusOverlay(progress: Float) {
     val t = progress.coerceIn(0f, 1f)
     val width = with(density) { snapshot.boundsInRoot.width.toDp() }
     val height = with(density) { snapshot.boundsInRoot.height.toDp() }
-    Image(
-        bitmap = snapshot.image,
-        contentDescription = null,
-        contentScale = ContentScale.FillBounds,
-        modifier =
-            Modifier
-                .offset {
-                    IntOffset(
-                        snapshot.boundsInRoot.left.roundToInt(),
-                        snapshot.boundsInRoot.top.roundToInt(),
-                    )
+    val dialogProperties =
+        androidx.compose.ui.window.DialogProperties(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false,
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        )
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = {},
+        properties = dialogProperties,
+    ) {
+        val dialogView = androidx.compose.ui.platform.LocalView.current
+        val dialogWindow =
+            (dialogView.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
+        DisposableEffect(dialogWindow) {
+            if (dialogWindow != null) {
+                dialogWindow.setWindowAnimations(0)
+                dialogWindow.setBackgroundDrawable(
+                    android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT),
+                )
+                dialogWindow.setDimAmount(0f)
+                dialogWindow.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+                dialogView.elevation = 0f
+                dialogView.translationZ = 0f
+                dialogWindow.decorView.elevation = 0f
+                dialogWindow.decorView.translationZ = 0f
+                val params = dialogWindow.attributes
+                params.format = android.graphics.PixelFormat.TRANSLUCENT
+                params.gravity = android.view.Gravity.TOP or android.view.Gravity.START
+                params.width = android.view.WindowManager.LayoutParams.MATCH_PARENT
+                params.height = android.view.WindowManager.LayoutParams.MATCH_PARENT
+                params.x = 0
+                params.y = 0
+                params.windowAnimations = 0
+                params.flags =
+                    (params.flags or
+                        android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                        android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE) and
+                        android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
+                dialogWindow.attributes = params
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                    dialogWindow.setBackgroundBlurRadius(0)
                 }
-                .size(width, height)
-                .clip(snapshot.shape)
-                .graphicsLayer { alpha = t },
-    )
+            }
+            onDispose { }
+        }
+        androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+            Image(
+                bitmap = snapshot.image,
+                contentDescription = null,
+                contentScale = ContentScale.FillBounds,
+                modifier =
+                    Modifier
+                        .offset {
+                            IntOffset(
+                                snapshot.boundsInRoot.left.roundToInt(),
+                                snapshot.boundsInRoot.top.roundToInt(),
+                            )
+                        }
+                        .size(width, height)
+                        // Keep the source shape inside the transformed layer so
+                        // the slight zoom does not crop its edge corners.
+                        .graphicsLayer {
+                            val zoom = 1f + 0.03f * t
+                            scaleX = zoom
+                            scaleY = zoom
+                            translationY = -with(density) { 6.dp.toPx() } * t
+                            alpha = t
+                            transformOrigin = TransformOrigin.Center
+                        }
+                        .clip(snapshot.shape),
+            )
+        }
+    }
 }
 
 /**
@@ -1188,14 +1322,15 @@ fun KpSheet(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     // Own the blur registration at the same composition boundary as this
-    // sheet. When the caller removes KpSheet, disposal snaps the backdrop clear
-    // immediately instead of waiting for ModalBottomSheet's exit composition.
-    KpRegisterModalBlur()
+    // sheet. Its target-Hidden callback releases blur at exit start, not after
+    // ModalBottomSheet's animated onDismissRequest callback.
+    val blurRegistration = KpRegisterModalBlur()
+    val sheetState = KpRememberModalBottomSheetState(blurRegistration)
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = GlassSheetSurface,
         scrimColor = Color.Black.copy(alpha = 0.10f),
-        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheetState,
     ) {
         Column(
             Modifier

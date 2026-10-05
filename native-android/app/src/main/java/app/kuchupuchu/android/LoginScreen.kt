@@ -52,7 +52,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -1128,10 +1127,11 @@ fun CountryPickerSheet(
     onPick: (KpCountry) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    KpRegisterModalBlur()
+    val blurRegistration = KpRegisterModalBlur()
+    val sheetState = KpRememberModalBottomSheetState(blurRegistration)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheetState,
         // Keep the explicit theme palette, now with the shared glass tint.
         containerColor = GlassSheetSurface,
         scrimColor = Color.Black.copy(alpha = 0.10f),

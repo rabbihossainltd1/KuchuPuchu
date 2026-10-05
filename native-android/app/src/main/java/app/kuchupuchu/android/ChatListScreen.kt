@@ -1016,7 +1016,9 @@ private fun FloatingBottomNav(
     // The reference pill is a 28%-opaque blue glass card; the system blur is
     // applied to the native window behind it, not faked with a border/shadow.
     val glassFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.28f) else Card.copy(alpha = 0.76f)
-    val modalOpen = KpModalBlurState.isActive
+    // Blur can release at target-Hidden, but keep the nav suppressed until the
+    // sheet's native window finishes its exit and leaves composition.
+    val modalOpen = KpModalBlurState.hasVisibleWindow
     val windowVisible = visible
     val slideProgress = remember { Animatable(1f) }
     val slideEasing = remember { CubicBezierEasing(0.32f, 0.8f, 0.3f, 1f) }
@@ -1043,7 +1045,10 @@ private fun FloatingBottomNav(
     val indicatorY = capsulePadding + (itemH - indicatorSize) * 0.5f
     val dialogAttached = !modalOpen && (windowVisible || slideProgress.value < 1f)
     val windowInteractive = windowVisible && slideProgress.value <= 0.05f
-    val hideDistancePx = with(density) { (capsuleHeight + 18.dp).toPx() }
+    val exitTravelPx = capsuleHeightPx + with(density) { 18.dp.roundToPx() }
+    // Move the native window itself, not only its Compose child: the rounded
+    // blur mask and glass fill must travel together. x stays pinned at zero.
+    val windowYOffsetPx = bottomOffsetPx - (exitTravelPx * slideProgress.value).roundToInt()
     // Android's background-blur API blurs only through the WINDOW background,
     // not a Compose child background. Keep the glass tint on the floating
     // window drawable itself so the platform has a translucent rounded blur
@@ -1063,7 +1068,10 @@ private fun FloatingBottomNav(
                 dismissOnBackPress = false,
                 dismissOnClickOutside = false,
                 usePlatformDefaultWidth = false,
-                decorFitsSystemWindows = false,
+                // Keep the native Dialog floating/translucent so Android's
+                // per-window background-blur mask is supported. decorFits=false
+                // makes Compose use a non-floating full-screen Window.
+                decorFitsSystemWindows = true,
             ),
         ) {
             val dialogView = LocalView.current
@@ -1072,22 +1080,33 @@ private fun FloatingBottomNav(
                 if (dialogWindow != null) {
                     dialogWindow.setWindowAnimations(0)
                     dialogWindow.setBackgroundDrawable(pillWindowBackground)
+                    dialogView.elevation = 0f
+                    dialogView.translationZ = 0f
                     dialogWindow.decorView.elevation = 0f
                     dialogWindow.decorView.translationZ = 0f
                     dialogWindow.setDimAmount(0f)
                     val params = dialogWindow.attributes
                     params.format = PixelFormat.TRANSLUCENT
-                    params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
                     params.width = capsuleWidthPx
                     params.height = capsuleHeightPx
                     params.windowAnimations = 0
+                    params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
                     params.x = 0
-                    params.y = bottomOffsetPx
+                    params.y = windowYOffsetPx
                     params.flags =
                         (params.flags or
+                            WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or
+                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL) and
                             WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        // Use physical-screen coordinates for the explicit
+                        // navigation-bar inset above; do not inset the floating
+                        // capsule a second time as decorFits would otherwise.
+                        params.setFitInsetsSides(0)
+                        params.setFitInsetsTypes(0)
+                    }
                     dialogWindow.attributes = params
                 }
                 onDispose {
@@ -1098,18 +1117,38 @@ private fun FloatingBottomNav(
                 if (dialogWindow != null) {
                     val params = dialogWindow.attributes
                     var flags = params.flags or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                         WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                     flags = flags and WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
                     flags = if (windowInteractive) flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
                     else flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                    if (params.flags != flags) {
+                    val positionChanged =
+                        params.x != 0 ||
+                            params.y != windowYOffsetPx ||
+                            params.gravity != (Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL) ||
+                            params.width != capsuleWidthPx ||
+                            params.height != capsuleHeightPx
+                    val fitInsetsChanged =
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                            (params.fitInsetsSides != 0 || params.fitInsetsTypes != 0)
+                    if (params.flags != flags || positionChanged || fitInsetsChanged) {
                         params.flags = flags
+                        params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                        params.width = capsuleWidthPx
+                        params.height = capsuleHeightPx
+                        params.x = 0
+                        params.y = windowYOffsetPx
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            params.setFitInsetsSides(0)
+                            params.setFitInsetsTypes(0)
+                        }
                         dialogWindow.attributes = params
                     }
                     // Fade the real per-window blur with the pill itself. This
-                    // avoids a detached blur capsule or touch-blocking window
-                    // flashing before the nav has risen onto the screen.
+                    // mask now moves with the floating window instead of leaving
+                    // a stationary blur/shadow ghost as the bar exits.
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                         val fraction = (1f - slideProgress.value).coerceIn(0f, 1f)
                         dialogWindow.setBackgroundBlurRadius((blurRadiusPx * fraction).roundToInt())
@@ -1119,9 +1158,6 @@ private fun FloatingBottomNav(
             Box(
                 Modifier
                     .size(capsuleWidth, capsuleHeight)
-                    .graphicsLayer {
-                        translationY = hideDistancePx * slideProgress.value
-                    }
                     .then(if (windowInteractive) Modifier else Modifier.clearAndSetSemantics {})
                     .clip(CircleShape),
             ) {

@@ -1145,7 +1145,7 @@ const convBetween = (db, a, b) =>
     !chat.includes("listState.layoutInfo.visibleItemsInfo.firstOrNull") &&
       chat.includes("if (mid in selected) selected.remove(mid)") &&
       chat.includes("ModalBottomSheet(") &&
-      chat.includes("skipPartiallyExpanded = true") &&
+      chat.includes("KpRememberModalBottomSheetState(blurRegistration)") &&
       chat.includes("var actionFor by remember { mutableStateOf<JSONObject?>(null) }") &&
       chat.includes("actionFor?.let { m ->") &&
       chat.includes('listOf("👍", "❤️", "😂", "😮", "😢", "🙏").forEach { e ->') &&
