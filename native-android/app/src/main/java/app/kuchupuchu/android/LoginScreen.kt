@@ -1134,8 +1134,9 @@ fun CountryPickerSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         // Keep the explicit theme palette, now with the shared glass tint.
         containerColor = GlassSheetSurface,
+        scrimColor = Color.Black.copy(alpha = 0.10f),
     ) {
-        KpApplyModalWindowBlur()
+        KpRegisterModalBlur()
         var query by remember { mutableStateOf("") }
         Column(
             Modifier

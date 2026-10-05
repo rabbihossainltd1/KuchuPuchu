@@ -8769,9 +8769,10 @@ private fun EmojiSheetDialog(onPick: (String) -> Unit) {
         onDismissRequest = { onPick("") },
         modifier = kpGlassSheetModifier(),
         containerColor = GlassSheetSurface,
+        scrimColor = Color.Black.copy(alpha = 0.10f),
         sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
-        KpApplyModalWindowBlur()
+        KpRegisterModalBlur()
         Column(
             Modifier
                 .fillMaxWidth()

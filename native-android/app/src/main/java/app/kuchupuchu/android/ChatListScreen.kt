@@ -1,5 +1,9 @@
 package app.kuchupuchu.android
 
+import android.graphics.drawable.GradientDrawable
+import android.os.Build
+import android.view.Gravity
+import android.view.WindowManager
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -86,7 +90,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -104,6 +110,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
@@ -123,12 +130,16 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.navigation.NavController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -395,7 +406,7 @@ fun ChatListScreen(nav: NavController) {
     }
     LaunchedEffect(tab) { navVisible = true }
     val fabBottom by animateDpAsState(
-        if (navVisible) 86.dp else 2.dp,
+        if (navVisible) 74.dp else 2.dp,
         tween(450, easing = FastOutSlowInEasing),
         label = "fabBottom",
     )
@@ -587,11 +598,15 @@ fun ChatListScreen(nav: NavController) {
             unreadChats = unreadChats,
             unseenStatus = unseenStatus,
             visible = navVisible,
-            modifier = Modifier.align(Alignment.BottomCenter),
         ) { i ->
             haptics.tap()
             if (i != 0) ListSelect.clear()
-            tab = i
+            if (i == 3) {
+                val myId = Store.myId()
+                if (myId.isNotBlank()) nav.navigate("profile/$myId") { launchSingleTop = true }
+            } else {
+                tab = i
+            }
         }
     }
 }
@@ -951,92 +966,176 @@ private fun FloatingBottomNav(
     unreadChats: Int,
     unseenStatus: Boolean,
     visible: Boolean,
-    modifier: Modifier = Modifier,
     onSelect: (Int) -> Unit,
 ) {
-    // Roomier tap targets and clearer separation bring the capsule closer to
-    // the reference without letting it crowd the screen's side margins.
-    val itemW = 56.dp
-    val itemH = 46.dp
-    val gap = 8.dp
+    // Keep the capsule slim while fitting the added Profile destination.
+    val itemW = 44.dp
+    val itemH = 40.dp
+    val gap = 4.dp
+    val capsulePadding = 4.dp
+    val capsuleWidth = itemW * 4 + gap * 3 + capsulePadding * 2
+    val capsuleHeight = itemH + capsulePadding * 2
     val density = LocalDensity.current
     val stepPx = with(density) { (itemW + gap).toPx() }
+    val capsuleWidthPx = with(density) { capsuleWidth.roundToPx() }
+    val capsuleHeightPx = with(density) { capsuleHeight.roundToPx() }
+    val bottomOffsetPx = WindowInsets.navigationBars.getBottom(density) + with(density) { 16.dp.roundToPx() }
+    val blurRadiusPx = with(density) { 42.dp.roundToPx() }
     val darkMode = KpThemeMode.darkBlue
     val idleTint = if (darkMode) Color(0xFFD3DEF5) else Muted
     val selectedTint = if (darkMode) Color.White else Ink
     val indicatorColor = if (darkMode) Color(0xB32B5BD7) else ActionBlue.copy(alpha = 0.16f)
-    // A localized live backdrop-filter is not available for an in-tree Compose
-    // surface; use a translucent tint and soft edge rather than rerendering
-    // the full scrolling chat beneath every frame.
-    val glassFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.68f) else Card.copy(alpha = 0.86f)
-    val glassEdge = if (darkMode) Color(0xFFA0B9F0).copy(alpha = 0.38f) else Line.copy(alpha = 0.92f)
+    val glassFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.54f) else Card.copy(alpha = 0.76f)
+    val glassEdge = if (darkMode) Color(0xE0A0B9F0) else Line.copy(alpha = 0.96f)
     val indicatorX by animateFloatAsState(
         tab * stepPx,
         spring(dampingRatio = 0.6f, stiffness = 380f),
         label = "navIndicator",
     )
     val shift by animateDpAsState(
-        if (visible) 0.dp else 100.dp,
-        tween(450, easing = FastOutSlowInEasing),
+        if (visible) 0.dp else 52.dp,
+        tween(350, easing = FastOutSlowInEasing),
         label = "navShift",
     )
-    val fade by animateFloatAsState(if (visible) 1f else 0f, tween(350), label = "navFade")
-    Box(
-        modifier
-            .navigationBarsPadding()
-            .padding(bottom = 16.dp)
-            .offset(y = shift)
-            .alpha(fade)
-            .then(if (visible) Modifier else Modifier.clearAndSetSemantics {})
-            .clip(CircleShape)
-            .background(glassFill)
-            .border(0.5.dp, glassEdge, CircleShape)
-            .padding(6.dp),
+    val fade by animateFloatAsState(if (visible) 1f else 0f, tween(280), label = "navFade")
+    val modalBlur by animateDpAsState(
+        if (KpModalBlurState.isActive) 28.dp else 0.dp,
+        tween(180),
+        label = "navModalBlur",
+    )
+    val pillWindowBackground = remember(capsuleHeightPx) {
+        GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = capsuleHeightPx / 2f
+            setColor(android.graphics.Color.TRANSPARENT)
+        }
+    }
+
+    Dialog(
+        onDismissRequest = {},
+        properties = DialogProperties(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false,
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
     ) {
+        val dialogView = LocalView.current
+        val dialogWindow = (dialogView.parent as? DialogWindowProvider)?.window
+        DisposableEffect(dialogWindow, pillWindowBackground) {
+            if (dialogWindow != null) {
+                dialogWindow.setBackgroundDrawable(pillWindowBackground)
+                dialogWindow.decorView.elevation = 0f
+                dialogWindow.decorView.translationZ = 0f
+                dialogWindow.setDimAmount(0f)
+                dialogWindow.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            }
+            onDispose {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dialogWindow?.setBackgroundBlurRadius(0)
+            }
+        }
+        DisposableEffect(dialogWindow, visible, blurRadiusPx) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && dialogWindow != null) {
+                dialogWindow.setBackgroundBlurRadius(if (visible) blurRadiusPx else 0)
+            }
+            onDispose {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dialogWindow?.setBackgroundBlurRadius(0)
+            }
+        }
+        SideEffect {
+            val window = dialogWindow ?: return@SideEffect
+            val gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            val p = window.attributes
+            var flags = p.flags or
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+            flags = flags and WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
+            flags = if (visible) flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+            else flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            if (
+                p.width != capsuleWidthPx || p.height != capsuleHeightPx || p.gravity != gravity ||
+                p.x != 0 || p.y != bottomOffsetPx || p.flags != flags
+            ) {
+                val updated = window.attributes
+                updated.gravity = gravity
+                updated.width = capsuleWidthPx
+                updated.height = capsuleHeightPx
+                updated.x = 0
+                updated.y = bottomOffsetPx
+                updated.flags = flags
+                window.attributes = updated
+            }
+        }
         Box(
             Modifier
-                .offset { IntOffset(indicatorX.roundToInt(), 0) }
-                .size(itemW, itemH)
-                .background(indicatorColor, CircleShape),
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
-            NavItem(
-                label = "Chats",
-                selected = tab == 0,
-                width = itemW,
-                height = itemH,
-                badge = unreadChats,
-                enabled = visible,
-                idleTint = idleTint,
-                selectedTint = selectedTint,
-                onClick = { onSelect(0) },
-            ) { tint ->
-                Icon(Icons.Filled.Chat, contentDescription = null, tint = tint, modifier = Modifier.size(26.dp))
-            }
-            NavItem(
-                label = "Status",
-                selected = tab == 1,
-                width = itemW,
-                height = itemH,
-                newStatus = unseenStatus,
-                enabled = visible,
-                idleTint = idleTint,
-                selectedTint = selectedTint,
-                onClick = { onSelect(1) },
-            ) { tint ->
-                StatusGlyphIcon(tint, 26.dp)
-            }
-            NavItem(
-                label = "Calls",
-                selected = tab == 2,
-                width = itemW,
-                height = itemH,
-                enabled = visible,
-                idleTint = idleTint,
-                selectedTint = selectedTint,
-                onClick = { onSelect(2) },
-            ) { tint ->
-                Icon(Icons.Filled.Call, contentDescription = null, tint = tint, modifier = Modifier.size(26.dp))
+                .size(capsuleWidth, capsuleHeight)
+                .offset(y = shift)
+                .alpha(fade)
+                .then(if (visible) Modifier else Modifier.clearAndSetSemantics {})
+                .blur(modalBlur)
+                .clip(CircleShape)
+                .background(glassFill)
+                .border(1.25.dp, glassEdge, CircleShape),
+        ) {
+            Box(Modifier.fillMaxSize().padding(capsulePadding)) {
+                Box(
+                    Modifier
+                        .offset { IntOffset(indicatorX.roundToInt(), 0) }
+                        .size(itemW, itemH)
+                        .background(indicatorColor, CircleShape),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    NavItem(
+                        label = "Chats",
+                        selected = tab == 0,
+                        width = itemW,
+                        height = itemH,
+                        badge = unreadChats,
+                        enabled = visible,
+                        idleTint = idleTint,
+                        selectedTint = selectedTint,
+                        onClick = { onSelect(0) },
+                    ) { tint ->
+                        Icon(Icons.Filled.Chat, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+                    }
+                    NavItem(
+                        label = "Status",
+                        selected = tab == 1,
+                        width = itemW,
+                        height = itemH,
+                        newStatus = unseenStatus,
+                        enabled = visible,
+                        idleTint = idleTint,
+                        selectedTint = selectedTint,
+                        onClick = { onSelect(1) },
+                    ) { tint ->
+                        StatusGlyphIcon(tint, 22.dp)
+                    }
+                    NavItem(
+                        label = "Calls",
+                        selected = tab == 2,
+                        width = itemW,
+                        height = itemH,
+                        enabled = visible,
+                        idleTint = idleTint,
+                        selectedTint = selectedTint,
+                        onClick = { onSelect(2) },
+                    ) { tint ->
+                        Icon(Icons.Filled.Call, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+                    }
+                    NavItem(
+                        label = "Profile",
+                        selected = false,
+                        width = itemW,
+                        height = itemH,
+                        enabled = visible,
+                        idleTint = idleTint,
+                        selectedTint = selectedTint,
+                        onClick = { onSelect(3) },
+                    ) { tint ->
+                        Icon(Icons.Filled.Person, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+                    }
+                }
             }
         }
     }
@@ -1108,7 +1207,7 @@ private fun NavItem(
             ) { onClick() },
         contentAlignment = Alignment.Center,
     ) {
-        Box(Modifier.size(26.dp)) {
+        Box(Modifier.size(22.dp)) {
             Box(
                 Modifier
                     .align(Alignment.Center)

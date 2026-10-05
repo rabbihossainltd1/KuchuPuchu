@@ -58,13 +58,19 @@ check(
     chatList.includes("if (acc > navShowPx) navVisible = true"),
 );
 check(
-  "roomier nav capsule and hide offsets preserve the floating reference layout",
-  chatList.includes("val itemW = 56.dp") &&
-    chatList.includes("val itemH = 46.dp") &&
-    chatList.includes("val gap = 8.dp") &&
-    chatList.includes(".padding(6.dp)") &&
-    chatList.includes("if (navVisible) 86.dp else 2.dp") &&
-    chatList.includes("if (visible) 0.dp else 100.dp"),
+  "slim four-button nav and safe FAB gap match the revised layout",
+  chatList.includes("val itemW = 44.dp") &&
+    chatList.includes("val itemH = 40.dp") &&
+    chatList.includes("val gap = 4.dp") &&
+    chatList.includes("val capsulePadding = 4.dp") &&
+    chatList.includes("if (navVisible) 74.dp else 2.dp") &&
+    chatList.includes("if (visible) 0.dp else 52.dp"),
+);
+check(
+  "profile tab routes to the signed-in user's profile",
+  chatList.includes('label = "Profile"') &&
+    chatList.includes("onClick = { onSelect(3) }") &&
+    chatList.includes('nav.navigate("profile/$myId")'),
 );
 check(
   "unread badge can overhang its tab hit target without being clipped",
@@ -73,8 +79,12 @@ check(
     !chatList.includes(".size(width, height)\n            .clip(CircleShape)"),
 );
 check(
-  "floating nav glass uses a translucent tint and a soft hairline edge",
-  chatList.includes("copy(alpha = 0.68f)") && chatList.includes("copy(alpha = 0.38f)"),
+  "floating nav uses a visible glass border and localized native backdrop blur",
+  chatList.includes("copy(alpha = 0.54f)") &&
+    chatList.includes(".border(1.25.dp, glassEdge, CircleShape)") &&
+    chatList.includes("dialogWindow.decorView.elevation = 0f") &&
+    chatList.includes("dialogWindow.setBackgroundBlurRadius(if (visible) blurRadiusPx else 0)") &&
+    !chatList.includes(".shadow("),
 );
 check(
   "chat, status, and calls lists leave safe-area-aware space beneath the floating nav",

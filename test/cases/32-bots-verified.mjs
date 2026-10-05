@@ -1981,7 +1981,7 @@ const convBetween = (db, a, b) =>
       !statusKt.includes("import androidx.compose.material3.DropdownMenu") &&
       statusKt.includes("private fun StatusMenuSheet(") &&
       statusKt.includes(
-        "modifier = kpGlassSheetModifier(),\n        containerColor = GlassSheetSurface,\n        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)",
+        "modifier = kpGlassSheetModifier(),\n        containerColor = GlassSheetSurface,\n        scrimColor = Color.Black.copy(alpha = 0.10f),\n        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)",
       ) &&
       statusKt.includes("paused = showViewers || menuOpen || replyFocused || holding,") &&
       // r31-7: the confirm is a bottom sheet too (KpConfirmSheet on the shared glass surface).
@@ -2847,7 +2847,7 @@ const convBetween = (db, a, b) =>
         ui.includes("fun KpSheetRow(") &&
         ui.includes("fun KpConfirmSheet(") &&
         ui.includes(
-          "modifier = kpGlassSheetModifier(),\n        containerColor = GlassSheetSurface,\n        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)",
+          "modifier = kpGlassSheetModifier(),\n        containerColor = GlassSheetSurface,\n        scrimColor = Color.Black.copy(alpha = 0.10f),\n        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)",
         ),
       JSON.stringify(withAlert),
     );

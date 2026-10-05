@@ -10,6 +10,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -162,7 +164,12 @@ fun KpApp() {
         }
     }
 
-    Surface(Modifier.fillMaxSize(), color = Cream) {
+    val modalBlurRadius by animateDpAsState(
+        targetValue = if (KpModalBlurState.isActive) 30.dp else 0.dp,
+        animationSpec = tween(220),
+        label = "modalBackdropBlur",
+    )
+    Surface(Modifier.fillMaxSize().blur(modalBlurRadius), color = Cream) {
         if (!authed) {
             LoginScreen { Store.authed.value = true }
         } else {
@@ -431,7 +438,7 @@ fun KpUpdateGate() {
             usePlatformDefaultWidth = false,
         ),
     ) {
-        KpApplyModalWindowBlur()
+        KpRegisterModalBlur()
         // Centered card — theme-aware, works on any route because this gate is at the root of KpApp.
         androidx.compose.foundation.layout.Box(
             Modifier.fillMaxWidth().padding(horizontal = 22.dp),
@@ -441,7 +448,7 @@ fun KpUpdateGate() {
                 shape = RoundedCornerShape(20.dp),
                 colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = GlassSheetSurface),
                 elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 8.dp),
-                modifier = Modifier.fillMaxWidth().border(0.75.dp, GlassSheetEdge, RoundedCornerShape(20.dp)),
+                modifier = Modifier.fillMaxWidth().border(1.dp, GlassSheetEdge, RoundedCornerShape(20.dp)),
             ) {
                 Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
                     // v166 (owner: "in app update downloading er somoy ei

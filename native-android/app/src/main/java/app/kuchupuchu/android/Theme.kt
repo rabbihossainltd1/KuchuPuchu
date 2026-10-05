@@ -51,9 +51,9 @@ val Card: Color
  * contrast; older Android versions retain the same tinted translucent fill.
  */
 val GlassSheetSurface: Color
-    get() = Card.copy(alpha = if (KpThemeMode.darkBlue) 0.90f else 0.92f)
+    get() = Card.copy(alpha = if (KpThemeMode.darkBlue) 0.76f else 0.80f)
 val GlassSheetEdge: Color
-    get() = if (KpThemeMode.darkBlue) Color(0x66A0B9F0) else Line.copy(alpha = 0.82f)
+    get() = if (KpThemeMode.darkBlue) Color(0xC060A5FA) else Line.copy(alpha = 0.96f)
 val Ink: Color
     get() = if (KpThemeMode.darkBlue) Color(0xFFE9EDF6) else Color(0xFF1C1917) // primary text
 val Muted: Color

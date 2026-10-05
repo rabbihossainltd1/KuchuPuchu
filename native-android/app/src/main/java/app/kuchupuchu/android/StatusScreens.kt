@@ -1349,9 +1349,10 @@ private fun StatusMenuSheet(
         onDismissRequest = onDismiss,
         modifier = kpGlassSheetModifier(),
         containerColor = GlassSheetSurface,
+        scrimColor = Color.Black.copy(alpha = 0.10f),
         sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
-        KpApplyModalWindowBlur()
+        KpRegisterModalBlur()
         Column(
             Modifier
                 .fillMaxWidth()
@@ -1411,11 +1412,17 @@ private fun ViewersSheet(
     )
     LaunchedEffect(Unit) { shown = true }
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        KpApplyModalWindowBlur()
+        KpRegisterModalBlur()
+        val dialogView = androidx.compose.ui.platform.LocalView.current
+        val dialogWindow = (dialogView.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
+        androidx.compose.runtime.SideEffect {
+            dialogWindow?.setDimAmount(0f)
+            dialogWindow?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+        }
         Box(
             Modifier
                 .fillMaxSize()
-                .background(Color(0x52000000))
+                .background(Color(0x1F000000))
                 .clickable(onClick = onClose),
         ) {
             Column(
@@ -1425,7 +1432,7 @@ private fun ViewersSheet(
                     .graphicsLayer { translationY = progress * 900f }
                     .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
                     .background(GlassSheetSurface)
-                    .border(0.75.dp, GlassSheetEdge, RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+                    .border(1.dp, GlassSheetEdge, RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
                     .clickable(onClick = {})  // don't close when touching the sheet
                     .navigationBarsPadding()
                     .padding(vertical = 10.dp),
