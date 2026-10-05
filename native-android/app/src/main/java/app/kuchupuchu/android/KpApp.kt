@@ -9,11 +9,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -48,6 +49,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun KpApp() {
     val nav = rememberNavController()
+    val navEntry by nav.currentBackStackEntryAsState()
+    val homeTab = rememberSaveable { mutableIntStateOf(0) }
     val authed by Store.authed
 
     // Owner round 13d: if the previous launch crashed, surface the captured
@@ -167,23 +170,20 @@ fun KpApp() {
     }
 
     val modalActive = KpModalBlurState.isActive
-    val focusedItem = KpModalFocusState.focusedItem
-    val focusProgress by animateFloatAsState(
-        targetValue = if (modalActive && focusedItem != null) 1f else 0f,
-        animationSpec = tween(if (modalActive) 220 else 180),
-        label = "modalFocusZoom",
-    )
+    val modalWindowVisible = KpModalBlurState.hasVisibleWindow
     val modalBlur = remember { Animatable(0f) }
     LaunchedEffect(modalActive) {
         if (modalActive) modalBlur.animateTo(30f, tween(220)) else modalBlur.snapTo(0f)
     }
     val modalBlurRadius = modalBlur.value.dp
-    LaunchedEffect(modalActive) {
-        if (!modalActive) {
-            // Keep the captured crop alive for the full return animation even
-            // though blur itself is released as soon as a sheet targets Hidden.
-            kotlinx.coroutines.delay(260)
-            if (!KpModalBlurState.isActive) KpModalFocusState.clear()
+    val currentDestination = navEntry?.destination?.route
+    val actualRoute =
+        if (currentDestination == "chat/{id}") "chat/${navEntry?.arguments?.getString("id") ?: ""}"
+        else currentDestination.orEmpty()
+    LaunchedEffect(actualRoute, KpFocusSheetState.request?.key) {
+        val request = KpFocusSheetState.request
+        if (request != null && request.ownerRoute != actualRoute && !KpFocusSheetState.closing) {
+            KpFocusSheetState.dismiss()
         }
     }
     Box(Modifier.fillMaxSize()) {
@@ -214,7 +214,6 @@ fun KpApp() {
             // and the mirrored reaction buzzed a phone nobody was looking at.
             // Every reader (the notification path, the in-app sound, the unread
             // merge, the mirror) now sees what is really in front.
-            val navEntry by nav.currentBackStackEntryAsState()
             LaunchedEffect(navEntry) {
                 val e = navEntry
                 val dest = e?.destination?.route
@@ -246,7 +245,7 @@ fun KpApp() {
                     exitTransition = { slideOutVertically(tween(360)) { it } + fadeOut(tween(220)) },
                     popEnterTransition = { slideInVertically(tween(360)) { it } + fadeIn(tween(220)) },
                     popExitTransition = { fadeOut(tween(180)) },
-                ) { ChatListScreen(nav) }
+                ) { ChatListScreen(nav, homeTab) }
                 composable("newchat") { NewChatScreen(nav) }
                 // Owner round 32 (item 12): `with` = comma-separated user ids
                 // pre-picked as members ("Create group with …" from the list).
@@ -385,11 +384,31 @@ fun KpApp() {
             // the install confirm sheet opens right over the app.
             KpUpdateGate()
         }
+        }
+        val callFullscreen = CallEngine.instance?.let { it.active != null && !it.minimized } == true
+        val rootHaptics = rememberHaptics()
+        HomeBottomNavigation(
+            tab = homeTab.intValue,
+            unreadChats = ScreenStore.convs.count { !it.optBoolean("hidden") && it.optInt("unread", 0) > 0 },
+            unseenStatus = ScreenStore.statuses.any { !it.optBoolean("mine") && !it.optBoolean("allViewed") },
+            visible = authed && actualRoute == "main" && HomeNavState.visible.value && !callFullscreen && !modalWindowVisible,
+            modalOpen = modalWindowVisible,
+            onSelect = { index ->
+                rootHaptics.tap()
+                if (index != 0) {
+                    ListSelect.clear()
+                    ListSelect.muteFor = null
+                }
+                HomeNavState.visible.value = true
+                homeTab.intValue = index
+            },
+        )
+        // Keep one stable root call site for the live item throughout the
+        // sheet's entry, open, and return phases. This avoids a second handoff
+        // between a fallback overlay and the sheet host.
+        KpFocusedSheetHost()
+        KpRootFocusOverlayHost()
     }
-    if (focusedItem != null && focusProgress > 0f) {
-        KpModalFocusOverlay(focusProgress)
-    }
-}
 }
 
 /**

@@ -1,190 +1,121 @@
-// Android floating home-nav contract against the standalone navigation demo.
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+// Source-contract coverage for the current Compose home-navigation implementation.
+// Keep these checks tied to behavior (equal slots, route gating and animated root motion),
+// not implementation details from the retired floating-window navigation.
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const chatList = readFileSync(
-  resolve("native-android/app/src/main/java/app/kuchupuchu/android/ChatListScreen.kt"),
+const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(here, "../..");
+const chatList = fs.readFileSync(
+  path.join(root, "native-android/app/src/main/java/app/kuchupuchu/android/ChatListScreen.kt"),
   "utf8",
 );
-const statuses = readFileSync(
-  resolve("native-android/app/src/main/java/app/kuchupuchu/android/StatusScreens.kt"),
+const app = fs.readFileSync(
+  path.join(root, "native-android/app/src/main/java/app/kuchupuchu/android/KpApp.kt"),
   "utf8",
 );
-const calls = readFileSync(
-  resolve("native-android/app/src/main/java/app/kuchupuchu/android/CallsTabScreen.kt"),
-  "utf8",
-);
-const profile = readFileSync(
-  resolve("native-android/app/src/main/java/app/kuchupuchu/android/ProfileScreen.kt"),
-  "utf8",
-);
-const kpApp = readFileSync(
-  resolve("native-android/app/src/main/java/app/kuchupuchu/android/KpApp.kt"),
-  "utf8",
-);
-const fabSectionStart = statuses.indexOf("/* The reference keeps the text-status");
-const fabSectionEnd = statuses.indexOf("if (composeText)", fabSectionStart);
-const statusFabStack = statuses.slice(fabSectionStart, fabSectionEnd);
-const homeStart = kpApp.indexOf('composable(\n                    "main",');
-const homeEnd = kpApp.indexOf('composable("newchat")', homeStart);
-const homeRoute = kpApp.slice(homeStart, homeEnd);
-const chatStart = kpApp.indexOf('composable("chat/{id}")', homeEnd);
-const chatEnd = kpApp.indexOf('composable("settings")', chatStart);
-const chatRoute = kpApp.slice(chatStart, chatEnd);
-
+const navStart = chatList.indexOf("internal fun HomeBottomNavigation(");
+const navEnd = chatList.indexOf("@Composable\nprivate fun NavItem(", navStart);
+const nav = navStart >= 0 && navEnd > navStart ? chatList.slice(navStart, navEnd) : "";
+const rootNavStart = app.indexOf("HomeBottomNavigation(");
+const rootNavEnd = app.indexOf("\n    }", rootNavStart);
+const rootNav =
+  rootNavStart >= 0 && rootNavEnd > rootNavStart ? app.slice(rootNavStart, rootNavEnd) : "";
 const lines = [];
 const check = (name, condition, detail = "") =>
   lines.push(`  ${condition ? "OK     " : "BROKEN "}  ${name}${detail ? `  -> ${detail}` : ""}`);
 
 check(
-  "chat badge counts unread visible conversations, not unread message totals",
-  chatList.includes(
-    'val unreadChats = convs.count { !it.optBoolean("hidden") && it.optInt("unread", 0) > 0 }',
-  ),
+  "home navigation distributes all four tabs in equal-width slots",
+  nav.includes("horizontalArrangement = Arrangement.spacedBy(gap)") &&
+    (nav.match(/Modifier\.weight\(1f\)/g) ?? []).length >= 4 &&
+    nav.includes("val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4"),
 );
 check(
-  "chat badge is red, caps at 99+, and bumps when its displayed count changes",
-  chatList.includes('badge > 99 -> "99+"') &&
-    chatList.includes("Color(0xFFE24B4A)") &&
-    chatList.includes("LaunchedEffect(badgeLabel)") &&
-    chatList.includes("badgeScale.animateTo(1.2f"),
+  "selected indicator is centered within the selected slot on the icon baseline",
+  nav.includes("val indicatorSize = 40.dp") &&
+    nav.includes("capsulePadding + (slotWidth - indicatorSize) * 0.5f") &&
+    nav.includes("val indicatorY = capsulePadding + (itemH - indicatorSize) * 0.5f") &&
+    nav.includes("animateDpAsState") &&
+    nav.includes(".offset(x = indicatorX, y = indicatorY)"),
 );
 check(
-  "nav items expose tab roles, selected state, and unread/new-status descriptions",
-  chatList.includes("role = Role.Tab") &&
-    chatList.includes("this.selected = selected") &&
-    chatList.includes('append(", $badge unread chats")') &&
-    chatList.includes('append(", new updates")'),
+  "unread chat badge uses the unread-conversation count at the root nav call site",
+  app.includes("unreadChats = ScreenStore.convs.count") &&
+    rootNav.includes("unreadChats = ScreenStore.convs.count"),
 );
 check(
-  "page swipes use the reference 70dp / 2:1 thresholds and defer to child gestures",
-  chatList.includes("activeTab: Int") &&
-    chatList.includes("70.dp.toPx()") &&
-    chatList.includes("2f * kotlin.math.abs(dy)") &&
-    chatList.includes("childConsumedMovement"),
+  "nav visibility is route-gated to the authenticated home route",
+  rootNav.includes('visible = authed && actualRoute == "main"') &&
+    rootNav.includes("HomeNavState.visible.value") &&
+    rootNav.includes("!callFullscreen") &&
+    rootNav.includes("!modalWindowVisible"),
 );
 check(
-  "nav hides only on consumed list scroll and returns at the top edge",
-  chatList.includes("override fun onPostScroll(") &&
-    chatList.includes("if (available.y > 0f)") &&
-    chatList.includes("if (available.y < 0f)") &&
+  "pushed destinations keep the home nav hidden while home tabs keep it visible",
+  app.includes('actualRoute == "main"') &&
+    app.includes('currentDestination == "chat/{id}"') &&
+    app.includes("HomeBottomNavigation(") &&
+    chatList.includes('currentEntry?.destination?.route == "main"') &&
+    chatList.includes("if (homeRouteActive) HomeNavState.visible.value = true"),
+);
+check(
+  "scroll-to-hide behavior stays limited to the home chat list and resets on tab changes",
+  chatList.includes("navHidePx") &&
+    chatList.includes("navShowPx") &&
     chatList.includes("if (acc < -navHidePx) navVisible = false") &&
-    chatList.includes("if (acc > navShowPx) navVisible = true"),
+    chatList.includes("else if (acc > navShowPx) navVisible = true") &&
+    chatList.includes("LaunchedEffect(tab) { navVisible = true }"),
 );
 check(
-  "wider, slightly thicker four-button nav has stable four-way spacing and FAB clearance",
-  chatList.includes("val itemW = 56.dp") &&
-    chatList.includes("val itemH = 44.dp") &&
-    chatList.includes("val gap = 4.dp") &&
-    chatList.includes("val capsulePadding = 6.dp") &&
-    chatList.includes("if (navVisible) 84.dp else 2.dp") &&
-    chatList.includes("val exitTravelPx = capsuleHeightPx + with(density) { 18.dp.roundToPx() }"),
+  "chat/status/calls content reserves room for the floating nav and system inset",
+  chatList.includes("84.dp else 2.dp") &&
+    fs
+      .readFileSync(
+        path.join(root, "native-android/app/src/main/java/app/kuchupuchu/android/StatusScreens.kt"),
+        "utf8",
+      )
+      .includes("110.dp + WindowInsets.navigationBars.getBottom(this).toDp()") &&
+    fs
+      .readFileSync(
+        path.join(
+          root,
+          "native-android/app/src/main/java/app/kuchupuchu/android/CallsTabScreen.kt",
+        ),
+        "utf8",
+      )
+      .includes("110.dp + WindowInsets.navigationBars.getBottom(this).toDp()"),
 );
 check(
-  "profile stays inside the home shell, remains selected there, and returns to Chats without losing the bar",
-  chatList.includes('label = "Profile"') &&
-    chatList.includes("selected = tab == 3") &&
-    chatList.includes("userId = Store.myId()") &&
-    chatList.includes("onBack = { tab = 0 }") &&
-    chatList.includes("showHomeNav = true") &&
-    profile.includes("if (onBack != null) onBack() else nav.popBackStack()") &&
-    profile.includes("if (showHomeNav) Modifier.padding(bottom = 72.dp)"),
+  "bottom-nav show/hide motion animates vertically and fades instead of snapping",
+  nav.includes("slideProgress") &&
+    nav.includes("LaunchedEffect(visible, modalOpen)") &&
+    nav.includes("slideProgress.animateTo(") &&
+    nav.includes("translationY =") &&
+    nav.includes("alpha = 1f - slideProgress.value") &&
+    nav.includes("if (!modalOpen && (visible || slideProgress.value < 0.999f))"),
 );
 check(
-  "unread badge can overhang its tab hit target without being clipped",
-  chatList.includes(".offset(x = 6.dp, y = (-8).dp)") &&
-    chatList.includes("Do not clip this hit target") &&
-    !chatList.includes(".size(width, height)\n            .clip(CircleShape)"),
+  "nav remains in the Compose root instead of a separate native dialog/window",
+  !nav.includes("androidx.compose.ui.window.Dialog(") &&
+    !nav.includes("WindowManager") &&
+    app.includes("HomeBottomNavigation("),
 );
 check(
-  "a shared 40dp indicator is centered behind every icon and slides between tabs with the demo's overshoot",
-  chatList.includes("val indicatorSize = 40.dp") &&
-    chatList.includes("val indicatorX by animateDpAsState(") &&
-    chatList.includes("CubicBezierEasing(0.34f, 1.45f, 0.5f, 1f)") &&
-    chatList.includes("tween(450, easing = indicatorEasing)") &&
-    chatList.includes(".background(indicatorColor)") &&
-    !chatList.includes(".border(1.25.dp, selectedBorder, CircleShape)") &&
-    chatList.includes("Box(Modifier.size(24.dp))") &&
-    chatList.includes("selected = tab == 1") &&
-    chatList.includes("StatusGlyphIcon(tint, 24.dp)"),
+  "home nav exposes stable tab semantics and the selected tab state",
+  nav.includes("onSelect(0)") &&
+    nav.includes("onSelect(1)") &&
+    nav.includes("onSelect(2)") &&
+    nav.includes("onSelect(3)") &&
+    chatList.includes("role = Role.Tab") &&
+    chatList.includes("this.selected = selected") &&
+    chatList.includes("contentDescription = accessibilityLabel"),
 );
 check(
-  "the glass capsule keeps native background blur but has no outline",
-  !chatList.includes(".border(1.5.dp, glassEdge, CircleShape)") &&
-    chatList.includes("copy(alpha = 0.28f)") &&
-    chatList.includes("setColor(glassFill.toArgb())") &&
-    chatList.includes("params.format = PixelFormat.TRANSLUCENT") &&
-    chatList.includes("decorFitsSystemWindows = true") &&
-    chatList.includes("params.x = 0") &&
-    chatList.includes("params.y = windowYOffsetPx") &&
-    chatList.includes("params.setFitInsetsSides(0)") &&
-    chatList.includes("params.setFitInsetsTypes(0)") &&
-    !chatList.includes(".background(glassFill)") &&
-    chatList.includes(
-      "dialogWindow.setBackgroundBlurRadius((blurRadiusPx * fraction).roundToInt())",
-    ),
-);
-check(
-  "native nav blur is localized when shown, touch/blur are disabled as it exits, and the separate window is removed behind sheets",
-  chatList.includes(
-    "dialogWindow.setBackgroundBlurRadius((blurRadiusPx * fraction).roundToInt())",
-  ) &&
-    chatList.includes("val windowVisible = visible") &&
-    chatList.includes(
-      "val dialogAttached = !modalOpen && (windowVisible || slideProgress.value < 1f)",
-    ) &&
-    chatList.includes("val windowInteractive = windowVisible && slideProgress.value <= 0.05f") &&
-    chatList.includes("if (dialogAttached) {") &&
-    chatList.includes("dialogWindow.decorView.elevation = 0f") &&
-    chatList.includes("dialogWindow?.setBackgroundBlurRadius(0)") &&
-    chatList.includes(
-      "val windowYOffsetPx = bottomOffsetPx - (exitTravelPx * slideProgress.value).roundToInt()",
-    ) &&
-    chatList.includes("positionChanged") &&
-    chatList.includes("params.x = 0") &&
-    chatList.includes("params.y = windowYOffsetPx") &&
-    !chatList.includes("translationY = hideDistancePx") &&
-    chatList.includes("slideProgress.snapTo(1f)") &&
-    chatList.includes("params.windowAnimations = 0") &&
-    chatList.indexOf("FloatingBottomNav(") < chatList.indexOf("E2eeRestoreGate()") &&
-    !chatList.includes(".shadow("),
-);
-check(
-  "home route exits downward on push, rises from below on pop, and the chat pop has no inherited horizontal slide",
-  homeRoute.includes("slideInVertically(tween(360)) { it }") &&
-    homeRoute.includes("slideOutVertically(tween(360)) { it }") &&
-    homeRoute.includes(
-      "popEnterTransition = { slideInVertically(tween(360)) { it } + fadeIn(tween(220)) }",
-    ) &&
-    chatRoute.includes('composable("chat/{id}") { entry ->') &&
-    kpApp.includes('if (targetState.destination.route == "main") fadeOut(tween(180))') &&
-    chatList.includes("params.y = windowYOffsetPx") &&
-    chatList.includes("targetValue = if (windowVisible) 0f else 1f") &&
-    chatList.includes("tween(if (windowVisible) 450 else 320, easing = slideEasing)"),
-);
-check(
-  "home nav is gated off on non-home destinations and full-screen calls, but returns when calls are minimized",
-  chatList.includes("val currentEntry by nav.currentBackStackEntryAsState()") &&
-    chatList.includes('val homeRouteActive = currentEntry?.destination?.route == "main"') &&
-    chatList.includes(
-      "val callFullscreen = CallEngine.instance?.let { it.active != null && !it.minimized } == true",
-    ) &&
-    chatList.includes("visible = navVisible && homeRouteActive && !callFullscreen"),
-);
-check(
-  "chat, status, and calls lists leave safe-area-aware space beneath the floating nav",
-  chatList.includes("110.dp + WindowInsets.navigationBars.getBottom(this).toDp()") &&
-    statuses.includes("110.dp + WindowInsets.navigationBars.getBottom(this).toDp()") &&
-    calls.includes("110.dp + WindowInsets.navigationBars.getBottom(this).toDp()"),
-);
-check(
-  "status text action stacks above the lower-right photo action",
-  statusFabStack.includes(".align(Alignment.BottomEnd)") &&
-    statusFabStack.indexOf("SmallFloatingActionButton(") >= 0 &&
-    statusFabStack.indexOf("androidx.compose.material3.FloatingActionButton(") >
-      statusFabStack.indexOf("SmallFloatingActionButton(") &&
-    statusFabStack.includes("Modifier.padding(end = 8.dp).size(42.dp)") &&
-    statusFabStack.includes("Modifier.size(58.dp)"),
+  "chat overflow action stays above the floating nav reservation",
+  chatList.includes("val listBottomPadding = with(LocalDensity.current)") &&
+    chatList.includes("110.dp + WindowInsets.navigationBars.getBottom(this).toDp()"),
 );
 
 for (const line of lines) console.log(line);

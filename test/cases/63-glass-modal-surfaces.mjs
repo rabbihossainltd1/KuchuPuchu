@@ -11,6 +11,10 @@ const status = read("StatusScreens.kt");
 const chat = read("ChatScreen.kt");
 const chatList = read("ChatListScreen.kt");
 const kpApp = read("KpApp.kt");
+const focus = read("KpFocusSheet.kt");
+const navStart = chatList.indexOf("internal fun HomeBottomNavigation(");
+const navEnd = chatList.indexOf("@Composable\nprivate fun NavItem(", navStart);
+const nav = navStart >= 0 && navEnd > navStart ? chatList.slice(navStart, navEnd) : "";
 const sharedSheetStart = ui.indexOf("fun KpSheet(");
 const sharedSheetEnd = ui.indexOf("fun KpSheetRow(", sharedSheetStart);
 const sharedSheet = ui.slice(sharedSheetStart, sharedSheetEnd);
@@ -50,22 +54,35 @@ check(
     kpApp.includes("else modalBlur.snapTo(0f)"),
 );
 check(
-  "the source crop draws above a separate modal window, zooms slightly, returns to source bounds, and adds no shadow",
-  ui.includes("internal object KpModalFocusState") &&
-    ui.includes("DeleteAnim.capture(") &&
-    ui.includes("forceFresh = true") &&
-    ui.includes("androidx.compose.ui.window.Dialog(") &&
-    ui.includes("FLAG_NOT_TOUCHABLE") &&
-    ui.includes("scaleX = zoom") &&
-    ui.includes("translationY = -with(density) { 6.dp.toPx() } * t") &&
-    ui.includes("alpha = t") &&
-    ui.includes(".clip(snapshot.shape)") &&
-    kpApp.indexOf("Surface(Modifier.fillMaxSize().blur(modalBlurRadius)") <
-      kpApp.indexOf("KpModalFocusOverlay(") &&
-    kpApp.includes("animateFloatAsState(") &&
-    kpApp.includes("targetValue = if (modalActive && focusedItem != null) 1f else 0f") &&
-    kpApp.includes("KpModalFocusState.clear()") &&
-    !ui.includes(".shadow("),
+  "focus sheet lifts the same live Compose item, leaves its source slot, and returns without bitmap or duplicate capture",
+  focus.includes("androidx.compose.runtime.movableContentOf") &&
+    focus.includes("internal object KpModalFocusState") &&
+    focus.includes("if (focused) {") &&
+    focus.includes("Spacer(") &&
+    focus.includes("else {\n            movable()\n        }") &&
+    focus.includes("KpModalFocusState.updateSource(key, currentBounds)") &&
+    focus.includes("KpModalFocusState.beginReturn()") &&
+    focus.includes("KpModalFocusState.clear()") &&
+    !focus.includes("PixelCopy") &&
+    !focus.includes("ImageBitmap") &&
+    !focus.includes("DeleteAnim.capture(") &&
+    !focus.includes("androidx.compose.ui.window.Dialog("),
+);
+check(
+  "root overlay remains sharp above the blurred app and above the focused action sheet",
+  kpApp.indexOf("Surface(Modifier.fillMaxSize().blur(modalBlurRadius)") <
+    kpApp.indexOf("KpFocusedSheetHost()") &&
+    kpApp.indexOf("KpFocusedSheetHost()") < kpApp.indexOf("KpRootFocusOverlayHost()") &&
+    focus.includes("internal fun KpRootFocusOverlayHost()") &&
+    focus.includes("internal fun KpModalFocusOverlay(progress: Float)"),
+);
+check(
+  "reserved focus slot is measured in the sheet and precedes quick actions and sheet options",
+  focus.includes("internal fun KpModalFocusAnchor(key: String, sheetOffsetYPx: Float)") &&
+    focus.includes(".height(item.height + item.slotExtra)") &&
+    focus.indexOf("if (request.focusKey != null) KpModalFocusAnchor") <
+      focus.indexOf("request.content(this)") &&
+    focus.includes("anchorBoundsOnScreen.top - sheetOffsetYPx.roundToInt()"),
 );
 check(
   "shared KpSheet registers blur outside ModalBottomSheet content for immediate release on dismissal",
@@ -119,22 +136,14 @@ check(
     chat.includes(".border(0.5.dp, GlassSheetEdge)"),
 );
 check(
-  "home nav native window is removed while any sheet is open, preventing the extra blur box",
-  chatList.includes("val modalOpen = KpModalBlurState.hasVisibleWindow") &&
-    chatList.includes(
-      "val dialogAttached = !modalOpen && (windowVisible || slideProgress.value < 1f)",
-    ) &&
-    chatList.includes("if (dialogAttached) {") &&
-    chatList.includes("val windowVisible = visible") &&
-    chatList.includes(
-      "dialogWindow.setBackgroundBlurRadius((blurRadiusPx * fraction).roundToInt())",
-    ) &&
-    chatList.includes("decorFitsSystemWindows = true") &&
-    chatList.includes("params.y = windowYOffsetPx") &&
-    !chatList.includes("translationY = hideDistancePx") &&
-    chatList.includes(
-      "if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dialogWindow?.setBackgroundBlurRadius(0)",
-    ),
+  "home nav stays in Compose root and suppresses immediately behind a modal without a native popup window",
+  nav.includes("if (modalOpen)") &&
+    nav.includes("slideProgress.snapTo(1f)") &&
+    nav.includes("if (!modalOpen && (visible || slideProgress.value < 0.999f))") &&
+    nav.includes("slideProgress.animateTo(") &&
+    !nav.includes("androidx.compose.ui.window.Dialog(") &&
+    !nav.includes("WindowManager") &&
+    kpApp.includes("modalOpen = modalWindowVisible"),
 );
 
 for (const line of lines) console.log(line);

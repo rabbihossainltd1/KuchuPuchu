@@ -371,6 +371,7 @@ fun ChatScreen(nav: NavController, convId: String) {
     // row on top, every message action under it. (No floating bar, no
     // system-style icon strip.) Multi-select is the sheet's "Select" action.
     var actionFor by remember { mutableStateOf<JSONObject?>(null) }
+    var actionFocusKey by remember { mutableStateOf<String?>(null) }
 
     // r103-4 (owner: "massage tap hold korle je sheet ta ashe okahne arekta
     // options add Hobe ''Info'' - eita click korle massage sent Time
@@ -4244,6 +4245,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             Store.myId(),
                             otherReadAt,
                             player,
+                            focusKey = "message:$rowKey",
                             selectedIds = selected.toList(),
                             onToggleSelect = { msg ->
                                 // Deleted tombstones are not selectable: they
@@ -4314,17 +4316,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 // top). In multi-select mode a long-press just
                                 // toggles, like a tap.
                                 if (msg.optString("kind") != "DELETED" && selected.isEmpty()) {
-                                    val focusKey = msg.optString("clientId").ifBlank { msg.optString("id") }
-                                    val focusBounds = DeleteGeoms.bubbles[focusKey]
-                                    val focusRootBounds = DeleteGeoms.bubblesInRoot[focusKey]
-                                    val focusShape = DeleteGeoms.bubbleShapes[focusKey]
-                                    scope.launch {
-                                        if (focusBounds != null && focusShape != null) {
-                                            KpModalFocusState.capture(focusBounds, focusRootBounds ?: focusBounds, focusShape)
-                                        }
-                                        actionFor = msg
-                                        reactionFor = msg
-                                    }
+                                    actionFocusKey = "message:$rowKey"
+                                    actionFor = msg
+                                    reactionFor = msg
                                 }
                             },
                             quoteFor = { rid -> (msgs + pending).firstOrNull { it.optString("id") == rid } },
@@ -4622,11 +4616,16 @@ fun ChatScreen(nav: NavController, convId: String) {
             val kindM = m.optString("kind")
             val isText = kindM == "TEXT" && m.optText("body").isNotBlank()
             val echo = pendingEchoOf(m)
-            fun close() {
-                actionFor = null
-                reactionFor = null
+            val focusKey = actionFocusKey ?: ("message:" + m.optString("clientId").ifBlank { m.optString("id") })
+            fun close(after: () -> Unit = {}) {
+                KpFocusSheetState.close {
+                    actionFor = null
+                    reactionFor = null
+                    actionFocusKey = null
+                    after()
+                }
             }
-            KpSheet(onDismiss = { close() }) {
+            val body: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
                 if (!showEmojiSheet) {
                     Row(
                         Modifier
@@ -4644,8 +4643,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                                     .clip(CircleShape)
                                     .background(if (myReaction == e) ActionBlue.copy(alpha = 0.18f) else Color.Transparent)
                                     .clickable {
-                                        applyReaction(m, e)
-                                        actionFor = null
+                                        close { applyReaction(m, e) }
                                     }
                                     .padding(7.dp),
                             )
@@ -4662,58 +4660,74 @@ fun ChatScreen(nav: NavController, convId: String) {
                     Spacer(Modifier.height(4.dp))
                 }
                 KpSheetRow(Icons.AutoMirrored.Filled.Reply, "Reply") {
-                    close()
-                    requestAttachExit {
-                        haptics.tap()
-                        replyTo = m
-                        replyFocusNonce++
+                    close {
+                        requestAttachExit {
+                            haptics.tap()
+                            replyTo = m
+                            replyFocusNonce++
+                        }
                     }
                 }
                 if (isText) {
                     KpSheetRow(Icons.Filled.ContentCopy, "Copy") {
-                        close()
-                        val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                        cm.setPrimaryClip(android.content.ClipData.newPlainText("KuchuPuchu", m.optText("body")))
-                        android.widget.Toast.makeText(ctx, "Copied", android.widget.Toast.LENGTH_SHORT).show()
+                        close {
+                            val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            cm.setPrimaryClip(android.content.ClipData.newPlainText("KuchuPuchu", m.optText("body")))
+                            android.widget.Toast.makeText(ctx, "Copied", android.widget.Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
                 // r103-4: the message's own timeline - sent / delivered /
                 // seen, straight from the long-press sheet.
                 KpSheetRow(Icons.Filled.Info, "Info") {
-                    close()
-                    infoFor = m
+                    close { infoFor = m }
                 }
                 // Owner round 31 item 21: no forwarding out of a private chat.
                 // Owner round 32 (item 17): nor of a view-once photo / video.
                 if (!echo && !privateChat && !isViewOnce(m)) {
                     KpSheetRow(Icons.AutoMirrored.Filled.Send, "Forward") {
-                        close()
-                        selected.clear()
-                        selected.addAll(albumIds)
-                        forwarding = true
+                        close {
+                            selected.clear()
+                            selected.addAll(albumIds)
+                            forwarding = true
+                        }
                     }
                 }
                 if (canEdit(m)) {
                     KpSheetRow(Icons.Filled.Edit, "Edit") {
-                        close()
-                        editing = m
+                        close { editing = m }
                     }
                 }
-                // Owner round 32 (item 16) had two rows here — delete for
-                // everyone, delete for me; r68-8 (owner: "delete option just
-                // ektai hobe 2 ta na") merged them: ONE Delete, and the popup
-                // asks the scope with the checkbox — which is also what makes
-                // deleting the OTHER person's message possible at all.
+                // r68-8: ONE Delete row; the popup asks whose copy to remove.
                 KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red) {
-                    close()
-                    selected.clear()
-                    selected.addAll(albumIds)
-                    confirmDelete = true
+                    close {
+                        selected.clear()
+                        selected.addAll(albumIds)
+                        confirmDelete = true
+                    }
                 }
                 KpSheetRow(Icons.Filled.CheckCircle, "Select") {
-                    close()
-                    albumIds.forEach { if (it !in selected) selected.add(it) }
+                    close { albumIds.forEach { if (it !in selected) selected.add(it) } }
                 }
+            }
+            val latestBody = rememberUpdatedState(body)
+            val hostedBody: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = remember(focusKey) {
+                { latestBody.value.invoke(this) }
+            }
+            LaunchedEffect(focusKey) {
+                KpFocusSheetState.open(
+                    KpFocusSheetRequest(
+                        key = "message-actions:$focusKey",
+                        ownerRoute = "chat/$convId",
+                        focusKey = focusKey.takeIf { KpModalFocusState.focusedItem?.key == it },
+                        onDismiss = {
+                            actionFor = null
+                            reactionFor = null
+                            actionFocusKey = null
+                        },
+                        content = hostedBody,
+                    ),
+                )
             }
         }
 
@@ -8014,6 +8028,24 @@ private fun UnblockAskCard(
 /** Owner round 34 (item 19): bodies longer than this fold with See more. */
 private const val BODY_COLLAPSE_LINES = 10
 
+/** Lift only the visual message content, not the full-width chat-list row. */
+@Composable
+private fun KpMessageFocusSlot(
+    focusKey: String?,
+    content: @Composable (requestFocus: () -> Unit) -> Unit,
+) {
+    if (focusKey == null) {
+        content {}
+    } else {
+        KpLiveFocusItem(
+            key = focusKey,
+            targetScale = 1f,
+            slotExtra = 8.dp,
+            content = content,
+        )
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageRow(
@@ -8023,6 +8055,7 @@ private fun MessageRow(
     otherReadAt: String?,
     player: VoicePlayer,
     pendingEcho: Boolean = false,
+    focusKey: String? = null,
     selectedIds: List<String> = emptyList(),
     onToggleSelect: (JSONObject) -> Unit = {},
     onOpenImage: (JSONObject) -> Unit = {},
@@ -8245,8 +8278,19 @@ private fun MessageRow(
     // image uploads (picked as documents) get the same treatment.
     // Owner round 31 (item 29): photos sent together = one grouped bubble.
     if (m.has("kpAlbum")) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
-            AlbumMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenAlbum, onReply, onLongPress, theme, onDoubleTapHeart)
+        KpMessageFocusSlot(focusKey) { requestFocus ->
+            Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
+                AlbumMessageRow(
+                    m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect,
+                    onOpenImage, onOpenAlbum, onReply,
+                    onLongPress = { pressed ->
+                        if (pressed.optString("kind") != "DELETED") requestFocus()
+                        onLongPress(pressed)
+                    },
+                    theme = theme,
+                    onDoubleTapHeart = onDoubleTapHeart,
+                )
+            }
         }
         return
     }
@@ -8255,29 +8299,60 @@ private fun MessageRow(
     // opens the media ONCE for the recipient; the opening deletes the row
     // for everyone, so there is no opened state left to render.
     if (isViewOnce(m)) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
-            // r71-20: a view-once TEXT is its own bubble (veiled, one tap to
-            // reveal, five seconds, then gone for both) — the photo / video /
-            // voice flavours keep the tile.
-            if (kind == "TEXT" && m.optText("body").isNotBlank()) {
-                OnceTextRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, theme, onDoubleTapHeart)
-            } else {
-                ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme, onDoubleTapHeart)
+        KpMessageFocusSlot(focusKey) { requestFocus ->
+            Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
+                // r71-20: a view-once TEXT is its own bubble (veiled, one tap to
+                // reveal, five seconds, then gone for both) — the photo / video /
+                // voice flavours keep the tile.
+                val onFocusedLongPress: (JSONObject) -> Unit = { pressed ->
+                    if (pressed.optString("kind") != "DELETED") requestFocus()
+                    onLongPress(pressed)
+                }
+                if (kind == "TEXT" && m.optText("body").isNotBlank()) {
+                    OnceTextRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onFocusedLongPress, theme, onDoubleTapHeart)
+                } else {
+                    ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onFocusedLongPress, theme, onDoubleTapHeart)
+                }
             }
         }
         return
     }
     if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
-            ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend, onDoubleTapHeart)
+        KpMessageFocusSlot(focusKey) { requestFocus ->
+            Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
+                ImageMessageRow(
+                    m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect,
+                    onOpenImage, onReply,
+                    onLongPress = { pressed ->
+                        if (pressed.optString("kind") != "DELETED") requestFocus()
+                        onLongPress(pressed)
+                    },
+                    theme = theme,
+                    onCancelSend = onCancelSend,
+                    onDoubleTapHeart = onDoubleTapHeart,
+                )
+            }
         }
         return
     }
     // Owner round 20: videos render as a tappable video bubble and play
     // IN-APP (the system player could never stream these auth-only files).
     if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
-            VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend, onDoubleTapHeart)
+        KpMessageFocusSlot(focusKey) { requestFocus ->
+            Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
+                VideoMessageRow(
+                    m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect,
+                    onReply,
+                    onLongPress = { pressed ->
+                        if (pressed.optString("kind") != "DELETED") requestFocus()
+                        onLongPress(pressed)
+                    },
+                    onOpen = onOpenVideo,
+                    theme = theme,
+                    onCancelSend = onCancelSend,
+                    onDoubleTapHeart = onDoubleTapHeart,
+                )
+            }
         }
         return
     }
@@ -8383,9 +8458,14 @@ private fun MessageRow(
                 report(r)
                 if (r.lineCount > bodyLines) bodyLines = r.lineCount
             }
-            Box(
-                Modifier
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), bubbleShape) }
+            KpMessageFocusSlot(focusKey) { requestFocus ->
+                val onFocusedLongPress: (JSONObject) -> Unit = { pressed ->
+                    if (pressed.optString("kind") != "DELETED") requestFocus()
+                    onLongPress(pressed)
+                }
+                Box(
+                    Modifier
+                        .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), bubbleShape) }
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
                     // Owner round 13b: the hand-rolled awaitEachGesture fought
                     // the list's vertical scrolling (jank + crash on device).
@@ -8484,7 +8564,7 @@ private fun MessageRow(
                                 haptics.tap()
                                 // Owner round 31: selection only while selecting;
                                 // otherwise the action sheet takes over.
-                                if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)
+                                if (selectedIds.isNotEmpty()) onToggleSelect(m) else onFocusedLongPress(m)
                             }
                         },
                     )
@@ -8543,7 +8623,7 @@ private fun MessageRow(
                                     onLongClick = {
                                         if (!pendingEcho) {
                                             haptics.tap()
-                                            if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)
+                                            if (selectedIds.isNotEmpty()) onToggleSelect(m) else onFocusedLongPress(m)
                                         }
                                     },
                                 ) {
@@ -8586,9 +8666,9 @@ private fun MessageRow(
                         "STICKER" -> {
                             val st = m.optString("body")
                             if (EmojiRepo.isCustomId(st)) CustomEmojiOrFallback(st)
-                            else EmojiGlyphRow(st, 56f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } }, onDoubleTap = { if (!pendingEcho) onDoubleTapHeart(m) }, danceKey = fxKey)
+                            else EmojiGlyphRow(st, 56f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onFocusedLongPress(m) } }, onDoubleTap = { if (!pendingEcho) onDoubleTapHeart(m) }, danceKey = fxKey)
                         }
-                        "FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)
+                        "FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onFocusedLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)
                         // Owner round 33 (item 5): the stamp is placed by
                         // measurement after the last line (KpStamped) — the
                         // old no-break-space reserve is gone from every text
@@ -8607,12 +8687,12 @@ private fun MessageRow(
                             // bubble (outside) for every kind now.
                             // v206: single only animates, long-press shows actions
                             if (emojiOnly == 1) {
-                                EmojiGlyphRow(m.optText("body").trim(), 66f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } }, onDoubleTap = { if (!pendingEcho) onDoubleTapHeart(m) }, danceKey = fxKey)
+                                EmojiGlyphRow(m.optText("body").trim(), 66f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onFocusedLongPress(m) } }, onDoubleTap = { if (!pendingEcho) onDoubleTapHeart(m) }, danceKey = fxKey)
                             } else {
                                 // N3r: every glyph dances its own 3D move for
                                 // 3 s (arrival / tap / the other side's tap).
                                 // v206: multiple emojis don't animate, but long-press still works
-                                EmojiGlyphRow(m.optText("body").trim(), 40f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } }, onDoubleTap = { if (!pendingEcho) onDoubleTapHeart(m) }, danceKey = fxKey)
+                                EmojiGlyphRow(m.optText("body").trim(), 40f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onFocusedLongPress(m) } }, onDoubleTap = { if (!pendingEcho) onDoubleTapHeart(m) }, danceKey = fxKey)
                             }
                         } else {
                             val full = m.optText("body")
@@ -8708,6 +8788,7 @@ private fun MessageRow(
                             )
                         }
                     }
+                }
                 }
             }
             // v169 (owner: "single tick double tick seen tick send time eshob

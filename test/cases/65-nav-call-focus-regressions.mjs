@@ -1,5 +1,4 @@
-// Latest Android QA: demo icon/indicator, route & call ownership, glass borders,
-// prompt modal blur release, and source-matched focus rounding.
+// Android QA contracts: demo nav alignment, route/call ownership, modal glass, and live focus movement.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -7,7 +6,7 @@ const root = "native-android/app/src/main/java/app/kuchupuchu/android";
 const read = (name) => readFileSync(resolve(`${root}/${name}`), "utf8");
 const chatList = read("ChatListScreen.kt");
 const chat = read("ChatScreen.kt");
-const deleteAnim = read("DeleteAnim.kt");
+const focus = read("KpFocusSheet.kt");
 const ui = read("Ui.kt");
 const attach = read("AttachSheet.kt");
 const kpApp = read("KpApp.kt");
@@ -16,9 +15,9 @@ const icon = readFileSync(
   "utf8",
 );
 
-const navStart = chatList.indexOf("private fun FloatingBottomNav(");
+const navStart = chatList.indexOf("internal fun HomeBottomNavigation(");
 const navEnd = chatList.indexOf("@Composable\nprivate fun NavItem(", navStart);
-const nav = chatList.slice(navStart, navEnd);
+const nav = navStart >= 0 && navEnd > navStart ? chatList.slice(navStart, navEnd) : "";
 const peekStart = chatList.indexOf("private fun PeekAction(");
 const peekEnd = chatList.indexOf("\n}", peekStart);
 const peekAction = chatList.slice(peekStart, peekEnd);
@@ -36,9 +35,6 @@ const chatRoute = kpApp.slice(chatRouteStart, chatRouteEnd);
 const sharedSheetStart = ui.indexOf("fun KpSheet(");
 const sharedSheetEnd = ui.indexOf("fun KpSheetRow(", sharedSheetStart);
 const sharedSheet = ui.slice(sharedSheetStart, sharedSheetEnd);
-const focusStart = ui.indexOf("internal fun KpModalFocusOverlay(");
-const focusEnd = ui.indexOf("/**\n * Shared image helpers", focusStart);
-const focusOverlay = ui.slice(focusStart, focusEnd);
 const emojiStart = chat.indexOf("private fun EmojiSheetDialog(");
 const emojiEnd = chat.indexOf("/** True when a FILE message", emojiStart);
 const emojiSheet = chat.slice(emojiStart, emojiEnd);
@@ -54,39 +50,38 @@ check(
     ),
 );
 check(
-  "the tab highlight is one centered shared pill that slides with the demo's 450ms overshoot",
-  nav.includes("val indicatorSize = 40.dp") &&
-    nav.includes("val indicatorX by animateDpAsState(") &&
-    nav.includes("(itemW + gap) * tab.coerceIn(0, 3).toFloat()") &&
+  "four equally sized tab slots share a centered indicator with the demo's 450ms easing",
+  (nav.match(/Modifier\.weight\(1f\)/g) ?? []).length >= 4 &&
+    nav.includes("val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4") &&
+    nav.includes("val indicatorSize = 40.dp") &&
+    nav.includes("capsulePadding + (slotWidth - indicatorSize) * 0.5f") &&
+    nav.includes("(slotWidth + gap) * tab.coerceIn(0, 3).toFloat()") &&
     nav.includes("CubicBezierEasing(0.34f, 1.45f, 0.5f, 1f)") &&
     nav.includes("tween(450, easing = indicatorEasing)") &&
     nav.includes(".offset(x = indicatorX, y = indicatorY)"),
 );
 check(
-  "the native pill window moves vertically into and out of view with a fixed horizontal anchor",
+  "the Compose pill moves vertically and fades smoothly without a separate native window",
   nav.includes("val slideProgress = remember { Animatable(1f) }") &&
-    nav.includes("targetValue = if (windowVisible) 0f else 1f") &&
-    nav.includes("tween(if (windowVisible) 450 else 320, easing = slideEasing)") &&
-    nav.includes(
-      "val windowYOffsetPx = bottomOffsetPx - (exitTravelPx * slideProgress.value).roundToInt()",
-    ) &&
-    nav.includes("params.x = 0") &&
-    nav.includes("params.y = windowYOffsetPx") &&
-    !nav.includes("translationY = hideDistancePx"),
+    nav.includes("targetValue = if (visible) 0f else 1f") &&
+    nav.includes("tween(320, easing = slideEasing)") &&
+    nav.includes("translationY = exitTravelPx * slideProgress.value") &&
+    nav.includes("alpha = 1f - slideProgress.value") &&
+    nav.includes(".background(glassFill)") &&
+    !nav.includes("androidx.compose.ui.window.Dialog(") &&
+    !nav.includes("WindowManager"),
 );
 check(
-  "a native nav Dialog is gated to the home route and hidden during a non-minimized CallGate",
-  chatList.includes('val homeRouteActive = currentEntry?.destination?.route == "main"') &&
-    chatList.includes(
-      "val callFullscreen = CallEngine.instance?.let { it.active != null && !it.minimized } == true",
-    ) &&
-    chatList.includes("visible = navVisible && homeRouteActive && !callFullscreen") &&
+  "home route and full-screen call gate own nav visibility; pushed chat routes hide it",
+  kpApp.includes('visible = authed && actualRoute == "main"') &&
+    kpApp.includes("!callFullscreen && !modalWindowVisible") &&
+    kpApp.includes('currentDestination == "chat/{id}"') &&
     kpApp.includes("CallGate") &&
     kpApp.includes("callEngine.active != null") &&
     kpApp.includes("callEngine.minimized"),
 );
 check(
-  "home route slides down/up while the pop-to-home transition fades the outgoing chat without changing its forward entrance",
+  "home route slides down/up while returning chat fades without changing its forward entrance",
   homeRoute.includes("slideOutVertically(tween(360)) { it }") &&
     homeRoute.includes(
       "popEnterTransition = { slideInVertically(tween(360)) { it } + fadeIn(tween(220)) }",
@@ -95,24 +90,17 @@ check(
     kpApp.includes('if (targetState.destination.route == "main") fadeOut(tween(180))'),
 );
 check(
-  "the capsule uses its translucent rounded window background as the real local blur mask, with no Compose double-tint or border",
-  nav.includes("setColor(glassFill.toArgb())") &&
-    nav.includes("params.format = PixelFormat.TRANSLUCENT") &&
-    nav.includes("decorFitsSystemWindows = true") &&
-    nav.includes("params.x = 0") &&
-    nav.includes("params.y = windowYOffsetPx") &&
-    nav.includes("params.setFitInsetsSides(0)") &&
-    nav.includes("params.setFitInsetsTypes(0)") &&
-    nav.includes("val fraction = (1f - slideProgress.value).coerceIn(0f, 1f)") &&
-    !nav.includes(".background(glassFill)") &&
+  "capsule and selected indicator use the intended local Compose glass surfaces without a window border",
+  nav.includes("val glassFill =") &&
+    nav.includes(".clip(CircleShape)") &&
+    nav.includes(".background(glassFill)") &&
     nav.includes(".background(indicatorColor)") &&
-    nav.includes("dialogWindow.setBackgroundBlurRadius((blurRadiusPx * fraction).roundToInt())") &&
     !nav.includes("glassEdge") &&
     !nav.includes("selectedBorder") &&
     !nav.includes(".border(1.25.dp"),
 );
 check(
-  "sheet action buttons are borderless; selection badges, caption fields, shared sheet rows, and confirm actions keep their intended treatment",
+  "sheet action buttons remain borderless while selection, caption, and confirmation controls keep their treatment",
   !peekAction.includes(".border(") &&
     editButtonStart >= 0 &&
     editButtonEnd > editButtonStart &&
@@ -132,24 +120,30 @@ check(
       .includes(".border("),
 );
 check(
-  "the focused message uses an above-sheet touch-through window and reverses its slight zoom back to the captured source bounds",
-  deleteAnim.includes("val bubbleShapes = mutableMapOf<String, Shape>()") &&
-    chat.includes("DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), bubbleShape)") &&
-    chat.includes(
-      "DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), RoundedCornerShape(12.dp))",
-    ) &&
-    chat.includes("DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), shape)") &&
-    ui.includes("val shape: Shape") &&
-    focusOverlay.includes(".size(width, height)") &&
-    focusOverlay.includes(".clip(snapshot.shape)") &&
-    focusOverlay.includes("androidx.compose.ui.window.Dialog(") &&
-    focusOverlay.includes("FLAG_NOT_TOUCHABLE") &&
-    focusOverlay.includes("scaleX = zoom") &&
-    focusOverlay.includes("translationY = -with(density) { 6.dp.toPx() } * t") &&
-    focusOverlay.includes("alpha = t"),
+  "focused message is the original-size live bubble above reactions and sheet options, not a bitmap or touch-through window",
+  chat.includes("DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), bubbleShape)") &&
+    chat.includes('focusKey = "message:$rowKey"') &&
+    chat.includes("targetScale = 1f") &&
+    focus.includes("androidx.compose.runtime.movableContentOf") &&
+    focus.includes("item.content()") &&
+    focus.includes(".size(width, height)") &&
+    focus.includes("KpModalFocusState.updateSource(key, currentBounds)") &&
+    focus.includes("KpModalFocusState.beginReturn()") &&
+    !focus.includes("androidx.compose.ui.window.Dialog(") &&
+    !focus.includes("PixelCopy") &&
+    !focus.includes("DeleteAnim.capture("),
 );
 check(
-  "backdrop blur releases as sheets target Hidden while nav stays suppressed until the modal window disposes",
+  "root focus is drawn above the blurred screen and action sheet; reserved anchor precedes the emoji row",
+  kpApp.indexOf("Surface(Modifier.fillMaxSize().blur(modalBlurRadius)") <
+    kpApp.indexOf("KpFocusedSheetHost()") &&
+    kpApp.indexOf("KpFocusedSheetHost()") < kpApp.indexOf("KpRootFocusOverlayHost()") &&
+    focus.indexOf("KpModalFocusAnchor(request.focusKey, sheetOffsetYPx)") <
+      focus.indexOf("request.content(this)") &&
+    chat.includes('listOf("👍", "❤️", "😂", "😮", "😢", "🙏")'),
+);
+check(
+  "backdrop blur releases as sheets close and remains correctly registered for normal KpSheet and emoji sheet",
   kpApp.includes("modalBlur.animateTo(30f, tween(220))") &&
     kpApp.includes("else modalBlur.snapTo(0f)") &&
     sharedSheet.includes("KpRememberModalBottomSheetState(blurRegistration)") &&
@@ -162,9 +156,7 @@ check(
     emojiSheet.indexOf("KpRegisterModalBlur()") < emojiSheet.indexOf("ModalBottomSheet(") &&
     ui.includes("target == androidx.compose.material3.SheetValue.Hidden") &&
     ui.includes("registration.release()") &&
-    ui.includes("registration.retain()") &&
-    ui.includes("fun unregisterWindow()") &&
-    chatList.includes("val modalOpen = KpModalBlurState.hasVisibleWindow"),
+    ui.includes("registration.retain()"),
 );
 
 for (const line of lines) console.log(line);

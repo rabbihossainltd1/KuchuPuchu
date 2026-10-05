@@ -1,10 +1,5 @@
 package app.kuchupuchu.android
 
-import android.graphics.PixelFormat
-import android.graphics.drawable.GradientDrawable
-import android.os.Build
-import android.view.Gravity
-import android.view.WindowManager
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -35,6 +30,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -92,26 +88,20 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -129,14 +119,12 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -144,9 +132,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import kotlinx.coroutines.Dispatchers
@@ -162,22 +147,27 @@ import kotlin.math.roundToInt
  * ring avatars, floating bottom tabs (Chats / Status / Calls / Profile), gold FAB,
  * swipe actions for mute + delete.
  */
+internal object HomeNavState {
+    val visible = mutableStateOf(true)
+}
+
 @Composable
-fun ChatListScreen(nav: NavController) {
-    // This pill owns a separate Dialog window: NavHost can keep the old home
-    // entry composed during route exits, and Dialog windows sit above CallGate.
-    // Gate by the live route/call state instead of relying on composition alone.
+fun ChatListScreen(nav: NavController, selectedTab: MutableIntState) {
     val currentEntry by nav.currentBackStackEntryAsState()
     val homeRouteActive = currentEntry?.destination?.route == "main"
-    val callFullscreen = CallEngine.instance?.let { it.active != null && !it.minimized } == true
+    LaunchedEffect(homeRouteActive) {
+        // Returning from any pushed destination restores the home pill from
+        // below the screen, even if list scrolling had hidden it before push.
+        if (homeRouteActive) HomeNavState.visible.value = true
+    }
     val scope = rememberCoroutineScope()
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val convs = ScreenStore.convs
     var loading by remember { mutableStateOf(!ScreenStore.convsLoaded) }
-    // Saveable: coming back from a chat / status viewer returns to the SAME
-    // tab instead of jumping to Chats every time.
+    // Shared with KpApp's root-level nav pill so route transitions do not
+    // carry the bar along with the outgoing home screen.
     var homeMenu by remember { mutableStateOf(false) }
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+    var tab by selectedTab
     val haptics = rememberHaptics()
     // Owner round 17: the archive pull has TWO triggers — the list overscroll
     // (as before) AND a plain vertical drag on the header/tabs area, so a ROM
@@ -375,11 +365,9 @@ fun ChatListScreen(nav: NavController) {
     }
 
     // Owner round 83: the home destinations live in a compact,
-    // icon-only floating pill. Keep a per-visible-chat badge (not a message
-    // total), matching the standalone reference; hidden conversations stay out.
-    val unreadChats = convs.count { !it.optBoolean("hidden") && it.optInt("unread", 0) > 0 }
-    val unseenStatus = ScreenStore.statuses.any { !it.optBoolean("mine") && !it.optBoolean("allViewed") }
-    var navVisible by remember { mutableStateOf(true) }
+    // icon-only floating pill. Visibility is shared with KpApp so route
+    // changes animate independently of the NavHost's screen transition.
+    var navVisible by HomeNavState.visible
     val navHidePx = with(density) { 14.dp.toPx() }
     val navShowPx = with(density) { 10.dp.toPx() }
     // Observe the amount the child list actually scrolled, not the raw finger
@@ -439,15 +427,6 @@ fun ChatListScreen(nav: NavController) {
     }
 
     Box(Modifier.fillMaxSize().background(Cream)) {
-        // This native blur window is created before any sheet/dialog windows,
-        // so an open sheet always layers above the home bar's glass.
-        FloatingBottomNav(
-            tab = tab,
-            unreadChats = unreadChats,
-            unseenStatus = unseenStatus,
-            visible = navVisible && homeRouteActive && !callFullscreen,
-            onSelect = ::selectHomeTab,
-        )
         // r76-26 (owner: "onno phone a login korle purono message gulate lock"):
         // a locked key backup waits on the server — ask for its passphrase so
         // the sealed history opens on this phone instead of showing locks.
@@ -989,180 +968,70 @@ private fun ListTicks(read: Boolean, delivered: Boolean = read) {
  * standalone reference while retaining the app palette in light mode.
  */
 @Composable
-private fun FloatingBottomNav(
+internal fun HomeBottomNavigation(
     tab: Int,
     unreadChats: Int,
     unseenStatus: Boolean,
     visible: Boolean,
+    modalOpen: Boolean,
     onSelect: (Int) -> Unit,
 ) {
-    // A little wider and taller than the previous pill: four comfortable
-    // targets, with the same breathing room on every side.
-    val itemW = 56.dp
-    val itemH = 44.dp
-    val gap = 4.dp
-    val capsulePadding = 6.dp
-    val capsuleWidth = itemW * 4 + gap * 3 + capsulePadding * 2
-    val capsuleHeight = itemH + capsulePadding * 2
     val density = LocalDensity.current
-    val capsuleWidthPx = with(density) { capsuleWidth.roundToPx() }
-    val capsuleHeightPx = with(density) { capsuleHeight.roundToPx() }
-    val bottomOffsetPx = WindowInsets.navigationBars.getBottom(density) + with(density) { 16.dp.roundToPx() }
-    val blurRadiusPx = with(density) { 30.dp.roundToPx() }
     val darkMode = KpThemeMode.darkBlue
     val idleTint = if (darkMode) Color(0xFFD3DEF5) else Muted
     val selectedTint = if (darkMode) Color.White else Ink
     val indicatorColor = if (darkMode) Color(0xB32B5BD7) else ActionBlue.copy(alpha = 0.16f)
-    // The reference pill is a 28%-opaque blue glass card; the system blur is
-    // applied to the native window behind it, not faked with a border/shadow.
     val glassFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.28f) else Card.copy(alpha = 0.76f)
-    // Blur can release at target-Hidden, but keep the nav suppressed until the
-    // sheet's native window finishes its exit and leaves composition.
-    val modalOpen = KpModalBlurState.hasVisibleWindow
-    val windowVisible = visible
+    val itemH = 44.dp
+    val gap = 4.dp
+    val capsulePadding = 6.dp
+    val capsuleWidth = 248.dp
+    val capsuleHeight = 56.dp
+    val indicatorSize = 40.dp
+    val exitTravelPx = with(density) { (capsuleHeight + 18.dp).roundToPx() }
+    val bottomInset = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
     val slideProgress = remember { Animatable(1f) }
     val slideEasing = remember { CubicBezierEasing(0.32f, 0.8f, 0.3f, 1f) }
-    LaunchedEffect(windowVisible, modalOpen) {
+    val indicatorEasing = remember { CubicBezierEasing(0.34f, 1.45f, 0.5f, 1f) }
+
+    val navInteractive = visible && slideProgress.value <= 0.05f && !modalOpen
+    LaunchedEffect(visible, modalOpen) {
         if (modalOpen) {
-            // The home bar is removed behind a modal; re-entry always starts
-            // below the screen instead of resuming a half-finished exit.
+            // Sheets keep their existing behavior: the home pill is suppressed
+            // immediately behind a modal, rather than running a second motion.
             slideProgress.snapTo(1f)
         } else {
             slideProgress.animateTo(
-                targetValue = if (windowVisible) 0f else 1f,
-                animationSpec = tween(if (windowVisible) 450 else 320, easing = slideEasing),
+                targetValue = if (visible) 0f else 1f,
+                animationSpec = tween(320, easing = slideEasing),
             )
         }
     }
-    val indicatorEasing = remember { CubicBezierEasing(0.34f, 1.45f, 0.5f, 1f) }
-    val indicatorSize = 40.dp
-    val indicatorX by animateDpAsState(
-        targetValue = capsulePadding + (itemW - indicatorSize) * 0.5f +
-            (itemW + gap) * tab.coerceIn(0, 3).toFloat(),
-        animationSpec = tween(450, easing = indicatorEasing),
-        label = "navIndicatorX",
-    )
-    val indicatorY = capsulePadding + (itemH - indicatorSize) * 0.5f
-    val dialogAttached = !modalOpen && (windowVisible || slideProgress.value < 1f)
-    val windowInteractive = windowVisible && slideProgress.value <= 0.05f
-    val exitTravelPx = capsuleHeightPx + with(density) { 18.dp.roundToPx() }
-    // Move the native window itself, not only its Compose child: the rounded
-    // blur mask and glass fill must travel together. x stays pinned at zero.
-    val windowYOffsetPx = bottomOffsetPx - (exitTravelPx * slideProgress.value).roundToInt()
-    // Android's background-blur API blurs only through the WINDOW background,
-    // not a Compose child background. Keep the glass tint on the floating
-    // window drawable itself so the platform has a translucent rounded blur
-    // mask; the Compose content below stays transparent to avoid double tint.
-    val pillWindowBackground = remember(capsuleHeightPx, glassFill) {
-        GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = capsuleHeightPx / 2f
-            setColor(glassFill.toArgb())
-        }
-    }
 
-    if (dialogAttached) {
-        Dialog(
-            onDismissRequest = {},
-            properties = DialogProperties(
-                dismissOnBackPress = false,
-                dismissOnClickOutside = false,
-                usePlatformDefaultWidth = false,
-                // Keep the native Dialog floating/translucent so Android's
-                // per-window background-blur mask is supported. decorFits=false
-                // makes Compose use a non-floating full-screen Window.
-                decorFitsSystemWindows = true,
-            ),
-        ) {
-            val dialogView = LocalView.current
-            val dialogWindow = (dialogView.parent as? DialogWindowProvider)?.window
-            DisposableEffect(dialogWindow, capsuleWidthPx, capsuleHeightPx, bottomOffsetPx, pillWindowBackground) {
-                if (dialogWindow != null) {
-                    dialogWindow.setWindowAnimations(0)
-                    dialogWindow.setBackgroundDrawable(pillWindowBackground)
-                    dialogView.elevation = 0f
-                    dialogView.translationZ = 0f
-                    dialogWindow.decorView.elevation = 0f
-                    dialogWindow.decorView.translationZ = 0f
-                    dialogWindow.setDimAmount(0f)
-                    val params = dialogWindow.attributes
-                    params.format = PixelFormat.TRANSLUCENT
-                    params.width = capsuleWidthPx
-                    params.height = capsuleHeightPx
-                    params.windowAnimations = 0
-                    params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                    params.x = 0
-                    params.y = windowYOffsetPx
-                    params.flags =
-                        (params.flags or
-                            WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or
-                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL) and
-                            WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        // Use physical-screen coordinates for the explicit
-                        // navigation-bar inset above; do not inset the floating
-                        // capsule a second time as decorFits would otherwise.
-                        params.setFitInsetsSides(0)
-                        params.setFitInsetsTypes(0)
-                    }
-                    dialogWindow.attributes = params
-                }
-                onDispose {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dialogWindow?.setBackgroundBlurRadius(0)
-                }
-            }
-            SideEffect {
-                if (dialogWindow != null) {
-                    val params = dialogWindow.attributes
-                    var flags = params.flags or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                    flags = flags and WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
-                    flags = if (windowInteractive) flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-                    else flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                    val positionChanged =
-                        params.x != 0 ||
-                            params.y != windowYOffsetPx ||
-                            params.gravity != (Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL) ||
-                            params.width != capsuleWidthPx ||
-                            params.height != capsuleHeightPx
-                    val fitInsetsChanged =
-                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-                            (params.fitInsetsSides != 0 || params.fitInsetsTypes != 0)
-                    if (params.flags != flags || positionChanged || fitInsetsChanged) {
-                        params.flags = flags
-                        params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                        params.width = capsuleWidthPx
-                        params.height = capsuleHeightPx
-                        params.x = 0
-                        params.y = windowYOffsetPx
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                            params.setFitInsetsSides(0)
-                            params.setFitInsetsTypes(0)
-                        }
-                        dialogWindow.attributes = params
-                    }
-                    // Fade the real per-window blur with the pill itself. This
-                    // mask now moves with the floating window instead of leaving
-                    // a stationary blur/shadow ghost as the bar exits.
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        val fraction = (1f - slideProgress.value).coerceIn(0f, 1f)
-                        dialogWindow.setBackgroundBlurRadius((blurRadiusPx * fraction).roundToInt())
-                    }
-                }
-            }
-            Box(
+    if (!modalOpen && (visible || slideProgress.value < 0.999f)) {
+        Box(Modifier.fillMaxSize()) {
+            BoxWithConstraints(
                 Modifier
-                    .size(capsuleWidth, capsuleHeight)
-                    .then(if (windowInteractive) Modifier else Modifier.clearAndSetSemantics {})
-                    .clip(CircleShape),
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = bottomInset + 16.dp)
+                    .width(capsuleWidth)
+                    .height(capsuleHeight)
+                    .then(if (navInteractive) Modifier else Modifier.clearAndSetSemantics {})
+                    .graphicsLayer {
+                        translationY = exitTravelPx * slideProgress.value
+                        alpha = 1f - slideProgress.value
+                    }
+                    .clip(CircleShape)
+                    .background(glassFill),
             ) {
-                // One shared indicator travels between tab centers using the
-                // reference demo's 450 ms overshooting cubic-bezier.
+                val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4
+                val indicatorX by animateDpAsState(
+                    targetValue = capsulePadding + (slotWidth - indicatorSize) * 0.5f +
+                        (slotWidth + gap) * tab.coerceIn(0, 3).toFloat(),
+                    animationSpec = tween(450, easing = indicatorEasing),
+                    label = "navIndicatorX",
+                )
+                val indicatorY = capsulePadding + (itemH - indicatorSize) * 0.5f
                 Box(
                     Modifier
                         .offset(x = indicatorX, y = indicatorY)
@@ -1171,16 +1040,16 @@ private fun FloatingBottomNav(
                         .background(indicatorColor),
                 )
                 Row(
-                    Modifier.fillMaxSize().padding(capsulePadding),
+                    Modifier.fillMaxSize().padding(horizontal = capsulePadding, vertical = capsulePadding),
                     horizontalArrangement = Arrangement.spacedBy(gap),
                 ) {
                     NavItem(
                         label = "Chats",
                         selected = tab == 0,
-                        width = itemW,
+                        modifier = Modifier.weight(1f),
                         height = itemH,
                         badge = unreadChats,
-                        enabled = windowInteractive,
+                        enabled = navInteractive,
                         idleTint = idleTint,
                         selectedTint = selectedTint,
                         onClick = { onSelect(0) },
@@ -1195,22 +1064,20 @@ private fun FloatingBottomNav(
                     NavItem(
                         label = "Status",
                         selected = tab == 1,
-                        width = itemW,
+                        modifier = Modifier.weight(1f),
                         height = itemH,
                         newStatus = unseenStatus,
-                        enabled = windowInteractive,
+                        enabled = navInteractive,
                         idleTint = idleTint,
                         selectedTint = selectedTint,
                         onClick = { onSelect(1) },
-                    ) { tint ->
-                        StatusGlyphIcon(tint, 24.dp)
-                    }
+                    ) { tint -> StatusGlyphIcon(tint, 24.dp) }
                     NavItem(
                         label = "Calls",
                         selected = tab == 2,
-                        width = itemW,
+                        modifier = Modifier.weight(1f),
                         height = itemH,
-                        enabled = windowInteractive,
+                        enabled = navInteractive,
                         idleTint = idleTint,
                         selectedTint = selectedTint,
                         onClick = { onSelect(2) },
@@ -1220,9 +1087,9 @@ private fun FloatingBottomNav(
                     NavItem(
                         label = "Profile",
                         selected = tab == 3,
-                        width = itemW,
+                        modifier = Modifier.weight(1f),
                         height = itemH,
-                        enabled = windowInteractive,
+                        enabled = navInteractive,
                         idleTint = idleTint,
                         selectedTint = selectedTint,
                         onClick = { onSelect(3) },
@@ -1238,7 +1105,7 @@ private fun FloatingBottomNav(
 private fun NavItem(
     label: String,
     selected: Boolean,
-    width: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier,
     height: androidx.compose.ui.unit.Dp,
     badge: Int = 0,
     newStatus: Boolean = false,
@@ -1284,8 +1151,9 @@ private fun NavItem(
         if (newStatus) append(", new updates")
     }
     Box(
-        Modifier
-            .size(width, height)
+        modifier
+            .fillMaxWidth()
+            .height(height)
             // Do not clip this hit target: the unread badge intentionally
             // overhangs the icon's corner and must remain completely visible.
             .semantics(mergeDescendants = true) {
@@ -1698,8 +1566,6 @@ private fun SwipeConvRow(
             Modifier
                 .offset { IntOffset(-offset.roundToInt(), 0) }
                 .fillMaxSize()
-                .clip(RoundedCornerShape(16.dp))
-                .background(Card)
                 .pointerInput(conv.optString("id")) {
                     detectHorizontalDragGestures(
                         onDragEnd = {
@@ -1726,9 +1592,33 @@ private fun SwipeConvRow(
                     }
                 },
         ) {
-            ConvCard(conv, nav, revealedLeft || revealedRight) {
-                dragged = 0f
-                if (SwipeOpen.id == convId) SwipeOpen.id = null
+            KpLiveFocusItem(
+                key = "chat:$convId",
+                modifier = Modifier.fillMaxSize(),
+                targetScale = 1.035f,
+                slotExtra = 10.dp,
+            ) { requestFocus ->
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Card),
+                ) {
+                    ConvCard(
+                        conv = conv,
+                        nav = nav,
+                        revealed = revealedLeft || revealedRight,
+                        onCollapse = {
+                            dragged = 0f
+                            if (SwipeOpen.id == convId) SwipeOpen.id = null
+                        },
+                        onFocusRequest = {
+                            requestFocus()
+                            // r103-5: long-press opens the sheet; Select remains an explicit action.
+                            ListSelect.sheetFor = conv
+                        },
+                    )
+                }
             }
         }
     }
@@ -1804,12 +1694,15 @@ internal fun friendlyPreview(raw: String): String {
 
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
-private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = false, onCollapse: () -> Unit = {}) {
+private fun ConvCard(
+    conv: JSONObject,
+    nav: NavController,
+    revealed: Boolean = false,
+    onCollapse: () -> Unit = {},
+    onFocusRequest: () -> Unit,
+) {
     val id = conv.optString("id")
     val haptics = rememberHaptics()
-    val scope = rememberCoroutineScope()
-    var spotlightWindowBounds by remember(id) { mutableStateOf<Rect?>(null) }
-    var spotlightRootBounds by remember(id) { mutableStateOf<Rect?>(null) }
     // Owner round 32 (item 12): long-press = tick this row + open the sheet;
     // in select mode a tap toggles the tick instead of opening the chat.
     val selecting = ListSelect.active
@@ -1861,25 +1754,12 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
     if (peek) ProfilePeekSheet(conv, nav) { peek = false }
     val longPress = {
         haptics.heavy()
-        // Keep this chat card sharp above the modal blur, then raise its action sheet.
-        val windowBounds = spotlightWindowBounds
-        val rootBounds = spotlightRootBounds
-        scope.launch {
-            if (windowBounds != null && rootBounds != null) {
-                KpModalFocusState.capture(windowBounds, rootBounds, RoundedCornerShape(16.dp))
-            }
-            // r103-5: long-press opens the sheet; Select remains an explicit action.
-            ListSelect.sheetFor = conv
-        }
+        onFocusRequest()
     }
 
     Row(
         Modifier
             .fillMaxSize()
-            .onGloballyPositioned { coordinates ->
-                spotlightWindowBounds = coordinates.boundsInWindow()
-                spotlightRootBounds = coordinates.boundsInRoot()
-            }
             .background(if (ticked) ActionBlue.copy(alpha = 0.10f) else Color.Transparent)
             .combinedClickable(
                 onClick = {
@@ -2233,21 +2113,26 @@ private fun ChatRowSheet(
     val otherId = other?.optString("id").orEmpty()
     val handle = other?.optText("username").orEmpty().ifBlank { other?.optText("displayName").orEmpty() }
     val canGroup = !target.optBoolean("isGroup") && otherId.isNotBlank() && !isKpBot(otherId)
-    var confirmDelete by remember { mutableStateOf(false) }
+    val targetId = target.optString("id")
+    val sheetKey = "chat-actions:$targetId:${ids.joinToString(",")}"
+    val focusItem = KpModalFocusState.focusedItem?.takeIf { it.key == "chat:$targetId" }
+    var confirmDelete by remember(targetId) { mutableStateOf(false) }
+
     if (confirmDelete) {
-        // r68-7: the checkbox is the whole question ("tick korle duijoner thekei
-        // chat delete hoye jabe shob permanently, tick na korle just tar kache
-        // theke delete Hobe je koreche"); r69: the popup and the DELETE are the
-        // screen's shared pair (see ChatDeleteDialog above) — the swipe slots
-        // raise the very same dialog now.
+        // Keep the selected live row moving home before the destructive
+        // confirmation opens; the checkbox dialog remains the existing flow.
         val rowsToDelete =
             ids.mapNotNull { id -> ScreenStore.convs.firstOrNull { it.optString("id") == id } }
                 .ifEmpty { listOf(target) }
         ChatDeleteDialog(
             convs = rowsToDelete,
-            onDismiss = { confirmDelete = false },
+            onDismiss = {
+                confirmDelete = false
+                ListSelect.sheetFor = null
+            },
             onConfirm = { also ->
                 confirmDelete = false
+                ListSelect.sheetFor = null
                 haptics.heavy()
                 deleteChatsNow(scope, ids, also) {
                     android.widget.Toast.makeText(ctx, if (ids.size > 1) "Chats deleted" else "Chat deleted", android.widget.Toast.LENGTH_SHORT).show()
@@ -2256,46 +2141,69 @@ private fun ChatRowSheet(
                 }
             },
         )
-        return
-    }
-    KpSheet(onDismiss = onDismiss) {
-        KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red) { confirmDelete = true }
-        KpSheetRow(
-            if (allMuted) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
-            if (allMuted) "Unmute…" else "Mute…",
-        ) {
-            // r69: never one blind flag — the two-row chooser (call / messages)
-            // decides which half of every ticked chat is muted. It is hosted by
-            // the LIST (through ListSelect.muteFor), because this sheet is gone
-            // by the time the answer arrives.
-            haptics.tap()
-            ListSelect.muteFor = target
-            onDismiss()
-        }
-        KpSheetRow(Icons.Filled.PushPin, if (allPinned) "Unpin" else "Pin") {
-            haptics.confirm()
-            ids.forEach { ScreenStore.setPinned(it, !allPinned) }
-            ListSelect.clear()
-        }
-        if (canGroup) {
-            KpSheetRow(Icons.Filled.GroupAdd, "Create group with $handle") {
-                haptics.tap()
-                // Every ticked 1:1 peer rides along as a pre-picked member.
-                val peers =
-                    rows.filter { !it.optBoolean("isGroup") }
-                        .mapNotNull { it.optJSONObject("other")?.optString("id") }
-                        .filter { it.isNotBlank() && !isKpBot(it) }
-                        .ifEmpty { listOf(otherId) }
-                        .distinct()
-                ListSelect.clear()
-                nav.navigate("newgroup?with=${peers.joinToString(",")}")
+    } else {
+        val body: @Composable ColumnScope.() -> Unit = {
+            KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red) {
+                KpFocusSheetState.close { confirmDelete = true }
+            }
+            KpSheetRow(
+                if (allMuted) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
+                if (allMuted) "Unmute…" else "Mute…",
+            ) {
+                KpFocusSheetState.close {
+                    // r69: the two-row chooser decides which half of every
+                    // ticked chat is muted; never flip one blind flag.
+                    haptics.tap()
+                    ListSelect.muteFor = target
+                    onDismiss()
+                }
+            }
+            KpSheetRow(Icons.Filled.PushPin, if (allPinned) "Unpin" else "Pin") {
+                KpFocusSheetState.close {
+                    haptics.confirm()
+                    ids.forEach { ScreenStore.setPinned(it, !allPinned) }
+                    ListSelect.clear()
+                }
+            }
+            if (canGroup) {
+                KpSheetRow(Icons.Filled.GroupAdd, "Create group with $handle") {
+                    KpFocusSheetState.close {
+                        haptics.tap()
+                        // Every ticked 1:1 peer rides along as a pre-picked member.
+                        val peers =
+                            rows.filter { !it.optBoolean("isGroup") }
+                                .mapNotNull { it.optJSONObject("other")?.optString("id") }
+                                .filter { it.isNotBlank() && !isKpBot(it) }
+                                .ifEmpty { listOf(otherId) }
+                                .distinct()
+                        ListSelect.clear()
+                        nav.navigate("newgroup?with=${peers.joinToString(",")}")
+                    }
+                }
+            }
+            KpSheetRow(Icons.Filled.CheckCircle, "Select") {
+                KpFocusSheetState.close {
+                    haptics.tap()
+                    ListSelect.active = true
+                    if (targetId !in ListSelect.ids) ListSelect.ids.add(targetId)
+                    onDismiss()
+                }
             }
         }
-        KpSheetRow(Icons.Filled.CheckCircle, "Select") {
-            haptics.tap()
-            ListSelect.active = true
-            if (target.optString("id") !in ListSelect.ids) ListSelect.ids.add(target.optString("id"))
-            onDismiss()
+        val latestBody = rememberUpdatedState(body)
+        val hostedBody: @Composable ColumnScope.() -> Unit = remember(sheetKey) {
+            { latestBody.value.invoke(this) }
+        }
+        LaunchedEffect(sheetKey) {
+            KpFocusSheetState.open(
+                KpFocusSheetRequest(
+                    key = sheetKey,
+                    ownerRoute = "main",
+                    focusKey = focusItem?.key,
+                    onDismiss = onDismiss,
+                    content = hostedBody,
+                ),
+            )
         }
     }
 }

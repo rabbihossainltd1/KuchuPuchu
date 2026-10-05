@@ -36,7 +36,6 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.filled.Check
@@ -66,16 +65,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.foundation.layout.offset
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -92,7 +87,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.json.JSONObject
-import kotlin.math.roundToInt
 
 /**
  * A reference-counted modal signal. KpApp blurs the entire live screen while
@@ -108,12 +102,11 @@ internal object KpModalBlurState {
     val isActive: Boolean
         get() = activeCount > 0
 
-    /** Keeps the home nav removed until the native modal window has left composition. */
+    /** Keeps the home nav suppressed until the modal surface leaves composition. */
     val hasVisibleWindow: Boolean
         get() = visibleWindowCount > 0
 
     fun register() {
-        if (activeCount == 0) KpModalFocusState.onModalOpening()
         activeCount += 1
         visibleWindowCount += 1
     }
@@ -192,139 +185,6 @@ internal fun KpRememberModalBottomSheetState(
             true
         },
     )
-
-/** A sharp, source-aligned copy of the item that opened a modal sheet. */
-internal data class KpModalFocusSnapshot(
-    val image: ImageBitmap,
-    val boundsInRoot: Rect,
-    val shape: Shape,
-)
-
-/**
- * Captures only the pressed row/bubble before its modal opens. KpApp draws this
- * crop above the blurred app layer and below the sheet, keeping the source item
- * readable without weakening the backdrop blur around it.
- */
-internal object KpModalFocusState {
-    var focusedItem by mutableStateOf<KpModalFocusSnapshot?>(null)
-        private set
-    private var captureExpiresAt = 0L
-
-    suspend fun capture(windowBounds: Rect, rootBounds: Rect, shape: Shape) {
-        focusedItem = null
-        captureExpiresAt = 0L
-        val maxWidth = windowBounds.width.roundToInt().coerceAtLeast(1)
-        val bitmap =
-            DeleteAnim.capture(
-                bubble = windowBounds,
-                maxWidthPx = maxWidth,
-                forceFresh = true,
-            ) ?: return
-        focusedItem = KpModalFocusSnapshot(bitmap.asImageBitmap(), rootBounds, shape)
-        captureExpiresAt = android.os.SystemClock.uptimeMillis() + 1_000L
-    }
-
-    fun onModalOpening() {
-        if (android.os.SystemClock.uptimeMillis() > captureExpiresAt) focusedItem = null
-        captureExpiresAt = 0L
-    }
-
-    fun clear() {
-        focusedItem = null
-        captureExpiresAt = 0L
-    }
-}
-
-/**
- * Draws the captured source crop in a transparent, non-touchable window above
- * modal sheets. An Activity-layer child cannot overdraw Compose's separate
- * Dialog window, so the dedicated window is required when a sheet covers the
- * selected bubble. The crop zooms slightly on entry and scales back to its
- * exact source bounds on dismissal.
- */
-@Composable
-internal fun KpModalFocusOverlay(progress: Float) {
-    val snapshot = KpModalFocusState.focusedItem ?: return
-    val density = LocalDensity.current
-    val t = progress.coerceIn(0f, 1f)
-    val width = with(density) { snapshot.boundsInRoot.width.toDp() }
-    val height = with(density) { snapshot.boundsInRoot.height.toDp() }
-    val dialogProperties =
-        androidx.compose.ui.window.DialogProperties(
-            dismissOnBackPress = false,
-            dismissOnClickOutside = false,
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false,
-        )
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = {},
-        properties = dialogProperties,
-    ) {
-        val dialogView = androidx.compose.ui.platform.LocalView.current
-        val dialogWindow =
-            (dialogView.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
-        DisposableEffect(dialogWindow) {
-            if (dialogWindow != null) {
-                dialogWindow.setWindowAnimations(0)
-                dialogWindow.setBackgroundDrawable(
-                    android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT),
-                )
-                dialogWindow.setDimAmount(0f)
-                dialogWindow.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-                dialogView.elevation = 0f
-                dialogView.translationZ = 0f
-                dialogWindow.decorView.elevation = 0f
-                dialogWindow.decorView.translationZ = 0f
-                val params = dialogWindow.attributes
-                params.format = android.graphics.PixelFormat.TRANSLUCENT
-                params.gravity = android.view.Gravity.TOP or android.view.Gravity.START
-                params.width = android.view.WindowManager.LayoutParams.MATCH_PARENT
-                params.height = android.view.WindowManager.LayoutParams.MATCH_PARENT
-                params.x = 0
-                params.y = 0
-                params.windowAnimations = 0
-                params.flags =
-                    (params.flags or
-                        android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                        android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                        android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE) and
-                        android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
-                dialogWindow.attributes = params
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                    dialogWindow.setBackgroundBlurRadius(0)
-                }
-            }
-            onDispose { }
-        }
-        androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
-            Image(
-                bitmap = snapshot.image,
-                contentDescription = null,
-                contentScale = ContentScale.FillBounds,
-                modifier =
-                    Modifier
-                        .offset {
-                            IntOffset(
-                                snapshot.boundsInRoot.left.roundToInt(),
-                                snapshot.boundsInRoot.top.roundToInt(),
-                            )
-                        }
-                        .size(width, height)
-                        // Keep the source shape inside the transformed layer so
-                        // the slight zoom does not crop its edge corners.
-                        .graphicsLayer {
-                            val zoom = 1f + 0.03f * t
-                            scaleX = zoom
-                            scaleY = zoom
-                            translationY = -with(density) { 6.dp.toPx() } * t
-                            alpha = t
-                            transformOrigin = TransformOrigin.Center
-                        }
-                        .clip(snapshot.shape),
-            )
-        }
-    }
-}
 
 /**
  * Shared image helpers. Avatars are data-URLs the worker stores inline, so
