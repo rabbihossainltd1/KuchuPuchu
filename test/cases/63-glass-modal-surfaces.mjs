@@ -74,13 +74,16 @@ check(
     chat.includes(".border(0.5.dp, GlassSheetEdge)"),
 );
 check(
-  "home nav is a slim four-button capsule with a localized native backdrop blur",
-  chatList.includes("val itemW = 44.dp") &&
-    chatList.includes("val itemH = 40.dp") &&
+  "home nav is a wider four-button capsule with native backdrop blur that vanishes beneath modal sheets",
+  chatList.includes("val itemW = 56.dp") &&
+    chatList.includes("val itemH = 44.dp") &&
     chatList.includes('label = "Profile"') &&
     chatList.includes("Icons.Filled.Person") &&
-    chatList.includes("dialogWindow.setBackgroundBlurRadius(if (visible) blurRadiusPx else 0)") &&
-    chatList.includes(".blur(modalBlur)"),
+    chatList.includes(
+      "dialogWindow.setBackgroundBlurRadius(if (windowVisible) blurRadiusPx else 0)",
+    ) &&
+    chatList.includes("val windowVisible = visible && !modalOpen") &&
+    chatList.includes("alpha = if (modalOpen) 0f else 1f - hideProgress"),
 );
 
 for (const line of lines) console.log(line);

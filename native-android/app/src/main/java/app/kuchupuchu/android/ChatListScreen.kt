@@ -92,7 +92,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -110,7 +109,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
@@ -151,7 +149,7 @@ import kotlin.math.roundToInt
 /**
  * Chat List — locked design #7 "Gradient Rings".
  * Cream background, white 16dp cards, amber gradient
- * ring avatars, floating bottom tabs (Chats / Status / Calls), gold FAB,
+ * ring avatars, floating bottom tabs (Chats / Status / Calls / Profile), gold FAB,
  * swipe actions for mute + delete.
  */
 @Composable
@@ -360,7 +358,7 @@ fun ChatListScreen(nav: NavController) {
         if (Store.foreground) refresh()
     }
 
-    // Owner round 83: the Chats / Status / Calls tabs live in a compact,
+    // Owner round 83: the home destinations live in a compact,
     // icon-only floating pill. Keep a per-visible-chat badge (not a message
     // total), matching the standalone reference; hidden conversations stay out.
     val unreadChats = convs.count { !it.optBoolean("hidden") && it.optInt("unread", 0) > 0 }
@@ -382,6 +380,11 @@ fun ChatListScreen(nav: NavController) {
                 available: Offset,
                 source: NestedScrollSource,
             ): Offset {
+                if (tab == 3) {
+                    navVisible = true
+                    acc = 0f
+                    return Offset.Zero
+                }
                 if (available.y > 0f) {
                     navVisible = true
                     acc = 0f
@@ -406,12 +409,29 @@ fun ChatListScreen(nav: NavController) {
     }
     LaunchedEffect(tab) { navVisible = true }
     val fabBottom by animateDpAsState(
-        if (navVisible) 74.dp else 2.dp,
+        if (navVisible) 84.dp else 2.dp,
         tween(450, easing = FastOutSlowInEasing),
         label = "fabBottom",
     )
+    fun selectHomeTab(index: Int) {
+        haptics.tap()
+        if (index != 0) {
+            ListSelect.clear()
+            ListSelect.muteFor = null
+        }
+        tab = index
+    }
 
     Box(Modifier.fillMaxSize().background(Cream)) {
+        // This native blur window is created before any sheet/dialog windows,
+        // so an open sheet always layers above the home bar's glass.
+        FloatingBottomNav(
+            tab = tab,
+            unreadChats = unreadChats,
+            unseenStatus = unseenStatus,
+            visible = navVisible,
+            onSelect = ::selectHomeTab,
+        )
         // r76-26 (owner: "onno phone a login korle purono message gulate lock"):
         // a locked key backup waits on the server — ask for its passphrase so
         // the sealed history opens on this phone instead of showing locks.
@@ -442,7 +462,8 @@ fun ChatListScreen(nav: NavController) {
             // set of ticks.
             androidx.compose.runtime.DisposableEffect(Unit) { onDispose { ListSelect.clear() } }
             // r76-27 (audit #8): the bar swaps through a fade, not a hard cut.
-            androidx.compose.animation.Crossfade(
+            if (tab != 3) {
+                androidx.compose.animation.Crossfade(
                 targetState = selecting,
                 animationSpec = androidx.compose.animation.core.tween(180),
                 label = "chattopbar",
@@ -496,8 +517,9 @@ fun ChatListScreen(nav: NavController) {
                     Icon(Icons.Filled.MoreVert, "Menu", tint = Ink, modifier = Modifier.size(26.dp))
                 }
                 if (homeMenu) {
-                    HomeMenuSheet(onDismiss = { homeMenu = false }, nav = nav)
+                    HomeMenuSheet(onDismiss = { homeMenu = false }, nav = nav, onOpenProfile = { tab = 3 })
                 }
+            }
             }
             }
             }
@@ -560,7 +582,13 @@ fun ChatListScreen(nav: NavController) {
                     when (t) {
                         0 -> ArchivePullArea(nav, archivePull) { ChatListBody(convs, loading, nav, ::refresh, chatsListState, archivePull) }
                         1 -> StatusScreen(nav, fabBottom = fabBottom)
-                        else -> CallsScreen(nav)
+                        2 -> CallsScreen(nav)
+                        else -> ProfileScreen(
+                            nav = nav,
+                            userId = Store.myId(),
+                            onBack = { tab = 0 },
+                            showHomeNav = true,
+                        )
                     }
                 }
             }
@@ -592,22 +620,6 @@ fun ChatListScreen(nav: NavController) {
             }
         }
 
-        /* ---------- floating bottom nav ---------- */
-        FloatingBottomNav(
-            tab = tab,
-            unreadChats = unreadChats,
-            unseenStatus = unseenStatus,
-            visible = navVisible,
-        ) { i ->
-            haptics.tap()
-            if (i != 0) ListSelect.clear()
-            if (i == 3) {
-                val myId = Store.myId()
-                if (myId.isNotBlank()) nav.navigate("profile/$myId") { launchSingleTop = true }
-            } else {
-                tab = i
-            }
-        }
     }
 }
 
@@ -968,41 +980,34 @@ private fun FloatingBottomNav(
     visible: Boolean,
     onSelect: (Int) -> Unit,
 ) {
-    // Keep the capsule slim while fitting the added Profile destination.
-    val itemW = 44.dp
-    val itemH = 40.dp
+    // A little wider and taller than the previous pill: four comfortable
+    // targets, with the same breathing room on every side.
+    val itemW = 56.dp
+    val itemH = 44.dp
     val gap = 4.dp
-    val capsulePadding = 4.dp
+    val capsulePadding = 6.dp
     val capsuleWidth = itemW * 4 + gap * 3 + capsulePadding * 2
     val capsuleHeight = itemH + capsulePadding * 2
     val density = LocalDensity.current
-    val stepPx = with(density) { (itemW + gap).toPx() }
     val capsuleWidthPx = with(density) { capsuleWidth.roundToPx() }
     val capsuleHeightPx = with(density) { capsuleHeight.roundToPx() }
     val bottomOffsetPx = WindowInsets.navigationBars.getBottom(density) + with(density) { 16.dp.roundToPx() }
-    val blurRadiusPx = with(density) { 42.dp.roundToPx() }
+    val blurRadiusPx = with(density) { 30.dp.roundToPx() }
     val darkMode = KpThemeMode.darkBlue
     val idleTint = if (darkMode) Color(0xFFD3DEF5) else Muted
     val selectedTint = if (darkMode) Color.White else Ink
     val indicatorColor = if (darkMode) Color(0xB32B5BD7) else ActionBlue.copy(alpha = 0.16f)
+    val indicatorEdge = if (darkMode) Color(0xE0B8CCFF) else ActionBlue.copy(alpha = 0.82f)
     val glassFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.54f) else Card.copy(alpha = 0.76f)
     val glassEdge = if (darkMode) Color(0xE0A0B9F0) else Line.copy(alpha = 0.96f)
-    val indicatorX by animateFloatAsState(
-        tab * stepPx,
-        spring(dampingRatio = 0.6f, stiffness = 380f),
-        label = "navIndicator",
+    val modalOpen = KpModalBlurState.isActive
+    val windowVisible = visible && !modalOpen
+    val hideProgress by animateFloatAsState(
+        if (visible) 0f else 1f,
+        tween(200, easing = FastOutSlowInEasing),
+        label = "navHideProgress",
     )
-    val shift by animateDpAsState(
-        if (visible) 0.dp else 52.dp,
-        tween(350, easing = FastOutSlowInEasing),
-        label = "navShift",
-    )
-    val fade by animateFloatAsState(if (visible) 1f else 0f, tween(280), label = "navFade")
-    val modalBlur by animateDpAsState(
-        if (KpModalBlurState.isActive) 28.dp else 0.dp,
-        tween(180),
-        label = "navModalBlur",
-    )
+    val hideDistancePx = with(density) { (capsuleHeight + 18.dp).toPx() }
     val pillWindowBackground = remember(capsuleHeightPx) {
         GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
@@ -1022,119 +1027,123 @@ private fun FloatingBottomNav(
     ) {
         val dialogView = LocalView.current
         val dialogWindow = (dialogView.parent as? DialogWindowProvider)?.window
-        DisposableEffect(dialogWindow, pillWindowBackground) {
+        DisposableEffect(dialogWindow, capsuleWidthPx, capsuleHeightPx, bottomOffsetPx, pillWindowBackground) {
             if (dialogWindow != null) {
                 dialogWindow.setBackgroundDrawable(pillWindowBackground)
                 dialogWindow.decorView.elevation = 0f
                 dialogWindow.decorView.translationZ = 0f
                 dialogWindow.setDimAmount(0f)
-                dialogWindow.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+                val params = dialogWindow.attributes
+                params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                params.width = capsuleWidthPx
+                params.height = capsuleHeightPx
+                params.x = 0
+                params.y = bottomOffsetPx
+                params.flags =
+                    (params.flags or
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL) and
+                        WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
+                dialogWindow.attributes = params
             }
             onDispose {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dialogWindow?.setBackgroundBlurRadius(0)
             }
         }
-        DisposableEffect(dialogWindow, visible, blurRadiusPx) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && dialogWindow != null) {
-                dialogWindow.setBackgroundBlurRadius(if (visible) blurRadiusPx else 0)
+        DisposableEffect(dialogWindow, windowVisible, blurRadiusPx) {
+            if (dialogWindow != null) {
+                val params = dialogWindow.attributes
+                var flags = params.flags or
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                flags = flags and WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
+                flags = if (windowVisible) flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+                else flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                if (params.flags != flags) {
+                    params.flags = flags
+                    dialogWindow.attributes = params
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    dialogWindow.setBackgroundBlurRadius(if (windowVisible) blurRadiusPx else 0)
+                }
             }
             onDispose {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dialogWindow?.setBackgroundBlurRadius(0)
-            }
-        }
-        SideEffect {
-            val window = dialogWindow ?: return@SideEffect
-            val gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            val p = window.attributes
-            var flags = p.flags or
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-            flags = flags and WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
-            flags = if (visible) flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-            else flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-            if (
-                p.width != capsuleWidthPx || p.height != capsuleHeightPx || p.gravity != gravity ||
-                p.x != 0 || p.y != bottomOffsetPx || p.flags != flags
-            ) {
-                val updated = window.attributes
-                updated.gravity = gravity
-                updated.width = capsuleWidthPx
-                updated.height = capsuleHeightPx
-                updated.x = 0
-                updated.y = bottomOffsetPx
-                updated.flags = flags
-                window.attributes = updated
             }
         }
         Box(
             Modifier
                 .size(capsuleWidth, capsuleHeight)
-                .offset(y = shift)
-                .alpha(fade)
-                .then(if (visible) Modifier else Modifier.clearAndSetSemantics {})
-                .blur(modalBlur)
+                .graphicsLayer {
+                    translationY = if (modalOpen) hideDistancePx else hideDistancePx * hideProgress
+                    alpha = if (modalOpen) 0f else 1f - hideProgress
+                }
+                .then(if (windowVisible) Modifier else Modifier.clearAndSetSemantics {})
                 .clip(CircleShape)
                 .background(glassFill)
-                .border(1.25.dp, glassEdge, CircleShape),
+                .border(1.5.dp, glassEdge, CircleShape),
         ) {
-            Box(Modifier.fillMaxSize().padding(capsulePadding)) {
-                Box(
-                    Modifier
-                        .offset { IntOffset(indicatorX.roundToInt(), 0) }
-                        .size(itemW, itemH)
-                        .background(indicatorColor, CircleShape),
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
-                    NavItem(
-                        label = "Chats",
-                        selected = tab == 0,
-                        width = itemW,
-                        height = itemH,
-                        badge = unreadChats,
-                        enabled = visible,
-                        idleTint = idleTint,
-                        selectedTint = selectedTint,
-                        onClick = { onSelect(0) },
-                    ) { tint ->
-                        Icon(Icons.Filled.Chat, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
-                    }
-                    NavItem(
-                        label = "Status",
-                        selected = tab == 1,
-                        width = itemW,
-                        height = itemH,
-                        newStatus = unseenStatus,
-                        enabled = visible,
-                        idleTint = idleTint,
-                        selectedTint = selectedTint,
-                        onClick = { onSelect(1) },
-                    ) { tint ->
-                        StatusGlyphIcon(tint, 22.dp)
-                    }
-                    NavItem(
-                        label = "Calls",
-                        selected = tab == 2,
-                        width = itemW,
-                        height = itemH,
-                        enabled = visible,
-                        idleTint = idleTint,
-                        selectedTint = selectedTint,
-                        onClick = { onSelect(2) },
-                    ) { tint ->
-                        Icon(Icons.Filled.Call, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
-                    }
-                    NavItem(
-                        label = "Profile",
-                        selected = false,
-                        width = itemW,
-                        height = itemH,
-                        enabled = visible,
-                        idleTint = idleTint,
-                        selectedTint = selectedTint,
-                        onClick = { onSelect(3) },
-                    ) { tint ->
-                        Icon(Icons.Filled.Person, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
-                    }
+            Row(
+                Modifier.fillMaxSize().padding(capsulePadding),
+                horizontalArrangement = Arrangement.spacedBy(gap),
+            ) {
+                NavItem(
+                    label = "Chats",
+                    selected = tab == 0,
+                    width = itemW,
+                    height = itemH,
+                    badge = unreadChats,
+                    enabled = windowVisible,
+                    idleTint = idleTint,
+                    selectedTint = selectedTint,
+                    selectedBackground = indicatorColor,
+                    selectedBorder = indicatorEdge,
+                    onClick = { onSelect(0) },
+                ) { tint ->
+                    Icon(Icons.Filled.Chat, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+                }
+                NavItem(
+                    label = "Status",
+                    selected = tab == 1,
+                    width = itemW,
+                    height = itemH,
+                    newStatus = unseenStatus,
+                    enabled = windowVisible,
+                    idleTint = idleTint,
+                    selectedTint = selectedTint,
+                    selectedBackground = indicatorColor,
+                    selectedBorder = indicatorEdge,
+                    onClick = { onSelect(1) },
+                ) { tint ->
+                    StatusGlyphIcon(tint, 24.dp)
+                }
+                NavItem(
+                    label = "Calls",
+                    selected = tab == 2,
+                    width = itemW,
+                    height = itemH,
+                    enabled = windowVisible,
+                    idleTint = idleTint,
+                    selectedTint = selectedTint,
+                    selectedBackground = indicatorColor,
+                    selectedBorder = indicatorEdge,
+                    onClick = { onSelect(2) },
+                ) { tint ->
+                    Icon(Icons.Filled.Call, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+                }
+                NavItem(
+                    label = "Profile",
+                    selected = tab == 3,
+                    width = itemW,
+                    height = itemH,
+                    enabled = windowVisible,
+                    idleTint = idleTint,
+                    selectedTint = selectedTint,
+                    selectedBackground = indicatorColor,
+                    selectedBorder = indicatorEdge,
+                    onClick = { onSelect(3) },
+                ) { tint ->
+                    Icon(Icons.Filled.Person, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
                 }
             }
         }
@@ -1152,6 +1161,8 @@ private fun NavItem(
     enabled: Boolean = true,
     idleTint: Color,
     selectedTint: Color,
+    selectedBackground: Color,
+    selectedBorder: Color,
     onClick: () -> Unit,
     icon: @Composable (Color) -> Unit,
 ) {
@@ -1192,6 +1203,8 @@ private fun NavItem(
     Box(
         Modifier
             .size(width, height)
+            .background(if (selected) selectedBackground else Color.Transparent, CircleShape)
+            .border(if (selected) 1.25.dp else 0.dp, if (selected) selectedBorder else Color.Transparent, CircleShape)
             // Do not clip this hit target: the unread badge intentionally
             // overhangs the icon's corner and must remain completely visible.
             .semantics(mergeDescendants = true) {
@@ -1279,7 +1292,7 @@ private fun Modifier.homeTabSwipe(
         val dx = end.x - down.position.x
         val dy = end.y - down.position.y
         if (!childConsumedMovement && kotlin.math.abs(dx) >= thresholdPx && kotlin.math.abs(dx) >= 2f * kotlin.math.abs(dy)) {
-            val next = (activeTab + if (dx < 0f) 1 else -1).coerceIn(0, 2)
+            val next = (activeTab + if (dx < 0f) 1 else -1).coerceIn(0, 3)
             if (next != activeTab) onSwipe(next)
         }
     }
@@ -2202,9 +2215,9 @@ private fun HomeMenuItem(icon: ImageVector, label: String, onClick: () -> Unit) 
 }
 
 @Composable
-private fun HomeMenuSheet(onDismiss: () -> Unit, nav: NavController) {
+private fun HomeMenuSheet(onDismiss: () -> Unit, nav: NavController, onOpenProfile: () -> Unit) {
     KpSheet(onDismiss = onDismiss) {
-        HomeMenuItem(Icons.Filled.Person, "My Profile") { onDismiss(); nav.navigate("profile/${Store.myId()}") }
+        HomeMenuItem(Icons.Filled.Person, "My Profile") { onDismiss(); onOpenProfile() }
         HomeMenuItem(Icons.Filled.PersonAdd, "New contact") { onDismiss(); nav.navigate("newcontact") }
         HomeMenuItem(Icons.Filled.Contacts, "All contacts") { onDismiss(); nav.navigate("contacts") }
         HomeMenuItem(Icons.Filled.GroupAdd, "New group") { onDismiss(); nav.navigate("newgroup") }

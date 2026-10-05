@@ -14,6 +14,10 @@ const calls = readFileSync(
   resolve("native-android/app/src/main/java/app/kuchupuchu/android/CallsTabScreen.kt"),
   "utf8",
 );
+const profile = readFileSync(
+  resolve("native-android/app/src/main/java/app/kuchupuchu/android/ProfileScreen.kt"),
+  "utf8",
+);
 const fabSectionStart = statuses.indexOf("/* The reference keeps the text-status");
 const fabSectionEnd = statuses.indexOf("if (composeText)", fabSectionStart);
 const statusFabStack = statuses.slice(fabSectionStart, fabSectionEnd);
@@ -58,19 +62,23 @@ check(
     chatList.includes("if (acc > navShowPx) navVisible = true"),
 );
 check(
-  "slim four-button nav and safe FAB gap match the revised layout",
-  chatList.includes("val itemW = 44.dp") &&
-    chatList.includes("val itemH = 40.dp") &&
+  "wider, slightly thicker four-button nav has stable four-way spacing and FAB clearance",
+  chatList.includes("val itemW = 56.dp") &&
+    chatList.includes("val itemH = 44.dp") &&
     chatList.includes("val gap = 4.dp") &&
-    chatList.includes("val capsulePadding = 4.dp") &&
-    chatList.includes("if (navVisible) 74.dp else 2.dp") &&
-    chatList.includes("if (visible) 0.dp else 52.dp"),
+    chatList.includes("val capsulePadding = 6.dp") &&
+    chatList.includes("if (navVisible) 84.dp else 2.dp") &&
+    chatList.includes("(capsuleHeight + 18.dp).toPx()"),
 );
 check(
-  "profile tab routes to the signed-in user's profile",
+  "profile stays inside the home shell, remains selected there, and returns to Chats without losing the bar",
   chatList.includes('label = "Profile"') &&
-    chatList.includes("onClick = { onSelect(3) }") &&
-    chatList.includes('nav.navigate("profile/$myId")'),
+    chatList.includes("selected = tab == 3") &&
+    chatList.includes("userId = Store.myId()") &&
+    chatList.includes("onBack = { tab = 0 }") &&
+    chatList.includes("showHomeNav = true") &&
+    profile.includes("if (onBack != null) onBack() else nav.popBackStack()") &&
+    profile.includes("if (showHomeNav) Modifier.padding(bottom = 72.dp)"),
 );
 check(
   "unread badge can overhang its tab hit target without being clipped",
@@ -79,11 +87,22 @@ check(
     !chatList.includes(".size(width, height)\n            .clip(CircleShape)"),
 );
 check(
-  "floating nav uses a visible glass border and localized native backdrop blur",
-  chatList.includes("copy(alpha = 0.54f)") &&
-    chatList.includes(".border(1.25.dp, glassEdge, CircleShape)") &&
+  "every selected destination gets the same aligned fill and outline; the capsule keeps its own visible glass edge",
+  chatList.includes(".border(if (selected) 1.25.dp else 0.dp") &&
+    chatList.includes(".border(1.5.dp, glassEdge, CircleShape)") &&
+    chatList.includes("copy(alpha = 0.54f)"),
+);
+check(
+  "native nav blur is localized when idle, and the nav is fully cleared behind modal sheets",
+  chatList.includes(
+    "dialogWindow.setBackgroundBlurRadius(if (windowVisible) blurRadiusPx else 0)",
+  ) &&
+    chatList.includes("val windowVisible = visible && !modalOpen") &&
     chatList.includes("dialogWindow.decorView.elevation = 0f") &&
-    chatList.includes("dialogWindow.setBackgroundBlurRadius(if (visible) blurRadiusPx else 0)") &&
+    chatList.indexOf("FloatingBottomNav(") < chatList.indexOf("E2eeRestoreGate()") &&
+    chatList.includes(
+      "translationY = if (modalOpen) hideDistancePx else hideDistancePx * hideProgress",
+    ) &&
     !chatList.includes(".shadow("),
 );
 check(
