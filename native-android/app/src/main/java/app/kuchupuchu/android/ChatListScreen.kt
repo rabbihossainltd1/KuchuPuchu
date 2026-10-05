@@ -1,5 +1,10 @@
 package app.kuchupuchu.android
 
+import android.graphics.PixelFormat
+import android.graphics.drawable.GradientDrawable
+import android.os.Build
+import android.view.Gravity
+import android.view.WindowManager
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -89,7 +94,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.MutableIntState
@@ -120,12 +127,14 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -133,6 +142,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import kotlinx.coroutines.Dispatchers
@@ -978,52 +990,150 @@ internal fun HomeBottomNavigation(
     onSelect: (Int) -> Unit,
 ) {
     val density = LocalDensity.current
+    val blurEnabled = rememberCrossWindowBlurEnabled()
     val darkMode = KpThemeMode.darkBlue
     val idleTint = if (darkMode) Color(0xFFD3DEF5) else Muted
     val selectedTint = if (darkMode) Color.White else Ink
     val indicatorColor = if (darkMode) Color(0xB32B5BD7) else ActionBlue.copy(alpha = 0.16f)
     val glassFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.28f) else Card.copy(alpha = 0.76f)
+    val fallbackFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.88f) else Card.copy(alpha = 0.94f)
+    val windowFill = if (blurEnabled) glassFill else fallbackFill
     val itemH = 44.dp
     val gap = 4.dp
     val capsulePadding = 6.dp
     val capsuleWidth = 248.dp
     val capsuleHeight = 56.dp
+    val capsuleWidthPx = with(density) { capsuleWidth.roundToPx() }
+    val capsuleHeightPx = with(density) { capsuleHeight.roundToPx() }
+    val bottomOffsetPx = WindowInsets.navigationBars.getBottom(density) + with(density) { 16.dp.roundToPx() }
+    val blurRadiusPx = with(density) { 30.dp.roundToPx() }
     val indicatorSize = 40.dp
-    val exitTravelPx = with(density) { (capsuleHeight + 18.dp).roundToPx() }
-    val bottomInset = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
+    val exitTravelPx = capsuleHeightPx + bottomOffsetPx + with(density) { 12.dp.roundToPx() }
     val slideProgress = remember { Animatable(1f) }
     val slideEasing = remember { CubicBezierEasing(0.32f, 0.8f, 0.3f, 1f) }
     val indicatorEasing = remember { CubicBezierEasing(0.34f, 1.45f, 0.5f, 1f) }
+    val windowInteractive = visible && slideProgress.value <= 0.05f && !modalOpen
+    val dialogAttached = !modalOpen && (visible || slideProgress.value < 0.999f)
+    val windowYOffsetPx = bottomOffsetPx - (exitTravelPx * slideProgress.value).roundToInt()
+    val pillWindowBackground = remember(capsuleHeightPx, windowFill) {
+        GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = capsuleHeightPx / 2f
+            setColor(windowFill.copy(alpha = 0f).toArgb())
+        }
+    }
 
-    val navInteractive = visible && slideProgress.value <= 0.05f && !modalOpen
     LaunchedEffect(visible, modalOpen) {
         if (modalOpen) {
-            // Sheets keep their existing behavior: the home pill is suppressed
-            // immediately behind a modal, rather than running a second motion.
+            // Existing bottom-sheet behavior: remove the pill while a modal owns the screen.
             slideProgress.snapTo(1f)
         } else {
+            // Keep the glass window alive through the entire route transition so its
+            // position and real backdrop blur travel together instead of snapping away.
             slideProgress.animateTo(
                 targetValue = if (visible) 0f else 1f,
-                animationSpec = tween(320, easing = slideEasing),
+                animationSpec = tween(420, easing = slideEasing),
             )
         }
     }
 
-    if (!modalOpen && (visible || slideProgress.value < 0.999f)) {
-        Box(Modifier.fillMaxSize()) {
+    if (dialogAttached) {
+        Dialog(
+            onDismissRequest = {},
+            properties = DialogProperties(
+                dismissOnBackPress = false,
+                dismissOnClickOutside = false,
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = true,
+            ),
+        ) {
+            val dialogView = LocalView.current
+            val dialogWindow = (dialogView.parent as? DialogWindowProvider)?.window
+            DisposableEffect(dialogWindow, capsuleWidthPx, capsuleHeightPx, bottomOffsetPx, pillWindowBackground) {
+                if (dialogWindow != null) {
+                    dialogWindow.setWindowAnimations(0)
+                    dialogWindow.setBackgroundDrawable(pillWindowBackground)
+                    dialogView.elevation = 0f
+                    dialogView.translationZ = 0f
+                    dialogWindow.decorView.elevation = 0f
+                    dialogWindow.decorView.translationZ = 0f
+                    dialogWindow.setDimAmount(0f)
+                    val params = dialogWindow.attributes
+                    params.format = PixelFormat.TRANSLUCENT
+                    params.width = capsuleWidthPx
+                    params.height = capsuleHeightPx
+                    params.windowAnimations = 0
+                    params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                    params.x = 0
+                    params.y = windowYOffsetPx
+                    params.flags =
+                        (params.flags or
+                            WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or
+                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL) and
+                            WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        // Window y is in physical screen coordinates; avoid applying
+                        // the nav-bar inset twice to this floating glass window.
+                        params.setFitInsetsSides(0)
+                        params.setFitInsetsTypes(0)
+                    }
+                    dialogWindow.attributes = params
+                }
+                onDispose {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        dialogWindow?.setBackgroundBlurRadius(0)
+                    }
+                }
+            }
+            SideEffect {
+                if (dialogWindow != null) {
+                    val params = dialogWindow.attributes
+                    var flags = params.flags or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                    flags = flags and WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
+                    flags = if (windowInteractive) flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+                    else flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                    val positionChanged =
+                        params.x != 0 ||
+                            params.y != windowYOffsetPx ||
+                            params.gravity != (Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL) ||
+                            params.width != capsuleWidthPx ||
+                            params.height != capsuleHeightPx
+                    val fitInsetsChanged =
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                            (params.fitInsetsSides != 0 || params.fitInsetsTypes != 0)
+                    if (params.flags != flags || positionChanged || fitInsetsChanged) {
+                        params.flags = flags
+                        params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                        params.width = capsuleWidthPx
+                        params.height = capsuleHeightPx
+                        params.x = 0
+                        params.y = windowYOffsetPx
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            params.setFitInsetsSides(0)
+                            params.setFitInsetsTypes(0)
+                        }
+                        dialogWindow.attributes = params
+                    }
+                    val visibleFraction = (1f - slideProgress.value).coerceIn(0f, 1f)
+                    pillWindowBackground.setColor(windowFill.copy(alpha = windowFill.alpha * visibleFraction).toArgb())
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        dialogWindow.setBackgroundBlurRadius(
+                            if (blurEnabled) (blurRadiusPx * visibleFraction).roundToInt() else 0,
+                        )
+                    }
+                }
+            }
             BoxWithConstraints(
                 Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = bottomInset + 16.dp)
-                    .width(capsuleWidth)
-                    .height(capsuleHeight)
-                    .then(if (navInteractive) Modifier else Modifier.clearAndSetSemantics {})
-                    .graphicsLayer {
-                        translationY = exitTravelPx * slideProgress.value
-                        alpha = 1f - slideProgress.value
-                    }
-                    .clip(CircleShape)
-                    .background(glassFill),
+                    .size(capsuleWidth, capsuleHeight)
+                    .then(if (windowInteractive) Modifier else Modifier.clearAndSetSemantics {})
+                    .clip(CircleShape),
             ) {
                 val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4
                 val indicatorX by animateDpAsState(
@@ -1050,7 +1160,7 @@ internal fun HomeBottomNavigation(
                         modifier = Modifier.weight(1f),
                         height = itemH,
                         badge = unreadChats,
-                        enabled = navInteractive,
+                        enabled = windowInteractive,
                         idleTint = idleTint,
                         selectedTint = selectedTint,
                         onClick = { onSelect(0) },
@@ -1068,7 +1178,7 @@ internal fun HomeBottomNavigation(
                         modifier = Modifier.weight(1f),
                         height = itemH,
                         newStatus = unseenStatus,
-                        enabled = navInteractive,
+                        enabled = windowInteractive,
                         idleTint = idleTint,
                         selectedTint = selectedTint,
                         onClick = { onSelect(1) },
@@ -1078,7 +1188,7 @@ internal fun HomeBottomNavigation(
                         selected = tab == 2,
                         modifier = Modifier.weight(1f),
                         height = itemH,
-                        enabled = navInteractive,
+                        enabled = windowInteractive,
                         idleTint = idleTint,
                         selectedTint = selectedTint,
                         onClick = { onSelect(2) },
@@ -1090,7 +1200,7 @@ internal fun HomeBottomNavigation(
                         selected = tab == 3,
                         modifier = Modifier.weight(1f),
                         height = itemH,
-                        enabled = navInteractive,
+                        enabled = windowInteractive,
                         idleTint = idleTint,
                         selectedTint = selectedTint,
                         onClick = { onSelect(3) },
@@ -1102,6 +1212,38 @@ internal fun HomeBottomNavigation(
         }
     }
 }
+
+@Composable
+private fun rememberCrossWindowBlurEnabled(): Boolean {
+    val context = LocalContext.current
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        rememberCrossWindowBlurEnabledApiS(context)
+    } else {
+        false
+    }
+}
+
+@androidx.annotation.RequiresApi(Build.VERSION_CODES.S)
+@Composable
+private fun rememberCrossWindowBlurEnabledApiS(context: android.content.Context): Boolean {
+    var blurEnabled by remember(context) {
+        mutableStateOf(context.getSystemService(WindowManager::class.java)?.isCrossWindowBlurEnabled == true)
+    }
+    DisposableEffect(context) {
+        val windowManager = context.getSystemService(WindowManager::class.java)
+        if (windowManager == null) {
+            blurEnabled = false
+            onDispose {}
+        } else {
+            val listener = java.util.function.Consumer<Boolean> { blurEnabled = it }
+            blurEnabled = windowManager.isCrossWindowBlurEnabled
+            windowManager.addCrossWindowBlurEnabledListener(context.mainExecutor, listener)
+            onDispose { windowManager.removeCrossWindowBlurEnabledListener(listener) }
+        }
+    }
+    return blurEnabled
+}
+
 @Composable
 private fun NavItem(
     label: String,
@@ -1597,7 +1739,6 @@ private fun SwipeConvRow(
                 key = "chat:$convId",
                 modifier = Modifier.fillMaxSize(),
                 targetScale = 1.035f,
-                slotExtra = 10.dp,
             ) { requestFocus ->
                 Box(
                     Modifier

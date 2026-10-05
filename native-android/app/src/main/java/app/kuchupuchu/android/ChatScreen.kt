@@ -8040,7 +8040,6 @@ private fun KpMessageFocusSlot(
         KpLiveFocusItem(
             key = focusKey,
             targetScale = 1f,
-            slotExtra = 8.dp,
             content = content,
         )
     }

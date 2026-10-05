@@ -1,6 +1,5 @@
-// Source-contract coverage for the current Compose home-navigation implementation.
-// Keep these checks tied to behavior (equal slots, route gating and animated root motion),
-// not implementation details from the retired floating-window navigation.
+// Source-contract coverage for the Android home navigation: equal slots, route gating,
+// smooth independent motion, and the platform window's real backdrop blur.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -88,18 +87,26 @@ check(
       .includes("110.dp + WindowInsets.navigationBars.getBottom(this).toDp()"),
 );
 check(
-  "bottom-nav show/hide motion animates vertically and fades instead of snapping",
+  "bottom-nav route changes animate its own floating window down/up instead of snapping",
   nav.includes("slideProgress") &&
     nav.includes("LaunchedEffect(visible, modalOpen)") &&
     nav.includes("slideProgress.animateTo(") &&
-    nav.includes("translationY =") &&
-    nav.includes("alpha = 1f - slideProgress.value") &&
-    nav.includes("if (!modalOpen && (visible || slideProgress.value < 0.999f))"),
+    nav.includes("animationSpec = tween(420, easing = slideEasing)") &&
+    nav.includes("params.y = windowYOffsetPx") &&
+    nav.includes(
+      "windowYOffsetPx = bottomOffsetPx - (exitTravelPx * slideProgress.value).roundToInt()",
+    ) &&
+    nav.includes("val dialogAttached = !modalOpen && (visible || slideProgress.value < 0.999f)"),
 );
 check(
-  "nav remains in the Compose root instead of a separate native dialog/window",
-  !nav.includes("androidx.compose.ui.window.Dialog(") &&
-    !nav.includes("WindowManager") &&
+  "the pill uses Android's rounded floating-window background blur, with a readable fallback",
+  nav.includes("Dialog(") &&
+    nav.includes("dialogWindow.setBackgroundDrawable(pillWindowBackground)") &&
+    nav.includes("dialogWindow.setBackgroundBlurRadius(") &&
+    nav.includes("rememberCrossWindowBlurEnabled()") &&
+    nav.includes("val fallbackFill =") &&
+    nav.includes("WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE") &&
+    nav.includes("WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()") &&
     app.includes("HomeBottomNavigation("),
 );
 check(

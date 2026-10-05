@@ -77,12 +77,13 @@ check(
     focus.includes("internal fun KpModalFocusOverlay(progress: Float)"),
 );
 check(
-  "reserved focus slot is measured in the sheet and precedes quick actions and sheet options",
-  focus.includes("internal fun KpModalFocusAnchor(key: String, sheetOffsetYPx: Float)") &&
-    focus.includes(".height(item.height + item.slotExtra)") &&
-    focus.indexOf("if (request.focusKey != null) KpModalFocusAnchor") <
-      focus.indexOf("request.content(this)") &&
-    focus.includes("anchorBoundsOnScreen.top - sheetOffsetYPx.roundToInt()"),
+  "focused live row is measured to the sheet top and rests above the surface without an in-sheet spacer",
+  focus.includes("fun updateTargetAboveSheet(") &&
+    focus.includes("val finalSheetTop = sheetBoundsOnScreen.top - sheetOffsetYPx.roundToInt()") &&
+    focus.includes("val top = finalSheetTop - source.height - gapPx") &&
+    focus.includes("KpModalFocusState.updateTargetAboveSheet(") &&
+    !focus.includes("KpModalFocusAnchor") &&
+    !focus.includes("slotExtra"),
 );
 check(
   "shared KpSheet registers blur outside ModalBottomSheet content for immediate release on dismissal",
@@ -136,13 +137,14 @@ check(
     chat.includes(".border(0.5.dp, GlassSheetEdge)"),
 );
 check(
-  "home nav stays in Compose root and suppresses immediately behind a modal without a native popup window",
+  "home nav keeps the existing modal suppression and uses a blur-capable floating window",
   nav.includes("if (modalOpen)") &&
     nav.includes("slideProgress.snapTo(1f)") &&
-    nav.includes("if (!modalOpen && (visible || slideProgress.value < 0.999f))") &&
+    nav.includes("val dialogAttached = !modalOpen && (visible || slideProgress.value < 0.999f)") &&
     nav.includes("slideProgress.animateTo(") &&
-    !nav.includes("androidx.compose.ui.window.Dialog(") &&
-    !nav.includes("WindowManager") &&
+    nav.includes("Dialog(") &&
+    nav.includes("WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE") &&
+    nav.includes("dialogWindow.setBackgroundBlurRadius(") &&
     kpApp.includes("modalOpen = modalWindowVisible"),
 );
 

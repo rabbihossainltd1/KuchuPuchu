@@ -33,15 +33,12 @@ import android.telecom.TelecomManager
  *  - **No system call log.** `EXTRA_LOG_SELF_MANAGED_CALLS` (the opt-in) was deprecated in
  *    API 36.1 and would duplicate the app's own Calls tab, which already carries the
  *    missed-call and call-back flows.
- *  - **Not `androidx.core:core-telecom`.** It is the path the current docs lead with, and
- *    1.0.1 was tried before writing this file: its classes carry
- *    `kotlin.Metadata(mv = [2, 0, 0])`, which kotlinc 1.9.25 — the Kotlin this project is
- *    on, see the root build file — refuses to read. Taking the library would mean moving
- *    the whole app to Kotlin 2.x plus the Compose-compiler Gradle plugin, and it also
- *    brings its own foreground service and call notification, which would duplicate the
- *    call notification §25/§30 already own. `TelecomManager.addCall(CallAttributes, ...)`
- *    is the other "modern" answer and is API 34-only, so it would leave API 26-33 on a
- *    second code path; `addNewIncomingCall` is not deprecated for self-managed accounts.
+ *  - **Not `androidx.core:core-telecom`.** Its 1.0.1 integration brings its own foreground
+ *    service and call notification, duplicating the call UI and notification paths already
+ *    owned by §25/§30. Its `TelecomManager.addCall(CallAttributes, ...)` path is API 34-only,
+ *    leaving API 26-33 on a second code path; `addNewIncomingCall` remains available for
+ *    self-managed accounts. The dependency was therefore rejected for lifecycle and API
+ *    coverage reasons, not Kotlin-metadata compatibility.
  */
 object KpTelecom {
     /** The application context, kept for [KpCallConnection] to start our own activity in

@@ -61,15 +61,15 @@ check(
     nav.includes(".offset(x = indicatorX, y = indicatorY)"),
 );
 check(
-  "the Compose pill moves vertically and fades smoothly without a separate native window",
+  "the pill animates its floating window down/up and fades the real platform backdrop blur",
   nav.includes("val slideProgress = remember { Animatable(1f) }") &&
     nav.includes("targetValue = if (visible) 0f else 1f") &&
-    nav.includes("tween(320, easing = slideEasing)") &&
-    nav.includes("translationY = exitTravelPx * slideProgress.value") &&
-    nav.includes("alpha = 1f - slideProgress.value") &&
-    nav.includes(".background(glassFill)") &&
-    !nav.includes("androidx.compose.ui.window.Dialog(") &&
-    !nav.includes("WindowManager"),
+    nav.includes("tween(420, easing = slideEasing)") &&
+    nav.includes("params.y = windowYOffsetPx") &&
+    nav.includes("pillWindowBackground.setColor(") &&
+    nav.includes("dialogWindow.setBackgroundBlurRadius(") &&
+    nav.includes("WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE") &&
+    nav.includes("val dialogAttached = !modalOpen && (visible || slideProgress.value < 0.999f)"),
 );
 check(
   "home route and full-screen call gate own nav visibility; pushed chat routes hide it",
@@ -81,20 +81,27 @@ check(
     kpApp.includes("callEngine.minimized"),
 );
 check(
-  "home route slides down/up while returning chat fades without changing its forward entrance",
-  homeRoute.includes("slideOutVertically(tween(360)) { it }") &&
-    homeRoute.includes(
-      "popEnterTransition = { slideInVertically(tween(360)) { it } + fadeIn(tween(220)) }",
-    ) &&
+  "home content stays stationary on return while only the independently hosted pill rises from below",
+  homeRoute.includes("enterTransition = { fadeIn(tween(180)) }") &&
+    homeRoute.includes("exitTransition = { fadeOut(tween(160)) }") &&
+    homeRoute.includes("popEnterTransition = { fadeIn(tween(180)) }") &&
+    !homeRoute.includes("slideInVertically") &&
+    !homeRoute.includes("slideOutVertically") &&
     chatRoute.includes('composable("chat/{id}") { entry ->') &&
-    kpApp.includes('if (targetState.destination.route == "main") fadeOut(tween(180))'),
+    nav.includes(
+      "windowYOffsetPx = bottomOffsetPx - (exitTravelPx * slideProgress.value).roundToInt()",
+    ),
 );
 check(
-  "capsule and selected indicator use the intended local Compose glass surfaces without a window border",
+  "the pill's translucent rounded native background reveals platform blur rather than transparent Compose fill",
   nav.includes("val glassFill =") &&
+    nav.includes("val fallbackFill =") &&
+    nav.includes("GradientDrawable()") &&
+    nav.includes("dialogWindow.setBackgroundDrawable(pillWindowBackground)") &&
+    nav.includes("setBackgroundBlurRadius(") &&
     nav.includes(".clip(CircleShape)") &&
-    nav.includes(".background(glassFill)") &&
     nav.includes(".background(indicatorColor)") &&
+    !nav.includes(".background(glassFill)") &&
     !nav.includes("glassEdge") &&
     !nav.includes("selectedBorder") &&
     !nav.includes(".border(1.25.dp"),
@@ -134,11 +141,13 @@ check(
     !focus.includes("DeleteAnim.capture("),
 );
 check(
-  "root focus is drawn above the blurred screen and action sheet; reserved anchor precedes the emoji row",
+  "root focus is drawn above the blurred screen and action sheet; the live bubble rests above reactions and options",
   kpApp.indexOf("Surface(Modifier.fillMaxSize().blur(modalBlurRadius)") <
     kpApp.indexOf("KpFocusedSheetHost()") &&
     kpApp.indexOf("KpFocusedSheetHost()") < kpApp.indexOf("KpRootFocusOverlayHost()") &&
-    focus.indexOf("KpModalFocusAnchor(request.focusKey, sheetOffsetYPx)") <
+    focus.includes("KpModalFocusState.updateTargetAboveSheet(") &&
+    focus.includes("val top = finalSheetTop - source.height - gapPx") &&
+    focus.indexOf("KpModalFocusState.updateTargetAboveSheet(") <
       focus.indexOf("request.content(this)") &&
     chat.includes('listOf("👍", "❤️", "😂", "😮", "😢", "🙏")'),
 );

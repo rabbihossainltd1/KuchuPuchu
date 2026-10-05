@@ -238,13 +238,12 @@ fun KpApp() {
             ) {
                 composable(
                     "main",
-                    // Home rises from below on first entry and on every return.
-                    // When a chat/route is pushed, it leaves down rather than
-                    // being abruptly faded out behind the new destination.
-                    enterTransition = { slideInVertically(tween(360)) { it } + fadeIn(tween(220)) },
-                    exitTransition = { slideOutVertically(tween(360)) { it } + fadeOut(tween(220)) },
-                    popEnterTransition = { slideInVertically(tween(360)) { it } + fadeIn(tween(220)) },
-                    popExitTransition = { fadeOut(tween(180)) },
+                    // Keep the home content stationary during route changes; the
+                    // independently hosted nav pill owns the down/up travel.
+                    enterTransition = { fadeIn(tween(180)) },
+                    exitTransition = { fadeOut(tween(160)) },
+                    popEnterTransition = { fadeIn(tween(180)) },
+                    popExitTransition = { fadeOut(tween(160)) },
                 ) { ChatListScreen(nav, homeTab) }
                 composable("newchat") { NewChatScreen(nav) }
                 // Owner round 32 (item 12): `with` = comma-separated user ids

@@ -51,7 +51,6 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.coroutineScope
@@ -63,14 +62,14 @@ import kotlin.math.roundToInt
  * The live item that opened a focused action sheet. Its movable Compose
  * content is transferred from its list slot to the root overlay; the source
  * slot remains measured as a placeholder until the return animation finishes.
+ * This crosses LazyColumn/NavHost subcompositions, so Compose Runtime 1.10.0+
+ * is required for the upstream movable-content handoff crash fix.
  */
 internal data class KpModalFocusItem(
     val key: String,
     val sourceBoundsOnScreen: Rect,
     val returnBoundsOnScreen: Rect = sourceBoundsOnScreen,
     val targetBoundsOnScreen: Rect? = null,
-    val height: Dp,
-    val slotExtra: Dp,
     val targetScale: Float,
     val content: @Composable () -> Unit,
 )
@@ -85,10 +84,8 @@ internal object KpModalFocusState {
     fun focus(
         key: String,
         sourceBoundsOnScreen: Rect,
-        height: Dp,
         content: @Composable () -> Unit,
         targetScale: Float = 1f,
-        slotExtra: Dp = 8.dp,
     ) {
         returning = false
         KpFocusSheetState.updateOverlayProgress(0f)
@@ -97,28 +94,31 @@ internal object KpModalFocusState {
                 key = key,
                 sourceBoundsOnScreen = sourceBoundsOnScreen,
                 returnBoundsOnScreen = sourceBoundsOnScreen,
-                height = height,
-                slotExtra = slotExtra,
                 targetScale = targetScale,
                 content = content,
             )
     }
 
-    fun updateTarget(key: String, anchorBoundsOnScreen: Rect, sheetOffsetYPx: Float) {
+    fun updateTargetAboveSheet(
+        key: String,
+        sheetBoundsOnScreen: Rect,
+        sheetOffsetYPx: Float,
+        gapPx: Float,
+    ) {
         val item = focusedItem ?: return
         if (item.key != key || returning) return
         val source = item.sourceBoundsOnScreen
-        // Modifier.offset applies an IntOffset, so subtract that same rounded
-        // displacement to keep the final anchor pixel-stable during animation.
-        val finalAnchorTop = anchorBoundsOnScreen.top - sheetOffsetYPx.roundToInt()
-        val left = anchorBoundsOnScreen.center.x - source.width / 2f
-        val top = finalAnchorTop + (anchorBoundsOnScreen.height - source.height) / 2f
+        // The same live row/bubble rests in the clear space directly above the
+        // sheet. Subtract Modifier.offset's rounded displacement so the target
+        // stays fixed while the sheet slides into place beneath it.
+        val finalSheetTop = sheetBoundsOnScreen.top - sheetOffsetYPx.roundToInt()
+        val left = sheetBoundsOnScreen.center.x - source.width / 2f
+        val top = finalSheetTop - source.height - gapPx
         val target = Rect(left, top, left + source.width, top + source.height)
         if (item.targetBoundsOnScreen != target) {
             focusedItem = item.copy(targetBoundsOnScreen = target)
         }
     }
-
 
     fun updateSource(key: String, boundsOnScreen: Rect) {
         val item = focusedItem ?: return
@@ -206,7 +206,6 @@ internal fun KpLiveFocusItem(
     key: String,
     modifier: Modifier = Modifier,
     targetScale: Float = 1f,
-    slotExtra: Dp = 8.dp,
     content: @Composable (requestFocus: () -> Unit) -> Unit,
 ) {
     val density = LocalDensity.current
@@ -216,7 +215,7 @@ internal fun KpLiveFocusItem(
     val sourceHeightPx = remember(key) { mutableIntStateOf(0) }
     val focusContentRef = remember(key) { mutableStateOf<(@Composable () -> Unit)?>(null) }
 
-    val requestFocus = remember(key, targetScale, slotExtra) {
+    val requestFocus = remember(key, targetScale) {
         {
             val bounds = sourceBounds.value
             val heightPx = sourceHeightPx.intValue
@@ -225,10 +224,8 @@ internal fun KpLiveFocusItem(
                 KpModalFocusState.focus(
                     key = key,
                     sourceBoundsOnScreen = bounds,
-                    height = with(density) { heightPx.toDp() },
                     content = liveContent,
                     targetScale = targetScale,
-                    slotExtra = slotExtra,
                 )
             }
         }
@@ -272,25 +269,6 @@ internal fun KpLiveFocusItem(
             movable()
         }
     }
-}
-
-/** Measure the reserved sheet slot and keep the destination aligned to it. */
-@Composable
-internal fun KpModalFocusAnchor(key: String, sheetOffsetYPx: Float) {
-    val item = KpModalFocusState.focusedItem?.takeIf { it.key == key } ?: return
-    val view = LocalView.current
-    Spacer(
-        Modifier
-            .fillMaxWidth()
-            .height(item.height + item.slotExtra)
-            .onGloballyPositioned { coordinates ->
-                KpModalFocusState.updateTarget(
-                    key,
-                    coordinates.boundsOnScreen(view),
-                    sheetOffsetYPx,
-                )
-            },
-    )
 }
 
 /** Root-level, stable call site for the live item during every sheet phase. */
@@ -371,6 +349,7 @@ internal fun KpFocusedSheetHost() {
     val closing = KpFocusSheetState.closing
     val blurRegistration = KpRegisterModalBlur()
     val density = LocalDensity.current
+    val view = LocalView.current
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
     val sheetProgress = remember(request.key) { Animatable(1f) }
@@ -458,8 +437,18 @@ internal fun KpFocusedSheetHost() {
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .heightIn(max = maxSheetHeight)
-                .onGloballyPositioned { sheetHeightPx = it.size.height }
                 .offset { IntOffset(0, sheetOffsetYPx.roundToInt()) }
+                .onGloballyPositioned { coordinates ->
+                    sheetHeightPx = coordinates.size.height
+                    request.focusKey?.let { focusKey ->
+                        KpModalFocusState.updateTargetAboveSheet(
+                            focusKey,
+                            coordinates.boundsOnScreen(view),
+                            sheetOffsetYPx,
+                            with(density) { 12.dp.toPx() },
+                        )
+                    }
+                }
                 .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
                 .background(GlassSheetSurface),
         ) {
@@ -518,7 +507,6 @@ internal fun KpFocusedSheetHost() {
                             .background(Muted.copy(alpha = 0.58f)),
                     )
                 }
-                if (request.focusKey != null) KpModalFocusAnchor(request.focusKey, sheetOffsetYPx)
                 Column(
                     Modifier
                         .fillMaxWidth()

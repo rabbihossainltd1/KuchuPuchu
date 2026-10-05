@@ -7,6 +7,7 @@ import java.util.Base64
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 // §51 / Play policy: `release` must not be signed with the repository's debug key —
@@ -68,8 +69,8 @@ android {
         applicationId = "app.kuchupuchu.android"
         minSdk = 24
         targetSdk = 35
-        versionCode = 275
-        versionName = "3.9.198"
+        versionCode = 276
+        versionName = "3.9.199"
     }
     signingConfigs {
         getByName("debug") {
@@ -135,7 +136,6 @@ android {
     // paper over — if a rule needs a Context it belongs in the device checklist.
     testOptions { unitTests.isIncludeAndroidResources = false }
     buildFeatures { compose = true }
-    composeOptions { kotlinCompilerExtensionVersion = "1.5.15" }
     // Owner round 32 (item 41): libkp_voice — RNNoise voice isolation for
     // calls, built from src/main/cpp for the two shipped ABIs. CMake 3.22.1
     // ships with the SDK's cmake package on the CI image.
@@ -163,7 +163,8 @@ android {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.10.01")
+    // Runtime 1.10.0 fixes movable content crashes when live rows move between subcompositions.
+    val composeBom = platform("androidx.compose:compose-bom:2025.12.00")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")

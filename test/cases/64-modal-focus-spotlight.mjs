@@ -8,10 +8,21 @@ const chatList = read("ChatListScreen.kt");
 const chat = read("ChatScreen.kt");
 const focus = read("KpFocusSheet.kt");
 const kpApp = read("KpApp.kt");
+const rootBuild = readFileSync("native-android/build.gradle.kts", "utf8");
+const appBuild = readFileSync("native-android/app/build.gradle.kts", "utf8");
 
 const lines = [];
 const check = (name, condition, detail = "") =>
   lines.push(`  ${condition ? "OK     " : "BROKEN "}  ${name}${detail ? `  -> ${detail}` : ""}`);
+
+check(
+  "Compose runtime and compiler plugin include the supported movable-content subcomposition fix",
+  rootBuild.includes('id("org.jetbrains.kotlin.android") version "2.1.21"') &&
+    rootBuild.includes('id("org.jetbrains.kotlin.plugin.compose") version "2.1.21"') &&
+    appBuild.includes('id("org.jetbrains.kotlin.plugin.compose")') &&
+    appBuild.includes("compose-bom:2025.12.00") &&
+    focus.includes("Compose Runtime 1.10.0+"),
+);
 
 const convCardStart = chatList.indexOf("private fun ConvCard(");
 const longPressStart = chatList.indexOf("val longPress = {", convCardStart);
@@ -36,7 +47,6 @@ check(
   "chat-list long-press focuses the same live card and opens its action sheet",
   liveFocusStart >= 0 &&
     liveChatFocus.includes("targetScale = 1.035f") &&
-    liveChatFocus.includes("slotExtra = 10.dp") &&
     liveChatFocus.includes("ConvCard(") &&
     convLongPress.includes("onFocusRequest()") &&
     chatList.includes(
@@ -45,21 +55,24 @@ check(
     chatList.includes('key = "chat:$convId"'),
 );
 check(
-  "the lifted chat row keeps its measured source slot and reserves extra room before sheet actions",
+  "the focused row leaves its measured source slot and lands above the bottom-sheet surface",
   focus.includes("if (focused) {") &&
     focus.includes("Spacer(") &&
     focus.includes("sourceWidthPx.intValue.toDp()") &&
     focus.includes("sourceHeightPx.intValue.toDp()") &&
-    focus.includes(".height(item.height + item.slotExtra)") &&
-    focusedHost.indexOf("KpModalFocusAnchor(request.focusKey, sheetOffsetYPx)") <
+    focus.includes("fun updateTargetAboveSheet(") &&
+    focus.includes("val finalSheetTop = sheetBoundsOnScreen.top - sheetOffsetYPx.roundToInt()") &&
+    focus.includes("val top = finalSheetTop - source.height - gapPx") &&
+    focusedHost.includes("KpModalFocusState.updateTargetAboveSheet(") &&
+    !focusedHost.includes("KpModalFocusAnchor(") &&
+    focusedHost.indexOf("KpModalFocusState.updateTargetAboveSheet(") <
       focusedHost.indexOf("request.content(this)"),
 );
 check(
-  "chat-row enlargement is slight and its focus target is positioned from its reserved action-sheet anchor",
+  "chat-row enlargement stays slight and centered above the sheet with a deliberate gap",
   liveChatFocus.includes("targetScale = 1.035f") &&
-    liveChatFocus.includes("slotExtra = 10.dp") &&
-    focus.includes("val finalAnchorTop = anchorBoundsOnScreen.top - sheetOffsetYPx.roundToInt()") &&
-    focus.includes("val left = anchorBoundsOnScreen.center.x - source.width / 2f") &&
+    focus.includes("val left = sheetBoundsOnScreen.center.x - source.width / 2f") &&
+    focus.includes("with(density) { 12.dp.toPx() }") &&
     focus.includes("source.width / 2f"),
 );
 check(
@@ -68,7 +81,6 @@ check(
     messageSlot.includes("KpLiveFocusItem(") &&
     messageSlot.includes("key = focusKey") &&
     messageSlot.includes("targetScale = 1f") &&
-    messageSlot.includes("slotExtra = 8.dp") &&
     chat.includes('if (pressed.optString("kind") != "DELETED") requestFocus()'),
 );
 check(
@@ -91,7 +103,9 @@ check(
     messageActions.includes(
       "focusKey = focusKey.takeIf { KpModalFocusState.focusedItem?.key == it }",
     ) &&
-    focusedHost.indexOf("KpModalFocusAnchor(request.focusKey, sheetOffsetYPx)") <
+    focus.includes("KpModalFocusState.updateTargetAboveSheet(") &&
+    focus.includes("val top = finalSheetTop - source.height - gapPx") &&
+    focusedHost.indexOf("KpModalFocusState.updateTargetAboveSheet(") <
       focusedHost.indexOf("request.content(this)"),
 );
 check(
