@@ -1,6 +1,19 @@
 package app.kuchupuchu.android
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.tween
@@ -21,12 +34,14 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -46,7 +61,6 @@ import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Done
-import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Unarchive
@@ -89,9 +103,21 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.invisibleToUser
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
@@ -113,7 +139,7 @@ import kotlin.math.roundToInt
 /**
  * Chat List — locked design #7 "Gradient Rings".
  * Cream background, white 16dp cards, amber gradient
- * ring avatars, big top tabs (Chats / Status / Calls), gold FAB,
+ * ring avatars, floating bottom tabs (Chats / Status / Calls), gold FAB,
  * swipe actions for mute + delete.
  */
 @Composable
@@ -322,6 +348,57 @@ fun ChatListScreen(nav: NavController) {
         if (Store.foreground) refresh()
     }
 
+    // Owner round 83: the Chats / Status / Calls tabs live in a compact,
+    // icon-only floating pill. Keep a per-visible-chat badge (not a message
+    // total), matching the standalone reference; hidden conversations stay out.
+    val unreadChats = convs.count { !it.optBoolean("hidden") && it.optInt("unread", 0) > 0 }
+    val unseenStatus = ScreenStore.statuses.any { !it.optBoolean("mine") && !it.optBoolean("allViewed") }
+    var navVisible by remember { mutableStateOf(true) }
+    val navHidePx = with(density) { 14.dp.toPx() }
+    val navShowPx = with(density) { 10.dp.toPx() }
+    // Observe the amount the child list actually scrolled, not the raw finger
+    // delta. This avoids hiding the pill on overscroll / when a list has no
+    // more content. A downward pull at the top always restores it.
+    val navScrollProbe = remember(navHidePx, navShowPx, tab) {
+        object : NestedScrollConnection {
+            var acc = 0f
+
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset = Offset.Zero
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                if (available.y > 0f) {
+                    navVisible = true
+                    acc = 0f
+                    return Offset.Zero
+                }
+                if (available.y < 0f) {
+                    // At the bottom edge (or with a short list), don't count
+                    // unconsumed motion toward hiding the navigation.
+                    acc = 0f
+                    return Offset.Zero
+                }
+                val dy = consumed.y
+                if (dy != 0f) {
+                    if ((dy < 0f && acc > 0f) || (dy > 0f && acc < 0f)) acc = 0f
+                    acc += dy
+                    if (acc < -navHidePx) navVisible = false
+                    else if (acc > navShowPx) navVisible = true
+                }
+                return Offset.Zero
+            }
+        }
+    }
+    LaunchedEffect(tab) { navVisible = true }
+    val fabBottom by animateDpAsState(
+        if (navVisible) 74.dp else 2.dp,
+        tween(450, easing = FastOutSlowInEasing),
+        label = "fabBottom",
+    )
+
     Box(Modifier.fillMaxSize().background(Cream)) {
         // r76-26 (owner: "onno phone a login korle purono message gulate lock"):
         // a locked key backup waits on the server — ask for its passphrase so
@@ -442,40 +519,48 @@ fun ChatListScreen(nav: NavController) {
                 )
             }
 
-            /* ---------- big top tabs ---------- */
-            // Owner round 31 (item 26): hidden chats do not count — a badge
-            // nobody can trace to a visible row is just confusing.
-            val unreadTotal = convs.filter { !it.optBoolean("hidden") }.sumOf { it.optInt("unread", 0) }
-            val unseenStatus = ScreenStore.statuses.any { !it.optBoolean("mine") && !it.optBoolean("allViewed") }
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 6.dp, vertical = 4.dp)
-                    .then(archiveDrag),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TopTab(Icons.Filled.Chat, "Chats", tab == 0, unreadTotal, modifier = Modifier.weight(1f)) { haptics.tap(); tab = 0 }
-                TopTab(Icons.Filled.Circle, "Status", tab == 1, dot = unseenStatus, modifier = Modifier.weight(1f)) { haptics.tap(); ListSelect.clear(); tab = 1 }
-                TopTab(Icons.Filled.Call, "Calls", tab == 2, modifier = Modifier.weight(1f)) { haptics.tap(); ListSelect.clear(); tab = 2 }
-            }
+            /* ---------- tab bodies ---------- */
+            // Owner round 83: tabs switch with a direction-aware slide — a tab
+            // to the right enters from the right, a tab to the left from the
+            // left, and the old one drifts out and fades.
             Box(
                 Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .height(1.dp)
-                    .background(Line),
-            )
-
-            /* ---------- tab bodies ---------- */
-            when (tab) {
-                0 -> ArchivePullArea(nav, archivePull) { ChatListBody(convs, loading, nav, ::refresh, chatsListState, archivePull) }
-                1 -> StatusScreen(nav)
-                2 -> CallsScreen(nav)
+                    .fillMaxSize()
+                    .nestedScroll(navScrollProbe)
+                    .homeTabSwipe(tab, with(density) { 70.dp.toPx() }) { next ->
+                        haptics.tap()
+                        tab = next
+                    },
+            ) {
+                AnimatedContent(
+                    targetState = tab,
+                    modifier = Modifier.fillMaxSize(),
+                    transitionSpec = {
+                        val forward = targetState > initialState
+                        (slideInHorizontally(tween(420, easing = FastOutSlowInEasing)) { w -> if (forward) w else -w } +
+                            fadeIn(tween(300))).togetherWith(
+                            slideOutHorizontally(tween(420, easing = FastOutSlowInEasing)) { w -> if (forward) -w / 3 else w / 3 } +
+                                fadeOut(tween(250)),
+                        )
+                    },
+                    label = "hometabs",
+                ) { t ->
+                    when (t) {
+                        0 -> ArchivePullArea(nav, archivePull) { ChatListBody(convs, loading, nav, ::refresh, chatsListState, archivePull) }
+                        1 -> StatusScreen(nav, fabBottom = fabBottom)
+                        else -> CallsScreen(nav)
+                    }
+                }
             }
         }
 
         /* ---------- gold FAB (chats tab only — no overlap with status FABs) ---------- */
-        if (tab == 0) {
+        AnimatedVisibility(
+            visible = tab == 0,
+            enter = scaleIn(tween(250)) + fadeIn(tween(250)),
+            exit = scaleOut(tween(180)) + fadeOut(tween(180)),
+            modifier = Modifier.align(Alignment.BottomEnd),
+        ) {
             FloatingActionButton(
                 onClick = { haptics.tap(); nav.navigate("newchat") },
                 shape = CircleShape,
@@ -483,9 +568,8 @@ fun ChatListScreen(nav: NavController) {
                 containerColor = ActionBlue,
                 contentColor = ActionBlueInk,
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
                     .navigationBarsPadding()
-                    .padding(20.dp)
+                    .padding(end = 20.dp, bottom = fabBottom)
                     .size(52.dp)
             ) {
                 Icon(
@@ -494,6 +578,19 @@ fun ChatListScreen(nav: NavController) {
                     modifier = Modifier.size(24.dp),
                 )
             }
+        }
+
+        /* ---------- floating bottom nav ---------- */
+        FloatingBottomNav(
+            tab = tab,
+            unreadChats = unreadChats,
+            unseenStatus = unseenStatus,
+            visible = navVisible,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) { i ->
+            haptics.tap()
+            if (i != 0) ListSelect.clear()
+            tab = i
         }
     }
 }
@@ -843,95 +940,245 @@ private fun ListTicks(read: Boolean, delivered: Boolean = read) {
     }
 }
 
-/** Big friendly tab pill with optional unread badge / new-status dot. */
+/**
+ * Owner round 83: compact icon-only floating navigation, styled to the
+ * standalone reference while retaining the app palette in light mode.
+ */
 @Composable
-private fun TopTab(
-    icon: ImageVector,
+private fun FloatingBottomNav(
+    tab: Int,
+    unreadChats: Int,
+    unseenStatus: Boolean,
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+    onSelect: (Int) -> Unit,
+) {
+    val itemW = 50.dp
+    val itemH = 40.dp
+    val gap = 4.dp
+    val density = LocalDensity.current
+    val stepPx = with(density) { (itemW + gap).toPx() }
+    val darkMode = KpThemeMode.darkBlue
+    val idleTint = if (darkMode) Color(0xFFD3DEF5) else Muted
+    val selectedTint = if (darkMode) Color.White else Ink
+    val indicatorColor = if (darkMode) Color(0xB32B5BD7) else ActionBlue.copy(alpha = 0.16f)
+    // Compose does not expose CSS backdrop-filter on every supported Android
+    // version. This translucent, theme-aware surface is the native glass
+    // fallback; avoid blurring the entire scrolling screen offscreen.
+    val glassFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.58f) else Card.copy(alpha = 0.86f)
+    val glassEdge = if (darkMode) Color(0xFFA0B9F0).copy(alpha = 0.34f) else Line.copy(alpha = 0.92f)
+    val indicatorX by animateFloatAsState(
+        tab * stepPx,
+        spring(dampingRatio = 0.6f, stiffness = 380f),
+        label = "navIndicator",
+    )
+    val shift by animateDpAsState(
+        if (visible) 0.dp else 90.dp,
+        tween(450, easing = FastOutSlowInEasing),
+        label = "navShift",
+    )
+    val fade by animateFloatAsState(if (visible) 1f else 0f, tween(350), label = "navFade")
+    Box(
+        modifier
+            .navigationBarsPadding()
+            .padding(bottom = 16.dp)
+            .offset(y = shift)
+            .alpha(fade)
+            .semantics { if (!visible) invisibleToUser() }
+            .clip(CircleShape)
+            .background(glassFill)
+            .border(0.5.dp, glassEdge, CircleShape)
+            .padding(4.dp),
+    ) {
+        Box(
+            Modifier
+                .offset { IntOffset(indicatorX.roundToInt(), 0) }
+                .size(itemW, itemH)
+                .background(indicatorColor, CircleShape),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+            NavItem(
+                label = "Chats",
+                selected = tab == 0,
+                width = itemW,
+                height = itemH,
+                badge = unreadChats,
+                enabled = visible,
+                idleTint = idleTint,
+                selectedTint = selectedTint,
+                onClick = { onSelect(0) },
+            ) { tint ->
+                Icon(Icons.Filled.Chat, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+            }
+            NavItem(
+                label = "Status",
+                selected = tab == 1,
+                width = itemW,
+                height = itemH,
+                newStatus = unseenStatus,
+                enabled = visible,
+                idleTint = idleTint,
+                selectedTint = selectedTint,
+                onClick = { onSelect(1) },
+            ) { tint ->
+                StatusGlyphIcon(tint, 24.dp)
+            }
+            NavItem(
+                label = "Calls",
+                selected = tab == 2,
+                width = itemW,
+                height = itemH,
+                enabled = visible,
+                idleTint = idleTint,
+                selectedTint = selectedTint,
+                onClick = { onSelect(2) },
+            ) { tint ->
+                Icon(Icons.Filled.Call, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun NavItem(
     label: String,
     selected: Boolean,
+    width: androidx.compose.ui.unit.Dp,
+    height: androidx.compose.ui.unit.Dp,
     badge: Int = 0,
-    dot: Boolean = false,
-    modifier: Modifier = Modifier,
+    newStatus: Boolean = false,
+    enabled: Boolean = true,
+    idleTint: Color,
+    selectedTint: Color,
     onClick: () -> Unit,
+    icon: @Composable (Color) -> Unit,
 ) {
-    // Owner round 21: the tabs ride the blue action accent in dark-blue mode.
-    val tint = if (selected) ActionBlueDeep else Muted
-    val bg =
-        if (selected) Modifier.background(ActionBlue.copy(alpha = 0.16f), RoundedCornerShape(14.dp))
-        else Modifier
-    Row(
-        modifier
-            .padding(3.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .then(bg)
-            .clickable { onClick() }
-            .padding(horizontal = 6.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
-    ) {
-        Box {
-            if (label == "Status") {
-                // WhatsApp-style status glyph (ring + dot), not a plain circle.
-                StatusGlyphIcon(tint, 19.dp)
-            } else {
-                Icon(
-                    icon,
-                    contentDescription = label,
-                    tint = tint,
-                    modifier = Modifier.size(19.dp),
-                )
+    val tint by animateColorAsState(if (selected) selectedTint else idleTint, tween(250), label = "navTint")
+    val pop = remember { Animatable(1f) }
+    val firstRun = remember { booleanArrayOf(true) }
+    val badgeScale = remember { Animatable(1f) }
+    val badgeLabel = when {
+        badge <= 0 -> ""
+        badge > 99 -> "99+"
+        else -> badge.toString()
+    }
+    LaunchedEffect(selected) {
+        if (firstRun[0]) {
+            firstRun[0] = false
+            return@LaunchedEffect
+        }
+        if (selected) {
+            pop.snapTo(0.7f)
+            pop.animateTo(1.2f, tween(140, easing = FastOutSlowInEasing))
+            pop.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = 500f))
+        }
+    }
+    LaunchedEffect(badgeLabel) {
+        if (badgeLabel.isNotEmpty()) {
+            badgeScale.snapTo(0.7f)
+            badgeScale.animateTo(1.2f, tween(140, easing = FastOutSlowInEasing))
+            badgeScale.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = 500f))
+        } else {
+            badgeScale.snapTo(1f)
+        }
+    }
+    val accessibilityLabel = buildString {
+        append(label)
+        if (badge > 0) append(", $badge unread chats")
+        if (newStatus) append(", new updates")
+    }
+    Box(
+        Modifier
+            .size(width, height)
+            .clip(CircleShape)
+            .semantics(mergeDescendants = true) {
+                contentDescription = accessibilityLabel
+                role = Role.Tab
+                this.selected = selected
+                if (!enabled) invisibleToUser()
             }
-            // r82-3 (owner: "nav bar a unread number ta ekdom baje vabe show
-            // hocche ... massage button er right corner a rekhe daw ar double
-            // number hole double line jeno na hoi"): the count used to sit
-            // INLINE after the label, stretching the pill and getting crushed
-            // into a two-line digit stack when the four tabs squeezed. It is
-            // an overlay pinned to the message icon's top-right corner now -
-            // zero width pressure, so a two-digit count can never wrap, and
-            // maxLines/softWrap hard-lock one line regardless.
-            if (badge > 0) {
+            .clickable(
+                enabled = enabled,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.size(24.dp)) {
+            Box(
+                Modifier
+                    .align(Alignment.Center)
+                    .graphicsLayer { scaleX = pop.value; scaleY = pop.value },
+            ) {
+                icon(tint)
+            }
+            // The reference shows a single-line, capped unread-chat badge at
+            // the chat icon's top-right; red remains distinct from the tab tint.
+            if (badgeLabel.isNotEmpty()) {
                 Box(
                     Modifier
                         .align(Alignment.TopEnd)
-                        .offset(x = 9.dp, y = (-7).dp)
-                        .defaultMinSize(minWidth = 16.dp, minHeight = 16.dp)
+                        .offset(x = 11.dp, y = (-7).dp)
+                        .defaultMinSize(minWidth = 17.dp, minHeight = 17.dp)
                         .clip(CircleShape)
-                        .background(ActionBlue)
+                        .background(Color(0xFFE24B4A))
+                        .border(1.5.dp, if (KpThemeMode.darkBlue) Color(0xFF14203D) else Card, CircleShape)
+                        .graphicsLayer { scaleX = badgeScale.value; scaleY = badgeScale.value }
                         .padding(horizontal = 4.dp, vertical = 1.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        if (badge > 99) "99+" else "$badge",
-                        color = ActionBlueInk,
-                        fontSize = 9.sp,
+                        badgeLabel,
+                        color = Color.White,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        lineHeight = 9.sp,
+                        lineHeight = 11.sp,
                         maxLines = 1,
                         softWrap = false,
                         style = androidx.compose.ui.text.TextStyle(platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)),
                     )
                 }
-            } else if (dot) {
-                Box(
-                    Modifier
-                        .align(Alignment.TopEnd)
-                        .offset(x = 6.dp, y = (-5).dp)
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(Green),
-                )
             }
         }
-        Spacer(Modifier.width(6.dp))
-        Text(
-            label,
-            color = tint,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            fontSize = 14.sp,
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Clip,
-        )
+    }
+}
+
+/**
+ * Page swipe uses the final pointer pass so a child chat-row swipe or list
+ * scroll gets first refusal. Horizontal movement of 70dp or more, with at
+ * least a 2:1 horizontal/vertical ratio, switches one adjacent home tab.
+ */
+private fun Modifier.homeTabSwipe(
+    activeTab: Int,
+    thresholdPx: Float,
+    onSwipe: (Int) -> Unit,
+): Modifier = pointerInput(activeTab, thresholdPx) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        var childConsumedMovement = false
+        var endPosition: Offset? = null
+        while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Final)
+            if (event.changes.any { it.id != down.id && it.pressed }) {
+                childConsumedMovement = true
+                break
+            }
+            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+            if (change.position != change.previousPosition && change.isConsumed) {
+                childConsumedMovement = true
+            }
+            if (!change.pressed) {
+                endPosition = change.position
+                break
+            }
+        }
+        val end = endPosition ?: return@awaitEachGesture
+        val dx = end.x - down.position.x
+        val dy = end.y - down.position.y
+        if (!childConsumedMovement && kotlin.math.abs(dx) >= thresholdPx && kotlin.math.abs(dx) >= 2f * kotlin.math.abs(dy)) {
+            val next = (activeTab + if (dx < 0f) 1 else -1).coerceIn(0, 2)
+            if (next != activeTab) onSwipe(next)
+        }
     }
 }
 
@@ -969,6 +1216,9 @@ private fun ChatListBody(
         return
     }
     CloseSwipeOnScroll(listState)
+    val listBottomPadding = with(LocalDensity.current) {
+        110.dp + WindowInsets.navigationBars.getBottom(this).toDp()
+    }
     // Owner round 33 (item 2): a chat that just moved to the top is shown,
     // not hidden above the fold (see KpKeepTop).
     KpKeepTop(listState, visible.firstOrNull()?.optString("id"))
@@ -1006,7 +1256,7 @@ private fun ChatListBody(
                 }
             },
         state = listState,
-        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 96.dp),
+        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = listBottomPadding),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(visible, key = { it.optString("id") }) { conv ->

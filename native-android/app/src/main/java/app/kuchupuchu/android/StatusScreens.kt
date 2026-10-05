@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -86,11 +87,14 @@ import org.json.JSONObject
  * then Recent updates with segmented rings that gray out once viewed.
  */
 @Composable
-fun StatusScreen(nav: NavController) {
+fun StatusScreen(nav: NavController, fabBottom: androidx.compose.ui.unit.Dp = 74.dp) {
     val scope = rememberCoroutineScope()
     val groups = ScreenStore.statuses
     var composeText by remember { mutableStateOf(false) }
     val haptics = rememberHaptics()
+    val listBottomPadding = with(LocalDensity.current) {
+        110.dp + WindowInsets.navigationBars.getBottom(this).toDp()
+    }
 
     fun refresh(force: Boolean = false) {
         scope.launch {
@@ -136,7 +140,7 @@ fun StatusScreen(nav: NavController) {
                 Modifier.fillMaxSize(),
                 state = statusList,
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    start = 8.dp, end = 8.dp, bottom = 24.dp,
+                    start = 8.dp, end = 8.dp, bottom = listBottomPadding,
                 ),
             ) {
                 /* ---- my status row ---- */
@@ -304,17 +308,28 @@ fun StatusScreen(nav: NavController) {
             }
         }
 
-        /* Owner round 31 (item 31): ONE media icon, bottom-centre, opening the
-           app's own gallery (the "choose photo" / video buttons are gone); the
-           small pencil beside it keeps the text status reachable. */
-        Row(
+        /* The reference keeps the text-status pencil above the media action,
+           both floating at the lower-right and moving with the home nav. */
+        Column(
             Modifier
-                .align(Alignment.BottomCenter)
+                .align(Alignment.BottomEnd)
                 .navigationBarsPadding()
-                .padding(bottom = 20.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .padding(end = 14.dp, bottom = fabBottom),
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Spacer(Modifier.width(40.dp))
+            androidx.compose.material3.SmallFloatingActionButton(
+                onClick = {
+                    haptics.tap()
+                    composeText = true
+                },
+                shape = CircleShape,
+                containerColor = if (KpThemeMode.darkBlue) Color(0xFF26304A) else Card,
+                contentColor = ActionBlueDeep,
+                modifier = Modifier.padding(end = 8.dp).size(42.dp),
+            ) {
+                Icon(Icons.Filled.Edit, contentDescription = "Text status", modifier = Modifier.size(20.dp))
+            }
             androidx.compose.material3.FloatingActionButton(
                 onClick = {
                     haptics.tap()
@@ -323,22 +338,9 @@ fun StatusScreen(nav: NavController) {
                 shape = CircleShape,
                 containerColor = ActionBlue,
                 contentColor = ActionBlueInk,
-                modifier = Modifier.size(56.dp),
+                modifier = Modifier.size(58.dp),
             ) {
                 Icon(Icons.Filled.PhotoLibrary, contentDescription = "Media status", modifier = Modifier.size(26.dp))
-            }
-            Spacer(Modifier.width(14.dp))
-            androidx.compose.material3.SmallFloatingActionButton(
-                onClick = {
-                    haptics.tap()
-                    composeText = true
-                },
-                shape = CircleShape,
-                containerColor = Card,
-                contentColor = ActionBlueDeep,
-                modifier = Modifier.size(26.dp),
-            ) {
-                Icon(Icons.Filled.Edit, contentDescription = "Text status", modifier = Modifier.size(14.dp))
             }
         }
     }

@@ -1104,7 +1104,7 @@ const convBetween = (db, a, b) =>
       ongoingxml.includes('android:textColor="#A9B4C9"'),
   );
   check(
-    "r17-6: archive pull is dual-path — list overscroll AND header/tabs drag share ArchivePullState",
+    "r17-6: archive pull is dual-path — list overscroll AND header drag share ArchivePullState",
     chatlist.includes("class ArchivePullState") &&
       chatlist.includes("val archivePull = remember { ArchivePullState() }") &&
       chatlist.includes("detectVerticalDragGestures") &&
@@ -1216,7 +1216,7 @@ const convBetween = (db, a, b) =>
       chatlist.includes("awaitFirstDown(requireUnconsumed = false)") &&
       chatlist.includes("archivePull.pull = pull") &&
       chatlist.includes("state = listState") &&
-      !chatlist.includes("NestedScrollConnection"),
+      chatlist.includes("private fun ArchivePullArea"),
   );
   check(
     "r18-6: PHOTOS render reaction chips too (MessageReactions wired into ImageMessageRow)",
@@ -1448,7 +1448,9 @@ const convBetween = (db, a, b) =>
   );
   check(
     "r21-colours: dark-blue sweep — tabs, ticks, search, profile, crash row, avatar rings",
-    chatlist.includes("val tint = if (selected) ActionBlueDeep else Muted") &&
+    chatlist.includes("val selectedTint = if (darkMode) Color.White else Ink") &&
+      chatlist.includes("val idleTint = if (darkMode) Color(0xFFD3DEF5) else Muted") &&
+      chatlist.includes("tint by animateColorAsState(if (selected) selectedTint else idleTint") &&
       chatlist.includes("tint = if (read) ActionBlueDeep else Muted") &&
       readFileSync(
         "native-android/app/src/main/java/app/kuchupuchu/android/SearchScreen.kt",
@@ -1500,7 +1502,8 @@ const convBetween = (db, a, b) =>
     "r21-sweep: avatar ring, empty states, nav tabs, ticks, mute pills — blue in dark mode",
     theme.includes("Brush.linearGradient(listOf(Color(0xFF60A5FA), Color(0xFF2F6FED)))") &&
       ui.includes("tint = ActionBlueDeep, modifier = Modifier.size(34.dp)") &&
-      chatlist.includes("val tint = if (selected) ActionBlueDeep else Muted") &&
+      chatlist.includes("val selectedTint = if (darkMode) Color.White else Ink") &&
+      chatlist.includes("val idleTint = if (darkMode) Color(0xFFD3DEF5) else Muted") &&
       chatlist.includes("background(ActionBlue)") &&
       chatlist.includes("tint = if (read) ActionBlueDeep else Muted") &&
       chatlist.split("ActionBlueDeep").length - 1 >= 4,
@@ -3722,9 +3725,7 @@ const convBetween = (db, a, b) =>
             cl.includes(
               'convs.filter { ScreenStore.isArchived(it.optString("id")) && !it.optBoolean("hidden") }',
             ) &&
-            cl.includes(
-              'convs.filter { !it.optBoolean("hidden") }.sumOf { it.optInt("unread", 0) }',
-            ),
+            cl.includes('convs.count { !it.optBoolean("hidden") && it.optInt("unread", 0) > 0 }'),
         );
         // r33-6: the owner's new system. No gesture, no Hidden screen, no
         // `hidden` route: EVERY hide asks for a free-form secret key (sheet

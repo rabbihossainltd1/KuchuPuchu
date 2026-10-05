@@ -1520,8 +1520,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     'r82-3 (owner: "nav bar a unread number ta ekdom baje vabe show hocche ... massage button er right corner a rekhe daw ar double number hole double line jeno na hoi"): the count no longer sits inline after the tab label (pill crush = the ugly wrap) - it is an overlay pinned to the Chats icon\'s top-right corner with zero width pressure, and maxLines=1 + softWrap=false hard-lock one line so a two-digit count can never stack',
     list4.includes(".align(Alignment.TopEnd)") &&
-      list4.includes("offset(x = 9.dp, y = (-7).dp)") &&
-      list4.includes("lineHeight = 9.sp,"),
+      list4.includes("offset(x = 11.dp, y = (-7).dp)") &&
+      list4.includes("lineHeight = 11.sp,"),
   );
   check(
     'r84-1 (owner r84 #1: "emoji ekhono first time animates hoi na" - STILL dead after r78/r81/r82/r83): every prior round carried a 600 ms CAP on the entrance\'s visibility wait, and on the first send of a session the list is still settling (page fill, newest snap, keyboard glide) so the row could pass the cap OFF SCREEN - the fallback started the clock there and the whole window was spent before a visible frame. The wait is UNCAPPED now (cancelled on dispose), the layout callback only FLAGS visibility, and the clock starts only after the GLYPH is in hand (EmojiGlyphWarm - the warm cache marks readiness without a composition, so the entrance plays on the real glyph, never the system fallback + swap); the glyph wait itself is capped 1.2 s for a never-seen emoji',
