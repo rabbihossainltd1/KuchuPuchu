@@ -4317,9 +4317,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                                     val focusKey = msg.optString("clientId").ifBlank { msg.optString("id") }
                                     val focusBounds = DeleteGeoms.bubbles[focusKey]
                                     val focusRootBounds = DeleteGeoms.bubblesInRoot[focusKey]
+                                    val focusShape = DeleteGeoms.bubbleShapes[focusKey]
                                     scope.launch {
-                                        if (focusBounds != null) {
-                                            KpModalFocusState.capture(focusBounds, focusRootBounds ?: focusBounds)
+                                        if (focusBounds != null && focusShape != null) {
+                                            KpModalFocusState.capture(focusBounds, focusRootBounds ?: focusBounds, focusShape)
                                         }
                                         actionFor = msg
                                         reactionFor = msg
@@ -8384,7 +8385,7 @@ private fun MessageRow(
             }
             Box(
                 Modifier
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot()) }
+                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), bubbleShape) }
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
                     // Owner round 13b: the hand-rolled awaitEachGesture fought
                     // the list's vertical scrolling (jank + crash on device).
@@ -9159,7 +9160,7 @@ private fun VideoMessageRow(
             Modifier
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
                 .clip(RoundedCornerShape(12.dp))
-                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot()) }
+                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), RoundedCornerShape(12.dp)) }
                 .onGloballyPositioned { c ->
                     // r81-3: this tile is the player's hero seat (same screen-
                     // pixel formula as the photo tile), and it honours the
@@ -9455,7 +9456,7 @@ private fun OnceTextRow(
             Box(
                 Modifier
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot()) }
+                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), shape) }
                     .widthIn(max = bubbleMax)
                     .wrapContentWidth()
                     .requiredWidthIn(min = if (mine) 70.dp else 52.dp)
@@ -9774,7 +9775,7 @@ private fun ViewOnceRow(
             Box(
                 Modifier
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot()) }
+                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), bubbleShape) }
                     .onGloballyPositioned { c ->
                         if (!voice) {
                             val b = c.boundsInWindow()
@@ -10145,7 +10146,7 @@ private fun ImageMessageRow(
         Box(
             Modifier
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot()) }
+                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), RoundedCornerShape(12.dp)) }
                 .widthIn(max = 120.dp) // Owner round 25 / 32 item 29 / 33 item 18: smaller inline preview
                 // r71-16: photos keep the round-8 frame with NO drop shadow.
                 // thin border.
@@ -10514,7 +10515,7 @@ private fun AlbumMessageRow(
             Box(
                 Modifier
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot()) }
+                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), shape) }
                     .width(albumW)
                     .clip(shape)
                     .border(

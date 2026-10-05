@@ -74,6 +74,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -126,6 +127,7 @@ internal fun KpRegisterModalBlur() {
 internal data class KpModalFocusSnapshot(
     val image: ImageBitmap,
     val boundsInRoot: Rect,
+    val shape: Shape,
 )
 
 /**
@@ -138,7 +140,7 @@ internal object KpModalFocusState {
         private set
     private var captureExpiresAt = 0L
 
-    suspend fun capture(windowBounds: Rect, rootBounds: Rect) {
+    suspend fun capture(windowBounds: Rect, rootBounds: Rect, shape: Shape) {
         focusedItem = null
         captureExpiresAt = 0L
         val maxWidth = windowBounds.width.roundToInt().coerceAtLeast(1)
@@ -148,7 +150,7 @@ internal object KpModalFocusState {
                 maxWidthPx = maxWidth,
                 forceFresh = true,
             ) ?: return
-        focusedItem = KpModalFocusSnapshot(bitmap.asImageBitmap(), rootBounds)
+        focusedItem = KpModalFocusSnapshot(bitmap.asImageBitmap(), rootBounds, shape)
         captureExpiresAt = android.os.SystemClock.uptimeMillis() + 1_000L
     }
 
@@ -184,6 +186,7 @@ internal fun KpModalFocusOverlay(progress: Float) {
                     )
                 }
                 .size(width, height)
+                .clip(snapshot.shape)
                 .graphicsLayer {
                     scaleX = 1f + 0.035f * t
                     scaleY = 1f + 0.035f * t

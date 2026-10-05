@@ -91,44 +91,59 @@ check(
     !chatList.includes(".size(width, height)\n            .clip(CircleShape)"),
 );
 check(
-  "all four indicators are centered behind a common 24dp icon slot, including the custom Status glyph",
-  chatList.includes("contentAlignment = Alignment.Center") &&
-    chatList.includes(
-      ".size(40.dp)\n                    .align(Alignment.Center)\n                    .clip(CircleShape)\n                    .background(selectedBackground)\n                    .border(1.25.dp, selectedBorder, CircleShape)",
-    ) &&
+  "a shared 40dp indicator is centered behind every icon and slides between tabs with the demo's overshoot",
+  chatList.includes("val indicatorSize = 40.dp") &&
+    chatList.includes("val indicatorX by animateDpAsState(") &&
+    chatList.includes("CubicBezierEasing(0.34f, 1.45f, 0.5f, 1f)") &&
+    chatList.includes("tween(450, easing = indicatorEasing)") &&
+    chatList.includes(".background(indicatorColor)") &&
+    !chatList.includes(".border(1.25.dp, selectedBorder, CircleShape)") &&
     chatList.includes("Box(Modifier.size(24.dp))") &&
     chatList.includes("selected = tab == 1") &&
     chatList.includes("StatusGlyphIcon(tint, 24.dp)"),
 );
 check(
-  "the capsule keeps its own visible border and real native background blur",
-  chatList.includes(".border(1.5.dp, glassEdge, CircleShape)") &&
-    chatList.includes("copy(alpha = 0.54f)"),
+  "the glass capsule keeps native background blur but has no outline",
+  !chatList.includes(".border(1.5.dp, glassEdge, CircleShape)") &&
+    chatList.includes("copy(alpha = 0.28f)") &&
+    chatList.includes(
+      "dialogWindow.setBackgroundBlurRadius((blurRadiusPx * fraction).roundToInt())",
+    ),
 );
 check(
-  "native nav blur is localized when idle and its window is removed behind modal sheets",
+  "native nav blur is localized when shown, touch/blur are disabled as it exits, and the separate window is removed behind sheets",
   chatList.includes(
-    "dialogWindow.setBackgroundBlurRadius(if (windowVisible) blurRadiusPx else 0)",
+    "dialogWindow.setBackgroundBlurRadius((blurRadiusPx * fraction).roundToInt())",
   ) &&
     chatList.includes("val windowVisible = visible") &&
-    chatList.includes("if (!modalOpen) {") &&
+    chatList.includes(
+      "val dialogAttached = !modalOpen && (windowVisible || slideProgress.value < 1f)",
+    ) &&
+    chatList.includes("val windowInteractive = windowVisible && slideProgress.value <= 0.05f") &&
+    chatList.includes("if (dialogAttached) {") &&
     chatList.includes("dialogWindow.decorView.elevation = 0f") &&
     chatList.includes("dialogWindow?.setBackgroundBlurRadius(0)") &&
-    chatList.includes(
-      "translationY = hideDistancePx * (if (hasEntered) hideProgress else enterOffset.value)",
-    ) &&
-    chatList.includes("enterOffset.animateTo(0f, tween(380") &&
+    chatList.includes("translationY = hideDistancePx * slideProgress.value") &&
+    chatList.includes("slideProgress.snapTo(1f)") &&
     chatList.includes("params.windowAnimations = 0") &&
     chatList.indexOf("FloatingBottomNav(") < chatList.indexOf("E2eeRestoreGate()") &&
     !chatList.includes(".shadow("),
 );
 check(
-  "cold-start home and home-pill entrances rise from the bottom with no left/right slide",
+  "the home nav always enters from below and reverses downward when leaving home",
   kpApp.includes("enterTransition = { slideInVertically(tween(300)) { it } }") &&
-    chatList.includes("enterOffset.animateTo(0f, tween(380") &&
+    chatList.includes("translationY = hideDistancePx * slideProgress.value") &&
+    chatList.includes("targetValue = if (windowVisible) 0f else 1f") &&
+    chatList.includes("tween(if (windowVisible) 450 else 160, easing = slideEasing)"),
+);
+check(
+  "home nav is gated off on non-home destinations and full-screen calls, but returns when calls are minimized",
+  chatList.includes("val currentEntry by nav.currentBackStackEntryAsState()") &&
+    chatList.includes('val homeRouteActive = currentEntry?.destination?.route == "main"') &&
     chatList.includes(
-      "translationY = hideDistancePx * (if (hasEntered) hideProgress else enterOffset.value)",
-    ),
+      "val callFullscreen = CallEngine.instance?.let { it.active != null && !it.minimized } == true",
+    ) &&
+    chatList.includes("visible = navVisible && homeRouteActive && !callFullscreen"),
 );
 check(
   "chat, status, and calls lists leave safe-area-aware space beneath the floating nav",

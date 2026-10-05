@@ -29,20 +29,24 @@ check(
   "chat-list long-press captures the actual card bounds and snapshot before opening its sheet",
   chatList.includes("spotlightWindowBounds = coordinates.boundsInWindow()") &&
     chatList.includes("spotlightRootBounds = coordinates.boundsInRoot()") &&
-    convLongPress.includes("KpModalFocusState.capture(windowBounds, rootBounds)") &&
-    convLongPress.indexOf("KpModalFocusState.capture(windowBounds, rootBounds)") <
-      convLongPress.indexOf("ListSelect.sheetFor = conv"),
+    convLongPress.includes(
+      "KpModalFocusState.capture(windowBounds, rootBounds, RoundedCornerShape(16.dp))",
+    ) &&
+    convLongPress.indexOf(
+      "KpModalFocusState.capture(windowBounds, rootBounds, RoundedCornerShape(16.dp))",
+    ) < convLongPress.indexOf("ListSelect.sheetFor = conv"),
 );
 check(
   "message long-press captures that message's own bubble before showing its actions",
   messageLongPress.includes("DeleteGeoms.bubbles[focusKey]") &&
     messageLongPress.includes("DeleteGeoms.bubblesInRoot[focusKey]") &&
+    messageLongPress.includes("DeleteGeoms.bubbleShapes[focusKey]") &&
     messageLongPress.includes(
-      "KpModalFocusState.capture(focusBounds, focusRootBounds ?: focusBounds)",
+      "KpModalFocusState.capture(focusBounds, focusRootBounds ?: focusBounds, focusShape)",
     ) &&
     chat.includes("it.boundsInRoot()") &&
     messageLongPress.indexOf(
-      "KpModalFocusState.capture(focusBounds, focusRootBounds ?: focusBounds)",
+      "KpModalFocusState.capture(focusBounds, focusRootBounds ?: focusBounds, focusShape)",
     ) < messageLongPress.indexOf("actionFor = msg"),
 );
 check(
@@ -57,6 +61,9 @@ check(
   kpApp.indexOf("Surface(Modifier.fillMaxSize().blur(modalBlurRadius)") <
     kpApp.indexOf("KpModalFocusOverlay(") &&
     ui.includes("snapshot.boundsInRoot.left.roundToInt()") &&
+    ui.includes(".clip(snapshot.shape)") &&
+    ui.includes("val shape: Shape") &&
+    deleteAnim.includes("val bubbleShapes = mutableMapOf<String, Shape>()") &&
     ui.includes("snapshot.boundsInRoot.top.roundToInt()") &&
     ui.includes("scaleX = 1f + 0.035f * t") &&
     ui.includes("translationY = -with(density) { 8.dp.toPx() } * t") &&

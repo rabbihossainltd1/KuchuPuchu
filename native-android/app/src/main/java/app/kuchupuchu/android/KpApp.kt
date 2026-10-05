@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -167,7 +168,7 @@ fun KpApp() {
     val modalActive = KpModalBlurState.isActive
     val modalBlurRadius by animateDpAsState(
         targetValue = if (modalActive) 30.dp else 0.dp,
-        animationSpec = tween(220),
+        animationSpec = if (modalActive) tween(220) else snap(),
         label = "modalBackdropBlur",
     )
     LaunchedEffect(modalActive) {

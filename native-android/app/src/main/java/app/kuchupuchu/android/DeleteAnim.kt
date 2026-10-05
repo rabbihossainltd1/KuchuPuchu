@@ -25,6 +25,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.scale
@@ -52,18 +53,21 @@ import org.json.JSONObject
 internal object DeleteGeoms {
     val bubbles = mutableMapOf<String, Rect>()
     val bubblesInRoot = mutableMapOf<String, Rect>()
+    val bubbleShapes = mutableMapOf<String, Shape>()
     val rows = mutableMapOf<String, Rect>()
 
-    fun put(m: JSONObject, rect: Rect, rootRect: Rect = rect) {
+    fun put(m: JSONObject, rect: Rect, rootRect: Rect, shape: Shape) {
         val key = m.optString("clientId").ifBlank { m.optString("id") }
         bubbles[key] = rect
         bubblesInRoot[key] = rootRect
+        bubbleShapes[key] = shape
     }
 
     /** Consume-once: later layouts (collapse) must not move a running show. */
     fun snapshot(rowKey: String): DeleteFlip? {
         val row = rows.remove(rowKey) ?: return null
         bubblesInRoot.remove(rowKey)
+        bubbleShapes.remove(rowKey)
         return DeleteFlip(row, bubbles.remove(rowKey))
     }
 }

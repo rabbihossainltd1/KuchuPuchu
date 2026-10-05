@@ -994,7 +994,6 @@ fun AttachPanel(
                             Modifier
                                 .size(barH)
                                 .clip(CircleShape)
-                                .border(1.dp, Color(0x44FFFFFF), CircleShape)
                                 .clickable {
                                     haptics.tap()
                                     sel.lastOrNull()?.let(onEdit)
@@ -1387,7 +1386,6 @@ private fun AttachTile(icon: ImageVector, tint: Color, label: String, onClick: (
             Modifier
                 .size(38.dp)
                 .clip(CircleShape)
-                .border(1.dp, Color(0x1F1C1917), CircleShape)
                 .background(Card),
             contentAlignment = Alignment.Center,
         ) {

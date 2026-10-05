@@ -29,7 +29,8 @@ check(
     ui.includes("fun unregister()") &&
     ui.includes("KpModalBlurState.unregister()") &&
     kpApp.includes(".blur(modalBlurRadius)") &&
-    kpApp.includes("30.dp"),
+    kpApp.includes("30.dp") &&
+    kpApp.includes("animationSpec = if (modalActive) tween(220) else snap()"),
 );
 check(
   "the pressed chat/message crop stays sharp above the app blur and is raised without a drop shadow",
@@ -91,10 +92,13 @@ check(
 check(
   "home nav native window is removed while any sheet is open, preventing the extra blur box",
   chatList.includes("val modalOpen = KpModalBlurState.isActive") &&
-    chatList.includes("if (!modalOpen) {") &&
+    chatList.includes(
+      "val dialogAttached = !modalOpen && (windowVisible || slideProgress.value < 1f)",
+    ) &&
+    chatList.includes("if (dialogAttached) {") &&
     chatList.includes("val windowVisible = visible") &&
     chatList.includes(
-      "dialogWindow.setBackgroundBlurRadius(if (windowVisible) blurRadiusPx else 0)",
+      "dialogWindow.setBackgroundBlurRadius((blurRadiusPx * fraction).roundToInt())",
     ) &&
     chatList.includes(
       "if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dialogWindow?.setBackgroundBlurRadius(0)",

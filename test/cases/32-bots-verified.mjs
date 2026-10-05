@@ -6544,7 +6544,9 @@ const convBetween = (db, a, b) =>
         onceRow.includes("coil.compose.AsyncImage(") &&
         onceRow.includes("ViewOnceOneIcon(56.dp)") &&
         onceRow.includes("ImageRatios.put(photoUrl,") &&
-        onceRow.includes("DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot())") &&
+        onceRow.includes(
+          "DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), bubbleShape)",
+        ) &&
         !onceRow.includes("viewOnceSpent") &&
         !chat.includes('"Opened"') &&
         chat.includes("internal fun isViewOnce(m: JSONObject): Boolean =") &&
@@ -9653,8 +9655,11 @@ const convBetween = (db, a, b) =>
         ui.includes("t.snapTo(1f)") &&
         // Owner round 44 (item 6): frames carry their own capture again
         // (r71-20: 6 — text + video + photo + album + view-once + once-text).
-        (chat.match(/DeleteGeoms\.put\(m, it\.boundsInWindow\(\), it\.boundsInRoot\(\)\)/g) || [])
-          .length === 6 &&
+        (
+          chat.match(
+            /DeleteGeoms\.put\(m, it\.boundsInWindow\(\), it\.boundsInRoot\(\), (?:bubbleShape|shape|RoundedCornerShape\(12\.dp\))\)/g,
+          ) || []
+        ).length === 6 &&
         kt("DeleteAnim.kt").includes("const val SWEEP_MS = 1200") &&
         kt("DeleteAnim.kt").includes("const val GRACE_MS = 3200L") &&
         kt("DeleteAnim.kt").includes("const val COLLAPSE_MS = 220") &&

@@ -8,6 +8,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -92,6 +93,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -133,6 +135,7 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
@@ -143,6 +146,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.navigation.NavController
+import androidx.navigation.compose.currentBackStackEntryAsState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -158,6 +162,12 @@ import kotlin.math.roundToInt
  */
 @Composable
 fun ChatListScreen(nav: NavController) {
+    // This pill owns a separate Dialog window: NavHost can keep the old home
+    // entry composed during route exits, and Dialog windows sit above CallGate.
+    // Gate by the live route/call state instead of relying on composition alone.
+    val currentEntry by nav.currentBackStackEntryAsState()
+    val homeRouteActive = currentEntry?.destination?.route == "main"
+    val callFullscreen = CallEngine.instance?.let { it.active != null && !it.minimized } == true
     val scope = rememberCoroutineScope()
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val convs = ScreenStore.convs
@@ -433,7 +443,7 @@ fun ChatListScreen(nav: NavController) {
             tab = tab,
             unreadChats = unreadChats,
             unseenStatus = unseenStatus,
-            visible = navVisible,
+            visible = navVisible && homeRouteActive && !callFullscreen,
             onSelect = ::selectHomeTab,
         )
         // r76-26 (owner: "onno phone a login korle purono message gulate lock"):
@@ -1001,22 +1011,36 @@ private fun FloatingBottomNav(
     val idleTint = if (darkMode) Color(0xFFD3DEF5) else Muted
     val selectedTint = if (darkMode) Color.White else Ink
     val indicatorColor = if (darkMode) Color(0xB32B5BD7) else ActionBlue.copy(alpha = 0.16f)
-    val indicatorEdge = if (darkMode) Color(0xE0B8CCFF) else ActionBlue.copy(alpha = 0.82f)
-    val glassFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.54f) else Card.copy(alpha = 0.76f)
-    val glassEdge = if (darkMode) Color(0xE0A0B9F0) else Line.copy(alpha = 0.96f)
+    // The reference pill is a 28%-opaque blue glass card; the system blur is
+    // applied to the native window behind it, not faked with a border/shadow.
+    val glassFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.28f) else Card.copy(alpha = 0.76f)
     val modalOpen = KpModalBlurState.isActive
     val windowVisible = visible
-    val enterOffset = remember { Animatable(1f) }
-    var hasEntered by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        enterOffset.animateTo(0f, tween(380, easing = FastOutSlowInEasing))
-        hasEntered = true
+    val slideProgress = remember { Animatable(1f) }
+    val slideEasing = remember { CubicBezierEasing(0.32f, 0.8f, 0.3f, 1f) }
+    LaunchedEffect(windowVisible, modalOpen) {
+        if (modalOpen) {
+            // The home bar is removed behind a modal; re-entry always starts
+            // below the screen instead of resuming a half-finished exit.
+            slideProgress.snapTo(1f)
+        } else {
+            slideProgress.animateTo(
+                targetValue = if (windowVisible) 0f else 1f,
+                animationSpec = tween(if (windowVisible) 450 else 160, easing = slideEasing),
+            )
+        }
     }
-    val hideProgress by animateFloatAsState(
-        if (visible) 0f else 1f,
-        tween(200, easing = FastOutSlowInEasing),
-        label = "navHideProgress",
+    val indicatorEasing = remember { CubicBezierEasing(0.34f, 1.45f, 0.5f, 1f) }
+    val indicatorSize = 40.dp
+    val indicatorX by animateDpAsState(
+        targetValue = capsulePadding + (itemW - indicatorSize) * 0.5f +
+            (itemW + gap) * tab.coerceIn(0, 3).toFloat(),
+        animationSpec = tween(450, easing = indicatorEasing),
+        label = "navIndicatorX",
     )
+    val indicatorY = capsulePadding + (itemH - indicatorSize) * 0.5f
+    val dialogAttached = !modalOpen && (windowVisible || slideProgress.value < 1f)
+    val windowInteractive = windowVisible && slideProgress.value <= 0.05f
     val hideDistancePx = with(density) { (capsuleHeight + 18.dp).toPx() }
     val pillWindowBackground = remember(capsuleHeightPx) {
         GradientDrawable().apply {
@@ -1026,7 +1050,7 @@ private fun FloatingBottomNav(
         }
     }
 
-    if (!modalOpen) {
+    if (dialogAttached) {
         Dialog(
             onDismissRequest = {},
             properties = DialogProperties(
@@ -1063,38 +1087,47 @@ private fun FloatingBottomNav(
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dialogWindow?.setBackgroundBlurRadius(0)
                 }
             }
-            DisposableEffect(dialogWindow, windowVisible, blurRadiusPx) {
+            SideEffect {
                 if (dialogWindow != null) {
                     val params = dialogWindow.attributes
                     var flags = params.flags or
                         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                         WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                     flags = flags and WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
-                    flags = if (windowVisible) flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+                    flags = if (windowInteractive) flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
                     else flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
                     if (params.flags != flags) {
                         params.flags = flags
                         dialogWindow.attributes = params
                     }
+                    // Fade the real per-window blur with the pill itself. This
+                    // avoids a detached blur capsule or touch-blocking window
+                    // flashing before the nav has risen onto the screen.
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        dialogWindow.setBackgroundBlurRadius(if (windowVisible) blurRadiusPx else 0)
+                        val fraction = if (windowVisible) (1f - slideProgress.value).coerceIn(0f, 1f) else 0f
+                        dialogWindow.setBackgroundBlurRadius((blurRadiusPx * fraction).roundToInt())
                     }
-                }
-                onDispose {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dialogWindow?.setBackgroundBlurRadius(0)
                 }
             }
             Box(
                 Modifier
                     .size(capsuleWidth, capsuleHeight)
                     .graphicsLayer {
-                        translationY = hideDistancePx * (if (hasEntered) hideProgress else enterOffset.value)
+                        translationY = hideDistancePx * slideProgress.value
                     }
-                    .then(if (windowVisible) Modifier else Modifier.clearAndSetSemantics {})
+                    .then(if (windowInteractive) Modifier else Modifier.clearAndSetSemantics {})
                     .clip(CircleShape)
-                    .background(glassFill)
-                    .border(1.5.dp, glassEdge, CircleShape),
+                    .background(glassFill),
             ) {
+                // One shared indicator travels between tab centers using the
+                // reference demo's 450 ms overshooting cubic-bezier.
+                Box(
+                    Modifier
+                        .offset(x = indicatorX, y = indicatorY)
+                        .size(indicatorSize)
+                        .clip(CircleShape)
+                        .background(indicatorColor),
+                )
                 Row(
                     Modifier.fillMaxSize().padding(capsulePadding),
                     horizontalArrangement = Arrangement.spacedBy(gap),
@@ -1105,14 +1138,17 @@ private fun FloatingBottomNav(
                         width = itemW,
                         height = itemH,
                         badge = unreadChats,
-                        enabled = windowVisible,
+                        enabled = windowInteractive,
                         idleTint = idleTint,
                         selectedTint = selectedTint,
-                        selectedBackground = indicatorColor,
-                        selectedBorder = indicatorEdge,
                         onClick = { onSelect(0) },
                     ) { tint ->
-                        Icon(Icons.Filled.Chat, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+                        Icon(
+                            painter = painterResource(R.drawable.ic_nav_chat),
+                            contentDescription = null,
+                            tint = tint,
+                            modifier = Modifier.size(24.dp),
+                        )
                     }
                     NavItem(
                         label = "Status",
@@ -1120,11 +1156,9 @@ private fun FloatingBottomNav(
                         width = itemW,
                         height = itemH,
                         newStatus = unseenStatus,
-                        enabled = windowVisible,
+                        enabled = windowInteractive,
                         idleTint = idleTint,
                         selectedTint = selectedTint,
-                        selectedBackground = indicatorColor,
-                        selectedBorder = indicatorEdge,
                         onClick = { onSelect(1) },
                     ) { tint ->
                         StatusGlyphIcon(tint, 24.dp)
@@ -1134,11 +1168,9 @@ private fun FloatingBottomNav(
                         selected = tab == 2,
                         width = itemW,
                         height = itemH,
-                        enabled = windowVisible,
+                        enabled = windowInteractive,
                         idleTint = idleTint,
                         selectedTint = selectedTint,
-                        selectedBackground = indicatorColor,
-                        selectedBorder = indicatorEdge,
                         onClick = { onSelect(2) },
                     ) { tint ->
                         Icon(Icons.Filled.Call, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
@@ -1148,11 +1180,9 @@ private fun FloatingBottomNav(
                         selected = tab == 3,
                         width = itemW,
                         height = itemH,
-                        enabled = windowVisible,
+                        enabled = windowInteractive,
                         idleTint = idleTint,
                         selectedTint = selectedTint,
-                        selectedBackground = indicatorColor,
-                        selectedBorder = indicatorEdge,
                         onClick = { onSelect(3) },
                     ) { tint ->
                         Icon(Icons.Filled.Person, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
@@ -1173,14 +1203,13 @@ private fun NavItem(
     enabled: Boolean = true,
     idleTint: Color,
     selectedTint: Color,
-    selectedBackground: Color,
-    selectedBorder: Color,
     onClick: () -> Unit,
     icon: @Composable (Color) -> Unit,
 ) {
     val tint by animateColorAsState(if (selected) selectedTint else idleTint, tween(250), label = "navTint")
     val pop = remember { Animatable(1f) }
     val firstRun = remember { booleanArrayOf(true) }
+    val popEasing = remember { CubicBezierEasing(0.34f, 1.56f, 0.64f, 1f) }
     val badgeScale = remember { Animatable(1f) }
     val badgeLabel = when {
         badge <= 0 -> ""
@@ -1194,8 +1223,8 @@ private fun NavItem(
         }
         if (selected) {
             pop.snapTo(0.7f)
-            pop.animateTo(1.2f, tween(140, easing = FastOutSlowInEasing))
-            pop.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = 500f))
+            pop.animateTo(1.2f, tween(270, easing = popEasing))
+            pop.animateTo(1f, tween(180, easing = popEasing))
         }
     }
     LaunchedEffect(badgeLabel) {
@@ -1230,16 +1259,6 @@ private fun NavItem(
             ) { onClick() },
         contentAlignment = Alignment.Center,
     ) {
-        if (selected) {
-            Box(
-                Modifier
-                    .size(40.dp)
-                    .align(Alignment.Center)
-                    .clip(CircleShape)
-                    .background(selectedBackground)
-                    .border(1.25.dp, selectedBorder, CircleShape),
-            )
-        }
         Box(Modifier.size(24.dp)) {
             Box(
                 Modifier
@@ -1805,7 +1824,7 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
         val rootBounds = spotlightRootBounds
         scope.launch {
             if (windowBounds != null && rootBounds != null) {
-                KpModalFocusState.capture(windowBounds, rootBounds)
+                KpModalFocusState.capture(windowBounds, rootBounds, RoundedCornerShape(16.dp))
             }
             // r103-5: long-press opens the sheet; Select remains an explicit action.
             ListSelect.sheetFor = conv
@@ -2351,7 +2370,6 @@ private fun PeekAction(icon: ImageVector, label: String, onClick: () -> Unit) {
             .size(50.dp)
             .clip(CircleShape)
             .background(circleButtonFill())
-            .border(1.dp, CircleButtonEdge, CircleShape)
             .clickable {
                 haptics.tap()
                 onClick()
