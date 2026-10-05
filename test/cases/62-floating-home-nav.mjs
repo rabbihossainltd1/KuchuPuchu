@@ -87,16 +87,22 @@ check(
       .includes("110.dp + WindowInsets.navigationBars.getBottom(this).toDp()"),
 );
 check(
-  "bottom-nav route changes animate its own floating window down/up instead of snapping",
-  nav.includes("slideProgress") &&
-    nav.includes("LaunchedEffect(visible, modalOpen)") &&
-    nav.includes("slideProgress.animateTo(") &&
-    nav.includes("animationSpec = tween(420, easing = slideEasing)") &&
-    nav.includes("params.y = windowYOffsetPx") &&
-    nav.includes(
-      "windowYOffsetPx = bottomOffsetPx - (exitTravelPx * slideProgress.value).roundToInt()",
-    ) &&
-    nav.includes("val dialogAttached = !modalOpen && (visible || slideProgress.value < 0.999f)"),
+  "bottom-nav route changes use compositor window animations rather than per-frame WindowManager relayouts",
+  nav.includes("if (modalOpen)") &&
+    nav.includes("dialogAttached = visible") &&
+    nav.includes("dialogWindow.setWindowAnimations(R.style.KpNavWindowAnimations)") &&
+    nav.includes("params.y = bottomOffsetPx") &&
+    !nav.includes("slideProgress") &&
+    !nav.includes("params.y = windowYOffsetPx") &&
+    fs
+      .readFileSync(
+        path.join(root, "native-android/app/src/main/res/anim/kp_nav_enter.xml"),
+        "utf8",
+      )
+      .includes('android:fromYDelta="100%"') &&
+    fs
+      .readFileSync(path.join(root, "native-android/app/src/main/res/anim/kp_nav_exit.xml"), "utf8")
+      .includes('android:toYDelta="100%"'),
 );
 check(
   "the pill uses Android's rounded floating-window background blur, with a readable fallback",

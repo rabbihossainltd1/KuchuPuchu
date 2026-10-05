@@ -16,6 +16,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -238,12 +240,13 @@ fun KpApp() {
             ) {
                 composable(
                     "main",
-                    // Keep the home content stationary during route changes; the
-                    // independently hosted nav pill owns the down/up travel.
-                    enterTransition = { fadeIn(tween(180)) },
-                    exitTransition = { fadeOut(tween(160)) },
-                    popEnterTransition = { fadeIn(tween(180)) },
-                    popExitTransition = { fadeOut(tween(160)) },
+                    // The main/chat NavHost handoff produced a runtime
+                    // endGroup crash on animation frames. Keep home stationary;
+                    // the floating nav window owns the only transition here.
+                    enterTransition = { EnterTransition.None },
+                    exitTransition = { ExitTransition.None },
+                    popEnterTransition = { EnterTransition.None },
+                    popExitTransition = { ExitTransition.None },
                 ) { ChatListScreen(nav, homeTab) }
                 composable("newchat") { NewChatScreen(nav) }
                 // Owner round 32 (item 12): `with` = comma-separated user ids

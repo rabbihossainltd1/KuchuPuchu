@@ -96,7 +96,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.MutableIntState
@@ -995,7 +994,9 @@ internal fun HomeBottomNavigation(
     val idleTint = if (darkMode) Color(0xFFD3DEF5) else Muted
     val selectedTint = if (darkMode) Color.White else Ink
     val indicatorColor = if (darkMode) Color(0xB32B5BD7) else ActionBlue.copy(alpha = 0.16f)
-    val glassFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.28f) else Card.copy(alpha = 0.76f)
+    // Keep the enabled-blur surface translucent enough for the backdrop to read;
+    // the nearly opaque fallback is used only when the platform blur is unavailable.
+    val glassFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.28f) else Card.copy(alpha = 0.42f)
     val fallbackFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.88f) else Card.copy(alpha = 0.94f)
     val windowFill = if (blurEnabled) glassFill else fallbackFill
     val itemH = 44.dp
@@ -1008,32 +1009,25 @@ internal fun HomeBottomNavigation(
     val bottomOffsetPx = WindowInsets.navigationBars.getBottom(density) + with(density) { 16.dp.roundToPx() }
     val blurRadiusPx = with(density) { 30.dp.roundToPx() }
     val indicatorSize = 40.dp
-    val exitTravelPx = capsuleHeightPx + bottomOffsetPx + with(density) { 12.dp.roundToPx() }
-    val slideProgress = remember { Animatable(1f) }
-    val slideEasing = remember { CubicBezierEasing(0.32f, 0.8f, 0.3f, 1f) }
     val indicatorEasing = remember { CubicBezierEasing(0.34f, 1.45f, 0.5f, 1f) }
-    val windowInteractive = visible && slideProgress.value <= 0.05f && !modalOpen
-    val dialogAttached = !modalOpen && (visible || slideProgress.value < 0.999f)
-    val windowYOffsetPx = bottomOffsetPx - (exitTravelPx * slideProgress.value).roundToInt()
+    val windowInteractive = visible && !modalOpen
+    val dialogWindowRef = remember { arrayOfNulls<android.view.Window>(1) }
+    var dialogAttached by remember { mutableStateOf(visible && !modalOpen) }
     val pillWindowBackground = remember(capsuleHeightPx, windowFill) {
         GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = capsuleHeightPx / 2f
-            setColor(windowFill.copy(alpha = 0f).toArgb())
+            setColor(windowFill.toArgb())
         }
     }
 
     LaunchedEffect(visible, modalOpen) {
         if (modalOpen) {
-            // Existing bottom-sheet behavior: remove the pill while a modal owns the screen.
-            slideProgress.snapTo(1f)
+            // Preserve the old immediate hide while a sheet owns the screen.
+            dialogWindowRef[0]?.setWindowAnimations(0)
+            dialogAttached = false
         } else {
-            // Keep the glass window alive through the entire route transition so its
-            // position and real backdrop blur travel together instead of snapping away.
-            slideProgress.animateTo(
-                targetValue = if (visible) 0f else 1f,
-                animationSpec = tween(420, easing = slideEasing),
-            )
+            dialogAttached = visible
         }
     }
 
@@ -1049,9 +1043,21 @@ internal fun HomeBottomNavigation(
         ) {
             val dialogView = LocalView.current
             val dialogWindow = (dialogView.parent as? DialogWindowProvider)?.window
-            DisposableEffect(dialogWindow, capsuleWidthPx, capsuleHeightPx, bottomOffsetPx, pillWindowBackground) {
+            DisposableEffect(
+                dialogWindow,
+                capsuleWidthPx,
+                capsuleHeightPx,
+                bottomOffsetPx,
+                pillWindowBackground,
+                blurEnabled,
+                blurRadiusPx,
+            ) {
                 if (dialogWindow != null) {
-                    dialogWindow.setWindowAnimations(0)
+                    dialogWindowRef[0] = dialogWindow
+                    // Let WindowManager animate the whole translucent surface.
+                    // Updating LayoutParams.y from Compose every frame forced a
+                    // relayout on each frame, causing the reported stutter.
+                    dialogWindow.setWindowAnimations(R.style.KpNavWindowAnimations)
                     dialogWindow.setBackgroundDrawable(pillWindowBackground)
                     dialogView.elevation = 0f
                     dialogView.translationZ = 0f
@@ -1062,70 +1068,32 @@ internal fun HomeBottomNavigation(
                     params.format = PixelFormat.TRANSLUCENT
                     params.width = capsuleWidthPx
                     params.height = capsuleHeightPx
-                    params.windowAnimations = 0
+                    params.windowAnimations = R.style.KpNavWindowAnimations
                     params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
                     params.x = 0
-                    params.y = windowYOffsetPx
+                    params.y = bottomOffsetPx
                     params.flags =
                         (params.flags or
                             WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or
                             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL) and
-                            WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
+                            WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv() and
+                            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        // Window y is in physical screen coordinates; avoid applying
-                        // the nav-bar inset twice to this floating glass window.
+                        // The window y is the bottom inset; don't apply it twice.
                         params.setFitInsetsSides(0)
                         params.setFitInsetsTypes(0)
                     }
                     dialogWindow.attributes = params
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        dialogWindow.setBackgroundBlurRadius(if (blurEnabled) blurRadiusPx else 0)
+                    }
                 }
                 onDispose {
+                    if (dialogWindowRef[0] === dialogWindow) dialogWindowRef[0] = null
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                         dialogWindow?.setBackgroundBlurRadius(0)
-                    }
-                }
-            }
-            SideEffect {
-                if (dialogWindow != null) {
-                    val params = dialogWindow.attributes
-                    var flags = params.flags or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                    flags = flags and WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
-                    flags = if (windowInteractive) flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-                    else flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                    val positionChanged =
-                        params.x != 0 ||
-                            params.y != windowYOffsetPx ||
-                            params.gravity != (Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL) ||
-                            params.width != capsuleWidthPx ||
-                            params.height != capsuleHeightPx
-                    val fitInsetsChanged =
-                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-                            (params.fitInsetsSides != 0 || params.fitInsetsTypes != 0)
-                    if (params.flags != flags || positionChanged || fitInsetsChanged) {
-                        params.flags = flags
-                        params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                        params.width = capsuleWidthPx
-                        params.height = capsuleHeightPx
-                        params.x = 0
-                        params.y = windowYOffsetPx
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                            params.setFitInsetsSides(0)
-                            params.setFitInsetsTypes(0)
-                        }
-                        dialogWindow.attributes = params
-                    }
-                    val visibleFraction = (1f - slideProgress.value).coerceIn(0f, 1f)
-                    pillWindowBackground.setColor(windowFill.copy(alpha = windowFill.alpha * visibleFraction).toArgb())
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        dialogWindow.setBackgroundBlurRadius(
-                            if (blurEnabled) (blurRadiusPx * visibleFraction).roundToInt() else 0,
-                        )
                     }
                 }
             }

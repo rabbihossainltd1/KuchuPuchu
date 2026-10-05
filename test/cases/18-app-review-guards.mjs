@@ -247,6 +247,29 @@ check(
 );
 has(list, "Api.PollCadence.succeeded()", "a good poll clears the penalty");
 has(list, "Api.PollCadence.failed()", "…and a bad one starts it");
+has(
+  api,
+  "fun cooldownRemainingMs()",
+  "the Retry-After deadline is available to the fastest poller",
+);
+const calls = kt("CallEngine.kt");
+check(
+  "call polling sleeps exactly through Retry-After, then keeps its existing healthy cadence",
+  calls.includes("if (Api.cooldownRemainingMs() == 0L) runCatching { tick() }") &&
+    calls.includes("if (cooldownDelay > 0L) cooldownDelay") &&
+    calls.includes("Store.foreground -> 1500L") &&
+    calls.includes("else -> 4000L"),
+  "call poll / healthy foreground/background interval changed",
+);
+const chat = kt("ChatScreen.kt");
+check(
+  "open-chat fallback honours cooldown without disabling socket rejoin or healthy safety polls",
+  chat.includes("if (!Api.inCooldown() && now - lastFallbackRefresh >=") &&
+    chat.includes("if (now - lastRejoin >= 10_000)") &&
+    chat.includes("if (down) 3_000L else upCadence") &&
+    chat.includes("else 8_000L"),
+  "missing Retry-After guard, socket rejoin, or 3s/8s cadence",
+);
 
 // ── Phase 2 §11/§40: the outgoing queue must heal itself, not wait for a chat ──
 {
@@ -328,16 +351,22 @@ has(list, "Api.PollCadence.failed()", "…and a bad one starts it");
   // Triggers: the whole point of the change — flush had exactly one call site.
   has(cache, "fun start(ctx: Context)", "startup arms the queue");
   has(cache, "watchNetwork(ctx)", "…by registering for connectivity…");
-  has(cache, "mgr.registerNetworkCallback(req, cb)", "…through the documented callback…");
+  has(
+    cache,
+    "mgr.registerDefaultNetworkCallback(cb)",
+    "…through the active default-route callback…",
+  );
   has(cache, "override fun onAvailable(network: Network)", "…on the available event…");
-  const onAv = cache.slice(
-    cache.indexOf("override fun onAvailable(network: Network)"),
-    cache.indexOf("override fun onAvailable(network: Network)") + 320,
+  const onAvStart = cache.indexOf("override fun onAvailable(network: Network)");
+  const onAv = cache.slice(onAvStart, onAvStart + 900);
+  check(
+    "network recovery evicts stale HTTP sockets before forcing queued sends",
+    onAv.includes("Api.http.connectionPool.evictAll()") && onAv.includes("kick(400, force = true)"),
+    onAv.slice(0, 60),
   );
   check(
-    "…which force-flushes (backoff must not outlive an outage)",
-    onAv.includes("kick(400, force = true)"),
-    onAv.slice(0, 60),
+    "network recovery refreshes visible inbox and status data",
+    onAv.includes("ScreenStore.pokeInbox()"),
   );
   has(
     cache,

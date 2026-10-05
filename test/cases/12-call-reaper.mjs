@@ -151,6 +151,41 @@ async function main() {
       !!missed?.message?.android?.data?.kp_callback && !!missed?.message?.android?.data?.kp_chat,
       JSON.stringify(missed?.message?.android?.data ?? {}),
     );
+
+    // A fresh isolate exercises the request path. Two immediate active-call
+    // polls may run the stale scan once, never twice; the cron above remains
+    // the independent guarantee when nobody has the app open.
+    const pollWorker = await freshWorker();
+    const reaperReads = [];
+    const prepare = db.prepare.bind(db);
+    db.prepare = (sql) => {
+      if (
+        sql.includes("SELECT id, caller_id, callee_id, kind FROM calls WHERE status = 'RINGING'") ||
+        sql.includes("SELECT id, caller_id, callee_id, kind FROM calls WHERE status = 'ACTIVE'")
+      ) {
+        reaperReads.push(sql);
+      }
+      return prepare(sql);
+    };
+    const pollActive = async () => {
+      const res = await pollWorker.fetch(
+        new Request("https://kp.test/api/calls/active", {
+          headers: { authorization: `Bearer ${caller.token}` },
+        }),
+        env,
+        ctx,
+      );
+      const status = res.status;
+      await res.text();
+      await ctx.drain();
+      return status;
+    };
+    const pollStatuses = [await pollActive(), await pollActive()];
+    check(
+      "two /active polls share one minute-gated stale-call scan (healthy poll shape stays separate)",
+      pollStatuses.every((status) => status === 200) && reaperReads.length === 2,
+      `statuses=${pollStatuses.join(",")} reaperReads=${reaperReads.length}`,
+    );
   } finally {
     globalThis.fetch = realFetch;
   }

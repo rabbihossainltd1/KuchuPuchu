@@ -7,8 +7,9 @@
 // status poll that costs hundreds of D1 statements, and an append-only debug table
 // nobody prunes.
 //
-// The statuses case asserts on STATEMENT COUNT, not timing — the free-tier
-// row-read limit does not care how fast each query is, and D1 counts round trips.
+// The sqlite shim does not expose Cloudflare D1's `rows_read` metric. The
+// statuses case therefore checks statement budget AND the SQL predicates, so it
+// can prove the view query is scoped without pretending statement count is rows_read.
 
 import { readFile } from "node:fs/promises";
 import { makeD1, makeR2, makeCtx } from "../d1shim.mjs";
@@ -638,14 +639,41 @@ async function main() {
     // statuses — the shape that used to blow the D1 row-read budget.
     const A = await h.reg("s1a");
     const ids = [];
+    const statusIds = [];
+    let firstContactToken = "";
     for (let i = 0; i < 12; i++) {
       const B = await h.reg(`s1b${i}`);
       ids.push(B.user.id);
+      if (i === 0) firstContactToken = B.token;
       await h.call("POST", "/api/conversations", { userId: B.user.id }, A.token);
-      await h.call("POST", "/api/statuses", { kind: "TEXT", text: `status number ${i}` }, B.token);
+      const posted = await h.call(
+        "POST",
+        "/api/statuses",
+        { kind: "TEXT", text: `status number ${i}` },
+        B.token,
+      );
+      statusIds.push(posted.json.status?.id);
     }
-    await h.call("POST", "/api/statuses", { kind: "TEXT", text: "mine" }, A.token);
-    // a view row, so the viewers/allViewed paths are exercised
+    const ownPost = await h.call("POST", "/api/statuses", { kind: "TEXT", text: "mine" }, A.token);
+    const ownStatusId = ownPost.json.status?.id;
+    // Exercise both feed semantics: a contact viewed my status, and I viewed
+    // one contact's status. Other viewers of an unrelated user's live status
+    // must not participate in my feed query at all.
+    await h.call("POST", `/api/statuses/${ownStatusId}/view`, {}, firstContactToken);
+    await h.call("POST", `/api/statuses/${statusIds[0]}/view`, {}, A.token);
+    const unrelated = await h.reg("s1outside");
+    const unrelatedPost = await h.call(
+      "POST",
+      "/api/statuses",
+      { kind: "TEXT", text: "unrelated" },
+      unrelated.token,
+    );
+    for (const viewerId of ids) {
+      await h
+        .q("INSERT OR IGNORE INTO status_views (status_id, viewer_id, viewed_at) VALUES (?, ?, ?)")
+        .bind(unrelatedPost.json.status?.id, viewerId, new Date().toISOString())
+        .run();
+    }
     const otherConvs = await h.call("GET", "/api/conversations", undefined, A.token);
     const cid0 = otherConvs.json.items[0].id;
     const msgOfB = await h.call(
@@ -656,9 +684,28 @@ async function main() {
     );
     void msgOfB;
 
+    const sqlMark = h.traced.length;
+    let statusViewRowsReturned = 0;
+    const originalPrepare = h.env.DB.prepare.bind(h.env.DB);
+    h.env.DB.prepare = (sql) => {
+      const stmt = originalPrepare(sql);
+      if (/\bFROM status_views\b/i.test(sql)) {
+        const all = stmt.all.bind(stmt);
+        stmt.all = async (...args) => {
+          const result = await all(...args);
+          statusViewRowsReturned += result.results?.length ?? 0;
+          return result;
+        };
+      }
+      return stmt;
+    };
     h.env.DB._stats.reset();
     const res = await h.call("GET", "/api/statuses", undefined, A.token);
     const reads = h.env.DB._stats.reads;
+    const viewReads = h
+      .since(sqlMark)
+      .filter((sql) => /\bFROM status_views\b/i.test(sql))
+      .map((sql) => sql.replace(/\s+/g, " ").trim().toLowerCase());
     check(
       "statuses ring is populated for all contacts",
       (res.json.items ?? []).length >= 12,
@@ -669,14 +716,39 @@ async function main() {
       reads <= 8,
       `statements=${reads}`,
     );
+    check(
+      "status_views reads are feed-scoped (own IDs for counts; my viewer ID for contacts), never a global live-status sweep",
+      viewReads.length === 2 &&
+        viewReads.some((sql) =>
+          sql.startsWith("select status_id, viewer_id from status_views where status_id in ("),
+        ) &&
+        viewReads.some((sql) =>
+          sql.startsWith(
+            "select status_id from status_views where viewer_id = ? and status_id in (",
+          ),
+        ) &&
+        viewReads.every((sql) => !sql.includes("select id from statuses where expires_at")),
+      JSON.stringify(viewReads),
+    );
+    check(
+      "SQLite returns only the two relevant view rows; the 12 unrelated viewers stay out of the feed reads",
+      statusViewRowsReturned === 2,
+      `sqlite result rows=${statusViewRowsReturned} (not a Cloudflare D1 rows_read metric)`,
+    );
     const mineGroup = (res.json.items ?? []).find((x) => x.mine);
     check(
-      "own status still present with its viewer count",
-      mineGroup?.statuses?.[0]?.text === "mine" &&
-        typeof mineGroup.statuses[0].viewers === "number",
+      "own status keeps the exact viewer count without a global views sweep",
+      mineGroup?.statuses?.[0]?.text === "mine" && mineGroup.statuses[0].viewers === 1,
       JSON.stringify(mineGroup?.statuses?.[0] ?? {}).slice(0, 90),
     );
     const otherGroup = (res.json.items ?? []).find((x) => !x.mine);
+    const viewedGroup = (res.json.items ?? []).find((x) => x.user?.id === ids[0]);
+    const unseenGroup = (res.json.items ?? []).find((x) => x.user?.id === ids[1]);
+    check(
+      "allViewed stays true only for the contact status I actually viewed",
+      viewedGroup?.allViewed === true && unseenGroup?.allViewed === false,
+      JSON.stringify({ viewed: viewedGroup?.allViewed, unseen: unseenGroup?.allViewed }),
+    );
     check(
       "a contact group keeps its fields (shape unchanged)",
       !!otherGroup && !!otherGroup.user?.id && typeof otherGroup.allViewed === "boolean",

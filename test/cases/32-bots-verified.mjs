@@ -7731,7 +7731,7 @@ const convBetween = (db, a, b) =>
     check(
       "r33-2: status tab wiring",
       status.includes("fun refresh(force: Boolean = false) {") &&
-        status.includes('Api.get("/api/statuses", force)') &&
+        status.includes('Api.get("/api/statuses", force, allowCachedFallback = false)') &&
         status.includes(
           "LaunchedEffect(ScreenStore.poke) {\n        if (ScreenStore.poke > 0 && Store.foreground) refresh(force = true)",
         ) &&

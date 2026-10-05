@@ -1464,8 +1464,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                 if (!fg) continue
                 val onScreen = Store.route == "chat/$convId"
                 if (justReturned && onScreen) {
-                    refreshMessages(forceNetwork = true)
-                    refreshMeta()
+                    // Healthy foreground returns still fetch immediately. When
+                    // the server has explicitly sent 429/503 Retry-After, let
+                    // the live socket carry events instead of retrying REST.
+                    if (!Api.inCooldown()) {
+                        refreshMessages(forceNetwork = true)
+                        refreshMeta()
+                    }
                 } else if (onScreen) {
                     // Owner round 6: socket down used to mean messages up to
                     // 10s late ("realtime update late"). Two changes: the
@@ -1489,7 +1494,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // half-open-asymmetric is a 30s-late first bubble instead
                     // of 8s; any frame, send or typing snaps it back to 8s.
                     val upCadence = if (now - lastFrameAt > 120_000L && pending.isEmpty()) 30_000L else 8_000L
-                    if (now - lastFallbackRefresh >= (if (down) 3_000L else upCadence)) {
+                    // Do not burn the backend's Retry-After window with
+                    // marker polls. The healthy 3s/8s safety-net cadence and
+                    // socket rejoin below are deliberately unchanged.
+                    if (!Api.inCooldown() && now - lastFallbackRefresh >= (if (down) 3_000L else upCadence)) {
                         lastFallbackRefresh = now
                         refreshMessages(forceNetwork = true)
                         refreshMeta()

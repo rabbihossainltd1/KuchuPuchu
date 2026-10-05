@@ -10,6 +10,18 @@ const focus = read("KpFocusSheet.kt");
 const ui = read("Ui.kt");
 const attach = read("AttachSheet.kt");
 const kpApp = read("KpApp.kt");
+const cache = read("Cache.kt");
+const statusScreen = read("StatusScreens.kt");
+const api = read("Api.kt");
+const theme = readFileSync(resolve("native-android/app/src/main/res/values/themes.xml"), "utf8");
+const navEnter = readFileSync(
+  resolve("native-android/app/src/main/res/anim/kp_nav_enter.xml"),
+  "utf8",
+);
+const navExit = readFileSync(
+  resolve("native-android/app/src/main/res/anim/kp_nav_exit.xml"),
+  "utf8",
+);
 const icon = readFileSync(
   resolve("native-android/app/src/main/res/drawable/ic_nav_chat.xml"),
   "utf8",
@@ -61,15 +73,19 @@ check(
     nav.includes(".offset(x = indicatorX, y = indicatorY)"),
 );
 check(
-  "the pill animates its floating window down/up and fades the real platform backdrop blur",
-  nav.includes("val slideProgress = remember { Animatable(1f) }") &&
-    nav.includes("targetValue = if (visible) 0f else 1f") &&
-    nav.includes("tween(420, easing = slideEasing)") &&
-    nav.includes("params.y = windowYOffsetPx") &&
-    nav.includes("pillWindowBackground.setColor(") &&
-    nav.includes("dialogWindow.setBackgroundBlurRadius(") &&
-    nav.includes("WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE") &&
-    nav.includes("val dialogAttached = !modalOpen && (visible || slideProgress.value < 0.999f)"),
+  "WindowManager animates the pill as one surface; Compose no longer relayouts the window every frame",
+  nav.includes("if (dialogAttached)") &&
+    nav.includes("dialogWindow.setWindowAnimations(R.style.KpNavWindowAnimations)") &&
+    nav.includes("dialogWindowRef[0]?.setWindowAnimations(0)") &&
+    nav.includes("params.y = bottomOffsetPx") &&
+    nav.includes("dialogWindow.setBackgroundBlurRadius(if (blurEnabled) blurRadiusPx else 0)") &&
+    nav.includes("WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()") &&
+    theme.includes("@anim/kp_nav_enter") &&
+    theme.includes("@anim/kp_nav_exit") &&
+    navEnter.includes('android:fromYDelta="100%"') &&
+    navExit.includes('android:toYDelta="100%"') &&
+    !nav.includes("slideProgress") &&
+    !nav.includes("params.y = windowYOffsetPx"),
 );
 check(
   "home route and full-screen call gate own nav visibility; pushed chat routes hide it",
@@ -81,16 +97,15 @@ check(
     kpApp.includes("callEngine.minimized"),
 );
 check(
-  "home content stays stationary on return while only the independently hosted pill rises from below",
-  homeRoute.includes("enterTransition = { fadeIn(tween(180)) }") &&
-    homeRoute.includes("exitTransition = { fadeOut(tween(160)) }") &&
-    homeRoute.includes("popEnterTransition = { fadeIn(tween(180)) }") &&
+  "main/chat route content stays still while the nav pill owns its native up/down transition",
+  homeRoute.includes("enterTransition = { EnterTransition.None }") &&
+    homeRoute.includes("exitTransition = { ExitTransition.None }") &&
+    homeRoute.includes("popEnterTransition = { EnterTransition.None }") &&
     !homeRoute.includes("slideInVertically") &&
     !homeRoute.includes("slideOutVertically") &&
     chatRoute.includes('composable("chat/{id}") { entry ->') &&
-    nav.includes(
-      "windowYOffsetPx = bottomOffsetPx - (exitTravelPx * slideProgress.value).roundToInt()",
-    ),
+    !nav.includes("windowYOffsetPx") &&
+    nav.includes("R.style.KpNavWindowAnimations"),
 );
 check(
   "the pill's translucent rounded native background reveals platform blur rather than transparent Compose fill",
@@ -105,6 +120,21 @@ check(
     !nav.includes("glassEdge") &&
     !nav.includes("selectedBorder") &&
     !nav.includes(".border(1.25.dp"),
+);
+check(
+  "default-network recovery evicts stale HTTP sockets, retries the outbox, and refreshes visible feeds",
+  cache.includes("mgr.registerDefaultNetworkCallback(cb)") &&
+    cache.includes("Api.http.connectionPool.evictAll()") &&
+    cache.includes("kick(400, force = true)") &&
+    cache.includes("ScreenStore.pokeInbox()") &&
+    !cache.includes("registerNetworkCallback(req, cb)"),
+);
+check(
+  "a failed status fetch bypasses stale-cache fallback so the retry notice can be shown",
+  api.includes("allowCachedFallback: Boolean = true") &&
+    api.includes("if (allowCachedFallback) Cache.peek(key)?.let { return it }") &&
+    statusScreen.includes("allowCachedFallback = false") &&
+    statusScreen.includes("Tap to retry"),
 );
 check(
   "sheet action buttons remain borderless while selection, caption, and confirmation controls keep their treatment",

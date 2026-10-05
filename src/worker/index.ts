@@ -5037,6 +5037,24 @@ export async function rollupMetrics(db: D1Database, now = new Date()): Promise<n
   return touched;
 }
 
+// `/api/calls/active` is polled on sub-second to 1.5s safety ticks, but stale
+// calls only need reaping once per cron interval. Gate the request path per
+// isolate so healthy call-list polling stays unchanged while repeated scans
+// disappear; the independent one-minute cron remains the no-client guarantee.
+const CALL_REAPER_INTERVAL_MS = 60_000;
+let nextCallReaperAt = 0;
+async function reapStaleCallsIfDue(
+  env: Env,
+  db: D1Database,
+  ctx: ExecutionContext,
+): Promise<number> {
+  const now = Date.now();
+  if (now < nextCallReaperAt) return 0;
+  // Set before awaiting so overlapping polls in the same isolate coalesce.
+  nextCallReaperAt = now + CALL_REAPER_INTERVAL_MS;
+  return reapStaleCalls(env, db, ctx);
+}
+
 async function reapStaleCalls(env: Env, db: D1Database, ctx: ExecutionContext): Promise<number> {
   const cutoff = new Date(Date.now() - 60_000).toISOString();
   const stale = await all<{ id: string; caller_id: string; callee_id: string; kind: string }>(
@@ -10215,21 +10233,31 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       uid,
       uid,
     );
-    // Every view row for every live status, in one go. The primary key is
-    // (status_id, viewer_id), so the per-contact `WHERE viewer_id = ?` scan that
-    // used to repeat for each contact is gone.
-    const views = await all<{ status_id: string; viewer_id: string }>(
-      db,
-      `SELECT status_id, viewer_id FROM status_views
-        WHERE status_id IN (SELECT id FROM statuses WHERE expires_at > ? OR user_id = ?)`,
-      now,
-      uid,
-    );
+    // Only the current user's own statuses need total viewer counts. For
+    // contact statuses we need just this viewer's seen bit. Scanning views for
+    // every active status in the whole service made each 12s feed poll pay for
+    // unrelated users' traffic; bound both reads to IDs already in this feed.
     const viewersByStatus = new Map<string, number>();
     const iViewed = new Set<string>();
-    for (const view of views) {
-      if (view.viewer_id === uid) iViewed.add(view.status_id);
-      viewersByStatus.set(view.status_id, (viewersByStatus.get(view.status_id) ?? 0) + 1);
+    for (const group of chunked(mine.map((row) => row.id))) {
+      for (const view of await all<{ status_id: string; viewer_id: string }>(
+        db,
+        `SELECT status_id, viewer_id FROM status_views WHERE status_id IN (${inSql(group.length)})`,
+        ...group,
+      )) {
+        viewersByStatus.set(view.status_id, (viewersByStatus.get(view.status_id) ?? 0) + 1);
+      }
+    }
+    for (const group of chunked(others.map((row) => row.id))) {
+      for (const view of await all<{ status_id: string }>(
+        db,
+        `SELECT status_id FROM status_views
+          WHERE viewer_id = ? AND status_id IN (${inSql(group.length)})`,
+        uid,
+        ...group,
+      )) {
+        iViewed.add(view.status_id);
+      }
     }
     const shape = (row: StatusRow) => ({
       id: row.id,
@@ -10978,7 +11006,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // one-minute cron (see the `scheduled` handler) so the transition happens
     // even when BOTH phones are backgrounded and nobody polls — the stuck
     // "X is calling" card bug.
-    await reapStaleCalls(env, db, ctx);
+    await reapStaleCallsIfDue(env, db, ctx);
     const rows = await all<CallRow>(
       db,
       "SELECT * FROM calls WHERE (caller_id = ? OR callee_id = ?) AND status IN ('RINGING', 'ACTIVE') ORDER BY created_at DESC",

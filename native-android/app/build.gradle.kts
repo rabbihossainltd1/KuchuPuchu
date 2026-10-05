@@ -163,8 +163,9 @@ android {
 }
 
 dependencies {
-    // Runtime 1.10.0 fixes movable content crashes when live rows move between subcompositions.
-    val composeBom = platform("androidx.compose:compose-bom:2025.12.00")
+    // Runtime 1.11.3 includes the movable-content exception fix; keep Compose
+    // runtime/UI/animation versions aligned through the BOM.
+    val composeBom = platform("androidx.compose:compose-bom:2026.06.00")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
@@ -176,7 +177,7 @@ dependencies {
     // InvalidFragmentVersionForActivityResult said so. Named explicitly so it is a
     // decision, not an accident of what compose-bom happens to resolve.
     implementation("androidx.fragment:fragment-ktx:1.8.9")
-    implementation("androidx.navigation:navigation-compose:2.8.3")
+    implementation("androidx.navigation:navigation-compose:2.9.8")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")

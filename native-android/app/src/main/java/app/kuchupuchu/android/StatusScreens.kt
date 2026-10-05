@@ -92,6 +92,7 @@ fun StatusScreen(nav: NavController, fabBottom: androidx.compose.ui.unit.Dp = 74
     val scope = rememberCoroutineScope()
     val groups = ScreenStore.statuses
     var composeText by remember { mutableStateOf(false) }
+    var refreshError by remember { mutableStateOf<String?>(null) }
     val haptics = rememberHaptics()
     val listBottomPadding = with(LocalDensity.current) {
         110.dp + WindowInsets.navigationBars.getBottom(this).toDp()
@@ -100,9 +101,17 @@ fun StatusScreen(nav: NavController, fabBottom: androidx.compose.ui.unit.Dp = 74
     fun refresh(force: Boolean = false) {
         scope.launch {
             try {
-                val data = withContext(Dispatchers.IO) { Api.get("/api/statuses", force) }
+                val data = withContext(Dispatchers.IO) {
+                    Api.get("/api/statuses", force, allowCachedFallback = false)
+                }
                 ScreenStore.setStatuses(data.arr("items").objects())
-            } catch (_: Exception) {
+                refreshError = null
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                refreshError =
+                    (e as? ApiException)?.message?.takeIf { it.isNotBlank() }
+                        ?: "Check your connection and tap to retry."
             }
         }
     }
@@ -229,6 +238,29 @@ fun StatusScreen(nav: NavController, fabBottom: androidx.compose.ui.unit.Dp = 74
                                 fontSize = 13.sp,
                                 color = Muted,
                                 maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+
+                refreshError?.let { message ->
+                    item(key = "status_refresh_error") {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Card)
+                                .clickable { refresh(force = true) }
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "Status could not refresh · $message · Tap to retry",
+                                color = Muted,
+                                fontSize = 13.sp,
+                                maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }

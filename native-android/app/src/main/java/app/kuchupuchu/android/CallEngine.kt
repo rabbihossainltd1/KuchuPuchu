@@ -612,10 +612,11 @@ class CallEngine(private val app: Application) {
                     while (isActive) {
                         // A throw out of tick() used to kill this coroutine, which
                         // meant no more call polling at all for the process.
-                        // Owner round 33 (item 13): a failed tick is retried by
-                        // the very next one — no toast for a single miss; a real
-                        // outage surfaces as "Reconnecting…" (netFailStreak).
-                        runCatching { tick() }
+                        // A normal missed tick keeps the existing fast retry;
+                        // explicit 429/503 Retry-After is the sole exception.
+                        // Do not turn a server backpressure response into a
+                        // 1.5s call-poll storm while the socket remains live.
+                        if (Api.cooldownRemainingMs() == 0L) runCatching { tick() }
                         // Once a second, ask the framework whether the call is
                         // still where the button says it is — and make it stop
                         // carrying the audio anywhere else. OEM stacks move
@@ -630,8 +631,10 @@ class CallEngine(private val app: Application) {
                         // socket — one lost ANSWER frame used to cost the caller
                         // a 5 s wait ("the caller connects 6–7 s later").
                         val mediaUp = active?.let { it.status == "ACTIVE" && !it.connecting } == true
+                        val cooldownDelay = Api.cooldownRemainingMs()
                         delay(
-                            when {
+                            if (cooldownDelay > 0L) cooldownDelay
+                            else when {
                                 // Signalling socket live: the timer is a
                                 // safety net, not the delivery path.
                                 // 5s, not 500ms: with live frames the net

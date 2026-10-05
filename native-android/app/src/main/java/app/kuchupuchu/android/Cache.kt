@@ -3,8 +3,6 @@ package app.kuchupuchu.android
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
-import android.net.NetworkCapabilities
-import android.net.NetworkRequest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -832,17 +830,25 @@ object Outbox {
             as? ConnectivityManager ?: return
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                // The radio just came back: whatever is queued has waited long
-                // enough, and a 5s outage must not turn into "message stuck until
-                // the user opens that chat".
+                // A changed default route can leave pooled keep-alive sockets
+                // bound to the dead network. Calls already evict these in their
+                // own network watcher; do the same for the message/status HTTP
+                // paths before retrying the durable outbox.
+                runCatching { Api.http.connectionPool.evictAll() }
                 kick(400, force = true)
+                // Refresh visible screens immediately after connectivity returns:
+                // StatusScreen and the inbox otherwise keep showing their stale
+                // cache until their independent polling timers fire.
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    ScreenStore.pokeInbox()
+                }
             }
         }
         runCatching {
-            val req = NetworkRequest.Builder()
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                .build()
-            mgr.registerNetworkCallback(req, cb)
+            // Track only the active route. A generic INTERNET request fires for
+            // every available transport (Wi-Fi and cellular) and can trigger
+            // duplicate flushes while Android is still selecting the default.
+            mgr.registerDefaultNetworkCallback(cb)
             netCb = cb
         }
     }

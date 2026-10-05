@@ -5,4 +5,11 @@
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowBackground">@color/kp_window_bg</item>
     </style>
+
+    <!-- WindowManager moves the floating nav as a single surface, avoiding
+         per-frame Compose -> WindowManager relayouts and keeping blur attached. -->
+    <style name="KpNavWindowAnimations">
+        <item name="android:windowEnterAnimation">@anim/kp_nav_enter</item>
+        <item name="android:windowExitAnimation">@anim/kp_nav_exit</item>
+    </style>
 </resources>
