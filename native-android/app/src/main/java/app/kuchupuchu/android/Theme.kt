@@ -45,6 +45,15 @@ val Cream: Color
     get() = if (KpThemeMode.darkBlue) Color(0xFF0D1524) else Color(0xFFF7F6F4) // app background
 val Card: Color
     get() = if (KpThemeMode.darkBlue) Color(0xFF16213A) else Color(0xFFFFFFFF) // cards, 16dp radius
+/**
+ * Shared frosted surface for modal sheets and popup cards. The small alpha
+ * lets the platform's cross-window blur read through without reducing text
+ * contrast; older Android versions retain the same tinted translucent fill.
+ */
+val GlassSheetSurface: Color
+    get() = Card.copy(alpha = if (KpThemeMode.darkBlue) 0.90f else 0.92f)
+val GlassSheetEdge: Color
+    get() = if (KpThemeMode.darkBlue) Color(0x66A0B9F0) else Line.copy(alpha = 0.82f)
 val Ink: Color
     get() = if (KpThemeMode.darkBlue) Color(0xFFE9EDF6) else Color(0xFF1C1917) // primary text
 val Muted: Color

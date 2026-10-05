@@ -7156,7 +7156,8 @@ internal fun ForwardDialog(onClose: () -> Unit, onSend: (List<String>) -> Unit, 
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .background(Card)
+                        .background(GlassSheetSurface)
+                        .border(0.5.dp, GlassSheetEdge)
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -8766,9 +8767,11 @@ private fun EmojiSheetDialog(onPick: (String) -> Unit) {
     )
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = { onPick("") },
-        containerColor = Card,
+        modifier = kpGlassSheetModifier(),
+        containerColor = GlassSheetSurface,
         sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
+        KpApplyModalWindowBlur()
         Column(
             Modifier
                 .fillMaxWidth()
@@ -11644,8 +11647,8 @@ private fun ChatSearchSheet(
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(24.dp))
-                .background(Card)
-                .border(1.dp, ActionBlue, RoundedCornerShape(24.dp))
+                .background(GlassSheetSurface)
+                .border(1.dp, ActionBlue.copy(alpha = 0.72f), RoundedCornerShape(24.dp))
                 .padding(horizontal = 16.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -11684,8 +11687,8 @@ private fun ChatSearchSheet(
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(18.dp))
-                .background(Card)
-                .border(1.dp, Line, RoundedCornerShape(18.dp))
+                .background(GlassSheetSurface)
+                .border(1.dp, GlassSheetEdge, RoundedCornerShape(18.dp))
                 .padding(horizontal = 14.dp, vertical = 6.dp),
         ) {
             hits.take(12).forEachIndexed { i, m ->

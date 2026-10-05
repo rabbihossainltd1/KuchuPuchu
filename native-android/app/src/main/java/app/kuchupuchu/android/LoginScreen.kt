@@ -1130,11 +1130,12 @@ fun CountryPickerSheet(
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        modifier = kpGlassSheetModifier(),
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        // Owner round 25: explicit theme surface — the M3 default painted a
-        // mismatched panel in dark-blue ("colour missmatch").
-        containerColor = Card,
+        // Keep the explicit theme palette, now with the shared glass tint.
+        containerColor = GlassSheetSurface,
     ) {
+        KpApplyModalWindowBlur()
         var query by remember { mutableStateOf("") }
         Column(
             Modifier

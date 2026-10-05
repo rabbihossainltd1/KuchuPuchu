@@ -58,9 +58,23 @@ check(
     chatList.includes("if (acc > navShowPx) navVisible = true"),
 );
 check(
-  "nav and chat FAB follow the reference show/hide offsets",
-  chatList.includes("if (navVisible) 74.dp else 2.dp") &&
-    chatList.includes("if (visible) 0.dp else 90.dp"),
+  "roomier nav capsule and hide offsets preserve the floating reference layout",
+  chatList.includes("val itemW = 56.dp") &&
+    chatList.includes("val itemH = 46.dp") &&
+    chatList.includes("val gap = 8.dp") &&
+    chatList.includes(".padding(6.dp)") &&
+    chatList.includes("if (navVisible) 86.dp else 2.dp") &&
+    chatList.includes("if (visible) 0.dp else 100.dp"),
+);
+check(
+  "unread badge can overhang its tab hit target without being clipped",
+  chatList.includes(".offset(x = 6.dp, y = (-8).dp)") &&
+    chatList.includes("Do not clip this hit target") &&
+    !chatList.includes(".size(width, height)\n            .clip(CircleShape)"),
+);
+check(
+  "floating nav glass uses a translucent tint and a soft hairline edge",
+  chatList.includes("copy(alpha = 0.68f)") && chatList.includes("copy(alpha = 0.38f)"),
 );
 check(
   "chat, status, and calls lists leave safe-area-aware space beneath the floating nav",

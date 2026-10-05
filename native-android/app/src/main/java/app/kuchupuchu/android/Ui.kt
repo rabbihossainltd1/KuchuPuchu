@@ -1,6 +1,7 @@
 package app.kuchupuchu.android
 
 import android.graphics.Bitmap
+import android.os.Build
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.animation.core.Animatable
@@ -54,6 +55,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -74,8 +76,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.ViewConfiguration
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.text.font.FontWeight
 import coil.compose.AsyncImage
 import coil.request.CachePolicy
@@ -85,6 +89,35 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.json.JSONObject
+
+/**
+ * Apply Android's native cross-window backdrop blur to modal windows. Compose
+ * has no localized backdrop-filter for a surface embedded in the activity;
+ * modal sheets and dialogs do have their own translucent window, so Android 12+
+ * can blur what is behind them. The shared alpha-tinted surface remains the
+ * graceful fallback on older devices or when the system disables GPU blur.
+ */
+@Composable
+internal fun KpApplyModalWindowBlur() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+    val view = LocalView.current
+    val window = remember(view) { (view.parent as? DialogWindowProvider)?.window }
+    val blurRadiusPx = with(LocalDensity.current) { 12.dp.roundToPx() }
+    DisposableEffect(window, blurRadiusPx) {
+        if (window != null) window.setBackgroundBlurRadius(blurRadiusPx)
+        onDispose {
+            if (window != null) window.setBackgroundBlurRadius(0)
+        }
+    }
+}
+
+/** A quiet hairline that carries the shared glass treatment around a sheet. */
+internal fun kpGlassSheetModifier(): Modifier =
+    Modifier.border(
+        0.5.dp,
+        GlassSheetEdge,
+        RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+    )
 
 /**
  * Shared image helpers. Avatars are data-URLs the worker stores inline, so
@@ -891,12 +924,14 @@ fun KpDeleteDialog(
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
     ) {
+        KpApplyModalWindowBlur()
         Column(
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
                 .clip(RoundedCornerShape(10.dp))
-                .background(Card)
+                .background(GlassSheetSurface)
+                .border(0.75.dp, GlassSheetEdge, RoundedCornerShape(10.dp))
                 .padding(start = 24.dp, end = 24.dp, top = 14.dp, bottom = 12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1082,9 +1117,11 @@ fun KpSheet(
 ) {
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = Card,
+        modifier = kpGlassSheetModifier(),
+        containerColor = GlassSheetSurface,
         sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
+        KpApplyModalWindowBlur()
         Column(
             Modifier
                 .fillMaxWidth()

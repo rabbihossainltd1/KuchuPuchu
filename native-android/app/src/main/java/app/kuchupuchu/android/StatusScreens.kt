@@ -2,6 +2,7 @@ package app.kuchupuchu.android
 
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -1346,9 +1347,11 @@ private fun StatusMenuSheet(
 ) {
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = Card,
+        modifier = kpGlassSheetModifier(),
+        containerColor = GlassSheetSurface,
         sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
+        KpApplyModalWindowBlur()
         Column(
             Modifier
                 .fillMaxWidth()
@@ -1408,6 +1411,7 @@ private fun ViewersSheet(
     )
     LaunchedEffect(Unit) { shown = true }
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        KpApplyModalWindowBlur()
         Box(
             Modifier
                 .fillMaxSize()
@@ -1420,7 +1424,8 @@ private fun ViewersSheet(
                     .fillMaxWidth()
                     .graphicsLayer { translationY = progress * 900f }
                     .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
-                    .background(Card)
+                    .background(GlassSheetSurface)
+                    .border(0.75.dp, GlassSheetEdge, RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
                     .clickable(onClick = {})  // don't close when touching the sheet
                     .navigationBarsPadding()
                     .padding(vertical = 10.dp),

@@ -395,7 +395,7 @@ fun ChatListScreen(nav: NavController) {
     }
     LaunchedEffect(tab) { navVisible = true }
     val fabBottom by animateDpAsState(
-        if (navVisible) 74.dp else 2.dp,
+        if (navVisible) 86.dp else 2.dp,
         tween(450, easing = FastOutSlowInEasing),
         label = "fabBottom",
     )
@@ -954,27 +954,29 @@ private fun FloatingBottomNav(
     modifier: Modifier = Modifier,
     onSelect: (Int) -> Unit,
 ) {
-    val itemW = 50.dp
-    val itemH = 40.dp
-    val gap = 4.dp
+    // Roomier tap targets and clearer separation bring the capsule closer to
+    // the reference without letting it crowd the screen's side margins.
+    val itemW = 56.dp
+    val itemH = 46.dp
+    val gap = 8.dp
     val density = LocalDensity.current
     val stepPx = with(density) { (itemW + gap).toPx() }
     val darkMode = KpThemeMode.darkBlue
     val idleTint = if (darkMode) Color(0xFFD3DEF5) else Muted
     val selectedTint = if (darkMode) Color.White else Ink
     val indicatorColor = if (darkMode) Color(0xB32B5BD7) else ActionBlue.copy(alpha = 0.16f)
-    // Compose does not expose CSS backdrop-filter on every supported Android
-    // version. This translucent, theme-aware surface is the native glass
-    // fallback; avoid blurring the entire scrolling screen offscreen.
-    val glassFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.58f) else Card.copy(alpha = 0.86f)
-    val glassEdge = if (darkMode) Color(0xFFA0B9F0).copy(alpha = 0.34f) else Line.copy(alpha = 0.92f)
+    // A localized live backdrop-filter is not available for an in-tree Compose
+    // surface; use a translucent tint and soft edge rather than rerendering
+    // the full scrolling chat beneath every frame.
+    val glassFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.68f) else Card.copy(alpha = 0.86f)
+    val glassEdge = if (darkMode) Color(0xFFA0B9F0).copy(alpha = 0.38f) else Line.copy(alpha = 0.92f)
     val indicatorX by animateFloatAsState(
         tab * stepPx,
         spring(dampingRatio = 0.6f, stiffness = 380f),
         label = "navIndicator",
     )
     val shift by animateDpAsState(
-        if (visible) 0.dp else 90.dp,
+        if (visible) 0.dp else 100.dp,
         tween(450, easing = FastOutSlowInEasing),
         label = "navShift",
     )
@@ -989,7 +991,7 @@ private fun FloatingBottomNav(
             .clip(CircleShape)
             .background(glassFill)
             .border(0.5.dp, glassEdge, CircleShape)
-            .padding(4.dp),
+            .padding(6.dp),
     ) {
         Box(
             Modifier
@@ -1009,7 +1011,7 @@ private fun FloatingBottomNav(
                 selectedTint = selectedTint,
                 onClick = { onSelect(0) },
             ) { tint ->
-                Icon(Icons.Filled.Chat, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+                Icon(Icons.Filled.Chat, contentDescription = null, tint = tint, modifier = Modifier.size(26.dp))
             }
             NavItem(
                 label = "Status",
@@ -1022,7 +1024,7 @@ private fun FloatingBottomNav(
                 selectedTint = selectedTint,
                 onClick = { onSelect(1) },
             ) { tint ->
-                StatusGlyphIcon(tint, 24.dp)
+                StatusGlyphIcon(tint, 26.dp)
             }
             NavItem(
                 label = "Calls",
@@ -1034,7 +1036,7 @@ private fun FloatingBottomNav(
                 selectedTint = selectedTint,
                 onClick = { onSelect(2) },
             ) { tint ->
-                Icon(Icons.Filled.Call, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+                Icon(Icons.Filled.Call, contentDescription = null, tint = tint, modifier = Modifier.size(26.dp))
             }
         }
     }
@@ -1091,7 +1093,8 @@ private fun NavItem(
     Box(
         Modifier
             .size(width, height)
-            .clip(CircleShape)
+            // Do not clip this hit target: the unread badge intentionally
+            // overhangs the icon's corner and must remain completely visible.
             .semantics(mergeDescendants = true) {
                 contentDescription = accessibilityLabel
                 role = Role.Tab
@@ -1105,7 +1108,7 @@ private fun NavItem(
             ) { onClick() },
         contentAlignment = Alignment.Center,
     ) {
-        Box(Modifier.size(24.dp)) {
+        Box(Modifier.size(26.dp)) {
             Box(
                 Modifier
                     .align(Alignment.Center)
@@ -1119,8 +1122,8 @@ private fun NavItem(
                 Box(
                     Modifier
                         .align(Alignment.TopEnd)
-                        .offset(x = 11.dp, y = (-7).dp)
-                        .defaultMinSize(minWidth = 17.dp, minHeight = 17.dp)
+                        .offset(x = 6.dp, y = (-8).dp)
+                        .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
                         .clip(CircleShape)
                         .background(Color(0xFFE24B4A))
                         .border(1.5.dp, if (KpThemeMode.darkBlue) Color(0xFF14203D) else Card, CircleShape)

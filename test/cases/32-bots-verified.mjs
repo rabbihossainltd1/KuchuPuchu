@@ -1976,15 +1976,15 @@ const convBetween = (db, a, b) =>
       statusKt.includes("p?.setPaused(paused || bg)"),
   );
   check(
-    "r28-1: status ⋮ menu is a theme bottom sheet (no M3 DropdownMenu) + confirm dialog on the Card surface + clock pauses under the sheet",
+    "r28-1: status ⋮ menu is a theme bottom sheet (no M3 DropdownMenu) + glass confirm sheet + clock pauses under the sheet",
     !statusKt.includes("DropdownMenu(") &&
       !statusKt.includes("import androidx.compose.material3.DropdownMenu") &&
       statusKt.includes("private fun StatusMenuSheet(") &&
       statusKt.includes(
-        "containerColor = Card,\n        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)",
+        "modifier = kpGlassSheetModifier(),\n        containerColor = GlassSheetSurface,\n        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)",
       ) &&
       statusKt.includes("paused = showViewers || menuOpen || replyFocused || holding,") &&
-      // r31-7: the confirm is a bottom sheet too (KpConfirmSheet on the Card surface).
+      // r31-7: the confirm is a bottom sheet too (KpConfirmSheet on the shared glass surface).
       /KpConfirmSheet\(\n\s+title = "Delete status\?",/.test(statusKt),
   );
   check(
@@ -2847,7 +2847,7 @@ const convBetween = (db, a, b) =>
         ui.includes("fun KpSheetRow(") &&
         ui.includes("fun KpConfirmSheet(") &&
         ui.includes(
-          "containerColor = Card,\n        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)",
+          "modifier = kpGlassSheetModifier(),\n        containerColor = GlassSheetSurface,\n        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)",
         ),
       JSON.stringify(withAlert),
     );

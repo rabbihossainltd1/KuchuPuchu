@@ -1,5 +1,6 @@
 package app.kuchupuchu.android
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -430,6 +431,7 @@ fun KpUpdateGate() {
             usePlatformDefaultWidth = false,
         ),
     ) {
+        KpApplyModalWindowBlur()
         // Centered card — theme-aware, works on any route because this gate is at the root of KpApp.
         androidx.compose.foundation.layout.Box(
             Modifier.fillMaxWidth().padding(horizontal = 22.dp),
@@ -437,9 +439,9 @@ fun KpUpdateGate() {
         ) {
             androidx.compose.material3.Card(
                 shape = RoundedCornerShape(20.dp),
-                colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Card),
+                colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = GlassSheetSurface),
                 elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 8.dp),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().border(0.75.dp, GlassSheetEdge, RoundedCornerShape(20.dp)),
             ) {
                 Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
                     // v166 (owner: "in app update downloading er somoy ei

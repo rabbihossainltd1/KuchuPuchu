@@ -1520,7 +1520,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     'r82-3 (owner: "nav bar a unread number ta ekdom baje vabe show hocche ... massage button er right corner a rekhe daw ar double number hole double line jeno na hoi"): the count no longer sits inline after the tab label (pill crush = the ugly wrap) - it is an overlay pinned to the Chats icon\'s top-right corner with zero width pressure, and maxLines=1 + softWrap=false hard-lock one line so a two-digit count can never stack',
     list4.includes(".align(Alignment.TopEnd)") &&
-      list4.includes("offset(x = 11.dp, y = (-7).dp)") &&
+      list4.includes("offset(x = 6.dp, y = (-8).dp)") &&
       list4.includes("lineHeight = 11.sp,"),
   );
   check(
