@@ -111,8 +111,9 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.invisibleToUser
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
@@ -984,7 +985,7 @@ private fun FloatingBottomNav(
             .padding(bottom = 16.dp)
             .offset(y = shift)
             .alpha(fade)
-            .semantics { if (!visible) invisibleToUser() }
+            .then(if (visible) Modifier else Modifier.clearAndSetSemantics {})
             .clip(CircleShape)
             .background(glassFill)
             .border(0.5.dp, glassEdge, CircleShape)
@@ -1095,10 +1096,10 @@ private fun NavItem(
                 contentDescription = accessibilityLabel
                 role = Role.Tab
                 this.selected = selected
-                if (!enabled) invisibleToUser()
             }
             .clickable(
                 enabled = enabled,
+                role = Role.Tab,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
             ) { onClick() },
