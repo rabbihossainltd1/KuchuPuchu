@@ -164,12 +164,20 @@ fun KpApp() {
         }
     }
 
+    val modalActive = KpModalBlurState.isActive
     val modalBlurRadius by animateDpAsState(
-        targetValue = if (KpModalBlurState.isActive) 30.dp else 0.dp,
+        targetValue = if (modalActive) 30.dp else 0.dp,
         animationSpec = tween(220),
         label = "modalBackdropBlur",
     )
-    Surface(Modifier.fillMaxSize().blur(modalBlurRadius), color = Cream) {
+    LaunchedEffect(modalActive) {
+        if (!modalActive) {
+            kotlinx.coroutines.delay(260)
+            if (!KpModalBlurState.isActive) KpModalFocusState.clear()
+        }
+    }
+    Box(Modifier.fillMaxSize()) {
+        Surface(Modifier.fillMaxSize().blur(modalBlurRadius), color = Cream) {
         if (!authed) {
             LoginScreen { Store.authed.value = true }
         } else {
@@ -216,7 +224,13 @@ fun KpApp() {
                 popEnterTransition = { fadeIn(tween(220)) },
                 popExitTransition = { fadeOut(tween(200)) + slideOutHorizontally(tween(260)) { it / 6 } },
             ) {
-                composable("main") { ChatListScreen(nav) }
+                composable(
+                    "main",
+                    // The cold-start home screen rises vertically; it must not
+                    // inherit the routes' horizontal entrance from the left.
+                    enterTransition = { slideInVertically(tween(300)) { it } },
+                    popEnterTransition = { fadeIn(tween(220)) },
+                ) { ChatListScreen(nav) }
                 composable("newchat") { NewChatScreen(nav) }
                 // Owner round 32 (item 12): `with` = comma-separated user ids
                 // pre-picked as members ("Create group with …" from the list).
@@ -356,6 +370,10 @@ fun KpApp() {
             KpUpdateGate()
         }
     }
+    if (modalBlurRadius > 0.dp) {
+        KpModalFocusOverlay((modalBlurRadius / 30.dp).coerceIn(0f, 1f))
+    }
+}
 }
 
 /**

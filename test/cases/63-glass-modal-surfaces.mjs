@@ -32,20 +32,35 @@ check(
     kpApp.includes("30.dp"),
 );
 check(
-  "shared KpSheet uses the translucent glass surface, visible border, and modal blur registration",
-  ui.includes("modifier = kpGlassSheetModifier()") &&
-    ui.includes("containerColor = GlassSheetSurface") &&
-    ui.includes("KpRegisterModalBlur()") &&
-    ui.includes("1.dp,\n        GlassSheetEdge"),
+  "the pressed chat/message crop stays sharp above the app blur and is raised without a drop shadow",
+  ui.includes("internal object KpModalFocusState") &&
+    ui.includes("DeleteAnim.capture(") &&
+    ui.includes("forceFresh = true") &&
+    ui.includes("scaleX = 1f + 0.035f * t") &&
+    ui.includes("translationY = -with(density) { 8.dp.toPx() } * t") &&
+    kpApp.indexOf("Surface(Modifier.fillMaxSize().blur(modalBlurRadius)") <
+      kpApp.indexOf("KpModalFocusOverlay(") &&
+    kpApp.includes("KpModalFocusState.clear()") &&
+    !ui.includes(".shadow("),
 );
 check(
-  "country picker, status menu, and emoji picker use the same glass treatment",
-  login.includes("modifier = kpGlassSheetModifier()") &&
+  "shared KpSheet uses translucent glass without drawing an outline around the full dialog window",
+  ui.includes("containerColor = GlassSheetSurface") &&
+    ui.includes("KpRegisterModalBlur()") &&
+    !ui.includes("kpGlassSheetModifier") &&
+    !ui.includes("modifier = kpGlassSheetModifier()"),
+);
+check(
+  "country picker, status menu, and emoji picker keep the glass fill and modal blur without a window-sized border",
+  login.includes("containerColor = GlassSheetSurface") &&
     login.includes("KpRegisterModalBlur()") &&
-    status.includes("modifier = kpGlassSheetModifier()") &&
+    status.includes("containerColor = GlassSheetSurface") &&
     status.includes("KpRegisterModalBlur()") &&
-    chat.includes("modifier = kpGlassSheetModifier()") &&
-    chat.includes("KpRegisterModalBlur()"),
+    chat.includes("containerColor = GlassSheetSurface") &&
+    chat.includes("KpRegisterModalBlur()") &&
+    !login.includes("kpGlassSheetModifier") &&
+    !status.includes("kpGlassSheetModifier") &&
+    !chat.includes("kpGlassSheetModifier"),
 );
 check(
   "sheets keep a light dismissal scrim so the strongly blurred backdrop remains visible",
@@ -74,16 +89,16 @@ check(
     chat.includes(".border(0.5.dp, GlassSheetEdge)"),
 );
 check(
-  "home nav is a wider four-button capsule with native backdrop blur that vanishes beneath modal sheets",
-  chatList.includes("val itemW = 56.dp") &&
-    chatList.includes("val itemH = 44.dp") &&
-    chatList.includes('label = "Profile"') &&
-    chatList.includes("Icons.Filled.Person") &&
+  "home nav native window is removed while any sheet is open, preventing the extra blur box",
+  chatList.includes("val modalOpen = KpModalBlurState.isActive") &&
+    chatList.includes("if (!modalOpen) {") &&
+    chatList.includes("val windowVisible = visible") &&
     chatList.includes(
       "dialogWindow.setBackgroundBlurRadius(if (windowVisible) blurRadiusPx else 0)",
     ) &&
-    chatList.includes("val windowVisible = visible && !modalOpen") &&
-    chatList.includes("alpha = if (modalOpen) 0f else 1f"),
+    chatList.includes(
+      "if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dialogWindow?.setBackgroundBlurRadius(0)",
+    ),
 );
 
 for (const line of lines) console.log(line);

@@ -105,6 +105,10 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -1001,7 +1005,13 @@ private fun FloatingBottomNav(
     val glassFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.54f) else Card.copy(alpha = 0.76f)
     val glassEdge = if (darkMode) Color(0xE0A0B9F0) else Line.copy(alpha = 0.96f)
     val modalOpen = KpModalBlurState.isActive
-    val windowVisible = visible && !modalOpen
+    val windowVisible = visible
+    val enterOffset = remember { Animatable(1f) }
+    var hasEntered by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        enterOffset.animateTo(0f, tween(380, easing = FastOutSlowInEasing))
+        hasEntered = true
+    }
     val hideProgress by animateFloatAsState(
         if (visible) 0f else 1f,
         tween(200, easing = FastOutSlowInEasing),
@@ -1016,140 +1026,142 @@ private fun FloatingBottomNav(
         }
     }
 
-    Dialog(
-        onDismissRequest = {},
-        properties = DialogProperties(
-            dismissOnBackPress = false,
-            dismissOnClickOutside = false,
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false,
-        ),
-    ) {
-        val dialogView = LocalView.current
-        val dialogWindow = (dialogView.parent as? DialogWindowProvider)?.window
-        DisposableEffect(dialogWindow, capsuleWidthPx, capsuleHeightPx, bottomOffsetPx, pillWindowBackground) {
-            if (dialogWindow != null) {
-                dialogWindow.setBackgroundDrawable(pillWindowBackground)
-                dialogWindow.decorView.elevation = 0f
-                dialogWindow.decorView.translationZ = 0f
-                dialogWindow.setDimAmount(0f)
-                val params = dialogWindow.attributes
-                params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                params.width = capsuleWidthPx
-                params.height = capsuleHeightPx
-                params.x = 0
-                params.y = bottomOffsetPx
-                params.flags =
-                    (params.flags or
-                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL) and
-                        WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
-                dialogWindow.attributes = params
-            }
-            onDispose {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dialogWindow?.setBackgroundBlurRadius(0)
-            }
-        }
-        DisposableEffect(dialogWindow, windowVisible, blurRadiusPx) {
-            if (dialogWindow != null) {
-                val params = dialogWindow.attributes
-                var flags = params.flags or
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                flags = flags and WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
-                flags = if (windowVisible) flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-                else flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                if (params.flags != flags) {
-                    params.flags = flags
+    if (!modalOpen) {
+        Dialog(
+            onDismissRequest = {},
+            properties = DialogProperties(
+                dismissOnBackPress = false,
+                dismissOnClickOutside = false,
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false,
+            ),
+        ) {
+            val dialogView = LocalView.current
+            val dialogWindow = (dialogView.parent as? DialogWindowProvider)?.window
+            DisposableEffect(dialogWindow, capsuleWidthPx, capsuleHeightPx, bottomOffsetPx, pillWindowBackground) {
+                if (dialogWindow != null) {
+                    dialogWindow.setWindowAnimations(0)
+                    dialogWindow.setBackgroundDrawable(pillWindowBackground)
+                    dialogWindow.decorView.elevation = 0f
+                    dialogWindow.decorView.translationZ = 0f
+                    dialogWindow.setDimAmount(0f)
+                    val params = dialogWindow.attributes
+                    params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                    params.width = capsuleWidthPx
+                    params.height = capsuleHeightPx
+                    params.windowAnimations = 0
+                    params.x = 0
+                    params.y = bottomOffsetPx
+                    params.flags =
+                        (params.flags or
+                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL) and
+                            WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
                     dialogWindow.attributes = params
                 }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    dialogWindow.setBackgroundBlurRadius(if (windowVisible) blurRadiusPx else 0)
+                onDispose {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dialogWindow?.setBackgroundBlurRadius(0)
                 }
             }
-            onDispose {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dialogWindow?.setBackgroundBlurRadius(0)
-            }
-        }
-        Box(
-            Modifier
-                .size(capsuleWidth, capsuleHeight)
-                .graphicsLayer {
-                    translationY = if (modalOpen) hideDistancePx else hideDistancePx * hideProgress
-                    alpha = if (modalOpen) 0f else 1f
+            DisposableEffect(dialogWindow, windowVisible, blurRadiusPx) {
+                if (dialogWindow != null) {
+                    val params = dialogWindow.attributes
+                    var flags = params.flags or
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                    flags = flags and WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
+                    flags = if (windowVisible) flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+                    else flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                    if (params.flags != flags) {
+                        params.flags = flags
+                        dialogWindow.attributes = params
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        dialogWindow.setBackgroundBlurRadius(if (windowVisible) blurRadiusPx else 0)
+                    }
                 }
-                .then(if (windowVisible) Modifier else Modifier.clearAndSetSemantics {})
-                .clip(CircleShape)
-                .background(glassFill)
-                .border(1.5.dp, glassEdge, CircleShape),
-        ) {
-            Row(
-                Modifier.fillMaxSize().padding(capsulePadding),
-                horizontalArrangement = Arrangement.spacedBy(gap),
+                onDispose {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dialogWindow?.setBackgroundBlurRadius(0)
+                }
+            }
+            Box(
+                Modifier
+                    .size(capsuleWidth, capsuleHeight)
+                    .graphicsLayer {
+                        translationY = hideDistancePx * (if (hasEntered) hideProgress else enterOffset.value)
+                    }
+                    .then(if (windowVisible) Modifier else Modifier.clearAndSetSemantics {})
+                    .clip(CircleShape)
+                    .background(glassFill)
+                    .border(1.5.dp, glassEdge, CircleShape),
             ) {
-                NavItem(
-                    label = "Chats",
-                    selected = tab == 0,
-                    width = itemW,
-                    height = itemH,
-                    badge = unreadChats,
-                    enabled = windowVisible,
-                    idleTint = idleTint,
-                    selectedTint = selectedTint,
-                    selectedBackground = indicatorColor,
-                    selectedBorder = indicatorEdge,
-                    onClick = { onSelect(0) },
-                ) { tint ->
-                    Icon(Icons.Filled.Chat, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
-                }
-                NavItem(
-                    label = "Status",
-                    selected = tab == 1,
-                    width = itemW,
-                    height = itemH,
-                    newStatus = unseenStatus,
-                    enabled = windowVisible,
-                    idleTint = idleTint,
-                    selectedTint = selectedTint,
-                    selectedBackground = indicatorColor,
-                    selectedBorder = indicatorEdge,
-                    onClick = { onSelect(1) },
-                ) { tint ->
-                    StatusGlyphIcon(tint, 24.dp)
-                }
-                NavItem(
-                    label = "Calls",
-                    selected = tab == 2,
-                    width = itemW,
-                    height = itemH,
-                    enabled = windowVisible,
-                    idleTint = idleTint,
-                    selectedTint = selectedTint,
-                    selectedBackground = indicatorColor,
-                    selectedBorder = indicatorEdge,
-                    onClick = { onSelect(2) },
-                ) { tint ->
-                    Icon(Icons.Filled.Call, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
-                }
-                NavItem(
-                    label = "Profile",
-                    selected = tab == 3,
-                    width = itemW,
-                    height = itemH,
-                    enabled = windowVisible,
-                    idleTint = idleTint,
-                    selectedTint = selectedTint,
-                    selectedBackground = indicatorColor,
-                    selectedBorder = indicatorEdge,
-                    onClick = { onSelect(3) },
-                ) { tint ->
-                    Icon(Icons.Filled.Person, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+                Row(
+                    Modifier.fillMaxSize().padding(capsulePadding),
+                    horizontalArrangement = Arrangement.spacedBy(gap),
+                ) {
+                    NavItem(
+                        label = "Chats",
+                        selected = tab == 0,
+                        width = itemW,
+                        height = itemH,
+                        badge = unreadChats,
+                        enabled = windowVisible,
+                        idleTint = idleTint,
+                        selectedTint = selectedTint,
+                        selectedBackground = indicatorColor,
+                        selectedBorder = indicatorEdge,
+                        onClick = { onSelect(0) },
+                    ) { tint ->
+                        Icon(Icons.Filled.Chat, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+                    }
+                    NavItem(
+                        label = "Status",
+                        selected = tab == 1,
+                        width = itemW,
+                        height = itemH,
+                        newStatus = unseenStatus,
+                        enabled = windowVisible,
+                        idleTint = idleTint,
+                        selectedTint = selectedTint,
+                        selectedBackground = indicatorColor,
+                        selectedBorder = indicatorEdge,
+                        onClick = { onSelect(1) },
+                    ) { tint ->
+                        StatusGlyphIcon(tint, 24.dp)
+                    }
+                    NavItem(
+                        label = "Calls",
+                        selected = tab == 2,
+                        width = itemW,
+                        height = itemH,
+                        enabled = windowVisible,
+                        idleTint = idleTint,
+                        selectedTint = selectedTint,
+                        selectedBackground = indicatorColor,
+                        selectedBorder = indicatorEdge,
+                        onClick = { onSelect(2) },
+                    ) { tint ->
+                        Icon(Icons.Filled.Call, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+                    }
+                    NavItem(
+                        label = "Profile",
+                        selected = tab == 3,
+                        width = itemW,
+                        height = itemH,
+                        enabled = windowVisible,
+                        idleTint = idleTint,
+                        selectedTint = selectedTint,
+                        selectedBackground = indicatorColor,
+                        selectedBorder = indicatorEdge,
+                        onClick = { onSelect(3) },
+                    ) { tint ->
+                        Icon(Icons.Filled.Person, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+                    }
                 }
             }
         }
     }
 }
-
 @Composable
 private fun NavItem(
     label: String,
@@ -1203,8 +1215,6 @@ private fun NavItem(
     Box(
         Modifier
             .size(width, height)
-            .background(if (selected) selectedBackground else Color.Transparent, CircleShape)
-            .border(if (selected) 1.25.dp else 0.dp, if (selected) selectedBorder else Color.Transparent, CircleShape)
             // Do not clip this hit target: the unread badge intentionally
             // overhangs the icon's corner and must remain completely visible.
             .semantics(mergeDescendants = true) {
@@ -1220,7 +1230,17 @@ private fun NavItem(
             ) { onClick() },
         contentAlignment = Alignment.Center,
     ) {
-        Box(Modifier.size(22.dp)) {
+        if (selected) {
+            Box(
+                Modifier
+                    .size(40.dp)
+                    .align(Alignment.Center)
+                    .clip(CircleShape)
+                    .background(selectedBackground)
+                    .border(1.25.dp, selectedBorder, CircleShape),
+            )
+        }
+        Box(Modifier.size(24.dp)) {
             Box(
                 Modifier
                     .align(Alignment.Center)
@@ -1726,6 +1746,9 @@ internal fun friendlyPreview(raw: String): String {
 private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = false, onCollapse: () -> Unit = {}) {
     val id = conv.optString("id")
     val haptics = rememberHaptics()
+    val scope = rememberCoroutineScope()
+    var spotlightWindowBounds by remember(id) { mutableStateOf<Rect?>(null) }
+    var spotlightRootBounds by remember(id) { mutableStateOf<Rect?>(null) }
     // Owner round 32 (item 12): long-press = tick this row + open the sheet;
     // in select mode a tap toggles the tick instead of opening the chat.
     val selecting = ListSelect.active
@@ -1777,17 +1800,25 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
     if (peek) ProfilePeekSheet(conv, nav) { peek = false }
     val longPress = {
         haptics.heavy()
-        // r103-5 (owner: "jekono chat item a tap hold korlei select Hobe na
-        // ... user jodi select a click kore tobei click Hobe"): long-press
-        // only OPENS the sheet now - it no longer activates select mode or
-        // ticks the row. Selection happens exclusively through the sheet's
-        // Select action.
-        ListSelect.sheetFor = conv
+        // Keep this chat card sharp above the modal blur, then raise its action sheet.
+        val windowBounds = spotlightWindowBounds
+        val rootBounds = spotlightRootBounds
+        scope.launch {
+            if (windowBounds != null && rootBounds != null) {
+                KpModalFocusState.capture(windowBounds, rootBounds)
+            }
+            // r103-5: long-press opens the sheet; Select remains an explicit action.
+            ListSelect.sheetFor = conv
+        }
     }
 
     Row(
         Modifier
             .fillMaxSize()
+            .onGloballyPositioned { coordinates ->
+                spotlightWindowBounds = coordinates.boundsInWindow()
+                spotlightRootBounds = coordinates.boundsInRoot()
+            }
             .background(if (ticked) ActionBlue.copy(alpha = 0.10f) else Color.Transparent)
             .combinedClickable(
                 onClick = {

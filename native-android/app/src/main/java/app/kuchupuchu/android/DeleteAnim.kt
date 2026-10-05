@@ -48,18 +48,22 @@ import org.json.JSONObject
    columns bulge upward just ahead of the band; then the row collapses.
    Ports the owner's demo pixel-for-pixel (same constants, same order). */
 
-/** Geometry snapshots: bubble + row rects in window pixels, keyed by rowKey. */
+/** Geometry snapshots: bubble rects in window/root pixels and row rects in window pixels. */
 internal object DeleteGeoms {
     val bubbles = mutableMapOf<String, Rect>()
+    val bubblesInRoot = mutableMapOf<String, Rect>()
     val rows = mutableMapOf<String, Rect>()
 
-    fun put(m: JSONObject, rect: Rect) {
-        bubbles[m.optString("clientId").ifBlank { m.optString("id") }] = rect
+    fun put(m: JSONObject, rect: Rect, rootRect: Rect = rect) {
+        val key = m.optString("clientId").ifBlank { m.optString("id") }
+        bubbles[key] = rect
+        bubblesInRoot[key] = rootRect
     }
 
     /** Consume-once: later layouts (collapse) must not move a running show. */
     fun snapshot(rowKey: String): DeleteFlip? {
         val row = rows.remove(rowKey) ?: return null
+        bubblesInRoot.remove(rowKey)
         return DeleteFlip(row, bubbles.remove(rowKey))
     }
 }
@@ -109,13 +113,17 @@ internal object DeleteAnim {
      *  one into drawToBitmap's software canvas throws, so every solo photo
      *  delete silently fell back to the shrink. Below 26 hardware bitmaps
      *  do not exist, so the old path stays. */
-    suspend fun capture(bubble: Rect): Bitmap? {
+    suspend fun capture(
+        bubble: Rect,
+        maxWidthPx: Int = MAX_W,
+        forceFresh: Boolean = false,
+    ): Bitmap? {
         return try {
             if (bubble.width < 4f || bubble.height < 4f) return null
             val decor = MainActivity.current?.window?.decorView ?: return null
             val now = android.os.SystemClock.uptimeMillis()
             var full = sharedFull
-            if (full == null || full.isRecycled || now - sharedAt > 300) {
+            if (forceFresh || full == null || full.isRecycled || now - sharedAt > 300) {
                 full =
                     if (android.os.Build.VERSION.SDK_INT >= 26) {
                         pixelCopy() ?: return null
@@ -130,9 +138,10 @@ internal object DeleteAnim {
             val r = bubble.right.roundToInt().coerceIn(l + 1, full.width)
             val b = bubble.bottom.roundToInt().coerceIn(t + 1, full.height)
             val crop = Bitmap.createBitmap(full, l, t, r - l, b - t)
-            if (crop.width > MAX_W) {
-                val s = MAX_W.toFloat() / crop.width
-                Bitmap.createScaledBitmap(crop, MAX_W, (crop.height * s).roundToInt().coerceAtLeast(1), true)
+            val targetWidth = maxWidthPx.coerceAtLeast(1)
+            if (crop.width > targetWidth) {
+                val s = targetWidth.toFloat() / crop.width
+                Bitmap.createScaledBitmap(crop, targetWidth, (crop.height * s).roundToInt().coerceAtLeast(1), true)
             } else {
                 crop.copy(Bitmap.Config.ARGB_8888, false) ?: crop
             }

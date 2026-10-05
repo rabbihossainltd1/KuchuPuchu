@@ -1980,9 +1980,8 @@ const convBetween = (db, a, b) =>
     !statusKt.includes("DropdownMenu(") &&
       !statusKt.includes("import androidx.compose.material3.DropdownMenu") &&
       statusKt.includes("private fun StatusMenuSheet(") &&
-      statusKt.includes(
-        "modifier = kpGlassSheetModifier(),\n        containerColor = GlassSheetSurface,\n        scrimColor = Color.Black.copy(alpha = 0.10f),\n        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)",
-      ) &&
+      statusKt.includes("containerColor = GlassSheetSurface") &&
+      !statusKt.includes("kpGlassSheetModifier") &&
       statusKt.includes("paused = showViewers || menuOpen || replyFocused || holding,") &&
       // r31-7: the confirm is a bottom sheet too (KpConfirmSheet on the shared glass surface).
       /KpConfirmSheet\(\n\s+title = "Delete status\?",/.test(statusKt),
@@ -2849,9 +2848,8 @@ const convBetween = (db, a, b) =>
         ui.includes("fun KpSheet(") &&
         ui.includes("fun KpSheetRow(") &&
         ui.includes("fun KpConfirmSheet(") &&
-        ui.includes(
-          "modifier = kpGlassSheetModifier(),\n        containerColor = GlassSheetSurface,\n        scrimColor = Color.Black.copy(alpha = 0.10f),\n        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)",
-        ),
+        ui.includes("containerColor = GlassSheetSurface") &&
+        !ui.includes("kpGlassSheetModifier"),
       JSON.stringify(withAlert),
     );
     const update = kt("KpUpdate.kt");
@@ -6546,7 +6544,7 @@ const convBetween = (db, a, b) =>
         onceRow.includes("coil.compose.AsyncImage(") &&
         onceRow.includes("ViewOnceOneIcon(56.dp)") &&
         onceRow.includes("ImageRatios.put(photoUrl,") &&
-        onceRow.includes("DeleteGeoms.put(m, it.boundsInWindow())") &&
+        onceRow.includes("DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot())") &&
         !onceRow.includes("viewOnceSpent") &&
         !chat.includes('"Opened"') &&
         chat.includes("internal fun isViewOnce(m: JSONObject): Boolean =") &&
@@ -9655,7 +9653,8 @@ const convBetween = (db, a, b) =>
         ui.includes("t.snapTo(1f)") &&
         // Owner round 44 (item 6): frames carry their own capture again
         // (r71-20: 6 — text + video + photo + album + view-once + once-text).
-        (chat.match(/DeleteGeoms\.put\(m, it\.boundsInWindow\(\)\)/g) || []).length === 6 &&
+        (chat.match(/DeleteGeoms\.put\(m, it\.boundsInWindow\(\), it\.boundsInRoot\(\)\)/g) || [])
+          .length === 6 &&
         kt("DeleteAnim.kt").includes("const val SWEEP_MS = 1200") &&
         kt("DeleteAnim.kt").includes("const val GRACE_MS = 3200L") &&
         kt("DeleteAnim.kt").includes("const val COLLAPSE_MS = 220") &&
@@ -9669,7 +9668,8 @@ const convBetween = (db, a, b) =>
     check(
       "r35-1: deletes play to the end on every content — PixelCopy capture on API 26+ (drawToBitmap throws on coil hardware photos, which silently shrank every solo photo delete), grace sized past the worst-case show (PRE + capture + SAFETY + COLLAPSE) — and surviving rows glide into the gap (animateItem on thread rows)",
       kt("DeleteAnim.kt").includes("const val GRACE_MS = 3200L") &&
-        kt("DeleteAnim.kt").includes("suspend fun capture(bubble: Rect)") &&
+        kt("DeleteAnim.kt").includes("suspend fun capture(") &&
+        kt("DeleteAnim.kt").includes("maxWidthPx: Int = MAX_W") &&
         kt("DeleteAnim.kt").includes("PixelCopy.request(") &&
         kt("DeleteAnim.kt").includes("drawToBitmap()") &&
         // r76-27 (audit #15): rows still glide into the gap, and a leaving

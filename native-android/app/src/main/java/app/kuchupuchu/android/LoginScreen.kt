@@ -1130,7 +1130,6 @@ fun CountryPickerSheet(
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        modifier = kpGlassSheetModifier(),
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         // Keep the explicit theme palette, now with the shared glass tint.
         containerColor = GlassSheetSurface,

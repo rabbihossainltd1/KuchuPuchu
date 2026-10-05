@@ -138,6 +138,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -4313,8 +4314,16 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 // top). In multi-select mode a long-press just
                                 // toggles, like a tap.
                                 if (msg.optString("kind") != "DELETED" && selected.isEmpty()) {
-                                    actionFor = msg
-                                    reactionFor = msg
+                                    val focusKey = msg.optString("clientId").ifBlank { msg.optString("id") }
+                                    val focusBounds = DeleteGeoms.bubbles[focusKey]
+                                    val focusRootBounds = DeleteGeoms.bubblesInRoot[focusKey]
+                                    scope.launch {
+                                        if (focusBounds != null) {
+                                            KpModalFocusState.capture(focusBounds, focusRootBounds ?: focusBounds)
+                                        }
+                                        actionFor = msg
+                                        reactionFor = msg
+                                    }
                                 }
                             },
                             quoteFor = { rid -> (msgs + pending).firstOrNull { it.optString("id") == rid } },
@@ -8375,7 +8384,7 @@ private fun MessageRow(
             }
             Box(
                 Modifier
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
+                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot()) }
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
                     // Owner round 13b: the hand-rolled awaitEachGesture fought
                     // the list's vertical scrolling (jank + crash on device).
@@ -8767,7 +8776,6 @@ private fun EmojiSheetDialog(onPick: (String) -> Unit) {
     )
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = { onPick("") },
-        modifier = kpGlassSheetModifier(),
         containerColor = GlassSheetSurface,
         scrimColor = Color.Black.copy(alpha = 0.10f),
         sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -9151,7 +9159,7 @@ private fun VideoMessageRow(
             Modifier
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
                 .clip(RoundedCornerShape(12.dp))
-                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
+                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot()) }
                 .onGloballyPositioned { c ->
                     // r81-3: this tile is the player's hero seat (same screen-
                     // pixel formula as the photo tile), and it honours the
@@ -9447,7 +9455,7 @@ private fun OnceTextRow(
             Box(
                 Modifier
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
+                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot()) }
                     .widthIn(max = bubbleMax)
                     .wrapContentWidth()
                     .requiredWidthIn(min = if (mine) 70.dp else 52.dp)
@@ -9766,7 +9774,7 @@ private fun ViewOnceRow(
             Box(
                 Modifier
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
+                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot()) }
                     .onGloballyPositioned { c ->
                         if (!voice) {
                             val b = c.boundsInWindow()
@@ -10137,7 +10145,7 @@ private fun ImageMessageRow(
         Box(
             Modifier
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
+                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot()) }
                 .widthIn(max = 120.dp) // Owner round 25 / 32 item 29 / 33 item 18: smaller inline preview
                 // r71-16: photos keep the round-8 frame with NO drop shadow.
                 // thin border.
@@ -10506,7 +10514,7 @@ private fun AlbumMessageRow(
             Box(
                 Modifier
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
+                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot()) }
                     .width(albumW)
                     .clip(shape)
                     .border(

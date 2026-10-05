@@ -18,6 +18,10 @@ const profile = readFileSync(
   resolve("native-android/app/src/main/java/app/kuchupuchu/android/ProfileScreen.kt"),
   "utf8",
 );
+const kpApp = readFileSync(
+  resolve("native-android/app/src/main/java/app/kuchupuchu/android/KpApp.kt"),
+  "utf8",
+);
 const fabSectionStart = statuses.indexOf("/* The reference keeps the text-status");
 const fabSectionEnd = statuses.indexOf("if (composeText)", fabSectionStart);
 const statusFabStack = statuses.slice(fabSectionStart, fabSectionEnd);
@@ -87,23 +91,44 @@ check(
     !chatList.includes(".size(width, height)\n            .clip(CircleShape)"),
 );
 check(
-  "every selected destination gets the same aligned fill and outline; the capsule keeps its own visible glass edge",
-  chatList.includes(".border(if (selected) 1.25.dp else 0.dp") &&
-    chatList.includes(".border(1.5.dp, glassEdge, CircleShape)") &&
+  "all four indicators are centered behind a common 24dp icon slot, including the custom Status glyph",
+  chatList.includes("contentAlignment = Alignment.Center") &&
+    chatList.includes(
+      ".size(40.dp)\n                    .align(Alignment.Center)\n                    .clip(CircleShape)\n                    .background(selectedBackground)\n                    .border(1.25.dp, selectedBorder, CircleShape)",
+    ) &&
+    chatList.includes("Box(Modifier.size(24.dp))") &&
+    chatList.includes("selected = tab == 1") &&
+    chatList.includes("StatusGlyphIcon(tint, 24.dp)"),
+);
+check(
+  "the capsule keeps its own visible border and real native background blur",
+  chatList.includes(".border(1.5.dp, glassEdge, CircleShape)") &&
     chatList.includes("copy(alpha = 0.54f)"),
 );
 check(
-  "native nav blur is localized when idle, and the nav is fully cleared behind modal sheets",
+  "native nav blur is localized when idle and its window is removed behind modal sheets",
   chatList.includes(
     "dialogWindow.setBackgroundBlurRadius(if (windowVisible) blurRadiusPx else 0)",
   ) &&
-    chatList.includes("val windowVisible = visible && !modalOpen") &&
+    chatList.includes("val windowVisible = visible") &&
+    chatList.includes("if (!modalOpen) {") &&
     chatList.includes("dialogWindow.decorView.elevation = 0f") &&
-    chatList.indexOf("FloatingBottomNav(") < chatList.indexOf("E2eeRestoreGate()") &&
+    chatList.includes("dialogWindow?.setBackgroundBlurRadius(0)") &&
     chatList.includes(
-      "translationY = if (modalOpen) hideDistancePx else hideDistancePx * hideProgress",
+      "translationY = hideDistancePx * (if (hasEntered) hideProgress else enterOffset.value)",
     ) &&
+    chatList.includes("enterOffset.animateTo(0f, tween(380") &&
+    chatList.includes("params.windowAnimations = 0") &&
+    chatList.indexOf("FloatingBottomNav(") < chatList.indexOf("E2eeRestoreGate()") &&
     !chatList.includes(".shadow("),
+);
+check(
+  "cold-start home and home-pill entrances rise from the bottom with no left/right slide",
+  kpApp.includes("enterTransition = { slideInVertically(tween(300)) { it } }") &&
+    chatList.includes("enterOffset.animateTo(0f, tween(380") &&
+    chatList.includes(
+      "translationY = hideDistancePx * (if (hasEntered) hideProgress else enterOffset.value)",
+    ),
 );
 check(
   "chat, status, and calls lists leave safe-area-aware space beneath the floating nav",

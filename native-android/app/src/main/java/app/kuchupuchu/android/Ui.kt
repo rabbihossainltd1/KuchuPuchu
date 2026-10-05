@@ -65,6 +65,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
@@ -87,6 +90,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.json.JSONObject
+import kotlin.math.roundToInt
 
 /**
  * A reference-counted modal signal. KpApp blurs the entire live screen while
@@ -101,6 +105,7 @@ internal object KpModalBlurState {
         get() = activeCount > 0
 
     fun register() {
+        if (activeCount == 0) KpModalFocusState.onModalOpening()
         activeCount += 1
     }
 
@@ -117,13 +122,77 @@ internal fun KpRegisterModalBlur() {
     }
 }
 
-/** A visible hairline that carries the shared glass treatment around a sheet. */
-internal fun kpGlassSheetModifier(): Modifier =
-    Modifier.border(
-        1.dp,
-        GlassSheetEdge,
-        RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+/** A sharp, slightly lifted copy of the item that opened a modal sheet. */
+internal data class KpModalFocusSnapshot(
+    val image: ImageBitmap,
+    val boundsInRoot: Rect,
+)
+
+/**
+ * Captures only the pressed row/bubble before its modal opens. KpApp draws this
+ * crop above the blurred app layer and below the sheet, keeping the source item
+ * readable without weakening the backdrop blur around it.
+ */
+internal object KpModalFocusState {
+    var focusedItem by mutableStateOf<KpModalFocusSnapshot?>(null)
+        private set
+    private var captureExpiresAt = 0L
+
+    suspend fun capture(windowBounds: Rect, rootBounds: Rect) {
+        focusedItem = null
+        captureExpiresAt = 0L
+        val maxWidth = windowBounds.width.roundToInt().coerceAtLeast(1)
+        val bitmap =
+            DeleteAnim.capture(
+                bubble = windowBounds,
+                maxWidthPx = maxWidth,
+                forceFresh = true,
+            ) ?: return
+        focusedItem = KpModalFocusSnapshot(bitmap.asImageBitmap(), rootBounds)
+        captureExpiresAt = android.os.SystemClock.uptimeMillis() + 1_000L
+    }
+
+    fun onModalOpening() {
+        if (android.os.SystemClock.uptimeMillis() > captureExpiresAt) focusedItem = null
+        captureExpiresAt = 0L
+    }
+
+    fun clear() {
+        focusedItem = null
+        captureExpiresAt = 0L
+    }
+}
+
+/** Draw the original target sharply above the app blur, raised by a few dp. */
+@Composable
+internal fun KpModalFocusOverlay(progress: Float) {
+    val snapshot = KpModalFocusState.focusedItem ?: return
+    val density = LocalDensity.current
+    val t = progress.coerceIn(0f, 1f)
+    val width = with(density) { snapshot.boundsInRoot.width.toDp() }
+    val height = with(density) { snapshot.boundsInRoot.height.toDp() }
+    Image(
+        bitmap = snapshot.image,
+        contentDescription = null,
+        contentScale = ContentScale.FillBounds,
+        modifier =
+            Modifier
+                .offset {
+                    IntOffset(
+                        snapshot.boundsInRoot.left.roundToInt(),
+                        snapshot.boundsInRoot.top.roundToInt(),
+                    )
+                }
+                .size(width, height)
+                .graphicsLayer {
+                    scaleX = 1f + 0.035f * t
+                    scaleY = 1f + 0.035f * t
+                    translationY = -with(density) { 8.dp.toPx() } * t
+                    alpha = t
+                    transformOrigin = TransformOrigin.Center
+                },
     )
+}
 
 /**
  * Shared image helpers. Avatars are data-URLs the worker stores inline, so
@@ -1123,7 +1192,6 @@ fun KpSheet(
 ) {
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,
-        modifier = kpGlassSheetModifier(),
         containerColor = GlassSheetSurface,
         scrimColor = Color.Black.copy(alpha = 0.10f),
         sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
