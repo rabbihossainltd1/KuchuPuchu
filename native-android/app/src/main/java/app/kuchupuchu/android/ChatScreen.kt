@@ -8769,6 +8769,9 @@ private fun MessageReactions(m: JSONObject) {
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun EmojiSheetDialog(onPick: (String) -> Unit) {
+    // Register in this parent composition so dismissing the sheet releases the
+    // app blur before Material's animated exit retains its child content.
+    KpRegisterModalBlur()
     val emojis = listOf(
         "👍", "👎", "❤️", "🩷", "😂", "🥰", "😮", "😢", "😡", "🙏",
         "🔥", "🎉", "😍", "😭", "😅", "🤔", "💯", "👏", "🤝", "😎",
@@ -8781,7 +8784,6 @@ private fun EmojiSheetDialog(onPick: (String) -> Unit) {
         scrimColor = Color.Black.copy(alpha = 0.10f),
         sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
-        KpRegisterModalBlur()
         Column(
             Modifier
                 .fillMaxWidth()

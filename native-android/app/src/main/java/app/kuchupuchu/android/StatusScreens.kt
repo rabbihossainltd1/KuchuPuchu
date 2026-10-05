@@ -1345,13 +1345,13 @@ private fun StatusMenuSheet(
     onHide: () -> Unit,
     onReport: () -> Unit,
 ) {
+    KpRegisterModalBlur()
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = GlassSheetSurface,
         scrimColor = Color.Black.copy(alpha = 0.10f),
         sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
-        KpRegisterModalBlur()
         Column(
             Modifier
                 .fillMaxWidth()
@@ -1410,8 +1410,8 @@ private fun ViewersSheet(
         label = "sheet",
     )
     LaunchedEffect(Unit) { shown = true }
+    KpRegisterModalBlur()
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        KpRegisterModalBlur()
         val dialogView = androidx.compose.ui.platform.LocalView.current
         val dialogWindow = (dialogView.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
         androidx.compose.runtime.SideEffect {

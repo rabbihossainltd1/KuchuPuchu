@@ -24,6 +24,9 @@ const messageLongPressStart = chat.indexOf(
 );
 const messageLongPressEnd = chat.indexOf("quoteFor =", messageLongPressStart);
 const messageLongPress = chat.slice(messageLongPressStart, messageLongPressEnd);
+const focusStart = ui.indexOf("internal fun KpModalFocusOverlay(");
+const focusEnd = ui.indexOf("/**\n * Shared image helpers", focusStart);
+const focusOverlay = ui.slice(focusStart, focusEnd);
 
 check(
   "chat-list long-press captures the actual card bounds and snapshot before opening its sheet",
@@ -57,17 +60,19 @@ check(
     deleteAnim.includes("val targetWidth = maxWidthPx.coerceAtLeast(1)"),
 );
 check(
-  "spotlight is rendered above the blurred app at its original position, scaled and lifted without a shadow",
+  "spotlight bitmap overlays the source at exact bounds, clips to its stored shape, and is not scaled into a crop",
   kpApp.indexOf("Surface(Modifier.fillMaxSize().blur(modalBlurRadius)") <
     kpApp.indexOf("KpModalFocusOverlay(") &&
-    ui.includes("snapshot.boundsInRoot.left.roundToInt()") &&
-    ui.includes(".clip(snapshot.shape)") &&
+    focusOverlay.includes("snapshot.boundsInRoot.left.roundToInt()") &&
+    focusOverlay.includes("snapshot.boundsInRoot.top.roundToInt()") &&
+    focusOverlay.includes(".size(width, height)") &&
+    focusOverlay.includes(".clip(snapshot.shape)") &&
+    focusOverlay.includes(".graphicsLayer { alpha = t }") &&
+    !focusOverlay.includes("scaleX") &&
+    !focusOverlay.includes("translationY") &&
     ui.includes("val shape: Shape") &&
     deleteAnim.includes("val bubbleShapes = mutableMapOf<String, Shape>()") &&
-    ui.includes("snapshot.boundsInRoot.top.roundToInt()") &&
-    ui.includes("scaleX = 1f + 0.035f * t") &&
-    ui.includes("translationY = -with(density) { 8.dp.toPx() } * t") &&
-    !ui.includes(".shadow("),
+    !focusOverlay.includes(".shadow("),
 );
 
 for (const line of lines) console.log(line);

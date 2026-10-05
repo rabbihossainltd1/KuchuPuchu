@@ -123,7 +123,7 @@ internal fun KpRegisterModalBlur() {
     }
 }
 
-/** A sharp, slightly lifted copy of the item that opened a modal sheet. */
+/** A sharp, source-aligned copy of the item that opened a modal sheet. */
 internal data class KpModalFocusSnapshot(
     val image: ImageBitmap,
     val boundsInRoot: Rect,
@@ -165,7 +165,7 @@ internal object KpModalFocusState {
     }
 }
 
-/** Draw the original target sharply above the app blur, raised by a few dp. */
+/** Draw the source crop sharply above the app blur, without shifting or shrinking it. */
 @Composable
 internal fun KpModalFocusOverlay(progress: Float) {
     val snapshot = KpModalFocusState.focusedItem ?: return
@@ -187,13 +187,7 @@ internal fun KpModalFocusOverlay(progress: Float) {
                 }
                 .size(width, height)
                 .clip(snapshot.shape)
-                .graphicsLayer {
-                    scaleX = 1f + 0.035f * t
-                    scaleY = 1f + 0.035f * t
-                    translationY = -with(density) { 8.dp.toPx() } * t
-                    alpha = t
-                    transformOrigin = TransformOrigin.Center
-                },
+                .graphicsLayer { alpha = t },
     )
 }
 
@@ -983,6 +977,7 @@ fun KpDeleteDialog(
 ) {
     val haptics = rememberHaptics()
     var also by remember { mutableStateOf(alsoDefault) }
+    KpRegisterModalBlur()
     // r69 (owner: "popup box ta mota hoye geche left right a jaiga rekhe mota
     // keno korla screenshot a dekhcho koto sundor"): the box was fatter than his
     // reference and its width came from the PLATFORM dialog default, which
@@ -1002,7 +997,6 @@ fun KpDeleteDialog(
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        KpRegisterModalBlur()
         Column(
             Modifier
                 .fillMaxWidth()
@@ -1193,13 +1187,16 @@ fun KpSheet(
     title: String? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    // Own the blur registration at the same composition boundary as this
+    // sheet. When the caller removes KpSheet, disposal snaps the backdrop clear
+    // immediately instead of waiting for ModalBottomSheet's exit composition.
+    KpRegisterModalBlur()
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = GlassSheetSurface,
         scrimColor = Color.Black.copy(alpha = 0.10f),
         sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
-        KpRegisterModalBlur()
         Column(
             Modifier
                 .fillMaxWidth()

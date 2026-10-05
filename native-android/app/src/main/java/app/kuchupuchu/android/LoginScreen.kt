@@ -1128,6 +1128,7 @@ fun CountryPickerSheet(
     onPick: (KpCountry) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    KpRegisterModalBlur()
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -1135,7 +1136,6 @@ fun CountryPickerSheet(
         containerColor = GlassSheetSurface,
         scrimColor = Color.Black.copy(alpha = 0.10f),
     ) {
-        KpRegisterModalBlur()
         var query by remember { mutableStateOf("") }
         Column(
             Modifier

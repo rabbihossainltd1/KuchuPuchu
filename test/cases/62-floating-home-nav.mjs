@@ -25,6 +25,12 @@ const kpApp = readFileSync(
 const fabSectionStart = statuses.indexOf("/* The reference keeps the text-status");
 const fabSectionEnd = statuses.indexOf("if (composeText)", fabSectionStart);
 const statusFabStack = statuses.slice(fabSectionStart, fabSectionEnd);
+const homeStart = kpApp.indexOf('composable(\n                    "main",');
+const homeEnd = kpApp.indexOf('composable("newchat")', homeStart);
+const homeRoute = kpApp.slice(homeStart, homeEnd);
+const chatStart = kpApp.indexOf('composable("chat/{id}")', homeEnd);
+const chatEnd = kpApp.indexOf('composable("settings")', chatStart);
+const chatRoute = kpApp.slice(chatStart, chatEnd);
 
 const lines = [];
 const check = (name, condition, detail = "") =>
@@ -106,6 +112,9 @@ check(
   "the glass capsule keeps native background blur but has no outline",
   !chatList.includes(".border(1.5.dp, glassEdge, CircleShape)") &&
     chatList.includes("copy(alpha = 0.28f)") &&
+    chatList.includes("setColor(glassFill.toArgb())") &&
+    chatList.includes("params.format = PixelFormat.TRANSLUCENT") &&
+    !chatList.includes(".background(glassFill)") &&
     chatList.includes(
       "dialogWindow.setBackgroundBlurRadius((blurRadiusPx * fraction).roundToInt())",
     ),
@@ -130,11 +139,17 @@ check(
     !chatList.includes(".shadow("),
 );
 check(
-  "the home nav always enters from below and reverses downward when leaving home",
-  kpApp.includes("enterTransition = { slideInVertically(tween(300)) { it } }") &&
+  "home route exits downward on push, rises from below on pop, and the chat pop has no inherited horizontal slide",
+  homeRoute.includes("slideInVertically(tween(360)) { it }") &&
+    homeRoute.includes("slideOutVertically(tween(360)) { it }") &&
+    homeRoute.includes(
+      "popEnterTransition = { slideInVertically(tween(360)) { it } + fadeIn(tween(220)) }",
+    ) &&
+    chatRoute.includes('composable("chat/{id}") { entry ->') &&
+    kpApp.includes('if (targetState.destination.route == "main") fadeOut(tween(180))') &&
     chatList.includes("translationY = hideDistancePx * slideProgress.value") &&
     chatList.includes("targetValue = if (windowVisible) 0f else 1f") &&
-    chatList.includes("tween(if (windowVisible) 450 else 160, easing = slideEasing)"),
+    chatList.includes("tween(if (windowVisible) 450 else 320, easing = slideEasing)"),
 );
 check(
   "home nav is gated off on non-home destinations and full-screen calls, but returns when calls are minimized",

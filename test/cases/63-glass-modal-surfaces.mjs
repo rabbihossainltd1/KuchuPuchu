@@ -11,6 +11,12 @@ const status = read("StatusScreens.kt");
 const chat = read("ChatScreen.kt");
 const chatList = read("ChatListScreen.kt");
 const kpApp = read("KpApp.kt");
+const sharedSheetStart = ui.indexOf("fun KpSheet(");
+const sharedSheetEnd = ui.indexOf("fun KpSheetRow(", sharedSheetStart);
+const sharedSheet = ui.slice(sharedSheetStart, sharedSheetEnd);
+const countryStart = login.indexOf("fun CountryPickerSheet(");
+const statusMenuStart = status.indexOf("private fun StatusMenuSheet(");
+const emojiStart = chat.indexOf("private fun EmojiSheetDialog(");
 
 const lines = [];
 const check = (name, condition, detail = "") =>
@@ -29,36 +35,43 @@ check(
     ui.includes("fun unregister()") &&
     ui.includes("KpModalBlurState.unregister()") &&
     kpApp.includes(".blur(modalBlurRadius)") &&
-    kpApp.includes("30.dp") &&
-    kpApp.includes("animationSpec = if (modalActive) tween(220) else snap()"),
+    kpApp.includes("modalBlur.animateTo(30f, tween(220))") &&
+    kpApp.includes("else modalBlur.snapTo(0f)"),
 );
 check(
-  "the pressed chat/message crop stays sharp above the app blur and is raised without a drop shadow",
+  "the pressed chat/message crop stays sharp at its source bounds and source shape without a drop shadow",
   ui.includes("internal object KpModalFocusState") &&
     ui.includes("DeleteAnim.capture(") &&
     ui.includes("forceFresh = true") &&
-    ui.includes("scaleX = 1f + 0.035f * t") &&
-    ui.includes("translationY = -with(density) { 8.dp.toPx() } * t") &&
+    ui.includes(".graphicsLayer { alpha = t }") &&
+    !ui.includes("scaleX = 1f + 0.035f * t") &&
+    !ui.includes("translationY = -with(density) { 8.dp.toPx() } * t") &&
     kpApp.indexOf("Surface(Modifier.fillMaxSize().blur(modalBlurRadius)") <
       kpApp.indexOf("KpModalFocusOverlay(") &&
     kpApp.includes("KpModalFocusState.clear()") &&
     !ui.includes(".shadow("),
 );
 check(
-  "shared KpSheet uses translucent glass without drawing an outline around the full dialog window",
-  ui.includes("containerColor = GlassSheetSurface") &&
-    ui.includes("KpRegisterModalBlur()") &&
-    !ui.includes("kpGlassSheetModifier") &&
-    !ui.includes("modifier = kpGlassSheetModifier()"),
+  "shared KpSheet registers blur outside ModalBottomSheet content for immediate release on dismissal",
+  sharedSheet.includes("containerColor = GlassSheetSurface") &&
+    sharedSheet.indexOf("KpRegisterModalBlur()") >= 0 &&
+    sharedSheet.indexOf("KpRegisterModalBlur()") < sharedSheet.indexOf("ModalBottomSheet(") &&
+    sharedSheet.slice(sharedSheet.indexOf("ModalBottomSheet(")).indexOf("KpRegisterModalBlur()") <
+      0 &&
+    !sharedSheet.includes("kpGlassSheetModifier") &&
+    !sharedSheet.includes("modifier = kpGlassSheetModifier()"),
 );
 check(
   "country picker, status menu, and emoji picker keep the glass fill and modal blur without a window-sized border",
   login.includes("containerColor = GlassSheetSurface") &&
-    login.includes("KpRegisterModalBlur()") &&
+    login.indexOf("KpRegisterModalBlur()", countryStart) <
+      login.indexOf("ModalBottomSheet(", countryStart) &&
     status.includes("containerColor = GlassSheetSurface") &&
-    status.includes("KpRegisterModalBlur()") &&
+    status.indexOf("KpRegisterModalBlur()", statusMenuStart) <
+      status.indexOf("ModalBottomSheet(", statusMenuStart) &&
     chat.includes("containerColor = GlassSheetSurface") &&
-    chat.includes("KpRegisterModalBlur()") &&
+    chat.indexOf("KpRegisterModalBlur()", emojiStart) <
+      chat.indexOf("ModalBottomSheet(", emojiStart) &&
     !login.includes("kpGlassSheetModifier") &&
     !status.includes("kpGlassSheetModifier") &&
     !chat.includes("kpGlassSheetModifier"),

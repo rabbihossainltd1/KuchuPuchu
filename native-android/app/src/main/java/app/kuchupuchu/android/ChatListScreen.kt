@@ -1,5 +1,6 @@
 package app.kuchupuchu.android
 
+import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.view.Gravity
@@ -128,6 +129,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -1026,7 +1028,7 @@ private fun FloatingBottomNav(
         } else {
             slideProgress.animateTo(
                 targetValue = if (windowVisible) 0f else 1f,
-                animationSpec = tween(if (windowVisible) 450 else 160, easing = slideEasing),
+                animationSpec = tween(if (windowVisible) 450 else 320, easing = slideEasing),
             )
         }
     }
@@ -1042,11 +1044,15 @@ private fun FloatingBottomNav(
     val dialogAttached = !modalOpen && (windowVisible || slideProgress.value < 1f)
     val windowInteractive = windowVisible && slideProgress.value <= 0.05f
     val hideDistancePx = with(density) { (capsuleHeight + 18.dp).toPx() }
-    val pillWindowBackground = remember(capsuleHeightPx) {
+    // Android's background-blur API blurs only through the WINDOW background,
+    // not a Compose child background. Keep the glass tint on the floating
+    // window drawable itself so the platform has a translucent rounded blur
+    // mask; the Compose content below stays transparent to avoid double tint.
+    val pillWindowBackground = remember(capsuleHeightPx, glassFill) {
         GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = capsuleHeightPx / 2f
-            setColor(android.graphics.Color.TRANSPARENT)
+            setColor(glassFill.toArgb())
         }
     }
 
@@ -1070,6 +1076,7 @@ private fun FloatingBottomNav(
                     dialogWindow.decorView.translationZ = 0f
                     dialogWindow.setDimAmount(0f)
                     val params = dialogWindow.attributes
+                    params.format = PixelFormat.TRANSLUCENT
                     params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
                     params.width = capsuleWidthPx
                     params.height = capsuleHeightPx
@@ -1104,7 +1111,7 @@ private fun FloatingBottomNav(
                     // avoids a detached blur capsule or touch-blocking window
                     // flashing before the nav has risen onto the screen.
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        val fraction = if (windowVisible) (1f - slideProgress.value).coerceIn(0f, 1f) else 0f
+                        val fraction = (1f - slideProgress.value).coerceIn(0f, 1f)
                         dialogWindow.setBackgroundBlurRadius((blurRadiusPx * fraction).roundToInt())
                     }
                 }
@@ -1116,8 +1123,7 @@ private fun FloatingBottomNav(
                         translationY = hideDistancePx * slideProgress.value
                     }
                     .then(if (windowInteractive) Modifier else Modifier.clearAndSetSemantics {})
-                    .clip(CircleShape)
-                    .background(glassFill),
+                    .clip(CircleShape),
             ) {
                 // One shared indicator travels between tab centers using the
                 // reference demo's 450 ms overshooting cubic-bezier.

@@ -27,6 +27,21 @@ const attachTile = attach.slice(attachTileStart);
 const editButtonStart = attach.indexOf("// Edit (pencil) button");
 const editButtonEnd = attach.indexOf("// r66: one long caption pill", editButtonStart);
 const editButton = attach.slice(editButtonStart, editButtonEnd);
+const homeStart = kpApp.indexOf('composable(\n                    "main",');
+const homeEnd = kpApp.indexOf('composable("newchat")', homeStart);
+const homeRoute = kpApp.slice(homeStart, homeEnd);
+const chatRouteStart = kpApp.indexOf('composable("chat/{id}")', homeEnd);
+const chatRouteEnd = kpApp.indexOf('composable("settings")', chatRouteStart);
+const chatRoute = kpApp.slice(chatRouteStart, chatRouteEnd);
+const sharedSheetStart = ui.indexOf("fun KpSheet(");
+const sharedSheetEnd = ui.indexOf("fun KpSheetRow(", sharedSheetStart);
+const sharedSheet = ui.slice(sharedSheetStart, sharedSheetEnd);
+const focusStart = ui.indexOf("internal fun KpModalFocusOverlay(");
+const focusEnd = ui.indexOf("/**\n * Shared image helpers", focusStart);
+const focusOverlay = ui.slice(focusStart, focusEnd);
+const emojiStart = chat.indexOf("private fun EmojiSheetDialog(");
+const emojiEnd = chat.indexOf("/** True when a FILE message", emojiStart);
+const emojiSheet = chat.slice(emojiStart, emojiEnd);
 const lines = [];
 const check = (name, condition, detail = "") =>
   lines.push(`  ${condition ? "OK     " : "BROKEN "}  ${name}${detail ? `  -> ${detail}` : ""}`);
@@ -51,7 +66,7 @@ check(
   "the pill rises from below whenever shown and reverses downward when hidden",
   nav.includes("val slideProgress = remember { Animatable(1f) }") &&
     nav.includes("targetValue = if (windowVisible) 0f else 1f") &&
-    nav.includes("tween(if (windowVisible) 450 else 160, easing = slideEasing)") &&
+    nav.includes("tween(if (windowVisible) 450 else 320, easing = slideEasing)") &&
     nav.includes("translationY = hideDistancePx * slideProgress.value"),
 );
 check(
@@ -66,8 +81,20 @@ check(
     kpApp.includes("callEngine.minimized"),
 );
 check(
-  "the capsule and selected-tab highlight have no borders, while the translucent glass and real window blur remain",
-  nav.includes(".background(glassFill)") &&
+  "home route slides down/up while the pop-to-home transition fades the outgoing chat without changing its forward entrance",
+  homeRoute.includes("slideOutVertically(tween(360)) { it }") &&
+    homeRoute.includes(
+      "popEnterTransition = { slideInVertically(tween(360)) { it } + fadeIn(tween(220)) }",
+    ) &&
+    chatRoute.includes('composable("chat/{id}") { entry ->') &&
+    kpApp.includes('if (targetState.destination.route == "main") fadeOut(tween(180))'),
+);
+check(
+  "the capsule uses its translucent rounded window background as the real local blur mask, with no Compose double-tint or border",
+  nav.includes("setColor(glassFill.toArgb())") &&
+    nav.includes("params.format = PixelFormat.TRANSLUCENT") &&
+    nav.includes("val fraction = (1f - slideProgress.value).coerceIn(0f, 1f)") &&
+    !nav.includes(".background(glassFill)") &&
     nav.includes(".background(indicatorColor)") &&
     nav.includes("dialogWindow.setBackgroundBlurRadius((blurRadiusPx * fraction).roundToInt())") &&
     !nav.includes("glassEdge") &&
@@ -95,7 +122,7 @@ check(
       .includes(".border("),
 );
 check(
-  "the selected chat/message overlay stores the source Shape and clips the sharp bitmap with it",
+  "the focused message is redrawn at the captured source bounds and clipped to its actual shape without scale-cropping",
   deleteAnim.includes("val bubbleShapes = mutableMapOf<String, Shape>()") &&
     chat.includes("DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), bubbleShape)") &&
     chat.includes(
@@ -103,11 +130,22 @@ check(
     ) &&
     chat.includes("DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), shape)") &&
     ui.includes("val shape: Shape") &&
-    ui.includes(".clip(snapshot.shape)"),
+    focusOverlay.includes(".size(width, height)") &&
+    focusOverlay.includes(".clip(snapshot.shape)") &&
+    focusOverlay.includes(".graphicsLayer { alpha = t }") &&
+    !focusOverlay.includes("scaleX") &&
+    !focusOverlay.includes("translationY"),
 );
 check(
-  "backdrop blur opens smoothly but snaps clear on sheet dismissal",
-  kpApp.includes("animationSpec = if (modalActive) tween(220) else snap()"),
+  "backdrop blur keeps the 220ms opening tween and snaps off at the sheet owner boundary on dismiss",
+  kpApp.includes("modalBlur.animateTo(30f, tween(220))") &&
+    kpApp.includes("else modalBlur.snapTo(0f)") &&
+    sharedSheet.indexOf("KpRegisterModalBlur()") >= 0 &&
+    sharedSheet.indexOf("KpRegisterModalBlur()") < sharedSheet.indexOf("ModalBottomSheet(") &&
+    sharedSheet.slice(sharedSheet.indexOf("ModalBottomSheet(")).indexOf("KpRegisterModalBlur()") <
+      0 &&
+    emojiSheet.indexOf("KpRegisterModalBlur()") >= 0 &&
+    emojiSheet.indexOf("KpRegisterModalBlur()") < emojiSheet.indexOf("ModalBottomSheet("),
 );
 
 for (const line of lines) console.log(line);

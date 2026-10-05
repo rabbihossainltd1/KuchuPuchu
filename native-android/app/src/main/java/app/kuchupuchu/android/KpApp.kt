@@ -8,12 +8,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
-import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.snap
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -166,11 +166,11 @@ fun KpApp() {
     }
 
     val modalActive = KpModalBlurState.isActive
-    val modalBlurRadius by animateDpAsState(
-        targetValue = if (modalActive) 30.dp else 0.dp,
-        animationSpec = if (modalActive) tween(220) else snap(),
-        label = "modalBackdropBlur",
-    )
+    val modalBlur = remember { Animatable(0f) }
+    LaunchedEffect(modalActive) {
+        if (modalActive) modalBlur.animateTo(30f, tween(220)) else modalBlur.snapTo(0f)
+    }
+    val modalBlurRadius = modalBlur.value.dp
     LaunchedEffect(modalActive) {
         if (!modalActive) {
             kotlinx.coroutines.delay(260)
@@ -223,14 +223,20 @@ fun KpApp() {
                 enterTransition = { fadeIn(tween(220)) + slideInHorizontally(tween(260)) { it / 6 } },
                 exitTransition = { fadeOut(tween(180)) },
                 popEnterTransition = { fadeIn(tween(220)) },
-                popExitTransition = { fadeOut(tween(200)) + slideOutHorizontally(tween(260)) { it / 6 } },
+                popExitTransition = {
+                    if (targetState.destination.route == "main") fadeOut(tween(180))
+                    else fadeOut(tween(200)) + slideOutHorizontally(tween(260)) { it / 6 }
+                },
             ) {
                 composable(
                     "main",
-                    // The cold-start home screen rises vertically; it must not
-                    // inherit the routes' horizontal entrance from the left.
-                    enterTransition = { slideInVertically(tween(300)) { it } },
-                    popEnterTransition = { fadeIn(tween(220)) },
+                    // Home rises from below on first entry and on every return.
+                    // When a chat/route is pushed, it leaves down rather than
+                    // being abruptly faded out behind the new destination.
+                    enterTransition = { slideInVertically(tween(360)) { it } + fadeIn(tween(220)) },
+                    exitTransition = { slideOutVertically(tween(360)) { it } + fadeOut(tween(220)) },
+                    popEnterTransition = { slideInVertically(tween(360)) { it } + fadeIn(tween(220)) },
+                    popExitTransition = { fadeOut(tween(180)) },
                 ) { ChatListScreen(nav) }
                 composable("newchat") { NewChatScreen(nav) }
                 // Owner round 32 (item 12): `with` = comma-separated user ids
@@ -448,6 +454,9 @@ fun KpUpdateGate() {
     val installing = KpUpdate.installing
     val justUpdated = KpUpdate.justUpdated
     if (upd == null && ready == null && !downloading && !installing && !justUpdated) return
+    // Register at this composable boundary, not inside the Dialog's content,
+    // so dismissal releases the app blur as soon as the gate leaves composition.
+    KpRegisterModalBlur()
     // Non-skippable popup — Dialog with no outside/back dismiss so an update cannot be swiped away. The old KpSheet was dismissible and a bottom sheet.
     androidx.compose.ui.window.Dialog(
         onDismissRequest = {},
@@ -457,7 +466,6 @@ fun KpUpdateGate() {
             usePlatformDefaultWidth = false,
         ),
     ) {
-        KpRegisterModalBlur()
         // Centered card — theme-aware, works on any route because this gate is at the root of KpApp.
         androidx.compose.foundation.layout.Box(
             Modifier.fillMaxWidth().padding(horizontal = 22.dp),
