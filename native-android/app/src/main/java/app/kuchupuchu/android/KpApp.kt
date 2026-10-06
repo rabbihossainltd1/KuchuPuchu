@@ -272,8 +272,8 @@ fun KpApp() {
                     // it moves the destination surface without layering/recomposing
                     // the whole large ChatScreen on every animation frame.
                     enterTransition = {
-                        fadeIn(tween(240, easing = FastOutSlowInEasing)) +
-                            slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 }
+                        fadeIn(tween(200, easing = FastOutSlowInEasing)) +
+                            slideInHorizontally(tween(220, easing = FastOutSlowInEasing)) { it / 4 }
                     },
                     exitTransition = { fadeOut(tween(180, easing = FastOutSlowInEasing)) },
                     popEnterTransition = { fadeIn(tween(240, easing = FastOutSlowInEasing)) },

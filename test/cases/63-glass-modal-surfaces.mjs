@@ -36,7 +36,7 @@ check(
     theme.includes("val GlassSheetEdge: Color"),
 );
 check(
-  "modal blur is reference-counted, releases as a sheet targets Hidden, and reacquires if a swipe reverses",
+  "modal blur is reference-counted and releases on Hidden target observation or confirmation, then reacquires if a swipe reverses",
   ui.includes("internal object KpModalBlurState") &&
     ui.includes("internal class KpModalBlurRegistration") &&
     ui.includes("visibleWindowCount") &&
@@ -50,6 +50,8 @@ check(
     ui.includes("fun dispose()") &&
     ui.includes("DisposableEffect(registration)") &&
     ui.includes("target == androidx.compose.material3.SheetValue.Hidden") &&
+    ui.includes("snapshotFlow { sheetState.targetValue }.collect") &&
+    ui.includes("if (hasOpened) registration.release()") &&
     ui.includes("KpModalBlurState.unregister()") &&
     ui.includes("internal fun KpRememberModalBottomSheetState(") &&
     kpApp.includes(".blur(modalBlurRadius)") &&

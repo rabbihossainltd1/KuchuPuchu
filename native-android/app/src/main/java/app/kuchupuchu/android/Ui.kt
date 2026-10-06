@@ -63,6 +63,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -181,15 +182,29 @@ internal fun KpRegisterModalBlur(): KpModalBlurRegistration {
 @Composable
 internal fun KpRememberModalBottomSheetState(
     registration: KpModalBlurRegistration,
-): androidx.compose.material3.SheetState =
-    androidx.compose.material3.rememberModalBottomSheetState(
-        skipPartiallyExpanded = true,
-        confirmValueChange = { target ->
-            if (target == androidx.compose.material3.SheetValue.Hidden) registration.release()
-            else registration.retain()
-            true
-        },
-    )
+): androidx.compose.material3.SheetState {
+    val sheetState =
+        androidx.compose.material3.rememberModalBottomSheetState(
+            skipPartiallyExpanded = true,
+            confirmValueChange = { target ->
+                if (target == androidx.compose.material3.SheetValue.Hidden) registration.release()
+                else registration.retain()
+                true
+            },
+        )
+    var hasOpened by remember(sheetState) { mutableStateOf(false) }
+    LaunchedEffect(sheetState, registration) {
+        snapshotFlow { sheetState.targetValue }.collect { target ->
+            if (target == androidx.compose.material3.SheetValue.Hidden) {
+                if (hasOpened) registration.release()
+            } else {
+                hasOpened = true
+                registration.retain()
+            }
+        }
+    }
+    return sheetState
+}
 
 /**
  * Shared image helpers. Avatars are data-URLs the worker stores inline, so

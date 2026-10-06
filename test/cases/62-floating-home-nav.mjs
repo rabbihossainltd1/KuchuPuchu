@@ -52,15 +52,20 @@ check(
     nav.includes(".offset(x = indicatorX, y = indicatorY)"),
 );
 check(
-  "only the painted rounded card extends horizontally; the 248x56 window, slots, and 24dp glyphs stay put",
-  nav.includes("val navWindowWidth = 248.dp") &&
-    nav.includes("val navWindowHeight = 56.dp") &&
-    nav.includes("val backgroundCardWidth = 224.dp") &&
-    nav.includes("val backgroundCardHeight = 46.dp") &&
+  "the whole floating pill, slots, indicator, badge, and glyphs grow together by a restrained six percent",
+  nav.includes("val navScale = 1.06f") &&
+    nav.includes("val navWindowWidth = 248.dp * navScale") &&
+    nav.includes("val navWindowHeight = 56.dp * navScale") &&
+    nav.includes("val backgroundCardWidth = 224.dp * navScale") &&
+    nav.includes("val backgroundCardHeight = 46.dp * navScale") &&
+    nav.includes("val itemH = 44.dp * navScale") &&
+    nav.includes("val indicatorSize = 40.dp * navScale") &&
+    nav.includes("val navIconSize = 24.dp * navScale") &&
+    nav.includes("iconSize = navIconSize") &&
+    nav.includes("sizeScale = navScale") &&
     nav.includes(".size(backgroundCardWidth, backgroundCardHeight)") &&
     nav.includes("ColorDrawable(android.graphics.Color.TRANSPARENT)") &&
-    (nav.match(/modifier = Modifier\.size\(24\.dp\)/g) ?? []).length >= 3 &&
-    nav.includes("StatusGlyphIcon(tint, 24.dp)"),
+    nav.includes("StatusGlyphIcon(tint, navIconSize)"),
 );
 check(
   "tab and badge state are read inside the floating-pill scope, not by KpApp's animated NavHost",

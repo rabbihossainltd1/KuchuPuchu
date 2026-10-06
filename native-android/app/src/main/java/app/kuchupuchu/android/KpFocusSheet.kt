@@ -62,10 +62,11 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.roundToInt
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 
 /**
  * The one live Compose item that opened a focused action sheet. Its source
@@ -255,10 +256,12 @@ internal fun KpLiveFocusItem(
     val sourceBounds = remember(key) { mutableStateOf<Rect?>(null) }
     var pinnedHandle by remember(key) { mutableStateOf<PinnableContainer.PinnedHandle?>(null) }
     var capturePending by remember(key, graphicsContext) { mutableStateOf(false) }
+    val layerCaptureRecorded = remember(key, graphicsContext) { AtomicBoolean(false) }
     val captureScope = rememberCoroutineScope()
     val releaseFocusResources = remember(key, graphicsContext) {
         {
             capturePending = false
+            layerCaptureRecorded.set(false)
             KpModalFocusState.cancelCapture(key)
             val layer = focusLayer
             focusLayer = null
@@ -281,20 +284,26 @@ internal fun KpLiveFocusItem(
                 val layer = focusLayer ?: graphicsContext.createGraphicsLayer().also { focusLayer = it }
                 if (pinnedHandle == null) pinnedHandle = pinnableContainer?.pin()
                 // Keep the source visible while its first real draw is recorded.
-                // Only hand it to the root overlay after the layer has a size.
+                // Only hand it to the root overlay after recording has completed.
+                layerCaptureRecorded.set(false)
                 capturePending = true
                 captureScope.launch {
                     var waitedFrames = 0
-                    while ((layer.size.width <= 0 || layer.size.height <= 0) && waitedFrames < 3) {
+                    while (
+                        (!layerCaptureRecorded.get() || layer.size.width <= 0 || layer.size.height <= 0) &&
+                        waitedFrames < 8
+                    ) {
                         withFrameNanos { }
                         waitedFrames++
                     }
                     val readyBounds = sourceBounds.value
+                    val requestedFocusKey = KpFocusSheetState.request?.focusKey
                     if (
-                        capturePending && layer.size.width > 0 && layer.size.height > 0 &&
+                        capturePending && layerCaptureRecorded.get() && layer.size.width > 0 && layer.size.height > 0 &&
                         readyBounds != null && readyBounds.width > 0f && readyBounds.height > 0f &&
-                        KpFocusSheetState.request?.focusKey == key && !KpFocusSheetState.closing &&
-                        KpModalFocusState.focusedItem == null
+                        KpModalFocusState.pendingFocusKey == key &&
+                        (requestedFocusKey == null || requestedFocusKey == key) &&
+                        !KpFocusSheetState.closing && KpModalFocusState.focusedItem == null
                     ) {
                         capturePending = false
                         KpModalFocusState.focus(
@@ -344,6 +353,7 @@ internal fun KpLiveFocusItem(
                     layer.record {
                         this@drawWithContent.drawContent()
                     }
+                    layerCaptureRecorded.set(true)
                     drawContent()
                 } else {
                     drawContent()

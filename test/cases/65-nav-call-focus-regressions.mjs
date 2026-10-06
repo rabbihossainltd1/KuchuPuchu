@@ -122,9 +122,9 @@ check(
     !homeRoute.includes("slideInVertically") &&
     !homeRoute.includes("slideOutVertically") &&
     chatRoute.includes('"chat/{id}"') &&
-    chatRoute.includes("fadeIn(tween(240, easing = FastOutSlowInEasing))") &&
+    chatRoute.includes("fadeIn(tween(200, easing = FastOutSlowInEasing))") &&
     chatRoute.includes(
-      "slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 }",
+      "slideInHorizontally(tween(220, easing = FastOutSlowInEasing)) { it / 4 }",
     ) &&
     chatRoute.includes("fadeOut(tween(180, easing = FastOutSlowInEasing))") &&
     chatRoute.includes(
@@ -141,8 +141,9 @@ check(
   "the rounded floating pill uses a high-opacity native surface without platform blur",
   nav.includes("val pillFill =") &&
     nav.includes("copy(alpha = 0.92f)") &&
-    nav.includes("val backgroundCardWidth = 224.dp") &&
-    nav.includes("val backgroundCardHeight = 46.dp") &&
+    nav.includes("val navScale = 1.06f") &&
+    nav.includes("val backgroundCardWidth = 224.dp * navScale") &&
+    nav.includes("val backgroundCardHeight = 46.dp * navScale") &&
     nav.includes(".background(pillFill)") &&
     nav.includes("ColorDrawable(android.graphics.Color.TRANSPARENT)") &&
     nav.includes("dialogWindow.setBackgroundDrawable(pillWindowBackground)") &&

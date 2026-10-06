@@ -997,19 +997,21 @@ internal fun HomeBottomNavigation(
     val indicatorColor = if (darkMode) Color(0xB32B5BD7) else ActionBlue.copy(alpha = 0.16f)
     // Keep the floating card visibly solid; it no longer relies on platform blur.
     val pillFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.92f) else Card.copy(alpha = 0.92f)
-    val itemH = 44.dp
-    val gap = 4.dp
-    val capsulePadding = 6.dp
-    // Preserve the pill window and icon/tap layout; shrink only the painted card.
-    val navWindowWidth = 248.dp
-    val navWindowHeight = 56.dp
-    // Extend only the painted card a little farther to the left and right.
-    val backgroundCardWidth = 224.dp
-    val backgroundCardHeight = 46.dp
+    // A restrained proportional increase keeps the pill, slots, indicator,
+    // badge, and glyphs feeling like one larger control.
+    val navScale = 1.06f
+    val itemH = 44.dp * navScale
+    val gap = 4.dp * navScale
+    val capsulePadding = 6.dp * navScale
+    val navWindowWidth = 248.dp * navScale
+    val navWindowHeight = 56.dp * navScale
+    val backgroundCardWidth = 224.dp * navScale
+    val backgroundCardHeight = 46.dp * navScale
+    val navIconSize = 24.dp * navScale
     val navWindowWidthPx = with(density) { navWindowWidth.roundToPx() }
     val navWindowHeightPx = with(density) { navWindowHeight.roundToPx() }
     val bottomOffsetPx = WindowInsets.navigationBars.getBottom(density) + with(density) { 16.dp.roundToPx() }
-    val indicatorSize = 40.dp
+    val indicatorSize = 40.dp * navScale
     val indicatorEasing = remember { CubicBezierEasing(0.34f, 1.45f, 0.5f, 1f) }
     val windowInteractive = visible && !modalOpen
     val dialogWindowRef = remember { arrayOfNulls<android.view.Window>(1) }
@@ -1121,6 +1123,8 @@ internal fun HomeBottomNavigation(
                         selected = tab == 0,
                         modifier = Modifier.weight(1f),
                         height = itemH,
+                        iconSize = navIconSize,
+                        sizeScale = navScale,
                         badge = unreadChats,
                         enabled = windowInteractive,
                         idleTint = idleTint,
@@ -1131,7 +1135,7 @@ internal fun HomeBottomNavigation(
                             painter = painterResource(R.drawable.ic_nav_chat),
                             contentDescription = null,
                             tint = tint,
-                            modifier = Modifier.size(24.dp),
+                            modifier = Modifier.size(navIconSize),
                         )
                     }
                     NavItem(
@@ -1139,35 +1143,41 @@ internal fun HomeBottomNavigation(
                         selected = tab == 1,
                         modifier = Modifier.weight(1f),
                         height = itemH,
+                        iconSize = navIconSize,
+                        sizeScale = navScale,
                         newStatus = unseenStatus,
                         enabled = windowInteractive,
                         idleTint = idleTint,
                         selectedTint = selectedTint,
                         onClick = { onSelect(1) },
-                    ) { tint -> StatusGlyphIcon(tint, 24.dp) }
+                    ) { tint -> StatusGlyphIcon(tint, navIconSize) }
                     NavItem(
                         label = "Calls",
                         selected = tab == 2,
                         modifier = Modifier.weight(1f),
                         height = itemH,
+                        iconSize = navIconSize,
+                        sizeScale = navScale,
                         enabled = windowInteractive,
                         idleTint = idleTint,
                         selectedTint = selectedTint,
                         onClick = { onSelect(2) },
                     ) { tint ->
-                        Icon(Icons.Filled.Call, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+                        Icon(Icons.Filled.Call, contentDescription = null, tint = tint, modifier = Modifier.size(navIconSize))
                     }
                     NavItem(
                         label = "Profile",
                         selected = tab == 3,
                         modifier = Modifier.weight(1f),
                         height = itemH,
+                        iconSize = navIconSize,
+                        sizeScale = navScale,
                         enabled = windowInteractive,
                         idleTint = idleTint,
                         selectedTint = selectedTint,
                         onClick = { onSelect(3) },
                     ) { tint ->
-                        Icon(Icons.Filled.Person, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+                        Icon(Icons.Filled.Person, contentDescription = null, tint = tint, modifier = Modifier.size(navIconSize))
                     }
                 }
             }
@@ -1201,6 +1211,8 @@ private fun NavItem(
     selected: Boolean,
     modifier: Modifier = Modifier,
     height: androidx.compose.ui.unit.Dp,
+    iconSize: androidx.compose.ui.unit.Dp,
+    sizeScale: Float,
     badge: Int = 0,
     newStatus: Boolean = false,
     enabled: Boolean = true,
@@ -1263,7 +1275,7 @@ private fun NavItem(
             ) { onClick() },
         contentAlignment = Alignment.Center,
     ) {
-        Box(Modifier.size(24.dp)) {
+        Box(Modifier.size(iconSize)) {
             Box(
                 Modifier
                     .align(Alignment.Center)
@@ -1277,21 +1289,24 @@ private fun NavItem(
                 Box(
                     Modifier
                         .align(Alignment.TopEnd)
-                        .offset(x = 6.dp, y = (-8).dp)
-                        .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
+                        .offset(x = 6.dp * sizeScale, y = (-8).dp * sizeScale)
+                        .defaultMinSize(
+                            minWidth = 18.dp * sizeScale,
+                            minHeight = 18.dp * sizeScale,
+                        )
                         .clip(CircleShape)
                         .background(Color(0xFFE24B4A))
-                        .border(1.5.dp, if (KpThemeMode.darkBlue) Color(0xFF14203D) else Card, CircleShape)
+                        .border(1.5.dp * sizeScale, if (KpThemeMode.darkBlue) Color(0xFF14203D) else Card, CircleShape)
                         .graphicsLayer { scaleX = badgeScale.value; scaleY = badgeScale.value }
-                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                        .padding(horizontal = 4.dp * sizeScale, vertical = 1.dp * sizeScale),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         badgeLabel,
                         color = Color.White,
-                        fontSize = 11.sp,
+                        fontSize = 11.sp * sizeScale,
                         fontWeight = FontWeight.Bold,
-                        lineHeight = 11.sp,
+                        lineHeight = 11.sp * sizeScale,
                         maxLines = 1,
                         softWrap = false,
                         style = androidx.compose.ui.text.TextStyle(platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)),
@@ -1654,6 +1669,18 @@ private fun SwipeConvRow(
             }
         }
 
+        // Keep the source slot opaque while the live card is lifted. Without
+        // this blank card backing, the hidden swipe actions show through the
+        // now-empty slot behind the overlay for the whole sheet transition.
+        if (KpModalFocusState.focusedItem?.key == "chat:$convId") {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Card),
+            )
+        }
+
         /* the card itself, slid by the swipe (either direction) */
         var buzzedSide by remember { mutableStateOf(0) }
         Box(
@@ -1706,6 +1733,10 @@ private fun SwipeConvRow(
                             if (SwipeOpen.id == convId) SwipeOpen.id = null
                         },
                         onFocusRequest = {
+                            // Close partial swipe reveal before lifting the row;
+                            // the existing 160ms return animation remains intact.
+                            dragged = 0f
+                            SwipeOpen.id = null
                             requestFocus()
                             // r103-5: long-press opens the sheet; Select remains an explicit action.
                             ListSelect.sheetFor = conv

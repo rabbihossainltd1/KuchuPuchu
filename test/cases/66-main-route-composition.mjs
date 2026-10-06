@@ -51,8 +51,8 @@ check(
     mainRoute.includes("enterTransition = { EnterTransition.None }") &&
     mainRoute.includes("exitTransition = { ExitTransition.None }") &&
     app.includes('"chat/{id}"') &&
-    app.includes("fadeIn(tween(240, easing = FastOutSlowInEasing))") &&
-    app.includes("slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 }") &&
+    app.includes("fadeIn(tween(200, easing = FastOutSlowInEasing))") &&
+    app.includes("slideInHorizontally(tween(220, easing = FastOutSlowInEasing)) { it / 4 }") &&
     !app.includes("private fun ChatRouteEntryMotion(") &&
     app.includes("slideInHorizontally(tween(260))") &&
     app.includes("slideOutHorizontally(tween(260))"),

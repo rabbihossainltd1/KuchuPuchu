@@ -49,6 +49,9 @@ const convLongPress = chatList.slice(longPressStart, longPressEnd);
 const liveFocusStart = chatList.indexOf('key = "chat:$convId"');
 const liveFocusEnd = chatList.indexOf("\n            }\n        }\n    }\n}", liveFocusStart);
 const liveChatFocus = chatList.slice(liveFocusStart, liveFocusEnd);
+const swipeRowStart = chatList.indexOf("private fun SwipeConvRow(");
+const swipeRowEnd = chatList.indexOf("@Composable\nprivate fun RowScope.ActionSlot", swipeRowStart);
+const swipeRow = chatList.slice(swipeRowStart, swipeRowEnd);
 const messageSlotStart = chat.indexOf("private fun KpMessageFocusSlot(");
 const messageSlotEnd = chat.indexOf("@OptIn(ExperimentalFoundationApi::class)", messageSlotStart);
 const messageSlot = chat.slice(messageSlotStart, messageSlotEnd);
@@ -73,6 +76,14 @@ check(
     chatList.includes('key = "chat:$convId"'),
 );
 check(
+  "the lifted chat row keeps its swipe rails covered, and long-press resets a partial reveal",
+  swipeRow.includes('if (KpModalFocusState.focusedItem?.key == "chat:$convId")') &&
+    swipeRow.includes(".background(Card)") &&
+    swipeRow.includes("dragged = 0f") &&
+    swipeRow.includes("SwipeOpen.id = null") &&
+    swipeRow.includes("requestFocus()"),
+);
+check(
   "the source stays visible until its pinned live GraphicsLayer has been recorded, then the root overlay takes over",
   focus.includes("capturePending && layer != null") &&
     focus.includes("layer.record {") &&
@@ -82,10 +93,11 @@ check(
     chatList.includes("KpModalFocusState.pendingFocusKey") &&
     chatList.includes("LaunchedEffect(sheetKey, focusKey)") &&
     focus.includes("LaunchedEffect(request.key, request.focusKey, closing)") &&
-    focus.includes("KpFocusSheetState.request?.focusKey == key && !KpFocusSheetState.closing") &&
-    focus.includes(
-      "while ((layer.size.width <= 0 || layer.size.height <= 0) && waitedFrames < 3)",
-    ) &&
+    focus.includes("layerCaptureRecorded.set(true)") &&
+    focus.includes("layerCaptureRecorded.get()") &&
+    focus.includes("KpModalFocusState.pendingFocusKey == key") &&
+    focus.includes("(requestedFocusKey == null || requestedFocusKey == key)") &&
+    focus.includes("waitedFrames < 8") &&
     focus.includes("if (focused && layer != null)") &&
     focus.includes("drawContent()") &&
     focus.includes("content(requestFocus)") &&

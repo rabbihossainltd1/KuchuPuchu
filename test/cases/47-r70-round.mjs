@@ -1523,8 +1523,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     'r82-3 (owner: "nav bar a unread number ta ekdom baje vabe show hocche ... massage button er right corner a rekhe daw ar double number hole double line jeno na hoi"): the count no longer sits inline after the tab label (pill crush = the ugly wrap) - it is an overlay pinned to the Chats icon\'s top-right corner with zero width pressure, and maxLines=1 + softWrap=false hard-lock one line so a two-digit count can never stack',
     list4.includes(".align(Alignment.TopEnd)") &&
-      list4.includes("offset(x = 6.dp, y = (-8).dp)") &&
-      list4.includes("lineHeight = 11.sp,"),
+      list4.includes("offset(x = 6.dp * sizeScale, y = (-8).dp * sizeScale)") &&
+      list4.includes("lineHeight = 11.sp * sizeScale,"),
   );
   check(
     'r84-1 (owner r84 #1: "emoji ekhono first time animates hoi na" - STILL dead after r78/r81/r82/r83): every prior round carried a 600 ms CAP on the entrance\'s visibility wait, and on the first send of a session the list is still settling (page fill, newest snap, keyboard glide) so the row could pass the cap OFF SCREEN - the fallback started the clock there and the whole window was spent before a visible frame. The wait is UNCAPPED now (cancelled on dispose), the layout callback only FLAGS visibility, and the clock starts only after the GLYPH is in hand (EmojiGlyphWarm - the warm cache marks readiness without a composition, so the entrance plays on the real glyph, never the system fallback + swap); the glyph wait itself is capped 1.2 s for a never-seen emoji',
@@ -1837,10 +1837,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
-    "chat entry uses NavHost's smoother third-width fade/slide instead of a whole-screen graphics-layer animation; unrelated flight diagnostics stay unchanged",
+    "chat entry uses a shorter NavHost-managed fade/quarter-width slide instead of a whole-screen graphics-layer animation; unrelated flight diagnostics stay unchanged",
     kpapp4.includes('"chat/{id}"') &&
-      kpapp4.includes("fadeIn(tween(240, easing = FastOutSlowInEasing))") &&
-      kpapp4.includes("slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 }") &&
+      kpapp4.includes("fadeIn(tween(200, easing = FastOutSlowInEasing))") &&
+      kpapp4.includes("slideInHorizontally(tween(220, easing = FastOutSlowInEasing)) { it / 4 }") &&
       !kpapp4.includes("ChatRouteEntryMotion(") &&
       kpapp4.includes(
         "popEnterTransition = { fadeIn(tween(240, easing = FastOutSlowInEasing)) }",
@@ -1986,7 +1986,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     "r83-3 (owner r83 #3: chat-list unread count \"border er middle a nai\"): Text's default includeFontPadding reserves blank space above the digits, so the count hung below the pill's middle; font padding off + a tight line box centers it (row badge and nav-tab badge both)",
     (list4.match(/PlatformTextStyle\(includeFontPadding = false\)/g) || []).length >= 2 &&
-      list4.includes("lineHeight = 11.sp,"),
+      list4.includes("lineHeight = 11.sp * sizeScale,"),
   );
 }
 
