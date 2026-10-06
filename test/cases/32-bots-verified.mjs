@@ -1147,7 +1147,8 @@ const convBetween = (db, a, b) =>
       chat.includes("KpFocusSheetState.open(") &&
       chat.includes("KpFocusSheetRequest(") &&
       chat.includes('key = "message-actions:$focusKey"') &&
-      chat.includes("focusKey = focusKey.takeIf { KpModalFocusState.focusedItem?.key == it }") &&
+      chat.includes("focusKey = focusKey,") &&
+      !chat.includes("focusKey = focusKey.takeIf") &&
       chat.includes("var actionFor by remember { mutableStateOf<JSONObject?>(null) }") &&
       chat.includes("actionFor?.let { m ->") &&
       chat.includes('listOf("👍", "❤️", "😂", "😮", "😢", "🙏").forEach { e ->') &&
