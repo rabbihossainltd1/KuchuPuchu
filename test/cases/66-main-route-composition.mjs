@@ -56,22 +56,30 @@ check(
     app.includes("slideOutHorizontally(tween(260))"),
 );
 check(
-  "the live focused row still moves as one movable Compose item, with no bitmap or duplicate content",
-  focus.includes("androidx.compose.runtime.movableContentOf") &&
-    focus.includes("item.content()") &&
+  "the live focused row stays composed in its source slot and replays one graphics layer, with no bitmap or duplicate content",
+  focus.includes("LocalGraphicsContext.current") &&
+    focus.includes("createGraphicsLayer()") &&
+    focus.includes("focusLayer?.record") &&
+    focus.includes("drawLayer(item.graphicsLayer)") &&
+    focus.includes("content(requestFocus)") &&
+    focus.includes("LocalPinnableContainer.current") &&
     focus.includes("KpModalFocusState.beginReturn()") &&
+    !focus.includes("movableContentOf") &&
+    !focus.includes("item.content()") &&
     !focus.includes("PixelCopy") &&
     !focus.includes("captureToImage") &&
     !focus.includes("duplicateContent"),
 );
 check(
-  "Compose BOM advances the movable-content crash path with aligned libraries",
-  build.includes('val kpComposeBomVersion = "2026.09.00"') &&
+  "Compose 1.11.3 baseline is restored to isolate #1101; #1100 avoids movable-content transfer",
+  build.includes('val kpComposeBomVersion = "2026.06.00"') &&
     build.includes('platform("androidx.compose:compose-bom:$kpComposeBomVersion")') &&
-    build.includes("Runtime 1.12.1") &&
-    focus.includes("Compose 1.12.1+") &&
-    build.includes("compileSdk = 37") &&
-    build.includes("targetSdk = 35"),
+    build.includes("Compose 1.11.3 baseline") &&
+    build.includes("compileSdk = 35") &&
+    build.includes("targetSdk = 35") &&
+    focus.includes("LocalGraphicsContext.current") &&
+    focus.includes("createGraphicsLayer()") &&
+    !focus.includes("movableContentOf"),
 );
 check(
   "supplied chat vector stays tintable, outlined, and free of the attached metadata",

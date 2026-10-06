@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -27,6 +26,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -35,21 +35,29 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.drawscope.record
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.LocalPinnableContainer
+import androidx.compose.ui.layout.PinnableContainer
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalGraphicsContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -59,11 +67,10 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /**
- * The live item that opened a focused action sheet. Its movable Compose
- * content is transferred from its list slot to the root overlay; the source
- * slot remains measured as a placeholder until the return animation finishes.
- * This crosses LazyColumn/NavHost subcompositions; use Compose 1.12.1+ for its newer
- * movable-content/slot-table fixes after 1.11.3 crashed during long-press transfer.
+ * The one live Compose item that opened a focused action sheet. Its source
+ * composition stays in its measured list slot; while focused, one GraphicsLayer
+ * records that content and the root overlay replays the same display list.
+ * This avoids transferring movable content across LazyColumn/NavHost slots.
  */
 internal data class KpModalFocusItem(
     val key: String,
@@ -71,22 +78,26 @@ internal data class KpModalFocusItem(
     val returnBoundsOnScreen: Rect = sourceBoundsOnScreen,
     val targetBoundsOnScreen: Rect? = null,
     val targetScale: Float,
-    val content: @Composable () -> Unit,
+    val graphicsLayer: GraphicsLayer,
+    val releaseFocusResources: () -> Unit,
 )
 
 internal object KpModalFocusState {
     var focusedItem by mutableStateOf<KpModalFocusItem?>(null)
         private set
     private var returning by mutableStateOf(false)
+    private var pendingFocusCleanup: (() -> Unit)? = null
     val isReturning: Boolean
         get() = returning
 
     fun focus(
         key: String,
         sourceBoundsOnScreen: Rect,
-        content: @Composable () -> Unit,
+        graphicsLayer: GraphicsLayer,
+        releaseFocusResources: () -> Unit,
         targetScale: Float = 1f,
     ) {
+        if (focusedItem != null) return
         returning = false
         KpFocusSheetState.updateOverlayProgress(0f)
         focusedItem =
@@ -95,7 +106,8 @@ internal object KpModalFocusState {
                 sourceBoundsOnScreen = sourceBoundsOnScreen,
                 returnBoundsOnScreen = sourceBoundsOnScreen,
                 targetScale = targetScale,
-                content = content,
+                graphicsLayer = graphicsLayer,
+                releaseFocusResources = releaseFocusResources,
             )
     }
 
@@ -133,8 +145,17 @@ internal object KpModalFocusState {
     }
 
     fun clear() {
+        val previous = focusedItem
         focusedItem = null
         returning = false
+        if (previous != null) pendingFocusCleanup = previous.releaseFocusResources
+    }
+
+    /** Release a retained Lazy item only after the root overlay stopped drawing its layer. */
+    fun releasePendingCleanup() {
+        val release = pendingFocusCleanup ?: return
+        pendingFocusCleanup = null
+        release()
     }
 }
 
@@ -198,8 +219,10 @@ internal object KpFocusSheetState {
 }
 
 /**
- * Wraps one original list/thread item in movable content. Call requestFocus()
- * from its long-press handler; no bitmap or second visual copy is created.
+ * Keeps one original list/thread item in its source slot. While focused, the
+ * source records (but does not display) its drawing commands; the root overlay
+ * displays that same GraphicsLayer. It is allocated only on focus and pinned so
+ * a LazyColumn keeps the source composed through return. No second tree or bitmap.
  */
 @Composable
 internal fun KpLiveFocusItem(
@@ -208,77 +231,88 @@ internal fun KpLiveFocusItem(
     targetScale: Float = 1f,
     content: @Composable (requestFocus: () -> Unit) -> Unit,
 ) {
-    val density = LocalDensity.current
     val view = LocalView.current
+    val graphicsContext = LocalGraphicsContext.current
+    val pinnableContainer = LocalPinnableContainer.current
+    var focusLayer by remember(key, graphicsContext) { mutableStateOf<GraphicsLayer?>(null) }
     val sourceBounds = remember(key) { mutableStateOf<Rect?>(null) }
-    val sourceWidthPx = remember(key) { mutableIntStateOf(0) }
-    val sourceHeightPx = remember(key) { mutableIntStateOf(0) }
-    val focusContentRef = remember(key) { mutableStateOf<(@Composable () -> Unit)?>(null) }
+    var pinnedHandle by remember(key) { mutableStateOf<PinnableContainer.PinnedHandle?>(null) }
+    val releaseFocusResources = remember(key, graphicsContext) {
+        {
+            val layer = focusLayer
+            focusLayer = null
+            if (layer != null) graphicsContext.releaseGraphicsLayer(layer)
+            val handle = pinnedHandle
+            pinnedHandle = null
+            handle?.release()
+        }
+    }
 
-    val requestFocus = remember(key, targetScale) {
+    val requestFocus = remember(key, targetScale, graphicsContext, pinnableContainer, releaseFocusResources) {
         {
             val bounds = sourceBounds.value
-            val heightPx = sourceHeightPx.intValue
-            val liveContent = focusContentRef.value
-            if (bounds != null && sourceWidthPx.intValue > 0 && heightPx > 0 && liveContent != null) {
+            if (
+                bounds != null && bounds.width > 0f && bounds.height > 0f &&
+                KpModalFocusState.focusedItem == null
+            ) {
+                val layer = focusLayer ?: graphicsContext.createGraphicsLayer().also { focusLayer = it }
+                if (pinnedHandle == null) pinnedHandle = pinnableContainer?.pin()
                 KpModalFocusState.focus(
                     key = key,
                     sourceBoundsOnScreen = bounds,
-                    content = liveContent,
+                    graphicsLayer = layer,
+                    releaseFocusResources = releaseFocusResources,
                     targetScale = targetScale,
                 )
             }
         }
     }
 
-    val currentContent: @Composable () -> Unit = { content(requestFocus) }
-    val latestContent = rememberUpdatedState(currentContent)
-    val movable = remember(key) {
-        androidx.compose.runtime.movableContentOf {
-            latestContent.value()
+    val focused = KpModalFocusState.focusedItem?.key == key
+    DisposableEffect(key, graphicsContext, releaseFocusResources) {
+        onDispose {
+            // A Lazy item can still be removed by a data update while pinned.
+            // Clear first so the root stops drawing its retained layer before release.
+            if (KpModalFocusState.focusedItem?.key == key) {
+                KpModalFocusState.clear()
+            } else {
+                releaseFocusResources()
+            }
         }
     }
-    val focusContent: @Composable () -> Unit = remember(key) { { movable() } }
-    SideEffect { focusContentRef.value = focusContent }
 
-    val focused = KpModalFocusState.focusedItem?.key == key
     Box(
-        modifier.onGloballyPositioned { coordinates ->
-            // The wrapper remains measured as a placeholder while the live
-            // content is lifted; only its return endpoint follows list reflow.
-            val currentBounds = coordinates.boundsOnScreen(view)
-            sourceBounds.value = currentBounds
-            if (!focused) {
-                sourceWidthPx.intValue = coordinates.size.width
-                sourceHeightPx.intValue = coordinates.size.height
-            } else {
-                // The list/thread may reflow behind the sheet while realtime
-                // updates arrive. Keep the return endpoint aligned to the live
-                // placeholder without moving the lifted item off the sheet.
-                KpModalFocusState.updateSource(key, currentBounds)
+        modifier
+            .onGloballyPositioned { coordinates ->
+                val currentBounds = coordinates.boundsOnScreen(view)
+                sourceBounds.value = currentBounds
+                if (focused) KpModalFocusState.updateSource(key, currentBounds)
             }
-        },
+            .drawWithContent {
+                if (focused) {
+                    focusLayer?.record {
+                        this@drawWithContent.drawContent()
+                    }
+                } else {
+                    drawContent()
+                }
+            },
     ) {
-        if (focused) {
-            Spacer(
-                Modifier
-                    .width(with(density) { sourceWidthPx.intValue.toDp() })
-                    .height(with(density) { sourceHeightPx.intValue.toDp() }),
-            )
-        } else {
-            movable()
-        }
+        content(requestFocus)
     }
 }
 
-/** Root-level, stable call site for the live item during every sheet phase. */
+/** Root-level, stable call site for the live display layer during every sheet phase. */
 @Composable
 internal fun KpRootFocusOverlayHost() {
     val item = KpModalFocusState.focusedItem
+    SideEffect {
+        if (item == null) KpModalFocusState.releasePendingCleanup()
+    }
     if (item != null) KpModalFocusOverlay(KpFocusSheetState.overlayProgress)
 }
 
-/** Draw the same live movable item over the root-hosted sheet. */
+/** Replay the original item's recorded Compose drawing over the root-hosted sheet. */
 @Composable
 internal fun KpModalFocusOverlay(progress: Float) {
     val item = KpModalFocusState.focusedItem ?: return
@@ -308,9 +342,21 @@ internal fun KpModalFocusOverlay(progress: Float) {
                     scaleX = scale
                     scaleY = scale
                     transformOrigin = TransformOrigin.Center
+                }
+                .drawWithContent {
+                    val layerSize = item.graphicsLayer.size
+                    if (layerSize.width > 0 && layerSize.height > 0) {
+                        scale(
+                            scaleX = size.width / layerSize.width.toFloat(),
+                            scaleY = size.height / layerSize.height.toFloat(),
+                            pivot = Offset.Zero,
+                        ) {
+                            drawLayer(item.graphicsLayer)
+                        }
+                    }
+                    drawContent()
                 },
         ) {
-            item.content()
             // The lifted row/bubble is a visual focus target, not an action
             // surface. Keep taps from accidentally opening media beneath the
             // context menu; the reserved slot has no sheet options underneath.

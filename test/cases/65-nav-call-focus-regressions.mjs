@@ -176,24 +176,30 @@ check(
       .includes(".border("),
 );
 check(
-  "focused message is the original-size live bubble above reactions and sheet options, not a bitmap or touch-through window",
+  "focused message replays the original-size Compose layer above reactions, without bitmap capture or touch-through",
   chat.includes("DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), bubbleShape)") &&
     chat.includes('focusKey = "message:$rowKey"') &&
     chat.includes("targetScale = 1f") &&
-    focus.includes("androidx.compose.runtime.movableContentOf") &&
-    focus.includes("item.content()") &&
+    focus.includes("LocalGraphicsContext.current") &&
+    focus.includes("createGraphicsLayer()") &&
+    focus.includes("focusLayer?.record") &&
+    focus.includes("drawLayer(item.graphicsLayer)") &&
     focus.includes(".size(width, height)") &&
     focus.includes("KpModalFocusState.updateSource(key, currentBounds)") &&
     focus.includes("KpModalFocusState.beginReturn()") &&
+    !focus.includes("androidx.compose.runtime.movableContentOf") &&
+    !focus.includes("item.content()") &&
     !focus.includes("androidx.compose.ui.window.Dialog(") &&
     !focus.includes("PixelCopy") &&
     !focus.includes("DeleteAnim.capture("),
 );
 check(
-  "root focus is drawn above the blurred screen and action sheet; the live bubble rests above reactions and options",
+  "root focus replays the sharp source layer above the blurred screen and action sheet, over reactions and options",
   kpApp.indexOf("Surface(Modifier.fillMaxSize().blur(modalBlurRadius)") <
     kpApp.indexOf("KpFocusedSheetHost()") &&
     kpApp.indexOf("KpFocusedSheetHost()") < kpApp.indexOf("KpRootFocusOverlayHost()") &&
+    focus.includes("drawLayer(item.graphicsLayer)") &&
+    !focus.includes("movableContentOf") &&
     focus.includes("KpModalFocusState.updateTargetAboveSheet(") &&
     focus.includes("val top = finalSheetTop - source.height - gapPx") &&
     focus.indexOf("KpModalFocusState.updateTargetAboveSheet(") <

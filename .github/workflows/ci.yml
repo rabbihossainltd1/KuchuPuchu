@@ -84,20 +84,11 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      # No setup-android: v3 requests the long-obsolete `tools` package.
-      # ubuntu-22.04 ships the Android SDK command-line tools; install the exact
-      # API 37 platform required by Compose 1.12.1 before Gradle runs.
-      - name: Install Android API 37 platform
-        run: |
-          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -x "$SDKMANAGER" ]; then
-            SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)"
-          fi
-          if [ ! -x "$SDKMANAGER" ]; then echo "sdkmanager not found under $SDK_ROOT"; exit 1; fi
-          set +o pipefail
-          yes | "$SDKMANAGER" --licenses >/dev/null
-          "$SDKMANAGER" --install "platforms;android-37.0" "build-tools;37.0.0"
+      # No setup-android: v3's sdkmanager run requests the long-obsolete
+      # `tools` package and fails hard now that it is gone from the repo
+      # ("Failed to find package 'tools'", exit 1 — red since 2026-09-14
+      # ~20:47 UTC). ubuntu-22.04 already ships the SDK (platform 35,
+      # build-tools, licences accepted); AGP downloads anything else.
       # §50 puts unit tests and lint before the build, and until now neither rung
       # actually ran: `lint { abortOnError = true }` was configured but no CI step
       # invoked a lint task, and the module had no test sources at all.

@@ -54,15 +54,25 @@ check(
     kpApp.includes("else modalBlur.snapTo(0f)"),
 );
 check(
-  "focus sheet lifts the same live Compose item, leaves its source slot, and returns without bitmap or duplicate capture",
-  focus.includes("androidx.compose.runtime.movableContentOf") &&
-    focus.includes("internal object KpModalFocusState") &&
-    focus.includes("if (focused) {") &&
-    focus.includes("Spacer(") &&
-    focus.includes("else {\n            movable()\n        }") &&
+  "focus keeps one Compose subtree in the source slot and replays its recorded layer without bitmap or duplicate content",
+  focus.includes("LocalGraphicsContext.current") &&
+    focus.includes("createGraphicsLayer()") &&
+    focus.includes("releaseGraphicsLayer(layer)") &&
+    focus.includes("focusLayer?.record") &&
+    focus.includes("drawLayer(item.graphicsLayer)") &&
+    focus.includes("content(requestFocus)") &&
+    focus.includes("LocalPinnableContainer.current") &&
+    focus.includes("pinnableContainer?.pin()") &&
+    focus.includes("releasePendingCleanup()") &&
+    focus.includes("if (item == null) KpModalFocusState.releasePendingCleanup()") &&
+    focus.includes("onDispose") &&
+    focus.includes("focusLayer ?: graphicsContext.createGraphicsLayer()") &&
+    !focus.includes("Spacer(") &&
     focus.includes("KpModalFocusState.updateSource(key, currentBounds)") &&
     focus.includes("KpModalFocusState.beginReturn()") &&
     focus.includes("KpModalFocusState.clear()") &&
+    !focus.includes("movableContentOf") &&
+    !focus.includes("item.content()") &&
     !focus.includes("PixelCopy") &&
     !focus.includes("ImageBitmap") &&
     !focus.includes("DeleteAnim.capture(") &&

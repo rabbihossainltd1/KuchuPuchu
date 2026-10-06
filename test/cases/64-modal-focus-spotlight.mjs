@@ -22,22 +22,24 @@ const check = (name, condition, detail = "") =>
   lines.push(`  ${condition ? "OK     " : "BROKEN "}  ${name}${detail ? `  -> ${detail}` : ""}`);
 
 check(
-  "Compose runtime and compiler target the movable-content crash path on a supported toolchain",
-  rootBuild.includes('id("com.android.application") version "9.1.1"') &&
-    rootBuild.includes('id("org.jetbrains.kotlin.android") version "2.2.10"') &&
-    rootBuild.includes('id("org.jetbrains.kotlin.plugin.compose") version "2.2.10"') &&
+  "#1101 toolchain rollback isolates the runtime upgrade; #1100 no longer transfers movable content",
+  rootBuild.includes('id("com.android.application") version "8.11.1"') &&
+    rootBuild.includes('id("org.jetbrains.kotlin.android") version "2.1.21"') &&
+    rootBuild.includes('id("org.jetbrains.kotlin.plugin.compose") version "2.1.21"') &&
     appBuild.includes('id("org.jetbrains.kotlin.plugin.compose")') &&
-    appBuild.includes('val kpComposeBomVersion = "2026.09.00"') &&
-    appBuild.includes("compileSdk = 37") &&
+    appBuild.includes('val kpComposeBomVersion = "2026.06.00"') &&
+    appBuild.includes("Compose 1.11.3 baseline") &&
+    appBuild.includes("compileSdk = 35") &&
     appBuild.includes("targetSdk = 35") &&
     appBuild.includes('platform("androidx.compose:compose-bom:$kpComposeBomVersion")') &&
     appBuild.includes("navigation-compose:2.9.8") &&
-    gradleWrapper.includes("gradle-9.3.1-all.zip") &&
-    gradleProperties.includes("android.builtInKotlin=false") &&
-    gradleProperties.includes("android.newDsl=false") &&
-    workflow.includes('"platforms;android-37.0"') &&
-    focus.includes("Compose 1.12.1+") &&
-    focus.includes("movable-content/slot-table fixes after 1.11.3 crashed"),
+    gradleWrapper.includes("gradle-8.13-all.zip") &&
+    !gradleProperties.includes("android.builtInKotlin=false") &&
+    !gradleProperties.includes("android.newDsl=false") &&
+    !workflow.includes('"platforms;android-37.0"') &&
+    focus.includes("LocalGraphicsContext.current") &&
+    focus.includes("createGraphicsLayer()") &&
+    !focus.includes("movableContentOf"),
 );
 
 const convCardStart = chatList.indexOf("private fun ConvCard(");
@@ -71,11 +73,12 @@ check(
     chatList.includes('key = "chat:$convId"'),
 );
 check(
-  "the focused row leaves its measured source slot and lands above the bottom-sheet surface",
+  "the focused row keeps its measured source slot, pins the Lazy item, and draws above the bottom sheet",
   focus.includes("if (focused) {") &&
-    focus.includes("Spacer(") &&
-    focus.includes("sourceWidthPx.intValue.toDp()") &&
-    focus.includes("sourceHeightPx.intValue.toDp()") &&
+    focus.includes("focusLayer?.record") &&
+    focus.includes("content(requestFocus)") &&
+    focus.includes("LocalPinnableContainer.current") &&
+    focus.includes("pinnableContainer?.pin()") &&
     focus.includes("fun updateTargetAboveSheet(") &&
     focus.includes("val finalSheetTop = sheetBoundsOnScreen.top - sheetOffsetYPx.roundToInt()") &&
     focus.includes("val top = finalSheetTop - source.height - gapPx") &&
@@ -100,9 +103,9 @@ check(
     chat.includes('if (pressed.optString("kind") != "DELETED") requestFocus()'),
 );
 check(
-  "message bubble stays at original size while its measured live source returns smoothly after dismissal",
+  "message bubble stays at original size while its pinned, measured source returns smoothly after dismissal",
   messageSlot.includes("targetScale = 1f") &&
-    focus.includes("sourceHeightPx.intValue = coordinates.size.height") &&
+    focus.includes("sourceBounds.value = currentBounds") &&
     focus.includes("KpModalFocusState.updateSource(key, currentBounds)") &&
     focus.includes("val source = if (KpModalFocusState.isReturning) item.returnBoundsOnScreen") &&
     focus.includes("val left = source.left + (target.left - source.left) * t") &&
@@ -137,13 +140,17 @@ check(
       closeFlow.indexOf("KpFocusSheetState.finishClose()"),
 );
 check(
-  "focus overlay is one movable live composition in the root above the blurred screen and sheet",
-  focus.includes("androidx.compose.runtime.movableContentOf") &&
+  "one recorded Compose layer is replayed in the root above the blurred screen and sheet, without a second tree or bitmap",
+  focus.includes("LocalGraphicsContext.current") &&
+    focus.includes("createGraphicsLayer()") &&
+    focus.includes("focusLayer?.record") &&
+    focus.includes("drawLayer(item.graphicsLayer)") &&
     kpApp.indexOf("Surface(Modifier.fillMaxSize().blur(modalBlurRadius)") <
       kpApp.indexOf("KpFocusedSheetHost()") &&
     kpApp.indexOf("KpFocusedSheetHost()") < kpApp.indexOf("KpRootFocusOverlayHost()") &&
     focus.includes("internal fun KpRootFocusOverlayHost()") &&
-    focus.includes("item.content()") &&
+    !focus.includes("androidx.compose.runtime.movableContentOf") &&
+    !focus.includes("item.content()") &&
     !focus.includes("PixelCopy") &&
     !focus.includes("ImageBitmap") &&
     !focus.includes("DeleteAnim.capture("),
