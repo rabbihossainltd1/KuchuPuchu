@@ -127,10 +127,10 @@ check(
       )
       .includes('android:fromYDelta="100%"') &&
     navEnter.includes('android:duration="180"') &&
-    navEnter.includes('@android:interpolator/fast_out_slow_in') &&
+    navEnter.includes("@android:interpolator/fast_out_slow_in") &&
     navExit.includes('android:toYDelta="100%"') &&
     navExit.includes('android:duration="160"') &&
-    navExit.includes('@android:interpolator/fast_out_linear_in'),
+    navExit.includes("@android:interpolator/fast_out_linear_in"),
 );
 check(
   "the rounded floating pill uses a high-opacity theme surface without native blur",

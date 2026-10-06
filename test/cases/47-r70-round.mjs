@@ -1840,8 +1840,12 @@ const main = (f) => read(`${ANDROID}/${f}`);
     "chat entry uses a soft cross-fade plus a small horizontal drift; unrelated bornHere and flight diagnostics stay unchanged",
     kpapp4.includes('"chat/{id}"') &&
       kpapp4.includes("fadeIn(tween(210, easing = FastOutSlowInEasing))") &&
-      kpapp4.includes("slideInHorizontally(tween(210, easing = FastOutSlowInEasing)) { it / 20 }") &&
-      kpapp4.includes("popEnterTransition = { fadeIn(tween(200, easing = FastOutSlowInEasing)) }") &&
+      kpapp4.includes(
+        "slideInHorizontally(tween(210, easing = FastOutSlowInEasing)) { it / 20 }",
+      ) &&
+      kpapp4.includes(
+        "popEnterTransition = { fadeIn(tween(200, easing = FastOutSlowInEasing)) }",
+      ) &&
       chat4.includes('android.util.Log.d("kpfx", "born key=$fxKey') &&
       flight4.includes('android.util.Log.d("kpfx", "flight key=$key'),
   );

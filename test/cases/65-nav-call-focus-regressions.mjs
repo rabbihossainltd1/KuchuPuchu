@@ -123,10 +123,16 @@ check(
     !homeRoute.includes("slideOutVertically") &&
     chatRoute.includes('"chat/{id}"') &&
     chatRoute.includes("fadeIn(tween(210, easing = FastOutSlowInEasing))") &&
-    chatRoute.includes("slideInHorizontally(tween(210, easing = FastOutSlowInEasing)) { it / 20 }") &&
+    chatRoute.includes(
+      "slideInHorizontally(tween(210, easing = FastOutSlowInEasing)) { it / 20 }",
+    ) &&
     chatRoute.includes("fadeOut(tween(150, easing = FastOutSlowInEasing))") &&
-    chatRoute.includes("popEnterTransition = { fadeIn(tween(200, easing = FastOutSlowInEasing)) }") &&
-    chatRoute.includes("slideOutHorizontally(tween(190, easing = FastOutSlowInEasing)) { it / 20 }") &&
+    chatRoute.includes(
+      "popEnterTransition = { fadeIn(tween(200, easing = FastOutSlowInEasing)) }",
+    ) &&
+    chatRoute.includes(
+      "slideOutHorizontally(tween(190, easing = FastOutSlowInEasing)) { it / 20 }",
+    ) &&
     !nav.includes("windowYOffsetPx") &&
     nav.includes("R.style.KpNavWindowAnimations"),
 );
