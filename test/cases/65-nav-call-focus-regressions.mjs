@@ -44,7 +44,7 @@ const editButton = attach.slice(editButtonStart, editButtonEnd);
 const homeStart = kpApp.indexOf('composable(\n                    "main",');
 const homeEnd = kpApp.indexOf('composable("newchat")', homeStart);
 const homeRoute = kpApp.slice(homeStart, homeEnd);
-const chatRouteStart = kpApp.indexOf('composable("chat/{id}")', homeEnd);
+const chatRouteStart = kpApp.indexOf('"chat/{id}"', homeEnd);
 const chatRouteEnd = kpApp.indexOf('composable("settings")', chatRouteStart);
 const chatRoute = kpApp.slice(chatRouteStart, chatRouteEnd);
 const sharedSheetStart = ui.indexOf("fun KpSheet(");
@@ -92,10 +92,10 @@ check(
 check(
   "WindowManager animates the pill as one surface; Compose no longer relayouts the window every frame",
   nav.includes("if (dialogAttached)") &&
-    nav.includes("dialogWindow.setWindowAnimations(R.style.KpNavWindowAnimations)") &&
+    nav.includes("window.setWindowAnimations(R.style.KpNavWindowAnimations)") &&
     nav.includes("dialogWindowRef[0]?.setWindowAnimations(0)") &&
     nav.includes("params.y = bottomOffsetPx") &&
-    nav.includes("dialogWindow.setBackgroundBlurRadius(if (blurEnabled) blurRadiusPx else 0)") &&
+    nav.includes("window.setBackgroundBlurRadius(if (blurEnabled) blurRadiusPx else 0)") &&
     nav.includes("WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()") &&
     theme.includes("@anim/kp_nav_enter") &&
     theme.includes("@anim/kp_nav_exit") &&
@@ -120,7 +120,9 @@ check(
     homeRoute.includes("popEnterTransition = { EnterTransition.None }") &&
     !homeRoute.includes("slideInVertically") &&
     !homeRoute.includes("slideOutVertically") &&
-    chatRoute.includes('composable("chat/{id}") { entry ->') &&
+    chatRoute.includes('"chat/{id}"') &&
+    chatRoute.includes("enterTransition = { fadeIn(tween(150)) }") &&
+    chatRoute.includes("popExitTransition = { fadeOut(tween(130)) }") &&
     !nav.includes("windowYOffsetPx") &&
     nav.includes("R.style.KpNavWindowAnimations"),
 );
@@ -129,7 +131,7 @@ check(
   nav.includes("val glassFill =") &&
     nav.includes("val fallbackFill =") &&
     nav.includes("GradientDrawable()") &&
-    nav.includes("dialogWindow.setBackgroundDrawable(pillWindowBackground)") &&
+    nav.includes("window.setBackgroundDrawable(background)") &&
     nav.includes("setBackgroundBlurRadius(") &&
     nav.includes(".clip(CircleShape)") &&
     nav.includes(".background(indicatorColor)") &&

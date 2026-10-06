@@ -10,6 +10,10 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Include the CI source revision in crash diagnostics without changing the app version.
+val kpBuildSha = System.getenv("GITHUB_SHA")?.take(12)?.takeIf { it.matches(Regex("[0-9a-fA-F]{7,12}")) } ?: "local"
+val kpComposeBomVersion = "2026.06.00"
+
 // §51 / Play policy: `release` must not be signed with the repository's debug key —
 // that key is in git, so anyone with read access could publish an update that every
 // installed phone accepts as coming from this developer. The real signing key lives in
@@ -71,6 +75,8 @@ android {
         targetSdk = 35
         versionCode = 276
         versionName = "3.9.199"
+        buildConfigField("String", "BUILD_SHA", "\"$kpBuildSha\"")
+        buildConfigField("String", "COMPOSE_BOM_VERSION", "\"$kpComposeBomVersion\"")
     }
     signingConfigs {
         getByName("debug") {
@@ -135,7 +141,10 @@ android {
     // Unit tests are pure-JVM on purpose: no Robolectric, no android.jar stubs to
     // paper over — if a rule needs a Context it belongs in the device checklist.
     testOptions { unitTests.isIncludeAndroidResources = false }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     // Owner round 32 (item 41): libkp_voice — RNNoise voice isolation for
     // calls, built from src/main/cpp for the two shipped ABIs. CMake 3.22.1
     // ships with the SDK's cmake package on the CI image.
@@ -165,7 +174,7 @@ android {
 dependencies {
     // Runtime 1.11.3 includes the movable-content exception fix; keep Compose
     // runtime/UI/animation versions aligned through the BOM.
-    val composeBom = platform("androidx.compose:compose-bom:2026.06.00")
+    val composeBom = platform("androidx.compose:compose-bom:$kpComposeBomVersion")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")

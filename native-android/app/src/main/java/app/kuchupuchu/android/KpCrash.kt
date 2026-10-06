@@ -3,6 +3,7 @@ package app.kuchupuchu.android
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,6 +23,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.Collections
+import java.util.IdentityHashMap
 import androidx.compose.ui.unit.sp
 
 /**
@@ -35,6 +38,10 @@ import androidx.compose.ui.unit.sp
 object KpCrash {
     private const val FILE = "crash_last.txt"
     private const val PREF = "crash_capture"
+    private const val MAX_REPORT_CHARS = 24_000
+    private const val MAX_STACK_FRAMES = 256
+    private const val MAX_CAUSE_DEPTH = 12
+    private const val MAX_SUPPRESSED_PER_THROWABLE = 16
     private val crumbs = ArrayDeque<String>()
     private var enabled = true
 
@@ -62,10 +69,15 @@ object KpCrash {
                     buildString {
                         appendLine("time: ${java.time.Instant.now()}")
                         appendLine("thread: ${t.name}")
+                        appendLine("app: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                        appendLine("build: ${BuildConfig.BUILD_SHA}")
+                        appendLine("compose-bom: ${BuildConfig.COMPOSE_BOM_VERSION}")
+                        appendLine("android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+                        appendLine("device: ${Build.MANUFACTURER} ${Build.MODEL} (device=${Build.DEVICE})")
                         appendLine("route: ${Store.route}")
                         appendLine("crumbs: ${crumbs.joinToString(" | ")}")
                         appendLine(stackOf(e))
-                    },
+                    }.let(::boundedReport),
                 )
             }
             prev?.uncaughtException(t, e)
@@ -82,18 +94,43 @@ object KpCrash {
         }
     }
 
-    private fun stackOf(e: Throwable): String =
+    private fun stackOf(root: Throwable): String =
         buildString {
-            appendLine("${e.javaClass.name}: ${e.message}")
-            e.stackTrace.take(28).forEach { appendLine("    at $it") }
-            e.cause?.let { c ->
-                appendLine("cause: ${c.javaClass.name}: ${c.message}")
-                c.stackTrace.take(10).forEach { appendLine("    at $it") }
+            val seen = Collections.newSetFromMap(IdentityHashMap<Throwable, Boolean>())
+
+            fun appendThrowable(error: Throwable, relation: String, depth: Int) {
+                if (depth > MAX_CAUSE_DEPTH) {
+                    appendLine("$relation: [cause depth limit]")
+                    return
+                }
+                if (!seen.add(error)) {
+                    appendLine("$relation: [circular throwable reference]")
+                    return
+                }
+                appendLine("$relation: ${error.javaClass.name}: ${error.message}")
+                val frames = error.stackTrace
+                frames.take(MAX_STACK_FRAMES).forEach { appendLine("    at $it") }
+                if (frames.size > MAX_STACK_FRAMES) {
+                    appendLine("    ... ${frames.size - MAX_STACK_FRAMES} additional frames omitted")
+                }
+                error.suppressed.take(MAX_SUPPRESSED_PER_THROWABLE).forEachIndexed { index, nested ->
+                    appendThrowable(nested, "suppressed[$index]", depth + 1)
+                }
+                if (error.suppressed.size > MAX_SUPPRESSED_PER_THROWABLE) {
+                    appendLine("    ... ${error.suppressed.size - MAX_SUPPRESSED_PER_THROWABLE} more suppressed errors")
+                }
+                error.cause?.let { appendThrowable(it, "caused by", depth + 1) }
             }
+
+            appendThrowable(root, "exception", 0)
         }
 
+    private fun boundedReport(report: String): String =
+        if (report.length <= MAX_REPORT_CHARS) report
+        else report.take(MAX_REPORT_CHARS - 32) + "\n...[report truncated]..."
+
     fun lastReport(ctx: Context): String? =
-        runCatching { ctx.filesDir.resolve(FILE).takeIf { it.exists() }?.readText()?.take(4000) }.getOrNull()
+        runCatching { ctx.filesDir.resolve(FILE).takeIf { it.exists() }?.readText() }.getOrNull()
 
     fun clear(ctx: Context) {
         runCatching { ctx.filesDir.resolve(FILE).delete() }

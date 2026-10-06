@@ -99,7 +99,7 @@ check(
   "bottom-nav route changes use compositor window animations rather than per-frame WindowManager relayouts",
   nav.includes("if (modalOpen)") &&
     nav.includes("dialogAttached = visible") &&
-    nav.includes("dialogWindow.setWindowAnimations(R.style.KpNavWindowAnimations)") &&
+    nav.includes("window.setWindowAnimations(R.style.KpNavWindowAnimations)") &&
     nav.includes("params.y = bottomOffsetPx") &&
     !nav.includes("slideProgress") &&
     !nav.includes("params.y = windowYOffsetPx") &&
@@ -115,12 +115,13 @@ check(
 );
 check(
   "the pill is an explicitly translucent themed window using Android's real rounded background blur API",
-  nav.includes("HomeNavPillDialog(navDialogContext)") &&
-    chatList.includes("CompositionLocalProvider(LocalContext provides themedContext)") &&
+  nav.includes("HomeNavPillDialog(") &&
+    chatList.includes("Dialog(activityContext, R.style.KpNavDialogTheme)") &&
+    chatList.includes("CompositionLocalProvider(LocalContext provides dialog.context)") &&
     nav.includes("R.style.KpNavDialogTheme") &&
-    nav.includes("dialogWindow.setBackgroundDrawable(pillWindowBackground)") &&
+    nav.includes("window.setBackgroundDrawable(background)") &&
     nav.includes("params.format = PixelFormat.TRANSLUCENT") &&
-    nav.includes("dialogWindow.setBackgroundBlurRadius(if (blurEnabled) blurRadiusPx else 0)") &&
+    nav.includes("window.setBackgroundBlurRadius(if (blurEnabled) blurRadiusPx else 0)") &&
     nav.includes("rememberCrossWindowBlurEnabled()") &&
     nav.includes("val fallbackFill =") &&
     theme.includes('name="KpNavDialogTheme"') &&

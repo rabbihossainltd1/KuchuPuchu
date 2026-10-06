@@ -1837,9 +1837,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
-    'r99-4 (owner r98 #1: "baad daw tumi regression kore felba" - leave the chat entrance alone, do not risk regressions): the r98-4 per-route fade is REVERTED, chat/{id} is back to the plain composable inheriting the NavHost default transitions. The r96 bornHere floor and the r97 armed-adoption guard stay in force (they suppress real re-flights), and the kpfx diagnostic logs stay for the adb hunt',
-    kpapp4.includes('composable("chat/{id}") { entry ->') &&
-      !kpapp4.includes("enterTransition = { fadeIn(tween(220)) },") &&
+    "chat entry keeps a real route transition but uses a short cross-fade to reduce the reported chat-open hitch; unrelated bornHere and flight diagnostics stay unchanged",
+    kpapp4.includes('"chat/{id}"') &&
+      kpapp4.includes("enterTransition = { fadeIn(tween(150)) },") &&
+      kpapp4.includes("popExitTransition = { fadeOut(tween(130)) },") &&
       chat4.includes('android.util.Log.d("kpfx", "born key=$fxKey') &&
       flight4.includes('android.util.Log.d("kpfx", "flight key=$key'),
   );

@@ -143,7 +143,7 @@ check(
     !nav.includes("slideProgress") &&
     nav.includes("Dialog(") &&
     nav.includes("WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE") &&
-    nav.includes("dialogWindow.setBackgroundBlurRadius(if (blurEnabled) blurRadiusPx else 0)") &&
+    nav.includes("window.setBackgroundBlurRadius(if (blurEnabled) blurRadiusPx else 0)") &&
     kpApp.includes("modalOpen = modalWindowVisible"),
 );
 

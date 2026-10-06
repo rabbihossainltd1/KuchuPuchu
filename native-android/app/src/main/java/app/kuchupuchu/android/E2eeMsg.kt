@@ -2,6 +2,8 @@ package app.kuchupuchu.android
 
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -96,6 +98,10 @@ internal object E2eeMsg {
         private set
 
     private val publication = E2eePublicationGate()
+
+    private fun notifyRestoredNonceOnMain() {
+        Handler(Looper.getMainLooper()).post { restoredNonce++ }
+    }
 
     // ---------- pure core (JVM-testable, no Android) ----------
 
@@ -322,7 +328,7 @@ internal object E2eeMsg {
                     if (parsePriv(rp) != null && parsePub(ru) != null) {
                         prefs.edit().putString(KEY_PRIV, rp).putString(KEY_PUB, ru).apply()
                         identityCache = rp to ru
-                        restoredNonce++
+                        notifyRestoredNonceOnMain()
                         return@runCatching true
                     }
                 }
@@ -403,7 +409,7 @@ internal object E2eeMsg {
         }.getOrNull()
     }
 
-    /** The restore dialog's answer: unlock, adopt, republish. IO thread. */
+    /** The restore dialog's answer: unlock, adopt, republish. Called on IO. */
     fun tryRestore(ctx: Context, pass: String): Boolean =
         runCatching {
             val blob = pendingRestore ?: return false
@@ -411,7 +417,9 @@ internal object E2eeMsg {
             ctx.getSharedPreferences(PREFS, 0).edit().putString(KEY_PRIV, p).putString(KEY_PUB, u).apply()
             identityCache = p to u
             pendingRestore = null
-            restoredNonce++
+            // Compose observes restoredNonce: never mutate it on this IO thread.
+            // Queue the UI invalidation immediately, before republishing over network.
+            notifyRestoredNonceOnMain()
             publication.reset()
             val pub = Api.request("/api/me", "GET", null).optJSONObject("user")?.optText("e2eePublicKey")
             if (pub != u) Api.patch("/api/me", JSONObject().put("e2eePublicKey", u))

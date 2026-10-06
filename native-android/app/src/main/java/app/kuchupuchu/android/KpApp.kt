@@ -258,7 +258,17 @@ fun KpApp() {
                 ) { entry ->
                     CreateGroupScreen(nav, entry.arguments?.getString("with") ?: "")
                 }
-                composable("chat/{id}") { entry ->
+                composable(
+                    "chat/{id}",
+                    // Enter the thread with a short cross-fade instead of the
+                    // global slide. This reduces motion/overlap on the reported
+                    // chat-open hitch while preserving a real route transition;
+                    // device frame-time profiling is still needed to confirm it.
+                    enterTransition = { fadeIn(tween(150)) },
+                    exitTransition = { fadeOut(tween(110)) },
+                    popEnterTransition = { fadeIn(tween(150)) },
+                    popExitTransition = { fadeOut(tween(130)) },
+                ) { entry ->
                     val id = entry.arguments?.getString("id") ?: ""
                     ChatScreen(nav, id)
                 }

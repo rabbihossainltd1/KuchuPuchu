@@ -53,7 +53,8 @@ check(
   mainRoute.includes('"main"') &&
     mainRoute.includes("enterTransition = { EnterTransition.None }") &&
     mainRoute.includes("exitTransition = { ExitTransition.None }") &&
-    app.includes('composable("chat/{id}")') &&
+    app.includes('"chat/{id}"') &&
+    app.includes("enterTransition = { fadeIn(tween(150)) }") &&
     app.includes("slideInHorizontally(tween(260))") &&
     app.includes("slideOutHorizontally(tween(260))"),
 );
@@ -68,7 +69,8 @@ check(
 );
 check(
   "Compose BOM keeps a compatible stable runtime with the movable-content exception fix",
-  build.includes("androidx.compose:compose-bom:2026.06.00") &&
+  build.includes('val kpComposeBomVersion = "2026.06.00"') &&
+    build.includes('platform("androidx.compose:compose-bom:$kpComposeBomVersion")') &&
     build.includes("Runtime 1.11.3") &&
     focus.includes("Runtime 1.11.2+"),
 );

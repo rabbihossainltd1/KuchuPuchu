@@ -20,7 +20,8 @@ check(
   rootBuild.includes('id("org.jetbrains.kotlin.android") version "2.1.21"') &&
     rootBuild.includes('id("org.jetbrains.kotlin.plugin.compose") version "2.1.21"') &&
     appBuild.includes('id("org.jetbrains.kotlin.plugin.compose")') &&
-    appBuild.includes("compose-bom:2026.06.00") &&
+    appBuild.includes('val kpComposeBomVersion = "2026.06.00"') &&
+    appBuild.includes('platform("androidx.compose:compose-bom:$kpComposeBomVersion")') &&
     appBuild.includes("navigation-compose:2.9.8") &&
     focus.includes("Compose Runtime 1.11.2+"),
 );

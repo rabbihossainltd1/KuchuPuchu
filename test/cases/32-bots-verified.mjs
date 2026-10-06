@@ -5015,7 +5015,7 @@ const convBetween = (db, a, b) =>
   // anywhere past the Update tap names its phase in the report — and
   // the report keeps the whole stack (the sheet scrolls).
   check(
-    "release: crash-report solidity — update_ready / update_committed success marks, update_dl/install/session _failed marks with the exception name, the saved report keeps 4000 chars",
+    "release: crash-report solidity — update_ready / update_committed success marks, update_dl/install/session _failed marks with the exception name, the complete bounded report is scrollable/copyable",
     (() => {
       const crash = kt("KpCrash.kt");
       return (
@@ -5024,7 +5024,8 @@ const convBetween = (db, a, b) =>
         upd.includes('KpCrash.mark("update_dl_failed:${e.javaClass.simpleName}")') &&
         upd.includes('KpCrash.mark("update_install_failed:${it.javaClass.simpleName}")') &&
         upd.includes('KpCrash.mark("update_session_failed:${e.javaClass.simpleName}")') &&
-        crash.includes("?.readText()?.take(4000)")
+        crash.includes("?.readText()") &&
+        crash.includes("MAX_REPORT_CHARS = 24_000")
       );
     })(),
   );
