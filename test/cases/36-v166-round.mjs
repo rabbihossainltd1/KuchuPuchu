@@ -90,8 +90,8 @@ const pkg = readFileSync(
 
 /* the round's own bookkeeping */
 check(
-  "r106: versionCode 277 / versionName 3.9.200 (Android crash/navigation bug-fix bump; release remains a separate approval)",
-  /versionCode\s*=\s*277\b/.test(pkg) && /versionName\s*=\s*"3\.9\.200"/.test(pkg),
+  "r107: versionCode 278 / versionName 3.9.201 (Android cache, nav-alignment and reaction-animation update; release remains a separate approval)",
+  /versionCode\s*=\s*278\b/.test(pkg) && /versionName\s*=\s*"3\.9\.201"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */

@@ -267,8 +267,8 @@ check(
   chat.includes("if (!Api.inCooldown() && now - lastFallbackRefresh >=") &&
     chat.includes("if (now - lastRejoin >= 10_000)") &&
     chat.includes("if (down) 3_000L else upCadence") &&
-    chat.includes("else 8_000L"),
-  "missing Retry-After guard, socket rejoin, or 3s/8s cadence",
+    chat.includes("else 15_000L"),
+  "missing Retry-After guard, socket rejoin, or 3s/15s cadence",
 );
 
 // ── Phase 2 §11/§40: the outgoing queue must heal itself, not wait for a chat ──

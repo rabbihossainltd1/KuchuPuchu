@@ -73,6 +73,19 @@ check(
     nav.includes("StatusGlyphIcon(tint, navIconSize)"),
 );
 check(
+  "the translucent background card and native-blur mask follow the same 3dp downward alignment as the nav contents",
+  nav.includes("val navContentYOffsetPx = with(density) { navContentYOffset.roundToPx() }") &&
+    nav.includes(
+      ".align(Alignment.Center)\n                        .offset(y = navContentYOffset)\n                        .size(backgroundCardWidth, backgroundCardHeight)",
+    ) &&
+    nav.includes("+ navContentYOffsetPx).coerceAtLeast(0)") &&
+    nav.includes(
+      "val insetBottom = (navWindowHeightPx - backgroundCardHeightPx - insetY).coerceAtLeast(0)",
+    ) &&
+    nav.includes("navContentYOffsetPx,") &&
+    nav.includes("            insetBottom,"),
+);
+check(
   "tab and badge state are read inside the floating-pill scope, not by KpApp's animated NavHost",
   rootNav.includes("selectedTab = homeTab") &&
     !rootNav.includes("tab = homeTab.intValue") &&

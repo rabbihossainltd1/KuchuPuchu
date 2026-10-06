@@ -1258,7 +1258,7 @@ class CallEngine(private val app: Application) {
             // a monotonic rowid, not a timestamp (several ICE rows can share a ms).
             val after = iceCursorFor(ui.id)
             val icePath = "/api/calls/${ui.id}/ice" + if (after > 0L) "?after=$after" else ""
-            val iceData = withContext(Dispatchers.IO) { runCatching { Api.get(icePath) }.getOrNull() }
+            val iceData = withContext(Dispatchers.IO) { runCatching { Api.get(icePath, allowCachedFallback = false) }.getOrNull() }
             val ice = iceData?.arr("items")?.objects().orEmpty()
             var allItemsProcessed = true
             for (item in ice) {
@@ -2817,7 +2817,7 @@ override fun onRenegotiationNeeded() {
             val after = iceCursorFor(callId)
             val icePath = "/api/calls/$callId/ice" + if (after > 0L) "?after=$after" else ""
             val data =
-                withContext(Dispatchers.IO) { runCatching { Api.get(icePath) }.getOrNull() }
+                withContext(Dispatchers.IO) { runCatching { Api.get(icePath, allowCachedFallback = false) }.getOrNull() }
                     ?: return
             var allItemsProcessed = true
             for (item in data.arr("items").objects()) {

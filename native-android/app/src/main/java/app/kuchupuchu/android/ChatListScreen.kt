@@ -359,14 +359,14 @@ fun ChatListScreen(nav: NavController, selectedTab: MutableIntState) {
                 // forever) meant NO refresh AND NO fallback — the list froze
                 // until a chat was reopened (the AI-reply visibility bug that
                 // survived round 16). While foreground, a cheap marker-gated
-                // refresh runs every 8s no matter what the socket says; the
+                // refresh runs every 12s no matter what the socket says; the
                 // events still do the instant updates.
                 if (fg) {
                     val now = System.currentTimeMillis()
                     if (justReturned || !KpSocket.userLive()) {
                         refresh()
                         lastSafetyRefresh = now
-                    } else if (now - lastSafetyRefresh >= 4_000) {
+                    } else if (now - lastSafetyRefresh >= 12_000) {
                         lastSafetyRefresh = now
                         refresh()
                     }
@@ -1023,6 +1023,7 @@ internal fun HomeBottomNavigation(
     val navWindowHeightPx = with(density) { navWindowHeight.roundToPx() }
     val backgroundCardWidthPx = with(density) { backgroundCardWidth.roundToPx() }
     val backgroundCardHeightPx = with(density) { backgroundCardHeight.roundToPx() }
+    val navContentYOffsetPx = with(density) { navContentYOffset.roundToPx() }
     val navBlurRadiusPx = with(density) { 24.dp.roundToPx() }
     val bottomOffsetPx = WindowInsets.navigationBars.getBottom(density) + with(density) { 16.dp.roundToPx() }
     val indicatorSize = 40.dp * navScale
@@ -1041,9 +1042,11 @@ internal fun HomeBottomNavigation(
         navWindowHeightPx,
         backgroundCardWidthPx,
         backgroundCardHeightPx,
+        navContentYOffsetPx,
     ) {
         val insetX = ((navWindowWidthPx - backgroundCardWidthPx) / 2).coerceAtLeast(0)
-        val insetY = ((navWindowHeightPx - backgroundCardHeightPx) / 2).coerceAtLeast(0)
+        val insetY = ((navWindowHeightPx - backgroundCardHeightPx) / 2 + navContentYOffsetPx).coerceAtLeast(0)
+        val insetBottom = (navWindowHeightPx - backgroundCardHeightPx - insetY).coerceAtLeast(0)
         val rounded =
             GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
@@ -1055,7 +1058,7 @@ internal fun HomeBottomNavigation(
             insetX,
             insetY,
             (navWindowWidthPx - backgroundCardWidthPx - insetX).coerceAtLeast(0),
-            (navWindowHeightPx - backgroundCardHeightPx - insetY).coerceAtLeast(0),
+            insetBottom,
         )
     }
 
@@ -1154,6 +1157,7 @@ internal fun HomeBottomNavigation(
                 Box(
                     Modifier
                         .align(Alignment.Center)
+                        .offset(y = navContentYOffset)
                         .size(backgroundCardWidth, backgroundCardHeight)
                         .clip(CircleShape)
                         .background(pillFill),

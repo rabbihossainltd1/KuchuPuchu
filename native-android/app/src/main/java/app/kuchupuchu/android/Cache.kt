@@ -25,6 +25,10 @@ import java.util.concurrent.TimeUnit
 object Cache {
     private val mem = LinkedHashMap<String, Pair<Long, JSONObject>>()
     private var dir: File? = null
+    // Keep offline snapshots useful without letting JSON grow without bound.
+    private const val MAX_CACHE_SNAPSHOTS = 512
+    private const val MAX_CACHE_BYTES = 64L * 1024 * 1024
+    private var writesSincePrune = 0
 
     fun init(ctx: Context) {
         val app = ctx.applicationContext
@@ -37,6 +41,7 @@ object Cache {
         // Everything below is a cache, so a miss only means "fetch again".
         Thread {
             runCatching { loadDisk() }
+            runCatching { pruneDisk() }
             // Same idea for pixels: the JSON is worthless on screen if the avatar
             // it names still has to be fetched and decoded.
             runCatching { Bitmaps.init(app) }
@@ -57,9 +62,21 @@ object Cache {
 
     fun ttl(path: String): Long =
         when {
-            path.contains("/calls") -> 0L
+            // Call history can reuse a recent response; call control and ICE
+            // signaling must never reuse one (especially not a stale candidate).
+            path == "/api/calls/history" -> 20_000L
+            path.contains("/api/calls") -> 0L
+            // Message pages can contain view-once rows. Keep the existing
+            // network-first behavior; only the sanitized disk snapshot is an
+            // offline fallback, never a fresh page served as if authoritative.
             path.contains("/messages") -> 0L
+            // Status feeds are stable between pushes; mutations/pokes force a
+            // refresh, while the foreground safety poll reuses this short TTL.
+            path == "/api/statuses" -> 30_000L
             path.contains("/statuses") -> 2_000L
+            // Chat headers can be painted from the persisted snapshot. The
+            // socket/mutation paths bust this entry when a change arrives.
+            path.startsWith("/api/conversations/") -> 30_000L
             // A contact's profile is painted from this snapshot and the profile
             // screen force-refreshes right after, so a long TTL cannot go stale —
             // it only removes the "Loading…" frame on every cold start (bug the
@@ -77,14 +94,23 @@ object Cache {
         val ttl = ttl(path)
         if (ttl <= 0) return null
         val entry = mem[path] ?: return null
-        if (System.currentTimeMillis() - entry.first > ttl) return null
+        val age = System.currentTimeMillis() - entry.first
+        if (age < 0L || age > ttl) return null
         return entry.second
+    }
+
+    fun shouldPersist(path: String): Boolean {
+        val route = path.substringBefore("?")
+        return !route.startsWith("/api/calls/") || route == "/api/calls/history"
     }
 
     @Synchronized
     fun put(path: String, data: JSONObject) {
-        mem[path] = System.currentTimeMillis() to data
-        persist(path, data)
+        if (!shouldPersist(path)) return
+        val savedAt = System.currentTimeMillis()
+        val safe = offlineSafe(path, data)
+        mem[path] = savedAt to safe
+        persist(path, safe, savedAt)
     }
 
     @Synchronized
@@ -100,13 +126,38 @@ object Cache {
     @Synchronized
     fun clearDisk() {
         mem.clear()
+        writesSincePrune = 0
         dir?.listFiles()?.forEach { it.delete() }
     }
 
-    private fun persist(path: String, data: JSONObject) {
+    private fun cacheFileName(path: String): String = path.hashCode().toUInt().toString(16)
+
+    /** Message history remains offline, but view-once rows never reach disk. */
+    private fun offlineSafe(path: String, data: JSONObject): JSONObject {
+        if (!path.contains("/messages")) return data
+        val copy = runCatching { JSONObject(data.toString()) }.getOrElse { return data }
+        val items = copy.optJSONArray("items") ?: return copy
+        val safeItems = JSONArray()
+        for (index in 0 until items.length()) {
+            val row = items.optJSONObject(index) ?: continue
+            val once = row.optBoolean("viewOnce") || row.optJSONObject("meta")?.optBoolean("viewOnce") == true
+            if (!once) safeItems.put(row)
+        }
+        return copy.put("items", safeItems)
+    }
+
+    private fun persist(path: String, data: JSONObject, savedAt: Long) {
         val folder = dir ?: return
-        val name = path.hashCode().toUInt().toString(16)
-        runCatching { File(folder, name).writeText(JSONObject().put("p", path).put("d", data).toString()) }
+        runCatching {
+            val file = File(folder, cacheFileName(path))
+            file.writeText(JSONObject().put("p", path).put("t", savedAt).put("d", data).toString())
+            file.setLastModified(savedAt)
+            writesSincePrune++
+            if (writesSincePrune >= 16 || (folder.listFiles()?.size ?: 0) > MAX_CACHE_SNAPSHOTS) {
+                writesSincePrune = 0
+                pruneDisk()
+            }
+        }
     }
 
     @Synchronized
@@ -116,8 +167,41 @@ object Cache {
             runCatching {
                 val o = JSONObject(f.readText())
                 val p = o.optString("p")
+                if (p.isNotBlank() && !shouldPersist(p)) {
+                    f.delete()
+                    return@forEach
+                }
                 val d = o.optJSONObject("d") ?: return@forEach
-                if (p.isNotBlank()) mem[p] = 0L to d
+                val savedAt = o.optLong("t", f.lastModified()).takeIf { it > 0L } ?: f.lastModified()
+                if (p.isNotBlank()) {
+                    val safe = offlineSafe(p, d)
+                    mem[p] = savedAt to safe
+                    // Migrate older message snapshots that predate the local
+                    // view-once filter; all cache reads/writes stay off-main.
+                    if (safe !== d && safe.toString() != d.toString()) {
+                        f.writeText(JSONObject().put("p", p).put("t", savedAt).put("d", safe).toString())
+                    }
+                }
+            }
+        }
+    }
+
+    /** Keep the most recently written snapshots within both the count and size caps. */
+    @Synchronized
+    private fun pruneDisk() {
+        val folder = dir ?: return
+        val files = folder.listFiles()?.filter { it.isFile } ?: return
+        var kept = 0
+        var totalBytes = 0L
+        files.sortedByDescending { it.lastModified() }.forEach { file ->
+            val length = file.length()
+            if (kept < MAX_CACHE_SNAPSHOTS && totalBytes + length <= MAX_CACHE_BYTES) {
+                kept++
+                totalBytes += length
+            } else {
+                val name = file.name
+                mem.keys.filter { cacheFileName(it) == name }.forEach { mem.remove(it) }
+                runCatching { file.delete() }
             }
         }
     }

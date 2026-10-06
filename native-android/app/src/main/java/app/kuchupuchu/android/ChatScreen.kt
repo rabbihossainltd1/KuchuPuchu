@@ -775,7 +775,7 @@ fun ChatScreen(nav: NavController, convId: String) {
     fun refreshMeta() {
         scope.launch {
             runCatching {
-                val data = withContext(Dispatchers.IO) { Api.get("/api/conversations/$convId", force = true) }
+                val data = withContext(Dispatchers.IO) { Api.get("/api/conversations/$convId") }
                 val c = data.optJSONObject("conversation")
                 if (c != null) {
                     if (muteInFlight) {
@@ -1493,23 +1493,22 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // no close frame ever arrives, live stays true, and the
                     // open chat silently stops updating ("reply arrives but
                     // the chat doesn't move"). Now a marker-gated poll also
-                    // runs while the socket LOOKS connected (every 8s) as a
-                    // safety net; it is near-free when nothing changed.
+                    // runs while the socket LOOKS connected (every 15s) as a
+                    // safety net; marker responses stay small when unchanged.
                     val now = System.currentTimeMillis()
                     val down = !KpSocket.chatLive(convId)
                     // M7 (audit): adaptive backoff when idle. An active chat
-                    // keeps the r14 8s net exactly; with no socket frame and
-                    // no in-flight send for 2 minutes the net backs off to
-                    // 30s. Worst case for an idle chat that goes
-                    // half-open-asymmetric is a 30s-late first bubble instead
-                    // of 8s; any frame, send or typing snaps it back to 8s.
-                    val upCadence = if (now - lastFrameAt > 120_000L && pending.isEmpty()) 30_000L else 8_000L
+                    // uses a 15s safety net; with no socket frame and no
+                    // in-flight send for 2 minutes the net backs off to 30s.
+                    // Any frame, send or typing snaps the safety cadence back
+                    // to 15s, while socket events still paint immediately.
+                    val upCadence = if (now - lastFrameAt > 120_000L && pending.isEmpty()) 30_000L else 15_000L
                     // Do not burn the backend's Retry-After window with
-                    // marker polls. The healthy 3s/8s safety-net cadence and
-                    // socket rejoin below are deliberately unchanged.
+                    // marker polls. A down socket keeps a 3s retry cadence;
+                    // a healthy one uses the 15s/30s safety net above.
                     if (!Api.inCooldown() && now - lastFallbackRefresh >= (if (down) 3_000L else upCadence)) {
                         lastFallbackRefresh = now
-                        refreshMessages(forceNetwork = true)
+                        refreshMessages(forceNetwork = down)
                         refreshMeta()
                     }
                     if (now - lastRejoin >= 10_000) {
@@ -8799,6 +8798,9 @@ private fun MessageRow(
                 }
                 }
             }
+            // Anchor chips directly to the bubble corner before the small
+            // outside stamp row, so reactions stay attached to their message.
+            MessageReactions(m)
             // v169 (owner: "single tick double tick seen tick send time eshob
             // message body te na message er niche thakbe" + the example
             // image): the stamp lives OUTSIDE the bubble now - right under
@@ -8813,8 +8815,6 @@ private fun MessageRow(
             ) {
                 if (!m.optBoolean("kpHideStamp")) BubbleStamp(m, mine, pendingEcho, otherReadAt, if (kind == "STICKER") 1 else emojiOnly, stampInk)
             }
-            // Owner round 16: reaction chips under the bubble.
-            MessageReactions(m)
         }
     }
 }
@@ -8897,23 +8897,31 @@ private fun MessageReactions(m: JSONObject) {
     val dark = KpThemeMode.darkBlue
     val chipFill = if (dark) Color(0xE61D3151) else Color(0xF7FFFFFF)
     val chipLine = if (dark) Color.White.copy(alpha = 0.14f) else Color(0x1F273247)
+    val popStartOffsetPx = with(LocalDensity.current) { (-10).dp.toPx() }
     Row(
-        Modifier.padding(start = 6.dp),
+        Modifier.offset(y = (-4).dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         grouped.forEach { (emoji, count) ->
             val popScale = remember(messageKey, emoji) { Animatable(1f) }
             val popAlpha = remember(messageKey, emoji) { Animatable(1f) }
+            val popOffsetY = remember(messageKey, emoji) { Animatable(0f) }
             val animationNonce = animationNonces[emoji] ?: 0
             LaunchedEffect(animationNonce) {
                 if (animationNonce > 0) {
-                    popScale.snapTo(0.84f)
-                    popAlpha.snapTo(0.35f)
+                    // New reactions arrive oversized and just above the chip,
+                    // then drop into the corner and spring to their resting size.
+                    popScale.snapTo(1.7f)
+                    popAlpha.snapTo(0.25f)
+                    popOffsetY.snapTo(popStartOffsetPx)
                     launch {
-                        popScale.animateTo(1.08f, spring(dampingRatio = 0.72f, stiffness = 620f))
-                        popScale.animateTo(1f, spring(dampingRatio = 0.9f, stiffness = 760f))
+                        popScale.animateTo(0.94f, spring(dampingRatio = 0.68f, stiffness = 520f))
+                        popScale.animateTo(1f, spring(dampingRatio = 0.84f, stiffness = 720f))
                     }
-                    popAlpha.animateTo(1f, tween(durationMillis = 150, easing = FastOutSlowInEasing))
+                    launch {
+                        popOffsetY.animateTo(0f, spring(dampingRatio = 0.78f, stiffness = 620f))
+                    }
+                    popAlpha.animateTo(1f, tween(durationMillis = 180, easing = FastOutSlowInEasing))
                 }
             }
             val chipShape = RoundedCornerShape(12.dp)
@@ -8923,7 +8931,7 @@ private fun MessageReactions(m: JSONObject) {
                         scaleX = popScale.value
                         scaleY = popScale.value
                         alpha = popAlpha.value
-                        translationY = (1f - popAlpha.value) * 3.dp.toPx()
+                        translationY = popOffsetY.value
                     }
                     .clip(chipShape)
                     .background(chipFill)

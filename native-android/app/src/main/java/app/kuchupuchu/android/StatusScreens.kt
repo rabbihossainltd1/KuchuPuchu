@@ -101,7 +101,7 @@ fun StatusScreen(nav: NavController, fabBottom: androidx.compose.ui.unit.Dp = 74
         scope.launch {
             try {
                 val data = withContext(Dispatchers.IO) {
-                    Api.get("/api/statuses", force, allowCachedFallback = false)
+                    Api.get("/api/statuses", force)
                 }
                 ScreenStore.setStatuses(data.arr("items").objects())
                 refreshError = null
@@ -128,7 +128,7 @@ fun StatusScreen(nav: NavController, fabBottom: androidx.compose.ui.unit.Dp = 74
     LaunchedEffect(Unit) {
         while (true) {
             delay(12_000)
-            if (Store.foreground && !Api.inCooldown()) refresh(force = true)
+            if (Store.foreground && !Api.inCooldown()) refresh()
         }
     }
 

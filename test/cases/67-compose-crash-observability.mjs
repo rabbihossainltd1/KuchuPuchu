@@ -47,12 +47,12 @@ check(
     !crash.includes("readText()?.take(4000)"),
 );
 check(
-  "Gradle embeds CI revision/BOM diagnostics without changing the shipped app version",
+  "Gradle embeds CI revision/BOM diagnostics with the cache, nav and reaction patch version",
   build.includes('buildConfigField("String", "BUILD_SHA"') &&
     build.includes('buildConfigField("String", "COMPOSE_BOM_VERSION"') &&
     build.includes("buildConfig = true") &&
-    build.includes("versionCode = 277") &&
-    build.includes('versionName = "3.9.200"'),
+    build.includes("versionCode = 278") &&
+    build.includes('versionName = "3.9.201"'),
 );
 check(
   "release CI retains a build-matched R8 mapping artifact beside the unchanged APK artifact",

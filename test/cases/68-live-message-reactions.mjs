@@ -55,17 +55,21 @@ check(
     quickBar.includes("More emojis"),
 );
 check(
-  "new or changed reactions animate with a restrained, soft-fading chip pop closer to the message without replaying history",
+  "new reactions grow above the message corner, drop and spring onto it, while historical chips stay still",
   chips.includes("previous[userId] != emoji") &&
     chips.includes("animationNonces[emoji]") &&
     chips.includes("remember(messageKey) { mutableStateOf(byUser.toMap()) }") &&
-    chips.includes("popScale.snapTo(0.84f)") &&
-    chips.includes("popScale.animateTo(1.08f, spring") &&
+    chips.includes("popScale.snapTo(1.7f)") &&
+    chips.includes("popScale.animateTo(0.94f, spring") &&
     chips.includes("popScale.animateTo(1f, spring") &&
-    chips.includes("popAlpha.snapTo(0.35f)") &&
-    chips.includes("translationY = (1f - popAlpha.value) * 3.dp.toPx()") &&
+    chips.includes("popOffsetY.snapTo(popStartOffsetPx)") &&
+    chips.includes("popOffsetY.animateTo(0f, spring") &&
+    chips.includes("translationY = popOffsetY.value") &&
+    chips.includes("Modifier.offset(y = (-4).dp)") &&
+    !chips.includes("Modifier.padding(start = 6.dp)") &&
     chips.includes("RoundedCornerShape(12.dp)") &&
-    chips.includes("Modifier.padding(start = 6.dp)"),
+    messageRow.indexOf("MessageReactions(m)") >= 0 &&
+    messageRow.indexOf("MessageReactions(m)") < messageRow.indexOf("BubbleStamp(m, mine"),
 );
 check(
   "the effect is live on both phones: local reaction paints immediately and the worker broadcasts the updated message row",

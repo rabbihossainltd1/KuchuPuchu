@@ -150,6 +150,13 @@ check(
     nav.includes("val navContentYOffset = 3.dp") &&
     nav.includes(".offset(y = navContentYOffset)") &&
     nav.includes("+ navContentYOffset") &&
+    nav.includes("navContentYOffsetPx") &&
+    nav.includes(
+      "val insetBottom = (navWindowHeightPx - backgroundCardHeightPx - insetY).coerceAtLeast(0)",
+    ) &&
+    nav.includes(
+      ".offset(y = navContentYOffset)\n                        .size(backgroundCardWidth, backgroundCardHeight)",
+    ) &&
     nav.includes(".background(pillFill)") &&
     nav.includes("InsetDrawable(") &&
     nav.includes("dialogWindow.setBackgroundDrawable(pillWindowBackground)") &&
@@ -170,10 +177,13 @@ check(
     !cache.includes("registerNetworkCallback(req, cb)"),
 );
 check(
-  "a failed status fetch bypasses stale-cache fallback so the retry notice can be shown",
+  "the status feed paints a persisted offline snapshot, keeps its 12-second safety tick on a 30-second cache, and forces explicit inbox-poke syncs",
   api.includes("allowCachedFallback: Boolean = true") &&
     api.includes("if (allowCachedFallback) Cache.peek(key)?.let { return it }") &&
-    statusScreen.includes("allowCachedFallback = false") &&
+    !statusScreen.includes("allowCachedFallback = false") &&
+    statusScreen.includes("delay(12_000)") &&
+    statusScreen.includes("if (Store.foreground && !Api.inCooldown()) refresh()") &&
+    statusScreen.includes("refresh(force = true)") &&
     statusScreen.includes("Tap to retry"),
 );
 check(

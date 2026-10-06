@@ -596,9 +596,9 @@ const convBetween = (db, a, b) =>
   );
   check("timestamp parsing memoized (scroll perf)", chat.includes("stampCache"));
   check(
-    "round 14 + M7: 3s poll when socket down, 8s net when active, 30s idle backoff + 10s rejoin",
+    "round 14 + M7: 3s poll when socket down, 15s net when active, 30s idle backoff + 10s rejoin",
     chat.includes("if (down) 3_000L else upCadence") &&
-      chat.includes("30_000L else 8_000L") &&
+      chat.includes("30_000L else 15_000L") &&
       chat.includes("120_000L") &&
       chat.includes("lastFrameAt") &&
       chat.includes("KpSocket.joinChat(convId)") &&
@@ -1112,7 +1112,8 @@ const convBetween = (db, a, b) =>
   );
   check(
     "r17-8: half-open socket can't freeze the list — marker-gated safety refresh while foreground",
-    chatlist.includes("lastSafetyRefresh") && chatlist.includes("4_000"),
+    chatlist.includes("lastSafetyRefresh") &&
+      chatlist.includes("now - lastSafetyRefresh >= 12_000"),
   );
   check(
     "r17-8: EVERY AI text reply broadcasts + pokes + pushes (not just owner-card replies)",
@@ -1299,11 +1300,15 @@ const convBetween = (db, a, b) =>
       chat.includes("cursorBrush = androidx.compose.ui.graphics.SolidColor(accent)"),
   );
   check(
-    "r19-perf: cold-reopen lag — hydrate parses off-main + snapshot is capped",
+    "r19-perf: cold-reopen lag — hydrate parses off-main + expanded offline snapshot stays capped and excludes view-once rows",
     screenstore.includes("if (!convsLoaded && convs.isEmpty())") &&
-      screenstore.includes(".take(30)") &&
-      screenstore.includes(".takeLast(40)") &&
-      screenstore.includes("take(150)"),
+      screenstore.includes(".take(60)") &&
+      screenstore.includes(".takeLast(120)") &&
+      screenstore.includes("convs.toList().take(200)") &&
+      screenstore.includes("calls.toList().take(150)") &&
+      screenstore.includes("statuses.toList().take(200)") &&
+      screenstore.includes("rows.filterNot {") &&
+      screenstore.includes('it.optBoolean("viewOnce")'),
   );
   /* ---------------- round 20 (owner feedback) ---------------- */ check(
     "r20-2: Hang up button is SOLID red with white text",
@@ -7736,14 +7741,14 @@ const convBetween = (db, a, b) =>
         !tab.includes("LaunchedEffect(Unit) {"),
     );
     check(
-      "r33-2: status tab wiring",
+      "r33-2: status tab uses offline cache-aware safety refreshes with immediate forced inbox-poke sync",
       status.includes("fun refresh(force: Boolean = false) {") &&
-        status.includes('Api.get("/api/statuses", force, allowCachedFallback = false)') &&
+        status.includes('Api.get("/api/statuses", force)') &&
         status.includes(
           "LaunchedEffect(ScreenStore.poke) {\n        if (ScreenStore.poke > 0 && Store.foreground) refresh(force = true)",
         ) &&
         status.includes(
-          "delay(12_000)\n            if (Store.foreground && !Api.inCooldown()) refresh(force = true)",
+          "delay(12_000)\n            if (Store.foreground && !Api.inCooldown()) refresh()",
         ) &&
         status.includes(
           '.sortedByDescending { g -> g.arr("statuses").objects().maxOfOrNull { it.optString("createdAt") } ?: "" }',
