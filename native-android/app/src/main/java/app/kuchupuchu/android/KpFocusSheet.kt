@@ -179,6 +179,7 @@ internal data class KpFocusSheetRequest(
     val focusKey: String?,
     val onDismiss: () -> Unit,
     val content: @Composable ColumnScope.() -> Unit,
+    val floatingContent: (@Composable () -> Unit)? = null,
 )
 
 /** One root-hosted sheet at a time, so the lifted item and the sheet share the same Compose tree. */
@@ -389,9 +390,13 @@ internal fun KpModalFocusOverlay(progress: Float) {
     val top = source.top + (target.top - source.top) * t
     val width = with(density) { source.width.toDp() }
     val height = with(density) { source.height.toDp() }
-    // Keep the live source layer explicitly above the sheet, regardless of
-    // sibling draw-order changes elsewhere in the root composition.
-    Box(Modifier.fillMaxSize().zIndex(1f)) {
+    val floatingContent =
+        KpFocusSheetState.request
+            ?.takeIf { it.focusKey == item.key }
+            ?.floatingContent
+    // Keep the live source layer and its anchored reaction strip explicitly
+    // above the sheet, regardless of sibling draw-order changes at the root.
+    BoxWithConstraints(Modifier.fillMaxSize().zIndex(1f)) {
         Box(
             Modifier
                 .offset {
@@ -432,6 +437,38 @@ internal fun KpModalFocusOverlay(progress: Float) {
                         indication = null,
                     ) {},
             )
+        }
+        if (floatingContent != null && t > 0.78f && !KpFocusSheetState.closing) {
+            val floatingBarHeight = 52.dp
+            val floatingBarWidth = (maxWidth - 24.dp).coerceAtLeast(1.dp).coerceAtMost(320.dp)
+            val barWidthPx = with(density) { floatingBarWidth.roundToPx() }
+            val barHeightPx = with(density) { floatingBarHeight.roundToPx() }
+            val rootWidthPx = with(density) { maxWidth.roundToPx() }
+            val sideInsetPx = with(density) { 12.dp.roundToPx() }
+            val centerX = left + source.width / 2f - location[0]
+            val barLeftPx = (centerX - barWidthPx / 2f).roundToInt().coerceIn(
+                sideInsetPx,
+                (rootWidthPx - barWidthPx - sideInsetPx).coerceAtLeast(sideInsetPx),
+            )
+            val barTopPx =
+                (top - location[1] - barHeightPx - with(density) { 8.dp.roundToPx() })
+                    .roundToInt()
+                    .coerceAtLeast(with(density) { 24.dp.roundToPx() })
+            val barProgress = ((t - 0.78f) / 0.22f).coerceIn(0f, 1f)
+            Box(
+                Modifier
+                    .offset { IntOffset(barLeftPx, barTopPx) }
+                    .size(floatingBarWidth, floatingBarHeight)
+                    .graphicsLayer {
+                        alpha = barProgress
+                        scaleX = 0.94f + 0.06f * barProgress
+                        scaleY = 0.94f + 0.06f * barProgress
+                        transformOrigin = TransformOrigin.Center
+                    }
+                    .zIndex(2f),
+            ) {
+                floatingContent()
+            }
         }
     }
 }

@@ -399,8 +399,8 @@ private fun NotoEmojiGlyph(
     idx: Int,
     isSingle: Boolean,
     onLongPress: (() -> Unit)?,
-    // r71-21: handed down from EmojiGlyphRow — a double tap on an emoji-only
-    // bubble drops the heart without deferring the instant replay.
+    // r71-21: handed down from EmojiGlyphRow — one double tap in a rapid
+    // sequence drops the heart without deferring the instant replay.
     onDoubleTap: (() -> Unit)?,
     // r87-1: the row's stable key for the global birth-dance clock.
     danceKey: String = mid,
@@ -408,12 +408,13 @@ private fun NotoEmojiGlyph(
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
     val animScale = fxAnimatorScale()
-    // r71-21 (owner: "kono massage a double tap korle auto reaction Hobe ♥️"):
-    // on an emoji-only bubble the tap already means "replay the dance", and
-    // r67-4 made that INSTANT on purpose. So the heart is counted HERE, without
-    // deferring anything: a second tap inside [DOUBLE_TAP_HEART_MS] also runs
-    // [onDoubleTap] while the replay it already triggered plays on.
+    // r71-21: an emoji-only bubble replays immediately on every tap. A fast
+    // double tap adds one heart; further taps in the same burst keep replaying
+    // but cannot toggle the server reaction repeatedly.
     val lastTapAt = remember { longArrayOf(0L) }
+    // One rapid tap burst may contain several taps, but it spends at most one
+    // double-tap reaction until the user pauses longer than the gesture window.
+    val doubleTapConsumed = remember { booleanArrayOf(false) }
     // r87-1: the birth dance moved OFF the per-composition replayKey (the
     // swap restarted it) - it rides the global EmojiDance clock now, so the
     // seed stays 0 and only a TAP bumps replayKey.
@@ -494,7 +495,13 @@ private fun NotoEmojiGlyph(
                 // r71-21: count the taps first, so a double tap drops the heart
                 // WITHOUT holding the instant replay back.
                 val now = android.os.SystemClock.uptimeMillis()
-                if (onDoubleTap != null && now - lastTapAt[0] in 1..DOUBLE_TAP_HEART_MS) onDoubleTap.invoke()
+                val gap = now - lastTapAt[0]
+                val isDoubleTap = lastTapAt[0] > 0L && gap in 1..DOUBLE_TAP_HEART_MS
+                if (!isDoubleTap) doubleTapConsumed[0] = false
+                if (isDoubleTap && !doubleTapConsumed[0] && onDoubleTap != null) {
+                    doubleTapConsumed[0] = true
+                    onDoubleTap.invoke()
+                }
                 lastTapAt[0] = now
                 if (isSingle) replay(local = true) else haptics.tap()
             },

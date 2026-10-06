@@ -95,8 +95,8 @@ check(
     nav.includes("dialogWindow.setWindowAnimations(R.style.KpNavWindowAnimations)") &&
     nav.includes("dialogWindowRef[0]?.setWindowAnimations(0)") &&
     nav.includes("params.y = bottomOffsetPx") &&
-    nav.includes("copy(alpha = 0.92f)") &&
-    !nav.includes("setBackgroundBlurRadius(") &&
+    nav.includes("copy(alpha = 0.82f)") &&
+    chatList.includes("setBackgroundBlurRadius(") &&
     nav.includes("WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()") &&
     theme.includes("@anim/kp_nav_enter") &&
     theme.includes("@anim/kp_nav_exit") &&
@@ -138,16 +138,18 @@ check(
     nav.includes("R.style.KpNavWindowAnimations"),
 );
 check(
-  "the rounded floating pill uses a high-opacity native surface without platform blur",
+  "the floating pill keeps a translucent fill and requests native cross-window blur while scaling to 27dp glyphs",
   nav.includes("val pillFill =") &&
-    nav.includes("copy(alpha = 0.92f)") &&
-    nav.includes("val navScale = 1.06f") &&
+    nav.includes("copy(alpha = 0.82f)") &&
+    nav.includes("val navScale = 27f / 24f") &&
+    nav.includes("val navIconSize = 24.dp * navScale") &&
     nav.includes("val backgroundCardWidth = 224.dp * navScale") &&
     nav.includes("val backgroundCardHeight = 46.dp * navScale") &&
     nav.includes(".background(pillFill)") &&
-    nav.includes("ColorDrawable(android.graphics.Color.TRANSPARENT)") &&
+    nav.includes("InsetDrawable(") &&
     nav.includes("dialogWindow.setBackgroundDrawable(pillWindowBackground)") &&
-    !nav.includes("setBackgroundBlurRadius(") &&
+    chatList.includes("setBackgroundBlurRadius(") &&
+    nav.includes("isCrossWindowBlurEnabled") &&
     nav.includes(".clip(CircleShape)") &&
     nav.includes(".background(indicatorColor)") &&
     !nav.includes("glassEdge") &&

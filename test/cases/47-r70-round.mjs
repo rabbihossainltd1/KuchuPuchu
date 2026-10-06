@@ -173,10 +173,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     "r71-21: `heartReact` is a REAL reaction — it guards a sending echo (no id), then goes through the same `applyReaction` the sheet uses, so the chip, the server row and the other phone all agree",
     chat.includes("fun heartReact(m: JSONObject) {") &&
-      chat.includes(
-        'if (m.optString("id").startsWith("c_") || m.optString("id").isBlank()) return',
-      ) &&
+      chat.includes('if (mid.startsWith("c_") || mid.isBlank()) return') &&
       chat.includes('applyReaction(m, "❤️")') &&
+      chat.includes("lastHeartReactionAt = remember { HashMap<String, Long>() }") &&
+      chat.includes("now - previous < HEART_REACTION_COOLDOWN_MS") &&
       // exactly one heart call into applyReaction beyond the sheet's own
       (chat.match(/applyReaction\(m, "❤️"\)/g) || []).length === 1 &&
       (chat.match(/applyReaction\(it, e\)/g) || []).length === 1,
@@ -192,12 +192,12 @@ const main = (f) => read(`${ANDROID}/${f}`);
       (chat.match(/onDoubleTapHeart = ::heartReact,/g) || []).length === 3,
   );
   check(
-    "r71-21: an emoji-only bubble keeps its INSTANT tap (the r67-4 replay is never delayed) and still hearts on the second tap — its own 320 ms counter, no combinedClickable deferral",
+    "r71-21: emoji-only taps keep instant replay, while a rapid burst can trigger at most one double-tap heart",
     emo.includes("internal const val DOUBLE_TAP_HEART_MS = 320L") &&
       emo.includes("val lastTapAt = remember { longArrayOf(0L) }") &&
-      emo.includes(
-        "if (onDoubleTap != null && now - lastTapAt[0] in 1..DOUBLE_TAP_HEART_MS) onDoubleTap.invoke()",
-      ) &&
+      emo.includes("val doubleTapConsumed = remember { booleanArrayOf(false) }") &&
+      emo.includes("val isDoubleTap = lastTapAt[0] > 0L && gap in 1..DOUBLE_TAP_HEART_MS") &&
+      emo.includes("if (isDoubleTap && !doubleTapConsumed[0] && onDoubleTap != null)") &&
       emo.includes("onDoubleTap: (() -> Unit)? = null,") &&
       (
         chat.match(

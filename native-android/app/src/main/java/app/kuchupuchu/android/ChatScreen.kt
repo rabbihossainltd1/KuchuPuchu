@@ -354,10 +354,11 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Owner round 33 (item 17): the row a quote tap just jumped to (it
     // flashes once in the chat accent); "" = nothing flashing.
     var flashId by remember { mutableStateOf("") }
-    // Owner round 16: message reactions. Long-press still selects (unchanged)
-    // AND raises the quick-emoji bar; "+" opens the full emoji sheet.
+    // Message reactions: long-press keeps the focused action sheet and raises
+    // a separate quick-emoji strip above the selected live bubble; "+" opens all emojis.
     var reactionFor by remember { mutableStateOf<JSONObject?>(null) }
     var showEmojiSheet by remember { mutableStateOf(false) }
+    val lastHeartReactionAt = remember { HashMap<String, Long>() }
     // r68-8 (owner: "ekhon theke delete option just ektai hobe 2 ta na ... ei
     // popup"): ONE delete step in this chat. It serves the long-press sheet,
     // the multi-select bar, the viewers (through ScreenStore.viewerDelete below)
@@ -367,9 +368,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     // r69: the mute chooser (call mute / message mute) — see the ⋮ menu.
     var showMuteSheet by remember { mutableStateOf(false) }
     var confirmDeleteChat by remember { mutableStateOf(false) }
-    // Owner round 31: long-press opens ONE bottom sheet — the reaction emoji
-    // row on top, every message action under it. (No floating bar, no
-    // system-style icon strip.) Multi-select is the sheet's "Select" action.
+    // Long-press opens one focused action sheet. Its quick reaction strip is
+    // now a root overlay above the selected live message; all actions stay in
+    // the sheet, and multi-select remains the sheet's "Select" action.
     var actionFor by remember { mutableStateOf<JSONObject?>(null) }
     var actionFocusKey by remember { mutableStateOf<String?>(null) }
 
@@ -419,7 +420,16 @@ fun ChatScreen(nav: NavController, convId: String) {
      */
     fun heartReact(m: JSONObject) {
         // A sending echo has no id: there is nothing to react to yet.
-        if (m.optString("id").startsWith("c_") || m.optString("id").isBlank()) return
+        val mid = m.optString("id")
+        if (mid.startsWith("c_") || mid.isBlank()) return
+        // Treat a sustained rapid-tap burst as one reaction gesture. The emoji
+        // replay still happens on every tap; this only prevents repeated server
+        // toggles from immediately turning the heart back off/on.
+        val now = android.os.SystemClock.uptimeMillis()
+        val previous = lastHeartReactionAt[mid] ?: 0L
+        if (previous > 0L && now - previous < HEART_REACTION_COOLDOWN_MS) return
+        if (lastHeartReactionAt.size > 128) lastHeartReactionAt.clear()
+        lastHeartReactionAt[mid] = now
         applyReaction(m, "❤️")
     }
 
@@ -4320,9 +4330,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                             revealChars = if (m.optString("id") == aiRevealId) aiRevealChars else null,
                             onReply = { requestAttachExit { haptics.tap(); replyTo = it; replyFocusNonce++ } },
                             onLongPress = { msg ->
-                                // Owner round 31: the action sheet (reactions on
-                                // top). In multi-select mode a long-press just
-                                // toggles, like a tap.
+                                // Long-press opens the focused action sheet;
+                                // its quick reaction strip floats above the
+                                // selected message. Multi-select still toggles.
                                 if (msg.optString("kind") != "DELETED" && selected.isEmpty()) {
                                     actionFocusKey = "message:$rowKey"
                                     actionFor = msg
@@ -4606,16 +4616,16 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
 
 
-        /* ---------------- reaction quick bar (Owner round 16) ----------------
-           Long-press selects the message (unchanged) and raises this bar:
-           five quick emojis + "+" for the full sheet. */
+        /* ---------------- full emoji picker (Owner round 16) ----------------
+           The six quick choices live above the focused message; "+" opens
+           this full list while the action sheet remains beneath it. */
         if (showEmojiSheet && reactionFor != null) {
             EmojiSheetDialog { e -> reactionFor?.let { applyReaction(it, e) } }
         }
 
-        /* ---------------- message action sheet (Owner round 31) ----------------
-           Long-press → this sheet: quick reactions on top ("+" = full emoji
-           sheet), then Reply / Copy / Forward / Edit / Unsend / Delete / Select. */
+        /* ---------------- message action sheet ------------------------------
+           Long-press → this sheet: Reply / Copy / Forward / Edit / Unsend /
+           Delete / Select. Quick reactions float above the focused message. */
         actionFor?.let { m ->
             // Owner round 31 (item 29): Forward / Unsend / Delete / Select on
             // a grouped photo bubble act on every photo of the album.
@@ -4633,40 +4643,17 @@ fun ChatScreen(nav: NavController, convId: String) {
                     after()
                 }
             }
-            val body: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
+            val myReaction = m.optJSONObject("meta")?.optJSONObject("reactions")?.optString(Store.myId()).orEmpty()
+            val floatingReactionBar: @Composable () -> Unit = {
                 if (!showEmojiSheet) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                    ) {
-                        val myReaction = m.optJSONObject("meta")?.optJSONObject("reactions")?.optString(Store.myId()).orEmpty()
-                        listOf("👍", "❤️", "😂", "😮", "😢", "🙏").forEach { e ->
-                            Text(
-                                e,
-                                fontSize = 26.sp,
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .background(if (myReaction == e) ActionBlue.copy(alpha = 0.18f) else Color.Transparent)
-                                    .clickable {
-                                        close { applyReaction(m, e) }
-                                    }
-                                    .padding(7.dp),
-                            )
-                        }
-                        Box(
-                            Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(ActionBlue.copy(alpha = 0.14f))
-                                .clickable { showEmojiSheet = true },
-                            contentAlignment = Alignment.Center,
-                        ) { Icon(Icons.Filled.Add, "More emojis", tint = ActionBlueDeep, modifier = Modifier.size(22.dp)) }
-                    }
-                    Spacer(Modifier.height(4.dp))
+                    MessageQuickReactionBar(
+                        myReaction = myReaction,
+                        onReact = { emoji -> close { applyReaction(m, emoji) } },
+                        onMore = { showEmojiSheet = true },
+                    )
                 }
+            }
+            val body: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
                 KpSheetRow(Icons.AutoMirrored.Filled.Reply, "Reply") {
                     close {
                         requestAttachExit {
@@ -4722,6 +4709,10 @@ fun ChatScreen(nav: NavController, convId: String) {
             val hostedBody: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = remember(focusKey) {
                 { latestBody.value.invoke(this) }
             }
+            val latestFloating = rememberUpdatedState(floatingReactionBar)
+            val hostedFloating: @Composable () -> Unit = remember(focusKey) {
+                { latestFloating.value.invoke() }
+            }
             LaunchedEffect(focusKey) {
                 KpFocusSheetState.open(
                     KpFocusSheetRequest(
@@ -4736,6 +4727,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             actionFocusKey = null
                         },
                         content = hostedBody,
+                        floatingContent = hostedFloating,
                     ),
                 )
             }
@@ -8037,6 +8029,7 @@ private fun UnblockAskCard(
 
 /** Owner round 34 (item 19): bodies longer than this fold with See more. */
 private const val BODY_COLLAPSE_LINES = 10
+private const val HEART_REACTION_COOLDOWN_MS = 650L
 
 /** Lift only the visual message content, not the full-width chat-list row. */
 @Composable
@@ -8824,30 +8817,103 @@ private fun MessageRow(
     }
 }
 
-/** Owner round 16: the reaction chips under a bubble — emoji + count, own
- *  reaction highlighted gold. reactions live in message meta.reactions. */
+@Composable
+private fun MessageQuickReactionBar(
+    myReaction: String,
+    onReact: (String) -> Unit,
+    onMore: () -> Unit,
+) {
+    val quickEmojis = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
+    val shape = RoundedCornerShape(28.dp)
+    Row(
+        Modifier
+            .fillMaxSize()
+            .clip(shape)
+            .background(Card)
+            .border(1.dp, Line, shape)
+            .padding(horizontal = 5.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        quickEmojis.forEach { emoji ->
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(CircleShape)
+                    .background(if (myReaction == emoji) ActionBlue.copy(alpha = 0.18f) else Color.Transparent)
+                    .clickable { onReact(emoji) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(emoji, fontSize = 24.sp, maxLines = 1)
+            }
+        }
+        // A dedicated fixed-width seat keeps the final '+' visible on narrow
+        // screens instead of letting the emoji labels push it outside the bar.
+        Box(
+            Modifier
+                .width(38.dp)
+                .fillMaxHeight()
+                .clip(CircleShape)
+                .background(ActionBlue.copy(alpha = 0.14f))
+                .clickable(onClick = onMore),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Add, "More emojis", tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+/** Owner round 16: reaction chips under a bubble. New live reactions pop into
+ *  place on both devices when the local edit or room broadcast updates meta. */
 @Composable
 private fun MessageReactions(m: JSONObject) {
-    val reactions = m.optJSONObject("meta")?.optJSONObject("reactions") ?: return
-    val myId = Store.myId()
-    val grouped = LinkedHashMap<String, Int>()
-    var iHave = false
-    val ks = reactions.keys()
-    while (ks.hasNext()) {
-        val k = ks.next()
-        val e = reactions.optString(k)
-        if (e.isBlank()) continue
-        grouped[e] = (grouped[e] ?: 0) + 1
-        if (k == myId) iHave = true
+    val reactionObject = m.optJSONObject("meta")?.optJSONObject("reactions") ?: JSONObject()
+    val byUser = LinkedHashMap<String, String>()
+    val keys = reactionObject.keys()
+    while (keys.hasNext()) {
+        val userId = keys.next()
+        val emoji = reactionObject.optString(userId)
+        if (emoji.isNotBlank()) byUser[userId] = emoji
     }
+    val messageKey = m.optString("id").ifBlank { m.optString("clientId") }
+    val snapshotKey = byUser.toSortedMap().entries.joinToString("|") { "${it.key}:${it.value}" }
+    val previousByUser = remember(messageKey) { mutableStateOf(byUser.toMap()) }
+    val animationNonces = remember(messageKey) { androidx.compose.runtime.mutableStateMapOf<String, Int>() }
+    LaunchedEffect(snapshotKey) {
+        val previous = previousByUser.value
+        byUser.forEach { (userId, emoji) ->
+            if (previous[userId] != emoji) {
+                animationNonces[emoji] = (animationNonces[emoji] ?: 0) + 1
+            }
+        }
+        previousByUser.value = byUser.toMap()
+    }
+
+    val grouped = LinkedHashMap<String, Int>()
+    byUser.values.forEach { emoji -> grouped[emoji] = (grouped[emoji] ?: 0) + 1 }
     if (grouped.isEmpty()) return
     Row(
         Modifier.padding(start = 6.dp, top = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        // Owner round 22: bare emojis — no chip background, no border.
         grouped.forEach { (emoji, count) ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            val popScale = remember(messageKey, emoji) { Animatable(1f) }
+            val animationNonce = animationNonces[emoji] ?: 0
+            LaunchedEffect(animationNonce) {
+                if (animationNonce > 0) {
+                    popScale.snapTo(0.38f)
+                    popScale.animateTo(1.18f, spring(dampingRatio = 0.48f, stiffness = 520f))
+                    popScale.animateTo(1f, spring(dampingRatio = 0.78f, stiffness = 560f))
+                }
+            }
+            Row(
+                Modifier.graphicsLayer {
+                    scaleX = popScale.value
+                    scaleY = popScale.value
+                    translationY = (1f - popScale.value) * 6.dp.toPx()
+                },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(emoji, fontSize = 17.sp)
                 if (count > 1) {
                     Spacer(Modifier.width(2.dp))
