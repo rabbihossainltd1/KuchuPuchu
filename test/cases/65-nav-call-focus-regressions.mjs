@@ -92,10 +92,10 @@ check(
 check(
   "WindowManager animates the pill as one surface; Compose no longer relayouts the window every frame",
   nav.includes("if (dialogAttached)") &&
-    nav.includes("window.setWindowAnimations(R.style.KpNavWindowAnimations)") &&
+    nav.includes("dialogWindow.setWindowAnimations(R.style.KpNavWindowAnimations)") &&
     nav.includes("dialogWindowRef[0]?.setWindowAnimations(0)") &&
     nav.includes("params.y = bottomOffsetPx") &&
-    nav.includes("window.setBackgroundBlurRadius(if (blurEnabled) blurRadiusPx else 0)") &&
+    nav.includes("dialogWindow.setBackgroundBlurRadius(if (blurEnabled) blurRadiusPx else 0)") &&
     nav.includes("WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()") &&
     theme.includes("@anim/kp_nav_enter") &&
     theme.includes("@anim/kp_nav_exit") &&
@@ -131,7 +131,7 @@ check(
   nav.includes("val glassFill =") &&
     nav.includes("val fallbackFill =") &&
     nav.includes("GradientDrawable()") &&
-    nav.includes("window.setBackgroundDrawable(background)") &&
+    nav.includes("dialogWindow.setBackgroundDrawable(pillWindowBackground)") &&
     nav.includes("setBackgroundBlurRadius(") &&
     nav.includes(".clip(CircleShape)") &&
     nav.includes(".background(indicatorColor)") &&

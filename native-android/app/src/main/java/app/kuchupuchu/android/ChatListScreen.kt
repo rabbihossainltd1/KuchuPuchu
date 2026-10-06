@@ -1,12 +1,9 @@
 package app.kuchupuchu.android
 
 import android.graphics.PixelFormat
-import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
-import android.app.Dialog
 import android.view.Gravity
-import android.view.Window
 import android.view.WindowManager
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -97,7 +94,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.rememberCompositionContext
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
@@ -137,7 +133,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -145,6 +141,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import kotlinx.coroutines.Dispatchers
@@ -1018,9 +1017,10 @@ internal fun HomeBottomNavigation(
     val windowInteractive = visible && !modalOpen
     val dialogWindowRef = remember { arrayOfNulls<android.view.Window>(1) }
     var dialogAttached by remember { mutableStateOf(visible && !modalOpen) }
-    // Android's actual Dialog receives the translucent theme in its constructor;
-    // a Compose LocalContext wrapper alone cannot change the platform window theme.
     val baseContext = LocalContext.current
+    val navDialogContext = remember(baseContext) {
+        android.view.ContextThemeWrapper(baseContext, R.style.KpNavDialogTheme)
+    }
     val pillWindowBackground = remember(capsuleHeightPx, windowFill) {
         GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
@@ -1040,16 +1040,63 @@ internal fun HomeBottomNavigation(
     }
 
     if (dialogAttached) {
-        HomeNavPillDialog(
-            activityContext = baseContext,
-            windowRef = dialogWindowRef,
-            widthPx = capsuleWidthPx,
-            heightPx = capsuleHeightPx,
-            bottomOffsetPx = bottomOffsetPx,
-            background = pillWindowBackground,
-            blurEnabled = blurEnabled,
-            blurRadiusPx = blurRadiusPx,
-        ) {
+        HomeNavPillDialog(navDialogContext) {
+            val dialogView = LocalView.current
+            val dialogWindow = (dialogView.parent as? DialogWindowProvider)?.window
+            DisposableEffect(
+                dialogWindow,
+                capsuleWidthPx,
+                capsuleHeightPx,
+                bottomOffsetPx,
+                pillWindowBackground,
+                blurEnabled,
+                blurRadiusPx,
+            ) {
+                if (dialogWindow != null) {
+                    dialogWindowRef[0] = dialogWindow
+                    // Let WindowManager animate the whole translucent surface.
+                    // Updating LayoutParams.y from Compose every frame forced a
+                    // relayout on each frame, causing the reported stutter.
+                    dialogWindow.setWindowAnimations(R.style.KpNavWindowAnimations)
+                    dialogWindow.setBackgroundDrawable(pillWindowBackground)
+                    dialogView.elevation = 0f
+                    dialogView.translationZ = 0f
+                    dialogWindow.decorView.elevation = 0f
+                    dialogWindow.decorView.translationZ = 0f
+                    dialogWindow.setDimAmount(0f)
+                    val params = dialogWindow.attributes
+                    params.format = PixelFormat.TRANSLUCENT
+                    params.width = capsuleWidthPx
+                    params.height = capsuleHeightPx
+                    params.windowAnimations = R.style.KpNavWindowAnimations
+                    params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                    params.x = 0
+                    params.y = bottomOffsetPx
+                    params.flags =
+                        (params.flags or
+                            WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or
+                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL) and
+                            WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv() and
+                            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        // The window y is the bottom inset; don't apply it twice.
+                        params.setFitInsetsSides(0)
+                        params.setFitInsetsTypes(0)
+                    }
+                    dialogWindow.attributes = params
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        dialogWindow.setBackgroundBlurRadius(if (blurEnabled) blurRadiusPx else 0)
+                    }
+                }
+                onDispose {
+                    if (dialogWindowRef[0] === dialogWindow) dialogWindowRef[0] = null
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        dialogWindow?.setBackgroundBlurRadius(0)
+                    }
+                }
+            }
             BoxWithConstraints(
                 Modifier
                     .size(capsuleWidth, capsuleHeight)
@@ -1137,96 +1184,20 @@ internal fun HomeBottomNavigation(
 
 @Composable
 private fun HomeNavPillDialog(
-    activityContext: android.content.Context,
-    windowRef: Array<Window?>,
-    widthPx: Int,
-    heightPx: Int,
-    bottomOffsetPx: Int,
-    background: Drawable,
-    blurEnabled: Boolean,
-    blurRadiusPx: Int,
+    themedContext: android.content.Context,
     content: @Composable () -> Unit,
 ) {
-    val parentComposition = rememberCompositionContext()
-    val currentContent = rememberUpdatedState(content)
-    // Pass the theme to Android's Dialog itself so android:windowIsTranslucent
-    // applies to the real window on API 31+, not merely to Compose locals.
-    val dialog = remember(activityContext) { Dialog(activityContext, R.style.KpNavDialogTheme) }
-    val composeView = remember(dialog, parentComposition) {
-        ComposeView(dialog.context).apply {
-            setParentCompositionContext(parentComposition)
-            setContent {
-                CompositionLocalProvider(LocalContext provides dialog.context) {
-                    currentContent.value()
-                }
-            }
-        }
-    }
-    val updateWindow = rememberUpdatedState(
-        newValue = {
-            val window = dialog.window
-            if (window != null) {
-                windowRef[0] = window
-                // Let WindowManager animate the whole translucent surface.
-                // Updating LayoutParams.y from Compose every frame caused relayout
-                // on every frame and made the nav-to-chat transition stutter.
-                window.setWindowAnimations(R.style.KpNavWindowAnimations)
-                window.setBackgroundDrawable(background)
-                composeView.elevation = 0f
-                composeView.translationZ = 0f
-                window.decorView.elevation = 0f
-                window.decorView.translationZ = 0f
-                window.setDimAmount(0f)
-                val params = window.attributes
-                params.format = PixelFormat.TRANSLUCENT
-                params.width = widthPx
-                params.height = heightPx
-                params.windowAnimations = R.style.KpNavWindowAnimations
-                params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                params.x = 0
-                params.y = bottomOffsetPx
-                params.flags =
-                    (params.flags or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL) and
-                        WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv() and
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    // The window y is the bottom inset; don't apply it twice.
-                    params.setFitInsetsSides(0)
-                    params.setFitInsetsTypes(0)
-                }
-                window.attributes = params
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    window.setBackgroundBlurRadius(if (blurEnabled) blurRadiusPx else 0)
-                }
-            }
-        },
-    )
-
-    DisposableEffect(dialog, composeView) {
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        dialog.setCancelable(false)
-        dialog.setCanceledOnTouchOutside(false)
-        dialog.setContentView(composeView)
-        dialog.show()
-        updateWindow.value()
-        onDispose {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                dialog.window?.setBackgroundBlurRadius(0)
-            }
-            if (windowRef[0] === dialog.window) windowRef[0] = null
-            dialog.dismiss()
-            composeView.disposeComposition()
-        }
-    }
-    // Update the actual Android window only when one of its configuration keys
-    // changes (blur availability, inset, or theme fill), not on badge recomposes.
-    DisposableEffect(dialog, widthPx, heightPx, bottomOffsetPx, background, blurEnabled, blurRadiusPx) {
-        if (dialog.isShowing) updateWindow.value()
-        onDispose {}
+    CompositionLocalProvider(LocalContext provides themedContext) {
+        Dialog(
+            onDismissRequest = {},
+            properties = DialogProperties(
+                dismissOnBackPress = false,
+                dismissOnClickOutside = false,
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = true,
+            ),
+            content = content,
+        )
     }
 }
 
