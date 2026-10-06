@@ -105,6 +105,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PermMedia
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -8046,6 +8047,10 @@ private fun KpMessageFocusSlot(
     } else {
         KpLiveFocusItem(
             key = focusKey,
+            // Media rows use fillMaxWidth for their normal chat alignment. Let
+            // that inner row measure to its bubble here, so the captured live
+            // layer and its lift target do not span the whole thread width.
+            modifier = Modifier.wrapContentSize(unbounded = true),
             targetScale = 1f,
             content = content,
         )

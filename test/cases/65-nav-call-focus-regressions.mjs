@@ -81,9 +81,9 @@ check(
 check(
   "four equally sized tab slots share a centered indicator with the demo's 450ms easing",
   (nav.match(/Modifier\.weight\(1f\)/g) ?? []).length >= 4 &&
-    nav.includes("val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4") &&
+    nav.includes("val slotWidth = (maxWidth - capsuleHorizontalPadding * 2 - gap * 3) / 4") &&
     nav.includes("val indicatorSize = 40.dp") &&
-    nav.includes("capsulePadding + (slotWidth - indicatorSize) * 0.5f") &&
+    nav.includes("capsuleHorizontalPadding + (slotWidth - indicatorSize) * 0.5f") &&
     nav.includes("(slotWidth + gap) * tab.coerceIn(0, 3).toFloat()") &&
     nav.includes("CubicBezierEasing(0.34f, 1.45f, 0.5f, 1f)") &&
     nav.includes("tween(450, easing = indicatorEasing)") &&
@@ -115,15 +115,18 @@ check(
     kpApp.includes("callEngine.minimized"),
 );
 check(
-  "main/chat route content stays still while the nav pill owns its native up/down transition",
+  "home stays still; the chat route uses a small fade/slide while the nav pill keeps native window motion",
   homeRoute.includes("enterTransition = { EnterTransition.None }") &&
     homeRoute.includes("exitTransition = { ExitTransition.None }") &&
     homeRoute.includes("popEnterTransition = { EnterTransition.None }") &&
     !homeRoute.includes("slideInVertically") &&
     !homeRoute.includes("slideOutVertically") &&
     chatRoute.includes('"chat/{id}"') &&
-    chatRoute.includes("enterTransition = { fadeIn(tween(150)) }") &&
-    chatRoute.includes("popExitTransition = { fadeOut(tween(130)) }") &&
+    chatRoute.includes("fadeIn(tween(210, easing = FastOutSlowInEasing))") &&
+    chatRoute.includes("slideInHorizontally(tween(210, easing = FastOutSlowInEasing)) { it / 20 }") &&
+    chatRoute.includes("fadeOut(tween(150, easing = FastOutSlowInEasing))") &&
+    chatRoute.includes("popEnterTransition = { fadeIn(tween(200, easing = FastOutSlowInEasing)) }") &&
+    chatRoute.includes("slideOutHorizontally(tween(190, easing = FastOutSlowInEasing)) { it / 20 }") &&
     !nav.includes("windowYOffsetPx") &&
     nav.includes("R.style.KpNavWindowAnimations"),
 );
@@ -208,8 +211,8 @@ check(
 );
 check(
   "backdrop blur releases as sheets close and remains correctly registered for normal KpSheet and emoji sheet",
-  kpApp.includes("modalBlur.animateTo(30f, tween(220))") &&
-    kpApp.includes("else modalBlur.snapTo(0f)") &&
+  kpApp.includes("modalBlur.animateTo(30f, tween(260, easing = FastOutSlowInEasing))") &&
+    kpApp.includes("modalBlur.animateTo(0f, tween(220, easing = FastOutSlowInEasing))") &&
     sharedSheet.includes("KpRememberModalBottomSheetState(blurRegistration)") &&
     sharedSheet.indexOf("KpRegisterModalBlur()") >= 0 &&
     sharedSheet.indexOf("KpRegisterModalBlur()") < sharedSheet.indexOf("ModalBottomSheet(") &&

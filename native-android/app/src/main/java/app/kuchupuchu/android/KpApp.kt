@@ -15,6 +15,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -175,7 +176,13 @@ fun KpApp() {
     val modalWindowVisible = KpModalBlurState.hasVisibleWindow
     val modalBlur = remember { Animatable(0f) }
     LaunchedEffect(modalActive) {
-        if (modalActive) modalBlur.animateTo(30f, tween(220)) else modalBlur.snapTo(0f)
+        if (modalActive) {
+            modalBlur.animateTo(30f, tween(260, easing = FastOutSlowInEasing))
+        } else {
+            // Fade the sheet blur out from its current radius instead of snapping
+            // to clear; animateTo also reverses cleanly if another sheet opens.
+            modalBlur.animateTo(0f, tween(220, easing = FastOutSlowInEasing))
+        }
     }
     val modalBlurRadius = modalBlur.value.dp
     val currentDestination = navEntry?.destination?.route
@@ -260,14 +267,20 @@ fun KpApp() {
                 }
                 composable(
                     "chat/{id}",
-                    // Enter the thread with a short cross-fade instead of the
-                    // global slide. This reduces motion/overlap on the reported
-                    // chat-open hitch while preserving a real route transition;
-                    // device frame-time profiling is still needed to confirm it.
-                    enterTransition = { fadeIn(tween(150)) },
-                    exitTransition = { fadeOut(tween(110)) },
-                    popEnterTransition = { fadeIn(tween(150)) },
-                    popExitTransition = { fadeOut(tween(130)) },
+                    // A longer cross-fade with only a small horizontal drift
+                    // softens the jump into the thread without replaying the
+                    // full NavHost slide over the chat's first layout frames.
+                    // Device frame-time profiling is still needed to verify it.
+                    enterTransition = {
+                        fadeIn(tween(210, easing = FastOutSlowInEasing)) +
+                            slideInHorizontally(tween(210, easing = FastOutSlowInEasing)) { it / 20 }
+                    },
+                    exitTransition = { fadeOut(tween(150, easing = FastOutSlowInEasing)) },
+                    popEnterTransition = { fadeIn(tween(200, easing = FastOutSlowInEasing)) },
+                    popExitTransition = {
+                        fadeOut(tween(160, easing = FastOutSlowInEasing)) +
+                            slideOutHorizontally(tween(190, easing = FastOutSlowInEasing)) { it / 20 }
+                    },
                 ) { entry ->
                     val id = entry.arguments?.getString("id") ?: ""
                     ChatScreen(nav, id)

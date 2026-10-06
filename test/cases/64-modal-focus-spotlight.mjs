@@ -99,6 +99,7 @@ check(
   chat.includes('focusKey = "message:$rowKey"') &&
     messageSlot.includes("KpLiveFocusItem(") &&
     messageSlot.includes("key = focusKey") &&
+    messageSlot.includes("Modifier.wrapContentSize(unbounded = true)") &&
     messageSlot.includes("targetScale = 1f") &&
     chat.includes('if (pressed.optString("kind") != "DELETED") requestFocus()'),
 );

@@ -50,8 +50,8 @@ check(
     ui.includes("KpModalBlurState.unregister()") &&
     ui.includes("internal fun KpRememberModalBottomSheetState(") &&
     kpApp.includes(".blur(modalBlurRadius)") &&
-    kpApp.includes("modalBlur.animateTo(30f, tween(220))") &&
-    kpApp.includes("else modalBlur.snapTo(0f)"),
+    kpApp.includes("modalBlur.animateTo(30f, tween(260, easing = FastOutSlowInEasing))") &&
+    kpApp.includes("modalBlur.animateTo(0f, tween(220, easing = FastOutSlowInEasing))"),
 );
 check(
   "focus keeps one Compose subtree in the source slot and replays its recorded layer without bitmap or duplicate content",

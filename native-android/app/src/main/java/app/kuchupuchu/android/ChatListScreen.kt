@@ -1001,9 +1001,10 @@ internal fun HomeBottomNavigation(
     val pillFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.92f) else Card.copy(alpha = 0.92f)
     val itemH = 44.dp
     val gap = 4.dp
-    val capsulePadding = 6.dp
-    val capsuleWidth = 248.dp
-    val capsuleHeight = 56.dp
+    val capsuleHorizontalPadding = 6.dp
+    val capsuleVerticalPadding = 3.dp
+    val capsuleWidth = 240.dp
+    val capsuleHeight = 50.dp
     val capsuleWidthPx = with(density) { capsuleWidth.roundToPx() }
     val capsuleHeightPx = with(density) { capsuleHeight.roundToPx() }
     val bottomOffsetPx = WindowInsets.navigationBars.getBottom(density) + with(density) { 16.dp.roundToPx() }
@@ -1090,14 +1091,14 @@ internal fun HomeBottomNavigation(
                     .then(if (windowInteractive) Modifier else Modifier.clearAndSetSemantics {})
                     .clip(CircleShape),
             ) {
-                val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4
+                val slotWidth = (maxWidth - capsuleHorizontalPadding * 2 - gap * 3) / 4
                 val indicatorX by animateDpAsState(
-                    targetValue = capsulePadding + (slotWidth - indicatorSize) * 0.5f +
+                    targetValue = capsuleHorizontalPadding + (slotWidth - indicatorSize) * 0.5f +
                         (slotWidth + gap) * tab.coerceIn(0, 3).toFloat(),
                     animationSpec = tween(450, easing = indicatorEasing),
                     label = "navIndicatorX",
                 )
-                val indicatorY = capsulePadding + (itemH - indicatorSize) * 0.5f
+                val indicatorY = capsuleVerticalPadding + (itemH - indicatorSize) * 0.5f
                 Box(
                     Modifier
                         .offset(x = indicatorX, y = indicatorY)
@@ -1106,7 +1107,7 @@ internal fun HomeBottomNavigation(
                         .background(indicatorColor),
                 )
                 Row(
-                    Modifier.fillMaxSize().padding(horizontal = capsulePadding, vertical = capsulePadding),
+                    Modifier.fillMaxSize().padding(horizontal = capsuleHorizontalPadding, vertical = capsuleVerticalPadding),
                     horizontalArrangement = Arrangement.spacedBy(gap),
                 ) {
                     NavItem(

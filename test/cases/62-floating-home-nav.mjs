@@ -18,6 +18,14 @@ const theme = fs.readFileSync(
   path.join(root, "native-android/app/src/main/res/values/themes.xml"),
   "utf8",
 );
+const navEnter = fs.readFileSync(
+  path.join(root, "native-android/app/src/main/res/anim/kp_nav_enter.xml"),
+  "utf8",
+);
+const navExit = fs.readFileSync(
+  path.join(root, "native-android/app/src/main/res/anim/kp_nav_exit.xml"),
+  "utf8",
+);
 const navStart = chatList.indexOf("internal fun HomeBottomNavigation(");
 const navEnd = chatList.indexOf("@Composable\nprivate fun NavItem(", navStart);
 const nav = navStart >= 0 && navEnd > navStart ? chatList.slice(navStart, navEnd) : "";
@@ -33,15 +41,24 @@ check(
   "home navigation distributes all four tabs in equal-width slots",
   nav.includes("horizontalArrangement = Arrangement.spacedBy(gap)") &&
     (nav.match(/Modifier\.weight\(1f\)/g) ?? []).length >= 4 &&
-    nav.includes("val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4"),
+    nav.includes("val slotWidth = (maxWidth - capsuleHorizontalPadding * 2 - gap * 3) / 4"),
 );
 check(
   "selected indicator is centered within the selected slot on the icon baseline",
   nav.includes("val indicatorSize = 40.dp") &&
-    nav.includes("capsulePadding + (slotWidth - indicatorSize) * 0.5f") &&
-    nav.includes("val indicatorY = capsulePadding + (itemH - indicatorSize) * 0.5f") &&
+    nav.includes("capsuleHorizontalPadding + (slotWidth - indicatorSize) * 0.5f") &&
+    nav.includes("val indicatorY = capsuleVerticalPadding + (itemH - indicatorSize) * 0.5f") &&
     nav.includes("animateDpAsState") &&
     nav.includes(".offset(x = indicatorX, y = indicatorY)"),
+);
+check(
+  "the background capsule is compacted without shrinking the four 24dp nav glyphs",
+  nav.includes("val capsuleWidth = 240.dp") &&
+    nav.includes("val capsuleHeight = 50.dp") &&
+    nav.includes("val capsuleHorizontalPadding = 6.dp") &&
+    nav.includes("val capsuleVerticalPadding = 3.dp") &&
+    (nav.match(/modifier = Modifier\.size\(24\.dp\)/g) ?? []).length >= 3 &&
+    nav.includes("StatusGlyphIcon(tint, 24.dp)"),
 );
 check(
   "tab and badge state are read inside the floating-pill scope, not by KpApp's animated NavHost",
@@ -109,9 +126,11 @@ check(
         "utf8",
       )
       .includes('android:fromYDelta="100%"') &&
-    fs
-      .readFileSync(path.join(root, "native-android/app/src/main/res/anim/kp_nav_exit.xml"), "utf8")
-      .includes('android:toYDelta="100%"'),
+    navEnter.includes('android:duration="180"') &&
+    navEnter.includes('@android:interpolator/fast_out_slow_in') &&
+    navExit.includes('android:toYDelta="100%"') &&
+    navExit.includes('android:duration="160"') &&
+    navExit.includes('@android:interpolator/fast_out_linear_in'),
 );
 check(
   "the rounded floating pill uses a high-opacity theme surface without native blur",

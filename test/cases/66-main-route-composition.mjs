@@ -46,12 +46,13 @@ check(
     nav.includes("val unseenStatus = ScreenStore.statuses.any"),
 );
 check(
-  "home remains stationary while ordinary pushed routes keep the existing NavHost transitions",
+  "home remains stationary and chat entry uses the softened, short-distance route transition",
   mainRoute.includes('"main"') &&
     mainRoute.includes("enterTransition = { EnterTransition.None }") &&
     mainRoute.includes("exitTransition = { ExitTransition.None }") &&
     app.includes('"chat/{id}"') &&
-    app.includes("enterTransition = { fadeIn(tween(150)) }") &&
+    app.includes("fadeIn(tween(210, easing = FastOutSlowInEasing))") &&
+    app.includes("slideInHorizontally(tween(210, easing = FastOutSlowInEasing)) { it / 20 }") &&
     app.includes("slideInHorizontally(tween(260))") &&
     app.includes("slideOutHorizontally(tween(260))"),
 );
