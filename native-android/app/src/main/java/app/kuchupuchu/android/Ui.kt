@@ -11,6 +11,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -87,6 +88,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.json.JSONObject
+
+/** Returns the supplied outlined chat/message glyph as a tintable vector. */
+@Composable
+internal fun KpChatMessageVector(): ImageVector = ImageVector.vectorResource(R.drawable.ic_nav_chat)
 
 /**
  * A reference-counted modal signal. KpApp blurs the entire live screen while

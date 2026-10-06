@@ -40,7 +40,6 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.HideSource
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Flag
-import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.RemoveRedEye
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -1395,7 +1394,7 @@ private fun StatusMenuSheet(
             if (isMine) {
                 StatusMenuRow(Icons.Filled.Delete, "Delete status", Red, onDelete)
             } else {
-                StatusMenuRow(Icons.Filled.Chat, "Message", Ink, onMessage)
+                StatusMenuRow(KpChatMessageVector(), "Message", Ink, onMessage)
                 StatusMenuRow(Icons.Filled.HideSource, "Hide status", Ink, onHide)
                 StatusMenuRow(Icons.Filled.Flag, "Report", Ink, onReport)
             }

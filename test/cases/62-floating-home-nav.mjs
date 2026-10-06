@@ -14,6 +14,10 @@ const app = fs.readFileSync(
   path.join(root, "native-android/app/src/main/java/app/kuchupuchu/android/KpApp.kt"),
   "utf8",
 );
+const theme = fs.readFileSync(
+  path.join(root, "native-android/app/src/main/res/values/themes.xml"),
+  "utf8",
+);
 const navStart = chatList.indexOf("internal fun HomeBottomNavigation(");
 const navEnd = chatList.indexOf("@Composable\nprivate fun NavItem(", navStart);
 const nav = navStart >= 0 && navEnd > navStart ? chatList.slice(navStart, navEnd) : "";
@@ -40,9 +44,14 @@ check(
     nav.includes(".offset(x = indicatorX, y = indicatorY)"),
 );
 check(
-  "unread chat badge uses the unread-conversation count at the root nav call site",
-  app.includes("unreadChats = ScreenStore.convs.count") &&
-    rootNav.includes("unreadChats = ScreenStore.convs.count"),
+  "tab and badge state are read inside the floating-pill scope, not by KpApp's animated NavHost",
+  rootNav.includes("selectedTab = homeTab") &&
+    !rootNav.includes("tab = homeTab.intValue") &&
+    !rootNav.includes("unreadChats = ScreenStore.convs.count") &&
+    !rootNav.includes("unseenStatus = ScreenStore.statuses.any") &&
+    nav.includes("val tab = selectedTab.intValue") &&
+    nav.includes("val unreadChats = ScreenStore.convs.count") &&
+    nav.includes("val unseenStatus = ScreenStore.statuses.any"),
 );
 check(
   "nav visibility is route-gated to the authenticated home route",
@@ -105,12 +114,17 @@ check(
       .includes('android:toYDelta="100%"'),
 );
 check(
-  "the pill uses Android's rounded floating-window background blur, with a readable fallback",
-  nav.includes("Dialog(") &&
+  "the pill is an explicitly translucent themed window using Android's real rounded background blur API",
+  nav.includes("HomeNavPillDialog(navDialogContext)") &&
+    chatList.includes("CompositionLocalProvider(LocalContext provides themedContext)") &&
+    nav.includes("R.style.KpNavDialogTheme") &&
     nav.includes("dialogWindow.setBackgroundDrawable(pillWindowBackground)") &&
-    nav.includes("dialogWindow.setBackgroundBlurRadius(") &&
+    nav.includes("params.format = PixelFormat.TRANSLUCENT") &&
+    nav.includes("dialogWindow.setBackgroundBlurRadius(if (blurEnabled) blurRadiusPx else 0)") &&
     nav.includes("rememberCrossWindowBlurEnabled()") &&
     nav.includes("val fallbackFill =") &&
+    theme.includes('name="KpNavDialogTheme"') &&
+    theme.includes('name="android:windowIsTranslucent">true') &&
     nav.includes("WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE") &&
     nav.includes("WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()") &&
     app.includes("HomeBottomNavigation("),

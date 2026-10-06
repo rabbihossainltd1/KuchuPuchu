@@ -23,7 +23,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Language
@@ -217,7 +216,7 @@ fun AboutScreen(nav: NavController) {
                 .background(Card)
                 .padding(vertical = 4.dp),
         ) {
-            AboutRow(Icons.Filled.Chat, "Message the founder", "@rabbihossainltd") {
+            AboutRow(KpChatMessageVector(), "Message the founder", "@rabbihossainltd") {
                 haptics.tap()
                 messageOwner()
             }

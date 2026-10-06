@@ -3,7 +3,6 @@ package app.kuchupuchu.android
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
-import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Shield
@@ -372,7 +371,7 @@ fun PrivacySettingsScreen(nav: NavController) {
         SectionCard {
             SettingRow(Icons.Filled.Call, "My number", privacyLabel(level("phone", "contacts"))) { picker = "privPhone" }
             SettingRow(Icons.Filled.AccountCircle, "Profile picture", privacyLabel(level("avatar", "public"))) { picker = "privAvatar" }
-            SettingRow(Icons.AutoMirrored.Filled.Chat, "Messages", privacyLabel(level("messages", "public"))) { picker = "privMessages" }
+            SettingRow(KpChatMessageVector(), "Messages", privacyLabel(level("messages", "public"))) { picker = "privMessages" }
             SettingRow(Icons.Filled.Schedule, "Last seen", privacyLabel(level("lastSeen", "public"))) { picker = "privLastSeen" }
             SettingRow(Icons.Filled.GroupAdd, "Add to groups", privacyLabel(level("groups", "public"))) { picker = "privGroups" }
             // Owner round 32 (item 20): who can view this account's status updates.

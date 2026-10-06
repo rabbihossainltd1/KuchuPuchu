@@ -163,9 +163,9 @@ android {
 }
 
 dependencies {
-    // Runtime 1.11.3 includes the movable-content exception fix; keep Compose
-    // runtime/UI/animation versions aligned through the BOM.
-    val composeBom = platform("androidx.compose:compose-bom:2026.06.00")
+    // Runtime 1.12.1 includes the movable-content and slot-table fixes; keep
+    // runtime/UI/animation versions aligned through the Compose BOM.
+    val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")

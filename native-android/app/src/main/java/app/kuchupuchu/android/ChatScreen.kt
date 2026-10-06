@@ -61,7 +61,6 @@ import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.Reply
@@ -3856,7 +3855,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             KpSheetRow(Icons.Filled.Schedule, "Scheduled messages") { menuOpen = false; showScheduled = true }
                         }
                         KpSheetRow(Icons.Filled.Schedule, "History") { menuOpen = false; nav.navigate("aihistory") }
-                        KpSheetRow(Icons.AutoMirrored.Filled.Chat, "New chat") { menuOpen = false; resetAiSession() }
+                        KpSheetRow(KpChatMessageVector(), "New chat") { menuOpen = false; resetAiSession() }
                         KpSheetRow(Icons.Filled.NotificationsOff, if (muted) "Unmute…" else "Mute…", onClick = openMuteChooser)
                         KpSheetRow(Icons.Filled.Palette, "Chat theme") { menuOpen = false; showTheme = true }
                         KpSheetRow(Icons.Filled.VisibilityOff, if (aiIncognito) "Close incognito mode" else "Incognito mode") {
@@ -12458,7 +12457,7 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
-                        Icons.AutoMirrored.Filled.Chat,
+                        KpChatMessageVector(),
                         contentDescription = null,
                         tint = Color.White,
                         modifier = Modifier.size(16.dp),

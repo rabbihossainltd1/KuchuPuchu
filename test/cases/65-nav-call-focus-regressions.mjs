@@ -6,6 +6,9 @@ const root = "native-android/app/src/main/java/app/kuchupuchu/android";
 const read = (name) => readFileSync(resolve(`${root}/${name}`), "utf8");
 const chatList = read("ChatListScreen.kt");
 const chat = read("ChatScreen.kt");
+const about = read("AboutScreen.kt");
+const settings = read("SettingsScreen.kt");
+const status = read("StatusScreens.kt");
 const focus = read("KpFocusSheet.kt");
 const ui = read("Ui.kt");
 const attach = read("AttachSheet.kt");
@@ -55,10 +58,24 @@ const check = (name, condition, detail = "") =>
   lines.push(`  ${condition ? "OK     " : "BROKEN "}  ${name}${detail ? `  -> ${detail}` : ""}`);
 
 check(
-  "Chats tab uses the exact filled message/chat glyph from the supplied demo",
+  "Chats tab and every app chat/message action use the supplied tintable outline vector, with metadata stripped",
   nav.includes("painter = painterResource(R.drawable.ic_nav_chat)") &&
+    icon.includes('android:fillColor="#00000000"') &&
+    icon.includes('android:strokeColor="#FF000000"') &&
+    icon.includes('android:strokeWidth="1.6"') &&
+    icon.includes('android:strokeLineCap="round"') &&
+    icon.includes('android:strokeLineJoin="round"') &&
     icon.includes(
-      'android:pathData="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"',
+      'android:pathData="M3 20l1.3 -3.9c-2.324 -3.437 -1.426 -7.872 2.1 -10.374c3.526 -2.501 8.59 -2.296 11.845 .48c3.255 2.777 3.695 7.266 1.029 10.501c-2.666 3.235 -7.615 4.215 -11.574 2.293l-4.7 1"',
+    ) &&
+    !icon.includes("c2pa") &&
+    !icon.includes("metadata") &&
+    [chatList, chat, about, settings, status].every((source) =>
+      source.includes("KpChatMessageVector()"),
+    ) &&
+    [chatList, chat, about, settings, status].every(
+      (source) =>
+        !source.includes("Icons.Filled.Chat") && !source.includes("Icons.AutoMirrored.Filled.Chat"),
     ),
 );
 check(

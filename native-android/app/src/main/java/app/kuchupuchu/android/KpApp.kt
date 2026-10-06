@@ -240,9 +240,10 @@ fun KpApp() {
             ) {
                 composable(
                     "main",
-                    // The main/chat NavHost handoff produced a runtime
-                    // endGroup crash on animation frames. Keep home stationary;
-                    // the floating nav window owns the only transition here.
+                    // Keep the home surface stationary while the floating nav
+                    // owns its separate motion. This is not the crash fix by
+                    // itself: tab/badge reads are scoped to the nav-pill child
+                    // below so they do not restart this animated NavHost.
                     enterTransition = { EnterTransition.None },
                     exitTransition = { ExitTransition.None },
                     popEnterTransition = { EnterTransition.None },
@@ -390,9 +391,7 @@ fun KpApp() {
         val callFullscreen = CallEngine.instance?.let { it.active != null && !it.minimized } == true
         val rootHaptics = rememberHaptics()
         HomeBottomNavigation(
-            tab = homeTab.intValue,
-            unreadChats = ScreenStore.convs.count { !it.optBoolean("hidden") && it.optInt("unread", 0) > 0 },
-            unseenStatus = ScreenStore.statuses.any { !it.optBoolean("mine") && !it.optBoolean("allViewed") },
+            selectedTab = homeTab,
             visible = authed && actualRoute == "main" && HomeNavState.visible.value && !callFullscreen && !modalWindowVisible,
             modalOpen = modalWindowVisible,
             onSelect = { index ->

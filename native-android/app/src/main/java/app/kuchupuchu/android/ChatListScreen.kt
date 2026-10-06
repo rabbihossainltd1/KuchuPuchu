@@ -67,7 +67,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
@@ -94,6 +93,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
@@ -981,13 +981,17 @@ private fun ListTicks(read: Boolean, delivered: Boolean = read) {
  */
 @Composable
 internal fun HomeBottomNavigation(
-    tab: Int,
-    unreadChats: Int,
-    unseenStatus: Boolean,
+    selectedTab: MutableIntState,
     visible: Boolean,
     modalOpen: Boolean,
     onSelect: (Int) -> Unit,
 ) {
+    // Read fast-changing tab and badge state in the pill's own restart scope.
+    // Reading these in KpApp used to invalidate the entire NavHost on every
+    // tab/badge update, even though only this independent window needs them.
+    val tab = selectedTab.intValue
+    val unreadChats = ScreenStore.convs.count { !it.optBoolean("hidden") && it.optInt("unread", 0) > 0 }
+    val unseenStatus = ScreenStore.statuses.any { !it.optBoolean("mine") && !it.optBoolean("allViewed") }
     val density = LocalDensity.current
     val blurEnabled = rememberCrossWindowBlurEnabled()
     val darkMode = KpThemeMode.darkBlue
@@ -1007,12 +1011,16 @@ internal fun HomeBottomNavigation(
     val capsuleWidthPx = with(density) { capsuleWidth.roundToPx() }
     val capsuleHeightPx = with(density) { capsuleHeight.roundToPx() }
     val bottomOffsetPx = WindowInsets.navigationBars.getBottom(density) + with(density) { 16.dp.roundToPx() }
-    val blurRadiusPx = with(density) { 30.dp.roundToPx() }
+    val blurRadiusPx = with(density) { 40.dp.roundToPx() }.coerceIn(80, 140)
     val indicatorSize = 40.dp
     val indicatorEasing = remember { CubicBezierEasing(0.34f, 1.45f, 0.5f, 1f) }
     val windowInteractive = visible && !modalOpen
     val dialogWindowRef = remember { arrayOfNulls<android.view.Window>(1) }
     var dialogAttached by remember { mutableStateOf(visible && !modalOpen) }
+    val baseContext = LocalContext.current
+    val navDialogContext = remember(baseContext) {
+        android.view.ContextThemeWrapper(baseContext, R.style.KpNavDialogTheme)
+    }
     val pillWindowBackground = remember(capsuleHeightPx, windowFill) {
         GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
@@ -1032,15 +1040,7 @@ internal fun HomeBottomNavigation(
     }
 
     if (dialogAttached) {
-        Dialog(
-            onDismissRequest = {},
-            properties = DialogProperties(
-                dismissOnBackPress = false,
-                dismissOnClickOutside = false,
-                usePlatformDefaultWidth = false,
-                decorFitsSystemWindows = true,
-            ),
-        ) {
+        HomeNavPillDialog(navDialogContext) {
             val dialogView = LocalView.current
             val dialogWindow = (dialogView.parent as? DialogWindowProvider)?.window
             DisposableEffect(
@@ -1178,6 +1178,26 @@ internal fun HomeBottomNavigation(
                 }
             }
         }
+    }
+}
+
+
+@Composable
+private fun HomeNavPillDialog(
+    themedContext: android.content.Context,
+    content: @Composable () -> Unit,
+) {
+    CompositionLocalProvider(LocalContext provides themedContext) {
+        Dialog(
+            onDismissRequest = {},
+            properties = DialogProperties(
+                dismissOnBackPress = false,
+                dismissOnClickOutside = false,
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = true,
+            ),
+            content = content,
+        )
     }
 }
 
@@ -1383,7 +1403,7 @@ private fun ChatListBody(
                 CircularProgressIndicator(color = ActionBlue)
             } else {
                 EmptyState(
-                    icon = Icons.Filled.Chat,
+                    icon = KpChatMessageVector(),
                     title = "No chats yet",
                     note = "Tap the gold button to message someone",
                 )
@@ -2389,7 +2409,7 @@ private fun ProfilePeekSheet(conv: JSONObject, nav: NavController, onDismiss: ()
             }
             Spacer(Modifier.height(14.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                PeekAction(Icons.Filled.Chat, "Message") {
+                PeekAction(KpChatMessageVector(), "Message") {
                     onDismiss()
                     nav.navigate("chat/$id")
                 }
