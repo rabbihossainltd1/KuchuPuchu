@@ -30,10 +30,7 @@ const homeStart = app.indexOf('composable(\n                    "main",');
 const homeEnd = app.indexOf('composable("newchat")', homeStart);
 const mainRoute = homeStart >= 0 && homeEnd > homeStart ? app.slice(homeStart, homeEnd) : "";
 const navStart = chatList.indexOf("internal fun HomeBottomNavigation(");
-const navEnd = chatList.indexOf(
-  "@Composable\nprivate fun rememberCrossWindowBlurEnabled",
-  navStart,
-);
+const navEnd = chatList.indexOf("@Composable\nprivate fun NavItem(", navStart);
 const nav = navStart >= 0 && navEnd > navStart ? chatList.slice(navStart, navEnd) : "";
 const lines = [];
 const check = (name, ok) => lines.push(`  ${ok ? "OK     " : "BROKEN "}  ${name}`);
@@ -68,11 +65,13 @@ check(
     !focus.includes("duplicateContent"),
 );
 check(
-  "Compose BOM keeps a compatible stable runtime with the movable-content exception fix",
-  build.includes('val kpComposeBomVersion = "2026.06.00"') &&
+  "Compose BOM advances the movable-content crash path with aligned libraries",
+  build.includes('val kpComposeBomVersion = "2026.09.00"') &&
     build.includes('platform("androidx.compose:compose-bom:$kpComposeBomVersion")') &&
-    build.includes("Runtime 1.11.3") &&
-    focus.includes("Runtime 1.11.2+"),
+    build.includes("Runtime 1.12.1") &&
+    focus.includes("Compose 1.12.1+") &&
+    build.includes("compileSdk = 37") &&
+    build.includes("targetSdk = 35"),
 );
 check(
   "supplied chat vector stays tintable, outlined, and free of the attached metadata",

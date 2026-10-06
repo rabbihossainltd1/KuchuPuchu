@@ -993,16 +993,12 @@ internal fun HomeBottomNavigation(
     val unreadChats = ScreenStore.convs.count { !it.optBoolean("hidden") && it.optInt("unread", 0) > 0 }
     val unseenStatus = ScreenStore.statuses.any { !it.optBoolean("mine") && !it.optBoolean("allViewed") }
     val density = LocalDensity.current
-    val blurEnabled = rememberCrossWindowBlurEnabled()
     val darkMode = KpThemeMode.darkBlue
     val idleTint = if (darkMode) Color(0xFFD3DEF5) else Muted
     val selectedTint = if (darkMode) Color.White else Ink
     val indicatorColor = if (darkMode) Color(0xB32B5BD7) else ActionBlue.copy(alpha = 0.16f)
-    // Keep the enabled-blur surface translucent enough for the backdrop to read;
-    // the nearly opaque fallback is used only when the platform blur is unavailable.
-    val glassFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.28f) else Card.copy(alpha = 0.42f)
-    val fallbackFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.88f) else Card.copy(alpha = 0.94f)
-    val windowFill = if (blurEnabled) glassFill else fallbackFill
+    // Keep the floating card visibly solid; it no longer relies on platform blur.
+    val pillFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.92f) else Card.copy(alpha = 0.92f)
     val itemH = 44.dp
     val gap = 4.dp
     val capsulePadding = 6.dp
@@ -1011,7 +1007,6 @@ internal fun HomeBottomNavigation(
     val capsuleWidthPx = with(density) { capsuleWidth.roundToPx() }
     val capsuleHeightPx = with(density) { capsuleHeight.roundToPx() }
     val bottomOffsetPx = WindowInsets.navigationBars.getBottom(density) + with(density) { 16.dp.roundToPx() }
-    val blurRadiusPx = with(density) { 40.dp.roundToPx() }.coerceIn(80, 140)
     val indicatorSize = 40.dp
     val indicatorEasing = remember { CubicBezierEasing(0.34f, 1.45f, 0.5f, 1f) }
     val windowInteractive = visible && !modalOpen
@@ -1021,11 +1016,11 @@ internal fun HomeBottomNavigation(
     val navDialogContext = remember(baseContext) {
         android.view.ContextThemeWrapper(baseContext, R.style.KpNavDialogTheme)
     }
-    val pillWindowBackground = remember(capsuleHeightPx, windowFill) {
+    val pillWindowBackground = remember(capsuleHeightPx, pillFill) {
         GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = capsuleHeightPx / 2f
-            setColor(windowFill.toArgb())
+            setColor(pillFill.toArgb())
         }
     }
 
@@ -1049,8 +1044,6 @@ internal fun HomeBottomNavigation(
                 capsuleHeightPx,
                 bottomOffsetPx,
                 pillWindowBackground,
-                blurEnabled,
-                blurRadiusPx,
             ) {
                 if (dialogWindow != null) {
                     dialogWindowRef[0] = dialogWindow
@@ -1086,15 +1079,9 @@ internal fun HomeBottomNavigation(
                         params.setFitInsetsTypes(0)
                     }
                     dialogWindow.attributes = params
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        dialogWindow.setBackgroundBlurRadius(if (blurEnabled) blurRadiusPx else 0)
-                    }
                 }
                 onDispose {
                     if (dialogWindowRef[0] === dialogWindow) dialogWindowRef[0] = null
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        dialogWindow?.setBackgroundBlurRadius(0)
-                    }
                 }
             }
             BoxWithConstraints(
@@ -1199,37 +1186,6 @@ private fun HomeNavPillDialog(
             content = content,
         )
     }
-}
-
-@Composable
-private fun rememberCrossWindowBlurEnabled(): Boolean {
-    val context = LocalContext.current
-    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        rememberCrossWindowBlurEnabledApiS(context)
-    } else {
-        false
-    }
-}
-
-@androidx.annotation.RequiresApi(Build.VERSION_CODES.S)
-@Composable
-private fun rememberCrossWindowBlurEnabledApiS(context: android.content.Context): Boolean {
-    var blurEnabled by remember(context) {
-        mutableStateOf(context.getSystemService(WindowManager::class.java)?.isCrossWindowBlurEnabled == true)
-    }
-    DisposableEffect(context) {
-        val windowManager = context.getSystemService(WindowManager::class.java)
-        if (windowManager == null) {
-            blurEnabled = false
-            onDispose {}
-        } else {
-            val listener = java.util.function.Consumer<Boolean> { blurEnabled = it }
-            blurEnabled = windowManager.isCrossWindowBlurEnabled
-            windowManager.addCrossWindowBlurEnabledListener(context.mainExecutor, listener)
-            onDispose { windowManager.removeCrossWindowBlurEnabledListener(listener) }
-        }
-    }
-    return blurEnabled
 }
 
 @Composable

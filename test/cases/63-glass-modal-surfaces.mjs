@@ -137,13 +137,14 @@ check(
     chat.includes(".border(0.5.dp, GlassSheetEdge)"),
 );
 check(
-  "home nav keeps modal suppression and sets a static real-blur radius on its floating window",
+  "home nav keeps modal suppression and uses an opaque floating fill without platform blur",
   nav.includes("if (dialogAttached)") &&
     nav.includes("dialogWindowRef[0]?.setWindowAnimations(0)") &&
     !nav.includes("slideProgress") &&
     nav.includes("Dialog(") &&
     nav.includes("WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE") &&
-    nav.includes("dialogWindow.setBackgroundBlurRadius(if (blurEnabled) blurRadiusPx else 0)") &&
+    nav.includes("copy(alpha = 0.92f)") &&
+    !nav.includes("setBackgroundBlurRadius(") &&
     kpApp.includes("modalOpen = modalWindowVisible"),
 );
 

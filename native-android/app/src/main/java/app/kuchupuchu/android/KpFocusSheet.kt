@@ -62,8 +62,8 @@ import kotlin.math.roundToInt
  * The live item that opened a focused action sheet. Its movable Compose
  * content is transferred from its list slot to the root overlay; the source
  * slot remains measured as a placeholder until the return animation finishes.
- * This crosses LazyColumn/NavHost subcompositions, so Compose Runtime 1.11.2+
- * is required for the upstream movable-content exception fix.
+ * This crosses LazyColumn/NavHost subcompositions; use Compose 1.12.1+ for its newer
+ * movable-content/slot-table fixes after 1.11.3 crashed during long-press transfer.
  */
 internal data class KpModalFocusItem(
     val key: String,

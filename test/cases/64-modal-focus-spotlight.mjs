@@ -10,20 +10,34 @@ const focus = read("KpFocusSheet.kt");
 const kpApp = read("KpApp.kt");
 const rootBuild = readFileSync("native-android/build.gradle.kts", "utf8");
 const appBuild = readFileSync("native-android/app/build.gradle.kts", "utf8");
+const gradleProperties = readFileSync("native-android/gradle.properties", "utf8");
+const gradleWrapper = readFileSync(
+  "native-android/gradle/wrapper/gradle-wrapper.properties",
+  "utf8",
+);
+const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
 
 const lines = [];
 const check = (name, condition, detail = "") =>
   lines.push(`  ${condition ? "OK     " : "BROKEN "}  ${name}${detail ? `  -> ${detail}` : ""}`);
 
 check(
-  "Compose runtime and compiler plugin include the supported movable-content subcomposition fix",
-  rootBuild.includes('id("org.jetbrains.kotlin.android") version "2.1.21"') &&
-    rootBuild.includes('id("org.jetbrains.kotlin.plugin.compose") version "2.1.21"') &&
+  "Compose runtime and compiler target the movable-content crash path on a supported toolchain",
+  rootBuild.includes('id("com.android.application") version "9.1.1"') &&
+    rootBuild.includes('id("org.jetbrains.kotlin.android") version "2.2.10"') &&
+    rootBuild.includes('id("org.jetbrains.kotlin.plugin.compose") version "2.2.10"') &&
     appBuild.includes('id("org.jetbrains.kotlin.plugin.compose")') &&
-    appBuild.includes('val kpComposeBomVersion = "2026.06.00"') &&
+    appBuild.includes('val kpComposeBomVersion = "2026.09.00"') &&
+    appBuild.includes("compileSdk = 37") &&
+    appBuild.includes("targetSdk = 35") &&
     appBuild.includes('platform("androidx.compose:compose-bom:$kpComposeBomVersion")') &&
     appBuild.includes("navigation-compose:2.9.8") &&
-    focus.includes("Compose Runtime 1.11.2+"),
+    gradleWrapper.includes("gradle-9.3.1-all.zip") &&
+    gradleProperties.includes("android.builtInKotlin=false") &&
+    gradleProperties.includes("android.newDsl=false") &&
+    workflow.includes('"platforms;android-37.0"') &&
+    focus.includes("Compose 1.12.1+") &&
+    focus.includes("movable-content/slot-table fixes after 1.11.3 crashed"),
 );
 
 const convCardStart = chatList.indexOf("private fun ConvCard(");

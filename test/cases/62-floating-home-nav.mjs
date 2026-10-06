@@ -1,5 +1,5 @@
 // Source-contract coverage for the Android home navigation: equal slots, route gating,
-// smooth independent motion, and the platform window's real backdrop blur.
+// smooth independent motion, and a high-opacity surface without platform blur.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -114,15 +114,16 @@ check(
       .includes('android:toYDelta="100%"'),
 );
 check(
-  "the pill is an explicitly translucent themed window using Android's real rounded background blur API",
+  "the rounded floating pill uses a high-opacity theme surface without native blur",
   nav.includes("HomeNavPillDialog(navDialogContext)") &&
     chatList.includes("CompositionLocalProvider(LocalContext provides themedContext)") &&
     nav.includes("R.style.KpNavDialogTheme") &&
     nav.includes("dialogWindow.setBackgroundDrawable(pillWindowBackground)") &&
     nav.includes("params.format = PixelFormat.TRANSLUCENT") &&
-    nav.includes("dialogWindow.setBackgroundBlurRadius(if (blurEnabled) blurRadiusPx else 0)") &&
-    nav.includes("rememberCrossWindowBlurEnabled()") &&
-    nav.includes("val fallbackFill =") &&
+    nav.includes("val pillFill =") &&
+    nav.includes("copy(alpha = 0.92f)") &&
+    !nav.includes("setBackgroundBlurRadius(") &&
+    !nav.includes("rememberCrossWindowBlurEnabled()") &&
     theme.includes('name="KpNavDialogTheme"') &&
     theme.includes('name="android:windowIsTranslucent">true') &&
     nav.includes("WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE") &&

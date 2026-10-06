@@ -95,7 +95,8 @@ check(
     nav.includes("dialogWindow.setWindowAnimations(R.style.KpNavWindowAnimations)") &&
     nav.includes("dialogWindowRef[0]?.setWindowAnimations(0)") &&
     nav.includes("params.y = bottomOffsetPx") &&
-    nav.includes("dialogWindow.setBackgroundBlurRadius(if (blurEnabled) blurRadiusPx else 0)") &&
+    nav.includes("copy(alpha = 0.92f)") &&
+    !nav.includes("setBackgroundBlurRadius(") &&
     nav.includes("WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()") &&
     theme.includes("@anim/kp_nav_enter") &&
     theme.includes("@anim/kp_nav_exit") &&
@@ -127,15 +128,14 @@ check(
     nav.includes("R.style.KpNavWindowAnimations"),
 );
 check(
-  "the pill's translucent rounded native background reveals platform blur rather than transparent Compose fill",
-  nav.includes("val glassFill =") &&
-    nav.includes("val fallbackFill =") &&
+  "the rounded floating pill uses a high-opacity native surface without platform blur",
+  nav.includes("val pillFill =") &&
+    nav.includes("copy(alpha = 0.92f)") &&
     nav.includes("GradientDrawable()") &&
     nav.includes("dialogWindow.setBackgroundDrawable(pillWindowBackground)") &&
-    nav.includes("setBackgroundBlurRadius(") &&
+    !nav.includes("setBackgroundBlurRadius(") &&
     nav.includes(".clip(CircleShape)") &&
     nav.includes(".background(indicatorColor)") &&
-    !nav.includes(".background(glassFill)") &&
     !nav.includes("glassEdge") &&
     !nav.includes("selectedBorder") &&
     !nav.includes(".border(1.25.dp"),

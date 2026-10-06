@@ -12,7 +12,7 @@ plugins {
 
 // Include the CI source revision in crash diagnostics without changing the app version.
 val kpBuildSha = System.getenv("GITHUB_SHA")?.take(12)?.takeIf { it.matches(Regex("[0-9a-fA-F]{7,12}")) } ?: "local"
-val kpComposeBomVersion = "2026.06.00"
+val kpComposeBomVersion = "2026.09.00"
 
 // §51 / Play policy: `release` must not be signed with the repository's debug key —
 // that key is in git, so anyone with read access could publish an update that every
@@ -62,7 +62,7 @@ fun sha256Hex(f: File): String {
 
 android {
     namespace = "app.kuchupuchu.android"
-    compileSdk = 35
+    compileSdk = 37
     defaultConfig {
         // Lite-weight APK: WebRTC ships 4 ABIs, phones need 2; only English
         // resources. Cuts several MB and speeds install/startup.
@@ -172,8 +172,8 @@ android {
 }
 
 dependencies {
-    // Runtime 1.11.3 includes the movable-content exception fix; keep Compose
-    // runtime/UI/animation versions aligned through the BOM.
+    // Runtime 1.12.1 includes newer movable-content/slot-table fixes implicated by
+    // the device trace; keep Compose runtime/UI/animation aligned through the BOM.
     val composeBom = platform("androidx.compose:compose-bom:$kpComposeBomVersion")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")
