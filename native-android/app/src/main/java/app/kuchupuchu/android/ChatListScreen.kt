@@ -138,7 +138,6 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -146,9 +145,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.ViewTreeLifecycleOwner
-import androidx.lifecycle.ViewTreeViewModelStoreOwner
-import androidx.savedstate.ViewTreeSavedStateRegistryOwner
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import kotlinx.coroutines.Dispatchers
@@ -1151,18 +1147,14 @@ private fun HomeNavPillDialog(
     blurRadiusPx: Int,
     content: @Composable () -> Unit,
 ) {
-    val hostView = LocalView.current
     val parentComposition = rememberCompositionContext()
     val currentContent = rememberUpdatedState(content)
     // Pass the theme to Android's Dialog itself so android:windowIsTranslucent
     // applies to the real window on API 31+, not merely to Compose locals.
     val dialog = remember(activityContext) { Dialog(activityContext, R.style.KpNavDialogTheme) }
-    val composeView = remember(dialog, hostView, parentComposition) {
+    val composeView = remember(dialog, parentComposition) {
         ComposeView(dialog.context).apply {
             setParentCompositionContext(parentComposition)
-            ViewTreeLifecycleOwner.set(this, ViewTreeLifecycleOwner.get(hostView))
-            ViewTreeViewModelStoreOwner.set(this, ViewTreeViewModelStoreOwner.get(hostView))
-            ViewTreeSavedStateRegistryOwner.set(this, ViewTreeSavedStateRegistryOwner.get(hostView))
             setContent {
                 CompositionLocalProvider(LocalContext provides dialog.context) {
                     currentContent.value()
