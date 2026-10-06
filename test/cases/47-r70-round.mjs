@@ -173,37 +173,43 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     "r71-21: `heartReact` is a REAL reaction — it guards a sending echo (no id), then goes through the same `applyReaction` the sheet uses, so the chip, the server row and the other phone all agree",
     chat.includes("fun heartReact(m: JSONObject) {") &&
-      chat.includes(
-        'if (m.optString("id").startsWith("c_") || m.optString("id").isBlank()) return',
-      ) &&
+      chat.includes('if (mid.startsWith("c_") || mid.isBlank()) return') &&
       chat.includes('applyReaction(m, "❤️")') &&
+      chat.includes("lastHeartReactionAt = remember { HashMap<String, Long>() }") &&
+      chat.includes("now - previous < HEART_REACTION_COOLDOWN_MS") &&
       // exactly one heart call into applyReaction beyond the sheet's own
       (chat.match(/applyReaction\(m, "❤️"\)/g) || []).length === 1 &&
       (chat.match(/applyReaction\(it, e\)/g) || []).length === 1,
   );
   check(
-    "r71-21: EVERY bubble kind hearts on a double tap — the text/emoji bubble, the image, video, album, view-once, once-text (r71-20) and call/status rows all carry `onDoubleClick`, and MessageRow hands them the callback",
-    // r71-20 added the once-text bubble to the family — six rows now.
+    "r71-21: non-emoji-only bubble kinds still heart on double tap; emoji-only text deliberately opts out",
+    // Five child rows keep their callback; MessageRow gates only emoji-only TEXT.
     (chat.match(/onDoubleClick = \{ if \(!pendingEcho\) onDoubleTapHeart\(m\) \}/g) || [])
-      .length === 6 &&
+      .length === 5 &&
+      chat.includes("onDoubleClick = if (!pendingEcho && emojiOnly == 0)") &&
       chat.includes("onDoubleTapHeart: (JSONObject) -> Unit = {},") &&
       // five tiles + the r71-20 once-text bubble
       (chat.match(/onDoubleTapHeart: \(JSONObject\) -> Unit = \{\},/g) || []).length === 6 &&
       (chat.match(/onDoubleTapHeart = ::heartReact,/g) || []).length === 3,
   );
   check(
-    "r71-21: an emoji-only bubble keeps its INSTANT tap (the r67-4 replay is never delayed) and still hearts on the second tap — its own 320 ms counter, no combinedClickable deferral",
+    "r71-21: emoji glyphs keep instant replay; emoji-only text has no heart callback, while the sticker retains its double-tap callback",
     emo.includes("internal const val DOUBLE_TAP_HEART_MS = 320L") &&
       emo.includes("val lastTapAt = remember { longArrayOf(0L) }") &&
-      emo.includes(
-        "if (onDoubleTap != null && now - lastTapAt[0] in 1..DOUBLE_TAP_HEART_MS) onDoubleTap.invoke()",
-      ) &&
+      emo.includes("val doubleTapConsumed = remember { booleanArrayOf(false) }") &&
+      emo.includes("val isDoubleTap = lastTapAt[0] > 0L && gap in 1..DOUBLE_TAP_HEART_MS") &&
+      emo.includes("if (isDoubleTap && !doubleTapConsumed[0] && onDoubleTap != null)") &&
       emo.includes("onDoubleTap: (() -> Unit)? = null,") &&
       (
         chat.match(
           /onDoubleTap = \{ if \(!pendingEcho\) onDoubleTapHeart\(m\) \}, danceKey = fxKey\)/g,
         ) || []
-      ).length === 3,
+      ).length === 1 &&
+      chat.includes('EmojiGlyphRow(m.optText("body").trim(), 66f') &&
+      !chat
+        .split("\n")
+        .filter((line) => line.includes('EmojiGlyphRow(m.optText("body").trim(),'))
+        .some((line) => line.includes("onDoubleTap =")),
   );
 }
 

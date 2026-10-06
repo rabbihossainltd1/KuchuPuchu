@@ -3477,6 +3477,10 @@ async function ensureSchema(db: D1Database) {
     // call (the only other participant); the peer's id on a group call.
     `ALTER TABLE call_ice ADD COLUMN target_id TEXT`,
     `CREATE INDEX IF NOT EXISTS idx_call_ice_target ON call_ice(call_id, target_id, created_at)`,
+    // Incremental /ice polling uses monotonic rowid cursors. These prefix indexes
+    // let both the 1:1 and addressed group query resume without rereading history.
+    `CREATE INDEX IF NOT EXISTS idx_call_ice_cursor ON call_ice(call_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_call_ice_target_cursor ON call_ice(call_id, target_id)`,
     `ALTER TABLE conversations ADD COLUMN disappear_seconds INTEGER`,
     `ALTER TABLE conversations ADD COLUMN theme TEXT`,
     // Owner round 31 (item 26): "Hide chat" — per-member, like `muted`.
@@ -11288,43 +11292,51 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
     if (method === "GET") {
       const since = url.searchParams.get("since") || "";
+      const afterRaw = url.searchParams.get("after");
+      const afterRowid = afterRaw === null ? null : Number(afterRaw);
+      if (afterRaw !== null && !/^\d+$/.test(afterRaw)) fail(400, "Invalid ICE cursor.");
+      if (afterRowid !== null && (!Number.isSafeInteger(afterRowid) || afterRowid < 0)) {
+        fail(400, "Invalid ICE cursor.");
+      }
       // A group member reads only the candidates addressed to them; the 1:1
-      // shape (everything the other side sent) is unchanged.
+      // shape (everything the other side sent) is unchanged. `after` is the
+      // stable, monotonic rowid; unlike a timestamp it cannot skip candidates
+      // created in the same millisecond.
       const forMe = isGroupCall(row) ? " AND target_id = ?" : "";
       const forMeBind = isGroupCall(row) ? [uid] : [];
-      const rows = since
-        ? await all<{
-            rowid: number;
-            sender_id: string;
-            candidate_json: string;
-            created_at: string;
-          }>(
-            db,
-            `SELECT rowid AS rowid, sender_id, candidate_json, created_at FROM call_ice WHERE call_id = ? AND sender_id != ?${forMe} AND created_at > ? ORDER BY created_at ASC, rowid ASC`,
-            callId,
-            uid,
-            ...forMeBind,
-            since,
-          )
-        : await all<{
-            rowid: number;
-            sender_id: string;
-            candidate_json: string;
-            created_at: string;
-          }>(
-            db,
-            `SELECT rowid AS rowid, sender_id, candidate_json, created_at FROM call_ice WHERE call_id = ? AND sender_id != ?${forMe} ORDER BY created_at ASC, rowid ASC`,
-            callId,
-            uid,
-            ...forMeBind,
-          );
+      // Return a call-wide high-water mark as well as visible rows. A 1:1
+      // receiver does not see its own outgoing rows, and group peers do not see
+      // rows for other recipients; the high-water mark lets them skip those
+      // safely instead of re-reading the filtered rowids on every poll.
+      const watermark = await one<{ cursor: number | null }>(
+        db,
+        "SELECT MAX(rowid) AS cursor FROM call_ice WHERE call_id = ?",
+        callId,
+      );
+      const cursorClause =
+        afterRowid !== null ? " AND rowid > ?" : since ? " AND created_at > ?" : "";
+      const cursorBind = afterRowid !== null ? [afterRowid] : since ? [since] : [];
+      const rows = await all<{
+        rowid: number;
+        sender_id: string;
+        candidate_json: string;
+        created_at: string;
+      }>(
+        db,
+        `SELECT rowid AS rowid, sender_id, candidate_json, created_at FROM call_ice WHERE call_id = ? AND sender_id != ?${forMe}${cursorClause} ORDER BY rowid ASC`,
+        callId,
+        uid,
+        ...forMeBind,
+        ...cursorBind,
+      );
       const items = rows.map((r) => ({
         id: `${r.created_at}:${r.rowid}`,
+        cursor: r.rowid,
         from: r.sender_id,
         candidate: parseJson<Record<string, unknown>>(r.candidate_json, {}),
         createdAt: r.created_at,
       }));
-      return json({ items, now: nowIso() });
+      return json({ items, cursor: watermark?.cursor ?? 0, now: nowIso() });
     }
   }
 
@@ -12215,14 +12227,16 @@ const CONV_PREVIEW_COLS =
 // Only unread chats sample metadata, at most the newest 32 rows. Never walk
 // an entire history to label a backlog: incomplete/mixed samples say messages.
 // Both list and realtime detail use this in their ALREADY-existing statement.
-const UNREAD_PREVIEW_SAMPLE = `CASE WHEN viewer_member.unread BETWEEN 1 AND 32 THEN (
+export const UNREAD_PREVIEW_SAMPLE = `CASE WHEN viewer_member.unread BETWEEN 1 AND 32 THEN (
   SELECT json_group_array(json_object('kind', recent.kind, 'meta_json', recent.meta_json))
   FROM (
-    SELECT kind, meta_json, sender_id, created_at FROM messages
-    WHERE conv_id = m.conv_id ORDER BY created_at DESC, rowid DESC LIMIT 32
+    SELECT kind, meta_json FROM messages
+    WHERE conv_id = m.conv_id
+      AND sender_id != viewer_member.user_id
+      AND kind != 'DELETED'
+      AND created_at > COALESCE(viewer_member.last_read_at, '')
+    ORDER BY created_at DESC, rowid DESC LIMIT 32
   ) recent
-  WHERE recent.sender_id != viewer_member.user_id AND recent.kind != 'DELETED'
-    AND (viewer_member.last_read_at IS NULL OR recent.created_at > viewer_member.last_read_at)
 ) ELSE NULL END`;
 
 function previewCategory(row: Pick<MsgRow, "kind" | "meta_json">): string {

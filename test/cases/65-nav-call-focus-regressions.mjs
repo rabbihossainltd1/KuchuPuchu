@@ -95,8 +95,8 @@ check(
     nav.includes("dialogWindow.setWindowAnimations(R.style.KpNavWindowAnimations)") &&
     nav.includes("dialogWindowRef[0]?.setWindowAnimations(0)") &&
     nav.includes("params.y = bottomOffsetPx") &&
-    nav.includes("copy(alpha = 0.92f)") &&
-    !nav.includes("setBackgroundBlurRadius(") &&
+    nav.includes("copy(alpha = 0.82f)") &&
+    chatList.includes("setBackgroundBlurRadius(") &&
     nav.includes("WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()") &&
     theme.includes("@anim/kp_nav_enter") &&
     theme.includes("@anim/kp_nav_exit") &&
@@ -138,16 +138,23 @@ check(
     nav.includes("R.style.KpNavWindowAnimations"),
 );
 check(
-  "the rounded floating pill uses a high-opacity native surface without platform blur",
+  "the full floating pill is enlarged, icons stay 27dp, contents sit 3dp lower, and rounded native blur keeps its translucent fallback",
   nav.includes("val pillFill =") &&
-    nav.includes("copy(alpha = 0.92f)") &&
-    nav.includes("val navScale = 1.06f") &&
+    nav.includes("copy(alpha = 0.82f)") &&
+    nav.includes("val navScale = 1.2f") &&
+    nav.includes("val navIconSize = 27.dp") &&
+    nav.includes("val navWindowWidth = 248.dp * navScale") &&
+    nav.includes("val navWindowHeight = 56.dp * navScale") &&
     nav.includes("val backgroundCardWidth = 224.dp * navScale") &&
     nav.includes("val backgroundCardHeight = 46.dp * navScale") &&
+    nav.includes("val navContentYOffset = 3.dp") &&
+    nav.includes(".offset(y = navContentYOffset)") &&
+    nav.includes("+ navContentYOffset") &&
     nav.includes(".background(pillFill)") &&
-    nav.includes("ColorDrawable(android.graphics.Color.TRANSPARENT)") &&
+    nav.includes("InsetDrawable(") &&
     nav.includes("dialogWindow.setBackgroundDrawable(pillWindowBackground)") &&
-    !nav.includes("setBackgroundBlurRadius(") &&
+    chatList.includes("setBackgroundBlurRadius(") &&
+    nav.includes("isCrossWindowBlurEnabled") &&
     nav.includes(".clip(CircleShape)") &&
     nav.includes(".background(indicatorColor)") &&
     !nav.includes("glassEdge") &&

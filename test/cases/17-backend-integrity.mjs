@@ -1153,6 +1153,31 @@ async function main() {
     );
     const mediaAfter = await h.call("GET", `/api/conversations/${cid}/media`, undefined, B.token);
     const profileAfter = await h.call("GET", `/api/users/${A.user.id}`, undefined, B.token);
+    const personalCallId = callAfter.json.call?.id;
+    const personalIcePost = await h.call(
+      "POST",
+      `/api/calls/${personalCallId}/ice`,
+      { candidate: { candidate: "candidate:5 1 UDP b-self", sdpMid: "0", sdpMLineIndex: 0 } },
+      B.token,
+    );
+    const personalIceB = await h.call(
+      "GET",
+      `/api/calls/${personalCallId}/ice`,
+      undefined,
+      B.token,
+    );
+    const personalIceA = await h.call(
+      "GET",
+      `/api/calls/${personalCallId}/ice`,
+      undefined,
+      A.token,
+    );
+    const personalIceAfter = await h.call(
+      "GET",
+      `/api/calls/${personalCallId}/ice?after=${personalIceB.json.cursor}`,
+      undefined,
+      B.token,
+    );
     check(
       "r32-38: only the recipient can accept (opener → 403); after Accept the row is a normal chat and calls / media / last seen / the number (contacts-only default) open up",
       wrongSide.status === 403 &&
@@ -1164,6 +1189,22 @@ async function main() {
         typeof profileAfter.json.user?.lastActiveAt === "string" &&
         profileAfter.json.user?.phone === A.user.phone,
       `${wrongSide.status}/${accepted.status}/${callAfter.status}/${mediaAfter.status}`,
+    );
+    check(
+      "1:1 ICE cursor advances past the caller's own filtered row and still delivers that candidate to the peer",
+      personalIcePost.status === 201 &&
+        personalIceB.json.items?.length === 0 &&
+        personalIceB.json.cursor > 0 &&
+        personalIceA.json.items?.length === 1 &&
+        personalIceA.json.items[0].candidate.candidate === "candidate:5 1 UDP b-self" &&
+        personalIceA.json.cursor === personalIceB.json.cursor &&
+        personalIceAfter.json.items?.length === 0,
+      JSON.stringify({
+        post: personalIcePost.status,
+        selfItems: personalIceB.json.items?.length,
+        peerItems: personalIceA.json.items?.length,
+        cursor: personalIceB.json.cursor,
+      }),
     );
     // A reply from the recipient accepts by itself; a plain open (phone-book
     // match, or an old client) is never a request; the bots never are.
@@ -1670,22 +1711,82 @@ async function main() {
       { candidate: { candidate: "candidate:2 1 UDP no-target", sdpMid: "0", sdpMLineIndex: 0 } },
       A.token,
     );
+    const iceToB2 = await h.call(
+      "POST",
+      `/api/calls/${call.id}/ice`,
+      {
+        to: B.user.id,
+        candidate: { candidate: "candidate:3 1 UDP a-to-b-second", sdpMid: "0", sdpMLineIndex: 0 },
+      },
+      A.token,
+    );
+    // Force a same-millisecond pair: a timestamp-only strict `since` cursor
+    // would return an empty page and lose the second candidate.
+    const firstIceRow = await h
+      .q(
+        "SELECT rowid, created_at FROM call_ice WHERE call_id = ? ORDER BY rowid ASC LIMIT 1",
+        call.id,
+      )
+      .first();
+    const lastIceRow = await h
+      .q("SELECT rowid FROM call_ice WHERE call_id = ? ORDER BY rowid DESC LIMIT 1", call.id)
+      .first();
+    await h
+      .q(
+        "UPDATE call_ice SET created_at = ? WHERE rowid = ?",
+        firstIceRow.created_at,
+        lastIceRow.rowid,
+      )
+      .run();
+    const iceFromB = await h.call(
+      "POST",
+      `/api/calls/${call.id}/ice`,
+      {
+        to: A.user.id,
+        candidate: { candidate: "candidate:4 1 UDP b-to-a", sdpMid: "0", sdpMLineIndex: 0 },
+      },
+      B.token,
+    );
     const iceB = await h.call("GET", `/api/calls/${call.id}/ice`, undefined, B.token);
+    const iceAfterSameMs = await h.call(
+      "GET",
+      `/api/calls/${call.id}/ice?after=${iceB.json.items?.[0]?.cursor}`,
+      undefined,
+      B.token,
+    );
+    const iceAfterWatermark = await h.call(
+      "GET",
+      `/api/calls/${call.id}/ice?after=${iceB.json.cursor}`,
+      undefined,
+      B.token,
+    );
+    const iceA = await h.call("GET", `/api/calls/${call.id}/ice`, undefined, A.token);
     const iceC = await h.call("GET", `/api/calls/${call.id}/ice`, undefined, C.token);
     const iceD = await h.call("GET", `/api/calls/${call.id}/ice`, undefined, D.token);
     check(
-      "r32-5b: group ICE needs a peer (`to`); GET /ice hands a member only the candidates addressed to them (with `from`), and a non-member is refused",
+      "r32-5b: group ICE is peer-addressed; the rowid cursor returns same-millisecond candidates without leaking them to other members",
       iceToB.status === 201 &&
         iceNoTarget.status === 400 &&
-        iceB.json.items?.length === 1 &&
+        iceToB2.status === 201 &&
+        iceFromB.status === 201 &&
+        iceB.json.items?.length === 2 &&
         iceB.json.items[0].from === A.user.id &&
         iceB.json.items[0].candidate.candidate === "candidate:1 1 UDP a-to-b" &&
+        iceB.json.items[0].createdAt === iceB.json.items[1].createdAt &&
+        iceAfterSameMs.json.items?.length === 1 &&
+        iceAfterSameMs.json.items[0].candidate.candidate === "candidate:3 1 UDP a-to-b-second" &&
+        iceB.json.cursor > iceB.json.items[1].cursor &&
+        iceAfterWatermark.json.items?.length === 0 &&
+        iceA.json.items?.length === 1 &&
+        iceA.json.items[0].candidate.candidate === "candidate:4 1 UDP b-to-a" &&
         (iceC.json.items ?? []).length === 0 &&
         iceD.status === 403,
       JSON.stringify({
         ice: iceToB.status,
+        second: iceToB2.status,
         none: iceNoTarget.status,
         b: iceB.json.items?.length,
+        after: iceAfterSameMs.json.items?.length,
         c: iceC.json.items?.length,
         d: iceD.status,
       }),

@@ -24,6 +24,10 @@ const check = (name, cond, detail) =>
   lines.push(`  ${cond ? "OK     " : "BROKEN "}${name}${!cond && detail ? `  -> ${detail}` : ""}`);
 
 const src = readFileSync("src/worker/index.ts", "utf8");
+const callEngine = readFileSync(
+  "native-android/app/src/main/java/app/kuchupuchu/android/CallEngine.kt",
+  "utf8",
+);
 const day = new Date().toISOString().slice(0, 10);
 
 // Statements the worker issues for cleanup, exactly as written in the source.
@@ -97,7 +101,7 @@ const plan = (raw, sql, ...bind) =>
 
 // ------------------------------------------------------- 1. query shape: no full scans
 {
-  const { raw } = await seeded();
+  const { mod, raw } = await seeded();
   for (const [table, sql] of CLEANUP) {
     const p = plan(raw, sql, "2026-09-01T00:00:00.000Z");
     check(
@@ -106,6 +110,69 @@ const plan = (raw, sql, ...bind) =>
       p,
     );
   }
+  const previewPlan = plan(
+    raw,
+    `SELECT ${mod.UNREAD_PREVIEW_SAMPLE} FROM messages m
+     JOIN members viewer_member ON viewer_member.conv_id = m.conv_id
+     WHERE m.conv_id = ?`,
+    "c-preview",
+  );
+  check(
+    "unread-preview sampling seeks by conversation and last-read time before LIMIT 32",
+    previewPlan.includes(
+      "SEARCH messages USING INDEX idx_messages_conv (conv_id=? AND created_at>?)",
+    ),
+    previewPlan,
+  );
+  const oneToOneIcePlan = raw
+    .prepare(
+      "EXPLAIN QUERY PLAN SELECT rowid, sender_id, candidate_json, created_at FROM call_ice WHERE call_id = ? AND sender_id != ? AND rowid > ? ORDER BY rowid ASC",
+    )
+    .all("c-ice", "u-self", 0)
+    .map((r) => r.detail)
+    .join(" | ");
+  const groupIcePlan = raw
+    .prepare(
+      "EXPLAIN QUERY PLAN SELECT rowid, sender_id, candidate_json, created_at FROM call_ice WHERE call_id = ? AND sender_id != ? AND target_id = ? AND rowid > ? ORDER BY rowid ASC",
+    )
+    .all("c-ice", "u-self", "u-peer", 0)
+    .map((r) => r.detail)
+    .join(" | ");
+  const iceWatermarkPlan = raw
+    .prepare("EXPLAIN QUERY PLAN SELECT MAX(rowid) AS cursor FROM call_ice WHERE call_id = ?")
+    .all("c-ice")
+    .map((r) => r.detail)
+    .join(" | ");
+  check(
+    "1:1 ICE polling can seek directly from its rowid cursor",
+    oneToOneIcePlan.includes("idx_call_ice_cursor (call_id=? AND rowid>?)"),
+    oneToOneIcePlan,
+  );
+  check(
+    "group ICE polling can seek from its addressed rowid cursor",
+    groupIcePlan.includes("idx_call_ice_target_cursor (call_id=? AND target_id=? AND rowid>?)"),
+    groupIcePlan,
+  );
+  check(
+    "the per-call high-water mark is a single indexed seek, including filtered-out senders/peers",
+    iceWatermarkPlan.includes(
+      "SEARCH call_ice USING COVERING INDEX idx_call_ice_cursor (call_id=?)",
+    ),
+    iceWatermarkPlan,
+  );
+  check(
+    "both Android ICE callers send and advance the monotonic rowid cursor and safe high-water mark",
+    callEngine.includes(
+      'val icePath = "/api/calls/${ui.id}/ice" + if (after > 0L) "?after=$after" else ""',
+    ) &&
+      callEngine.includes(
+        'val icePath = "/api/calls/$callId/ice" + if (after > 0L) "?after=$after" else ""',
+      ) &&
+      callEngine.includes("advanceIceCursor(ui.id, rowid)") &&
+      callEngine.includes("advanceIceCursor(callId, rowid)") &&
+      callEngine.includes('iceData?.optLong("cursor", 0L)') &&
+      callEngine.includes('data.optLong("cursor", 0L)'),
+  );
   // The names themselves, because a rename would otherwise only show up as a plan
   // change on the one platform whose planner we can see.
   for (const idx of [

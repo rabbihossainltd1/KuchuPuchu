@@ -517,7 +517,7 @@ const convBetween = (db, a, b) =>
       // v169: the voice body is back to the shared frame; the stamp left the
       // bubble entirely (it rides under it now).
       chat.includes(
-        "bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp",
+        "bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else if (hasReactions) 8.dp else 15.dp",
       ) &&
       chat.includes('val textLike = kind == "TEXT" || kind == "STICKER" || kind == "DELETED"'),
   );
@@ -1141,7 +1141,7 @@ const convBetween = (db, a, b) =>
       !chat.includes("replyThreshold * 1.8f, 0f)\n                                    } else {"),
   );
   check(
-    "r17-13/r31-8 (r68-8): long-press opens ONE focused action sheet — reaction row on top, then Reply/Copy/Forward/Edit/Delete/Select; one Delete popup; same live bubble returns after dismissal",
+    "r17-13/r31-8: long-press keeps the focused action sheet; quick reactions float above the selected bubble, then Reply/Copy/Forward/Edit/Delete/Select remain in the sheet; one Delete popup and live-bubble return",
     !chat.includes("listState.layoutInfo.visibleItemsInfo.firstOrNull") &&
       chat.includes("if (mid in selected) selected.remove(mid)") &&
       chat.includes("KpFocusSheetState.open(") &&
@@ -1151,8 +1151,10 @@ const convBetween = (db, a, b) =>
       !chat.includes("focusKey = focusKey.takeIf") &&
       chat.includes("var actionFor by remember { mutableStateOf<JSONObject?>(null) }") &&
       chat.includes("actionFor?.let { m ->") &&
-      chat.includes('listOf("👍", "❤️", "😂", "😮", "😢", "🙏").forEach { e ->') &&
-      chat.includes("close { applyReaction(m, e) }") &&
+      chat.includes('val quickEmojis = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")') &&
+      chat.includes("MessageQuickReactionBar(") &&
+      chat.includes("floatingContent = hostedFloating") &&
+      chat.includes("onReact = { emoji -> close { applyReaction(m, emoji) } }") &&
       chat.includes("showEmojiSheet = true") &&
       chat.includes("KpMessageFocusSlot(focusKey) { requestFocus ->") &&
       chat.includes("val onFocusedLongPress: (JSONObject) -> Unit = { pressed ->") &&
@@ -1166,8 +1168,8 @@ const convBetween = (db, a, b) =>
           `KpSheetRow(Icons.${l === '"Reply"' ? "AutoMirrored.Filled.Reply" : l === '"Forward"' ? "AutoMirrored.Filled.Send" : l === '"Copy"' ? "Filled.ContentCopy" : l === '"Edit"' ? "Filled.Edit" : l === '"Delete"' ? "Filled.Delete" : "Filled.CheckCircle"}, ${l}`,
         ),
       ) &&
-      // A single live focus slot feeds the root host; the reserved anchor is
-      // inserted before the emoji row/options, and the same composition returns.
+      // A single live focus slot feeds the root host; the reaction strip is
+      // anchored above the same live bubble, while actions remain in the sheet.
       chat.includes('actionFocusKey = "message:$rowKey"') &&
       (chat.match(/KpSheetRow\(Icons\.Filled\.Delete, \"Delete\", tint = Red\)/g) || []).length ===
         1,

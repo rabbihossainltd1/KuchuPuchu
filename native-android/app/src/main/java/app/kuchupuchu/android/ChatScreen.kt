@@ -354,10 +354,11 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Owner round 33 (item 17): the row a quote tap just jumped to (it
     // flashes once in the chat accent); "" = nothing flashing.
     var flashId by remember { mutableStateOf("") }
-    // Owner round 16: message reactions. Long-press still selects (unchanged)
-    // AND raises the quick-emoji bar; "+" opens the full emoji sheet.
+    // Message reactions: long-press keeps the focused action sheet and raises
+    // a separate quick-emoji strip above the selected live bubble; "+" opens all emojis.
     var reactionFor by remember { mutableStateOf<JSONObject?>(null) }
     var showEmojiSheet by remember { mutableStateOf(false) }
+    val lastHeartReactionAt = remember { HashMap<String, Long>() }
     // r68-8 (owner: "ekhon theke delete option just ektai hobe 2 ta na ... ei
     // popup"): ONE delete step in this chat. It serves the long-press sheet,
     // the multi-select bar, the viewers (through ScreenStore.viewerDelete below)
@@ -367,9 +368,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     // r69: the mute chooser (call mute / message mute) — see the ⋮ menu.
     var showMuteSheet by remember { mutableStateOf(false) }
     var confirmDeleteChat by remember { mutableStateOf(false) }
-    // Owner round 31: long-press opens ONE bottom sheet — the reaction emoji
-    // row on top, every message action under it. (No floating bar, no
-    // system-style icon strip.) Multi-select is the sheet's "Select" action.
+    // Long-press opens one focused action sheet. Its quick reaction strip is
+    // now a root overlay above the selected live message; all actions stay in
+    // the sheet, and multi-select remains the sheet's "Select" action.
     var actionFor by remember { mutableStateOf<JSONObject?>(null) }
     var actionFocusKey by remember { mutableStateOf<String?>(null) }
 
@@ -419,7 +420,16 @@ fun ChatScreen(nav: NavController, convId: String) {
      */
     fun heartReact(m: JSONObject) {
         // A sending echo has no id: there is nothing to react to yet.
-        if (m.optString("id").startsWith("c_") || m.optString("id").isBlank()) return
+        val mid = m.optString("id")
+        if (mid.startsWith("c_") || mid.isBlank()) return
+        // Treat a sustained rapid-tap burst as one reaction gesture. The emoji
+        // replay still happens on every tap; this only prevents repeated server
+        // toggles from immediately turning the heart back off/on.
+        val now = android.os.SystemClock.uptimeMillis()
+        val previous = lastHeartReactionAt[mid] ?: 0L
+        if (previous > 0L && now - previous < HEART_REACTION_COOLDOWN_MS) return
+        if (lastHeartReactionAt.size > 128) lastHeartReactionAt.clear()
+        lastHeartReactionAt[mid] = now
         applyReaction(m, "❤️")
     }
 
@@ -4320,9 +4330,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                             revealChars = if (m.optString("id") == aiRevealId) aiRevealChars else null,
                             onReply = { requestAttachExit { haptics.tap(); replyTo = it; replyFocusNonce++ } },
                             onLongPress = { msg ->
-                                // Owner round 31: the action sheet (reactions on
-                                // top). In multi-select mode a long-press just
-                                // toggles, like a tap.
+                                // Long-press opens the focused action sheet;
+                                // its quick reaction strip floats above the
+                                // selected message. Multi-select still toggles.
                                 if (msg.optString("kind") != "DELETED" && selected.isEmpty()) {
                                     actionFocusKey = "message:$rowKey"
                                     actionFor = msg
@@ -4606,16 +4616,16 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
 
 
-        /* ---------------- reaction quick bar (Owner round 16) ----------------
-           Long-press selects the message (unchanged) and raises this bar:
-           five quick emojis + "+" for the full sheet. */
+        /* ---------------- full emoji picker (Owner round 16) ----------------
+           The six quick choices live above the focused message; "+" opens
+           this full list while the action sheet remains beneath it. */
         if (showEmojiSheet && reactionFor != null) {
             EmojiSheetDialog { e -> reactionFor?.let { applyReaction(it, e) } }
         }
 
-        /* ---------------- message action sheet (Owner round 31) ----------------
-           Long-press → this sheet: quick reactions on top ("+" = full emoji
-           sheet), then Reply / Copy / Forward / Edit / Unsend / Delete / Select. */
+        /* ---------------- message action sheet ------------------------------
+           Long-press → this sheet: Reply / Copy / Forward / Edit / Unsend /
+           Delete / Select. Quick reactions float above the focused message. */
         actionFor?.let { m ->
             // Owner round 31 (item 29): Forward / Unsend / Delete / Select on
             // a grouped photo bubble act on every photo of the album.
@@ -4633,40 +4643,17 @@ fun ChatScreen(nav: NavController, convId: String) {
                     after()
                 }
             }
-            val body: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
+            val myReaction = m.optJSONObject("meta")?.optJSONObject("reactions")?.optString(Store.myId()).orEmpty()
+            val floatingReactionBar: @Composable () -> Unit = {
                 if (!showEmojiSheet) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                    ) {
-                        val myReaction = m.optJSONObject("meta")?.optJSONObject("reactions")?.optString(Store.myId()).orEmpty()
-                        listOf("👍", "❤️", "😂", "😮", "😢", "🙏").forEach { e ->
-                            Text(
-                                e,
-                                fontSize = 26.sp,
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .background(if (myReaction == e) ActionBlue.copy(alpha = 0.18f) else Color.Transparent)
-                                    .clickable {
-                                        close { applyReaction(m, e) }
-                                    }
-                                    .padding(7.dp),
-                            )
-                        }
-                        Box(
-                            Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(ActionBlue.copy(alpha = 0.14f))
-                                .clickable { showEmojiSheet = true },
-                            contentAlignment = Alignment.Center,
-                        ) { Icon(Icons.Filled.Add, "More emojis", tint = ActionBlueDeep, modifier = Modifier.size(22.dp)) }
-                    }
-                    Spacer(Modifier.height(4.dp))
+                    MessageQuickReactionBar(
+                        myReaction = myReaction,
+                        onReact = { emoji -> close { applyReaction(m, emoji) } },
+                        onMore = { showEmojiSheet = true },
+                    )
                 }
+            }
+            val body: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
                 KpSheetRow(Icons.AutoMirrored.Filled.Reply, "Reply") {
                     close {
                         requestAttachExit {
@@ -4722,6 +4709,10 @@ fun ChatScreen(nav: NavController, convId: String) {
             val hostedBody: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = remember(focusKey) {
                 { latestBody.value.invoke(this) }
             }
+            val latestFloating = rememberUpdatedState(floatingReactionBar)
+            val hostedFloating: @Composable () -> Unit = remember(focusKey) {
+                { latestFloating.value.invoke() }
+            }
             LaunchedEffect(focusKey) {
                 KpFocusSheetState.open(
                     KpFocusSheetRequest(
@@ -4736,6 +4727,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             actionFocusKey = null
                         },
                         content = hostedBody,
+                        floatingContent = hostedFloating,
                     ),
                 )
             }
@@ -8037,6 +8029,7 @@ private fun UnblockAskCard(
 
 /** Owner round 34 (item 19): bodies longer than this fold with See more. */
 private const val BODY_COLLAPSE_LINES = 10
+private const val HEART_REACTION_COOLDOWN_MS = 650L
 
 /** Lift only the visual message content, not the full-width chat-list row. */
 @Composable
@@ -8424,6 +8417,7 @@ private fun MessageRow(
             // Owner round 32 (item 15): no "edited" marker anywhere — an edited
             // text is just the text (so an emoji-only edit stays emoji-only too).
             val emojiOnly = if (kind == "TEXT") emojiOnlyCount(m.optText("body")) else 0
+            val hasReactions = m.optJSONObject("meta")?.optJSONObject("reactions")?.length()?.let { it > 0 } == true
             // N3a: stickers are emoji too — no bubble behind them either, both sides.
             val noBubble = emojiOnly > 0 || kind == "STICKER"
             // Owner round 32 (items 45 / 34): a voice note's duration line —
@@ -8558,10 +8552,11 @@ private fun MessageRow(
                     // r62: animateContentSize only on collapsible text bodies; voice notes keep exact original body dimensions with no resize.
                     .then(if (textLike && longBody) Modifier.animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f)) else Modifier)
                     .combinedClickable(
-                        // r71-21: double tap = ❤️. combinedClickable holds the
-                        // single tap back until it knows this was not a double
-                        // one, so a heart never also collapses / selects.
-                        onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
+                        // r71-21: double tap = ❤️. Emoji-only bubbles keep the
+                        // same taps for their glyph treatment, but do not react.
+                        onDoubleClick = if (!pendingEcho && emojiOnly == 0) {
+                            { onDoubleTapHeart(m) }
+                        } else null,
                         onClick = {
                             if (selectedIds.isNotEmpty() && !pendingEcho) {
                                 onToggleSelect(m)
@@ -8588,7 +8583,7 @@ private fun MessageRow(
                     // the text. Other kinds keep the small bottom band —
                     // except FILE rows (items 45 / 34), whose second line
                     // already leaves the stamp its corner.
-                    .padding(start = if (voiceRow) 0.dp else 10.dp, top = if (voiceRow) 0.dp else 4.dp, end = if (voiceRow) 0.dp else 8.dp, bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp)
+                    .padding(start = if (voiceRow) 0.dp else 10.dp, top = if (voiceRow) 0.dp else 4.dp, end = if (voiceRow) 0.dp else 8.dp, bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else if (hasReactions) 8.dp else 15.dp)
                     // r58: live sent messages animate from right, received from left; history stays quiet
                     // r62: voice notes fly via fxFlyIn directly with original body; no duplicate box translation.
                     .then(if (voiceRow) Modifier else Modifier.fxSideSlide(active = fxFresh, isSent = mine))
@@ -8700,12 +8695,12 @@ private fun MessageRow(
                             // bubble (outside) for every kind now.
                             // v206: single only animates, long-press shows actions
                             if (emojiOnly == 1) {
-                                EmojiGlyphRow(m.optText("body").trim(), 66f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onFocusedLongPress(m) } }, onDoubleTap = { if (!pendingEcho) onDoubleTapHeart(m) }, danceKey = fxKey)
+                                EmojiGlyphRow(m.optText("body").trim(), 66f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onFocusedLongPress(m) } }, danceKey = fxKey)
                             } else {
                                 // N3r: every glyph dances its own 3D move for
                                 // 3 s (arrival / tap / the other side's tap).
                                 // v206: multiple emojis don't animate, but long-press still works
-                                EmojiGlyphRow(m.optText("body").trim(), 40f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onFocusedLongPress(m) } }, onDoubleTap = { if (!pendingEcho) onDoubleTapHeart(m) }, danceKey = fxKey)
+                                EmojiGlyphRow(m.optText("body").trim(), 40f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onFocusedLongPress(m) } }, danceKey = fxKey)
                             }
                         } else {
                             val full = m.optText("body")
@@ -8824,34 +8819,123 @@ private fun MessageRow(
     }
 }
 
-/** Owner round 16: the reaction chips under a bubble — emoji + count, own
- *  reaction highlighted gold. reactions live in message meta.reactions. */
+@Composable
+private fun MessageQuickReactionBar(
+    myReaction: String,
+    onReact: (String) -> Unit,
+    onMore: () -> Unit,
+) {
+    val quickEmojis = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
+    val shape = RoundedCornerShape(28.dp)
+    Row(
+        Modifier
+            .fillMaxSize()
+            .clip(shape)
+            .background(Card)
+            .border(1.dp, Line, shape)
+            .padding(horizontal = 5.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        quickEmojis.forEach { emoji ->
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(CircleShape)
+                    .background(if (myReaction == emoji) ActionBlue.copy(alpha = 0.18f) else Color.Transparent)
+                    .clickable { onReact(emoji) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(emoji, fontSize = 24.sp, maxLines = 1)
+            }
+        }
+        // A dedicated fixed-width seat keeps the final '+' visible on narrow
+        // screens instead of letting the emoji labels push it outside the bar.
+        Box(
+            Modifier
+                .width(38.dp)
+                .fillMaxHeight()
+                .clip(CircleShape)
+                .background(ActionBlue.copy(alpha = 0.14f))
+                .clickable(onClick = onMore),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Add, "More emojis", tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+/** Owner round 16: reaction chips under a bubble. New live reactions pop into
+ *  place on both devices when the local edit or room broadcast updates meta. */
 @Composable
 private fun MessageReactions(m: JSONObject) {
-    val reactions = m.optJSONObject("meta")?.optJSONObject("reactions") ?: return
-    val myId = Store.myId()
-    val grouped = LinkedHashMap<String, Int>()
-    var iHave = false
-    val ks = reactions.keys()
-    while (ks.hasNext()) {
-        val k = ks.next()
-        val e = reactions.optString(k)
-        if (e.isBlank()) continue
-        grouped[e] = (grouped[e] ?: 0) + 1
-        if (k == myId) iHave = true
+    val reactionObject = m.optJSONObject("meta")?.optJSONObject("reactions") ?: JSONObject()
+    val byUser = LinkedHashMap<String, String>()
+    val keys = reactionObject.keys()
+    while (keys.hasNext()) {
+        val userId = keys.next()
+        val emoji = reactionObject.optString(userId)
+        if (emoji.isNotBlank()) byUser[userId] = emoji
     }
+    val messageKey = m.optString("id").ifBlank { m.optString("clientId") }
+    val snapshotKey = byUser.toSortedMap().entries.joinToString("|") { "${it.key}:${it.value}" }
+    val previousByUser = remember(messageKey) { mutableStateOf(byUser.toMap()) }
+    val animationNonces = remember(messageKey) { androidx.compose.runtime.mutableStateMapOf<String, Int>() }
+    LaunchedEffect(snapshotKey) {
+        val previous = previousByUser.value
+        byUser.forEach { (userId, emoji) ->
+            if (previous[userId] != emoji) {
+                animationNonces[emoji] = (animationNonces[emoji] ?: 0) + 1
+            }
+        }
+        previousByUser.value = byUser.toMap()
+    }
+
+    val grouped = LinkedHashMap<String, Int>()
+    byUser.values.forEach { emoji -> grouped[emoji] = (grouped[emoji] ?: 0) + 1 }
     if (grouped.isEmpty()) return
+    val dark = KpThemeMode.darkBlue
+    val chipFill = if (dark) Color(0xE61D3151) else Color(0xF7FFFFFF)
+    val chipLine = if (dark) Color.White.copy(alpha = 0.14f) else Color(0x1F273247)
     Row(
-        Modifier.padding(start = 6.dp, top = 2.dp),
+        Modifier.padding(start = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        // Owner round 22: bare emojis — no chip background, no border.
         grouped.forEach { (emoji, count) ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(emoji, fontSize = 17.sp)
-                if (count > 1) {
-                    Spacer(Modifier.width(2.dp))
-                    Text("$count", fontSize = 10.sp, color = Muted)
+            val popScale = remember(messageKey, emoji) { Animatable(1f) }
+            val popAlpha = remember(messageKey, emoji) { Animatable(1f) }
+            val animationNonce = animationNonces[emoji] ?: 0
+            LaunchedEffect(animationNonce) {
+                if (animationNonce > 0) {
+                    popScale.snapTo(0.84f)
+                    popAlpha.snapTo(0.35f)
+                    launch {
+                        popScale.animateTo(1.08f, spring(dampingRatio = 0.72f, stiffness = 620f))
+                        popScale.animateTo(1f, spring(dampingRatio = 0.9f, stiffness = 760f))
+                    }
+                    popAlpha.animateTo(1f, tween(durationMillis = 150, easing = FastOutSlowInEasing))
+                }
+            }
+            val chipShape = RoundedCornerShape(12.dp)
+            Box(
+                Modifier
+                    .graphicsLayer {
+                        scaleX = popScale.value
+                        scaleY = popScale.value
+                        alpha = popAlpha.value
+                        translationY = (1f - popAlpha.value) * 3.dp.toPx()
+                    }
+                    .clip(chipShape)
+                    .background(chipFill)
+                    .border(1.dp, chipLine, chipShape)
+                    .padding(horizontal = 6.dp, vertical = 1.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(emoji, fontSize = 16.sp)
+                    if (count > 1) {
+                        Spacer(Modifier.width(2.dp))
+                        Text("$count", fontSize = 10.sp, color = if (dark) Color(0xFFE2E9F5) else Muted)
+                    }
                 }
             }
         }

@@ -167,7 +167,7 @@ check(
     // bubble instead, which is what actually shrinks the card's footprint.
     !chat.includes("val voiceNote") &&
     chat.includes(
-      ".padding(start = if (voiceRow) 0.dp else 10.dp, top = if (voiceRow) 0.dp else 4.dp, end = if (voiceRow) 0.dp else 8.dp, bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp)",
+      ".padding(start = if (voiceRow) 0.dp else 10.dp, top = if (voiceRow) 0.dp else 4.dp, end = if (voiceRow) 0.dp else 8.dp, bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else if (hasReactions) 8.dp else 15.dp)",
     ) &&
     chat.includes("horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,") &&
     // r33's scrub-to-seek and the spinner survive verbatim

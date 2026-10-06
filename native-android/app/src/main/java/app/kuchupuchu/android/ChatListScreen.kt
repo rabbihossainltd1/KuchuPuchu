@@ -1,8 +1,11 @@
 package app.kuchupuchu.android
 
 import android.graphics.PixelFormat
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.InsetDrawable
 import android.os.Build
 import android.view.Gravity
+import android.view.Window
 import android.view.WindowManager
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -159,6 +162,14 @@ import kotlin.math.roundToInt
  */
 internal object HomeNavState {
     val visible = mutableStateOf(true)
+}
+
+private fun setNavPillWindowBlur(window: Window, enabled: Boolean, radiusPx: Int) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        // Background blur is clipped to the pill's rounded window drawable;
+        // unlike FLAG_BLUR_BEHIND it does not blur the rest of the screen.
+        window.setBackgroundBlurRadius(if (enabled) radiusPx else 0)
+    }
 }
 
 @Composable
@@ -995,11 +1006,11 @@ internal fun HomeBottomNavigation(
     val idleTint = if (darkMode) Color(0xFFD3DEF5) else Muted
     val selectedTint = if (darkMode) Color.White else Ink
     val indicatorColor = if (darkMode) Color(0xB32B5BD7) else ActionBlue.copy(alpha = 0.16f)
-    // Keep the floating card visibly solid; it no longer relies on platform blur.
-    val pillFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.92f) else Card.copy(alpha = 0.92f)
-    // A restrained proportional increase keeps the pill, slots, indicator,
-    // badge, and glyphs feeling like one larger control.
-    val navScale = 1.06f
+    // Keep the glass card translucent even when cross-window blur is unavailable.
+    val pillFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.82f) else Card.copy(alpha = 0.82f)
+    // Enlarge the complete capsule and its slots while keeping the glyphs at 27dp.
+    val navScale = 1.2f
+    val navContentYOffset = 3.dp
     val itemH = 44.dp * navScale
     val gap = 4.dp * navScale
     val capsulePadding = 6.dp * navScale
@@ -1007,9 +1018,12 @@ internal fun HomeBottomNavigation(
     val navWindowHeight = 56.dp * navScale
     val backgroundCardWidth = 224.dp * navScale
     val backgroundCardHeight = 46.dp * navScale
-    val navIconSize = 24.dp * navScale
+    val navIconSize = 27.dp
     val navWindowWidthPx = with(density) { navWindowWidth.roundToPx() }
     val navWindowHeightPx = with(density) { navWindowHeight.roundToPx() }
+    val backgroundCardWidthPx = with(density) { backgroundCardWidth.roundToPx() }
+    val backgroundCardHeightPx = with(density) { backgroundCardHeight.roundToPx() }
+    val navBlurRadiusPx = with(density) { 24.dp.roundToPx() }
     val bottomOffsetPx = WindowInsets.navigationBars.getBottom(density) + with(density) { 16.dp.roundToPx() }
     val indicatorSize = 40.dp * navScale
     val indicatorEasing = remember { CubicBezierEasing(0.34f, 1.45f, 0.5f, 1f) }
@@ -1020,10 +1034,29 @@ internal fun HomeBottomNavigation(
     val navDialogContext = remember(baseContext) {
         android.view.ContextThemeWrapper(baseContext, R.style.KpNavDialogTheme)
     }
-    // Keep the Dialog window transparent so the smaller Compose capsule below
-    // is the only visible card; its full-size window still hosts the same icons.
-    val pillWindowBackground = remember {
-        android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
+    // Use a transparent rounded inset drawable so Android clips its native
+    // background blur to the same capsule bounds as the painted card.
+    val pillWindowBackground = remember(
+        navWindowWidthPx,
+        navWindowHeightPx,
+        backgroundCardWidthPx,
+        backgroundCardHeightPx,
+    ) {
+        val insetX = ((navWindowWidthPx - backgroundCardWidthPx) / 2).coerceAtLeast(0)
+        val insetY = ((navWindowHeightPx - backgroundCardHeightPx) / 2).coerceAtLeast(0)
+        val rounded =
+            GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                setColor(android.graphics.Color.TRANSPARENT)
+                cornerRadius = backgroundCardHeightPx / 2f
+            }
+        InsetDrawable(
+            rounded,
+            insetX,
+            insetY,
+            (navWindowWidthPx - backgroundCardWidthPx - insetX).coerceAtLeast(0),
+            (navWindowHeightPx - backgroundCardHeightPx - insetY).coerceAtLeast(0),
+        )
     }
 
     LaunchedEffect(visible, modalOpen) {
@@ -1045,8 +1078,11 @@ internal fun HomeBottomNavigation(
                 navWindowWidthPx,
                 navWindowHeightPx,
                 bottomOffsetPx,
+                navBlurRadiusPx,
                 pillWindowBackground,
             ) {
+                var blurWindowManager: WindowManager? = null
+                var blurListener: java.util.function.Consumer<Boolean>? = null
                 if (dialogWindow != null) {
                     dialogWindowRef[0] = dialogWindow
                     // Let WindowManager animate the whole translucent surface.
@@ -1081,8 +1117,31 @@ internal fun HomeBottomNavigation(
                         params.setFitInsetsTypes(0)
                     }
                     dialogWindow.attributes = params
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        blurWindowManager = dialogView.context.getSystemService(WindowManager::class.java)
+                        blurWindowManager?.let { manager ->
+                            val listener = java.util.function.Consumer<Boolean> { enabled ->
+                                setNavPillWindowBlur(dialogWindow, enabled, navBlurRadiusPx)
+                            }
+                            blurListener = listener
+                            setNavPillWindowBlur(dialogWindow, manager.isCrossWindowBlurEnabled, navBlurRadiusPx)
+                            val mainExecutor = java.util.concurrent.Executor { command ->
+                                dialogView.post { command.run() }
+                                Unit
+                            }
+                            manager.addCrossWindowBlurEnabledListener(mainExecutor, listener)
+                        }
+                    }
                 }
                 onDispose {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        blurListener?.let { listener ->
+                            blurWindowManager?.removeCrossWindowBlurEnabledListener(listener)
+                        }
+                    }
+                    if (dialogWindow != null) {
+                        setNavPillWindowBlur(dialogWindow, enabled = false, radiusPx = 0)
+                    }
                     if (dialogWindowRef[0] === dialogWindow) dialogWindowRef[0] = null
                 }
             }
@@ -1106,7 +1165,7 @@ internal fun HomeBottomNavigation(
                     animationSpec = tween(450, easing = indicatorEasing),
                     label = "navIndicatorX",
                 )
-                val indicatorY = capsulePadding + (itemH - indicatorSize) * 0.5f
+                val indicatorY = capsulePadding + (itemH - indicatorSize) * 0.5f + navContentYOffset
                 Box(
                     Modifier
                         .offset(x = indicatorX, y = indicatorY)
@@ -1115,7 +1174,10 @@ internal fun HomeBottomNavigation(
                         .background(indicatorColor),
                 )
                 Row(
-                    Modifier.fillMaxSize().padding(horizontal = capsulePadding, vertical = capsulePadding),
+                    Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = capsulePadding, vertical = capsulePadding)
+                        .offset(y = navContentYOffset),
                     horizontalArrangement = Arrangement.spacedBy(gap),
                 ) {
                     NavItem(

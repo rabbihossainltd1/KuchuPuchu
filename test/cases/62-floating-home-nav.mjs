@@ -1,5 +1,5 @@
 // Source-contract coverage for the Android home navigation: equal slots, route gating,
-// smooth independent motion, and a high-opacity surface without platform blur.
+// smooth independent motion, and a translucent native-blur surface when supported.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,26 +45,31 @@ check(
 );
 check(
   "selected indicator is centered within the selected slot on the icon baseline",
-  nav.includes("val indicatorSize = 40.dp") &&
+  nav.includes("val indicatorSize = 40.dp * navScale") &&
     nav.includes("capsulePadding + (slotWidth - indicatorSize) * 0.5f") &&
-    nav.includes("val indicatorY = capsulePadding + (itemH - indicatorSize) * 0.5f") &&
+    nav.includes(
+      "val indicatorY = capsulePadding + (itemH - indicatorSize) * 0.5f + navContentYOffset",
+    ) &&
+    nav.includes("val navContentYOffset = 3.dp") &&
     nav.includes("animateDpAsState") &&
     nav.includes(".offset(x = indicatorX, y = indicatorY)"),
 );
 check(
-  "the whole floating pill, slots, indicator, badge, and glyphs grow together by a restrained six percent",
-  nav.includes("val navScale = 1.06f") &&
+  "the full floating pill, slots, and indicator enlarge together while glyphs stay 27dp and move down 3dp",
+  nav.includes("val navScale = 1.2f") &&
     nav.includes("val navWindowWidth = 248.dp * navScale") &&
     nav.includes("val navWindowHeight = 56.dp * navScale") &&
     nav.includes("val backgroundCardWidth = 224.dp * navScale") &&
     nav.includes("val backgroundCardHeight = 46.dp * navScale") &&
     nav.includes("val itemH = 44.dp * navScale") &&
     nav.includes("val indicatorSize = 40.dp * navScale") &&
-    nav.includes("val navIconSize = 24.dp * navScale") &&
+    nav.includes("val navIconSize = 27.dp") &&
+    nav.includes("val navContentYOffset = 3.dp") &&
+    nav.includes(".offset(y = navContentYOffset)") &&
     nav.includes("iconSize = navIconSize") &&
     nav.includes("sizeScale = navScale") &&
     nav.includes(".size(backgroundCardWidth, backgroundCardHeight)") &&
-    nav.includes("ColorDrawable(android.graphics.Color.TRANSPARENT)") &&
+    nav.includes("InsetDrawable(") &&
     nav.includes("StatusGlyphIcon(tint, navIconSize)"),
 );
 check(
@@ -140,16 +145,22 @@ check(
     navExit.includes("@android:interpolator/fast_out_linear_in"),
 );
 check(
-  "the rounded floating pill uses a high-opacity theme surface without native blur",
+  "the nav pill is translucent, scales the glyphs to 27dp, and requests native cross-window blur with a support fallback",
   nav.includes("HomeNavPillDialog(navDialogContext)") &&
     chatList.includes("CompositionLocalProvider(LocalContext provides themedContext)") &&
     nav.includes("R.style.KpNavDialogTheme") &&
     nav.includes("dialogWindow.setBackgroundDrawable(pillWindowBackground)") &&
     nav.includes("params.format = PixelFormat.TRANSLUCENT") &&
     nav.includes("val pillFill =") &&
-    nav.includes("copy(alpha = 0.92f)") &&
-    !nav.includes("setBackgroundBlurRadius(") &&
-    !nav.includes("rememberCrossWindowBlurEnabled()") &&
+    nav.includes("copy(alpha = 0.82f)") &&
+    nav.includes("val navScale = 1.2f") &&
+    nav.includes("val navIconSize = 27.dp") &&
+    nav.includes("GradientDrawable()") &&
+    nav.includes("InsetDrawable(") &&
+    nav.includes("cornerRadius = backgroundCardHeightPx / 2f") &&
+    chatList.includes("setBackgroundBlurRadius(") &&
+    nav.includes("isCrossWindowBlurEnabled") &&
+    nav.includes("addCrossWindowBlurEnabledListener") &&
     theme.includes('name="KpNavDialogTheme"') &&
     theme.includes('name="android:windowIsTranslucent">true') &&
     nav.includes("WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE") &&
