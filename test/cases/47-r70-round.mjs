@@ -1837,10 +1837,13 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
-    "chat entry uses a visible quarter-width slide with a soft cross-fade; unrelated bornHere and flight diagnostics stay unchanged",
+    "chat entry uses a destination-local slide-and-fade; unrelated bornHere and flight diagnostics stay unchanged",
     kpapp4.includes('"chat/{id}"') &&
-      kpapp4.includes("fadeIn(tween(260, easing = FastOutSlowInEasing))") &&
-      kpapp4.includes("slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { it / 4 }") &&
+      kpapp4.includes("private fun ChatRouteEntryMotion(") &&
+      kpapp4.includes("progress.animateTo(1f, tween(380, easing = FastOutSlowInEasing))") &&
+      kpapp4.includes("translationX = size.width * 0.30f * (1f - fraction)") &&
+      kpapp4.includes("alpha = 0.90f + 0.10f * fraction") &&
+      kpapp4.includes("ChatRouteEntryMotion { ChatScreen(nav, id) }") &&
       kpapp4.includes(
         "popEnterTransition = { fadeIn(tween(240, easing = FastOutSlowInEasing)) }",
       ) &&

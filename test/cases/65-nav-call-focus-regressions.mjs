@@ -115,17 +115,14 @@ check(
     kpApp.includes("callEngine.minimized"),
 );
 check(
-  "home stays still; the chat route uses a small fade/slide while the nav pill keeps native window motion",
+  "home stays still; chat entry uses a destination-local slide-and-fade while the nav pill keeps native window motion",
   homeRoute.includes("enterTransition = { EnterTransition.None }") &&
     homeRoute.includes("exitTransition = { ExitTransition.None }") &&
     homeRoute.includes("popEnterTransition = { EnterTransition.None }") &&
     !homeRoute.includes("slideInVertically") &&
     !homeRoute.includes("slideOutVertically") &&
     chatRoute.includes('"chat/{id}"') &&
-    chatRoute.includes("fadeIn(tween(260, easing = FastOutSlowInEasing))") &&
-    chatRoute.includes(
-      "slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { it / 4 }",
-    ) &&
+    chatRoute.includes("enterTransition = { EnterTransition.None }") &&
     chatRoute.includes("fadeOut(tween(180, easing = FastOutSlowInEasing))") &&
     chatRoute.includes(
       "popEnterTransition = { fadeIn(tween(240, easing = FastOutSlowInEasing)) }",
@@ -133,6 +130,9 @@ check(
     chatRoute.includes(
       "slideOutHorizontally(tween(250, easing = FastOutSlowInEasing)) { it / 4 }",
     ) &&
+    kpApp.includes("private fun ChatRouteEntryMotion(") &&
+    kpApp.includes("translationX = size.width * 0.30f * (1f - fraction)") &&
+    kpApp.includes("ChatRouteEntryMotion { ChatScreen(nav, id) }") &&
     !nav.includes("windowYOffsetPx") &&
     nav.includes("R.style.KpNavWindowAnimations"),
 );
@@ -140,7 +140,7 @@ check(
   "the rounded floating pill uses a high-opacity native surface without platform blur",
   nav.includes("val pillFill =") &&
     nav.includes("copy(alpha = 0.92f)") &&
-    nav.includes("val backgroundCardWidth = 216.dp") &&
+    nav.includes("val backgroundCardWidth = 208.dp") &&
     nav.includes("val backgroundCardHeight = 46.dp") &&
     nav.includes(".background(pillFill)") &&
     nav.includes("ColorDrawable(android.graphics.Color.TRANSPARENT)") &&
@@ -221,7 +221,7 @@ check(
 check(
   "backdrop blur releases as sheets close and remains correctly registered for normal KpSheet and emoji sheet",
   kpApp.includes("modalBlur.animateTo(30f, tween(260, easing = FastOutSlowInEasing))") &&
-    kpApp.includes("modalBlur.animateTo(0f, tween(220, easing = FastOutSlowInEasing))") &&
+    kpApp.includes("modalBlur.animateTo(0f, tween(280, easing = LinearEasing))") &&
     sharedSheet.includes("KpRememberModalBottomSheetState(blurRegistration)") &&
     sharedSheet.indexOf("KpRegisterModalBlur()") >= 0 &&
     sharedSheet.indexOf("KpRegisterModalBlur()") < sharedSheet.indexOf("ModalBottomSheet(") &&

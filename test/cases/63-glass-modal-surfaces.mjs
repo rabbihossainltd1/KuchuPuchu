@@ -51,7 +51,7 @@ check(
     ui.includes("internal fun KpRememberModalBottomSheetState(") &&
     kpApp.includes(".blur(modalBlurRadius)") &&
     kpApp.includes("modalBlur.animateTo(30f, tween(260, easing = FastOutSlowInEasing))") &&
-    kpApp.includes("modalBlur.animateTo(0f, tween(220, easing = FastOutSlowInEasing))"),
+    kpApp.includes("modalBlur.animateTo(0f, tween(280, easing = LinearEasing))"),
 );
 check(
   "focus keeps one Compose subtree in the source slot and replays its recorded layer without bitmap or duplicate content",
@@ -79,12 +79,13 @@ check(
     !focus.includes("androidx.compose.ui.window.Dialog("),
 );
 check(
-  "root overlay remains sharp above the blurred app and above the focused action sheet",
+  "root overlay remains sharp and explicitly above the blurred app and focused action sheet",
   kpApp.indexOf("Surface(Modifier.fillMaxSize().blur(modalBlurRadius)") <
     kpApp.indexOf("KpFocusedSheetHost()") &&
     kpApp.indexOf("KpFocusedSheetHost()") < kpApp.indexOf("KpRootFocusOverlayHost()") &&
     focus.includes("internal fun KpRootFocusOverlayHost()") &&
-    focus.includes("internal fun KpModalFocusOverlay(progress: Float)"),
+    focus.includes("internal fun KpModalFocusOverlay(progress: Float)") &&
+    focus.includes("Box(Modifier.fillMaxSize().zIndex(1f))"),
 );
 check(
   "focused live row is measured to the sheet top and rests above the surface without an in-sheet spacer",

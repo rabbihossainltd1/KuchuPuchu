@@ -151,6 +151,7 @@ check(
       kpApp.indexOf("KpFocusedSheetHost()") &&
     kpApp.indexOf("KpFocusedSheetHost()") < kpApp.indexOf("KpRootFocusOverlayHost()") &&
     focus.includes("internal fun KpRootFocusOverlayHost()") &&
+    focus.includes("Box(Modifier.fillMaxSize().zIndex(1f))") &&
     !focus.includes("androidx.compose.runtime.movableContentOf") &&
     !focus.includes("item.content()") &&
     !focus.includes("PixelCopy") &&

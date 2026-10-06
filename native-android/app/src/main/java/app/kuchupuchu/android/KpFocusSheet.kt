@@ -60,6 +60,7 @@ import androidx.compose.ui.platform.LocalGraphicsContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -327,7 +328,9 @@ internal fun KpModalFocusOverlay(progress: Float) {
     val top = source.top + (target.top - source.top) * t
     val width = with(density) { source.width.toDp() }
     val height = with(density) { source.height.toDp() }
-    Box(Modifier.fillMaxSize()) {
+    // Keep the live source layer explicitly above the sheet, regardless of
+    // sibling draw-order changes elsewhere in the root composition.
+    Box(Modifier.fillMaxSize().zIndex(1f)) {
         Box(
             Modifier
                 .offset {
