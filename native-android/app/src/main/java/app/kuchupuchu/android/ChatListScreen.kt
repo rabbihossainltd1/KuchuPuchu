@@ -2208,7 +2208,9 @@ private fun ChatRowSheet(
     val canGroup = !target.optBoolean("isGroup") && otherId.isNotBlank() && !isKpBot(otherId)
     val targetId = target.optString("id")
     val sheetKey = "chat-actions:$targetId:${ids.joinToString(",")}"
-    val focusItem = KpModalFocusState.focusedItem?.takeIf { it.key == "chat:$targetId" }
+    val focusKey =
+        KpModalFocusState.focusedItem?.takeIf { it.key == "chat:$targetId" }?.key
+            ?: KpModalFocusState.pendingFocusKey?.takeIf { it == "chat:$targetId" }
     var confirmDelete by remember(targetId) { mutableStateOf(false) }
 
     if (confirmDelete) {
@@ -2287,12 +2289,12 @@ private fun ChatRowSheet(
         val hostedBody: @Composable ColumnScope.() -> Unit = remember(sheetKey) {
             { latestBody.value.invoke(this) }
         }
-        LaunchedEffect(sheetKey) {
+        LaunchedEffect(sheetKey, focusKey) {
             KpFocusSheetState.open(
                 KpFocusSheetRequest(
                     key = sheetKey,
                     ownerRoute = "main",
-                    focusKey = focusItem?.key,
+                    focusKey = focusKey,
                     onDismiss = onDismiss,
                     content = hostedBody,
                 ),

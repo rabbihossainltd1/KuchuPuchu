@@ -195,7 +195,8 @@ check(
     chat.includes("targetScale = 1f") &&
     focus.includes("LocalGraphicsContext.current") &&
     focus.includes("createGraphicsLayer()") &&
-    focus.includes("focusLayer?.record") &&
+    focus.includes("capturePending && layer != null") &&
+    focus.includes("layer.record {") &&
     focus.includes("drawLayer(item.graphicsLayer)") &&
     focus.includes(".size(width, height)") &&
     focus.includes("KpModalFocusState.updateSource(key, currentBounds)") &&

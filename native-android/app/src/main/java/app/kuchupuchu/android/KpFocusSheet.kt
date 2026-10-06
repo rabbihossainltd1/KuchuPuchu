@@ -37,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -85,10 +86,20 @@ internal data class KpModalFocusItem(
 internal object KpModalFocusState {
     var focusedItem by mutableStateOf<KpModalFocusItem?>(null)
         private set
+    var pendingFocusKey by mutableStateOf<String?>(null)
+        private set
     private var returning by mutableStateOf(false)
     private var pendingFocusCleanup: (() -> Unit)? = null
     val isReturning: Boolean
         get() = returning
+
+    fun beginCapture(key: String) {
+        if (focusedItem == null) pendingFocusKey = key
+    }
+
+    fun cancelCapture(key: String) {
+        if (pendingFocusKey == key) pendingFocusKey = null
+    }
 
     fun focus(
         key: String,
@@ -98,6 +109,7 @@ internal object KpModalFocusState {
         targetScale: Float = 1f,
     ) {
         if (focusedItem != null) return
+        pendingFocusKey = null
         returning = false
         KpFocusSheetState.updateOverlayProgress(0f)
         focusedItem =
@@ -147,6 +159,7 @@ internal object KpModalFocusState {
     fun clear() {
         val previous = focusedItem
         focusedItem = null
+        pendingFocusKey = null
         returning = false
         if (previous != null) pendingFocusCleanup = previous.releaseFocusResources
     }
@@ -184,7 +197,11 @@ internal object KpFocusSheetState {
     }
 
     fun open(request: KpFocusSheetRequest) {
-        if (this.request?.key == request.key && !closing) return
+        val current = this.request
+        if (current?.key == request.key && !closing) {
+            if (current.focusKey != request.focusKey) this.request = request
+            return
+        }
         this.request = request
         closing = false
         notifyDismiss = false
@@ -237,8 +254,12 @@ internal fun KpLiveFocusItem(
     var focusLayer by remember(key, graphicsContext) { mutableStateOf<GraphicsLayer?>(null) }
     val sourceBounds = remember(key) { mutableStateOf<Rect?>(null) }
     var pinnedHandle by remember(key) { mutableStateOf<PinnableContainer.PinnedHandle?>(null) }
+    var capturePending by remember(key, graphicsContext) { mutableStateOf(false) }
+    val captureScope = rememberCoroutineScope()
     val releaseFocusResources = remember(key, graphicsContext) {
         {
+            capturePending = false
+            KpModalFocusState.cancelCapture(key)
             val layer = focusLayer
             focusLayer = null
             if (layer != null) graphicsContext.releaseGraphicsLayer(layer)
@@ -249,22 +270,44 @@ internal fun KpLiveFocusItem(
         }
     }
 
-    val requestFocus = remember(key, targetScale, graphicsContext, pinnableContainer, releaseFocusResources) {
+    val requestFocus = remember(key, targetScale, graphicsContext, pinnableContainer, captureScope, releaseFocusResources) {
         {
             val bounds = sourceBounds.value
             if (
                 bounds != null && bounds.width > 0f && bounds.height > 0f &&
-                KpModalFocusState.focusedItem == null
+                KpModalFocusState.focusedItem == null && !capturePending
             ) {
+                KpModalFocusState.beginCapture(key)
                 val layer = focusLayer ?: graphicsContext.createGraphicsLayer().also { focusLayer = it }
                 if (pinnedHandle == null) pinnedHandle = pinnableContainer?.pin()
-                KpModalFocusState.focus(
-                    key = key,
-                    sourceBoundsOnScreen = bounds,
-                    graphicsLayer = layer,
-                    releaseFocusResources = releaseFocusResources,
-                    targetScale = targetScale,
-                )
+                // Keep the source visible while its first real draw is recorded.
+                // Only hand it to the root overlay after the layer has a size.
+                capturePending = true
+                captureScope.launch {
+                    var waitedFrames = 0
+                    while ((layer.size.width <= 0 || layer.size.height <= 0) && waitedFrames < 3) {
+                        withFrameNanos { }
+                        waitedFrames++
+                    }
+                    val readyBounds = sourceBounds.value
+                    if (
+                        capturePending && layer.size.width > 0 && layer.size.height > 0 &&
+                        readyBounds != null && readyBounds.width > 0f && readyBounds.height > 0f &&
+                        KpFocusSheetState.request?.focusKey == key && !KpFocusSheetState.closing &&
+                        KpModalFocusState.focusedItem == null
+                    ) {
+                        capturePending = false
+                        KpModalFocusState.focus(
+                            key = key,
+                            sourceBoundsOnScreen = readyBounds,
+                            graphicsLayer = layer,
+                            releaseFocusResources = releaseFocusResources,
+                            targetScale = targetScale,
+                        )
+                    } else {
+                        releaseFocusResources()
+                    }
+                }
             }
         }
     }
@@ -290,10 +333,18 @@ internal fun KpLiveFocusItem(
                 if (focused) KpModalFocusState.updateSource(key, currentBounds)
             }
             .drawWithContent {
-                if (focused) {
-                    focusLayer?.record {
+                val layer = focusLayer
+                if (focused && layer != null) {
+                    layer.record {
                         this@drawWithContent.drawContent()
                     }
+                } else if (capturePending && layer != null) {
+                    // Capture at the source while it remains visible; the next
+                    // frame can safely replace it with the root overlay copy.
+                    layer.record {
+                        this@drawWithContent.drawContent()
+                    }
+                    drawContent()
                 } else {
                     drawContent()
                 }
@@ -407,16 +458,27 @@ internal fun KpFocusedSheetHost() {
         snapshotFlow { focusProgress.value }.collect(KpFocusSheetState::updateOverlayProgress)
     }
     var sheetHeightPx by remember(request.key) { mutableIntStateOf(0) }
+    var sheetBoundsOnScreen by remember(request.key) { mutableStateOf<Rect?>(null) }
     var dragOffsetPx by remember(request.key) { mutableStateOf(0f) }
     BackHandler(enabled = true) {
         if (!KpFocusSheetState.closing) KpFocusSheetState.dismiss()
     }
 
-    LaunchedEffect(request.key, closing) {
+    LaunchedEffect(request.key, request.focusKey, closing) {
         if (!closing) {
             // Wait for the wrapped menu to report its natural height, then use
             // that exact distance for the slide (no first-frame position jump).
             snapshotFlow { sheetHeightPx }.first { it > 0 }
+            if (request.focusKey != null) {
+                // Do not let the sheet cover the source while its first graphics
+                // layer is still empty. The source records and stays visible until
+                // the root host has a measured live layer and a real target.
+                snapshotFlow {
+                    KpModalFocusState.focusedItem
+                        ?.takeIf { it.key == request.focusKey }
+                        ?.targetBoundsOnScreen
+                }.first { it != null }
+            }
             coroutineScope {
                 launch {
                     sheetProgress.animateTo(
@@ -426,11 +488,6 @@ internal fun KpFocusedSheetHost() {
                 }
                 if (request.focusKey != null) {
                     launch {
-                        snapshotFlow {
-                            KpModalFocusState.focusedItem
-                                ?.takeIf { it.key == request.focusKey }
-                                ?.targetBoundsOnScreen
-                        }.first { it != null }
                         focusProgress.animateTo(
                             1f,
                             tween(durationMillis = 320, easing = FastOutSlowInEasing),
@@ -470,6 +527,19 @@ internal fun KpFocusedSheetHost() {
         val slideDistancePx =
             (if (sheetHeightPx > 0) sheetHeightPx else with(density) { maxSheetHeight.roundToPx() }).toFloat()
         val sheetOffsetYPx = slideDistancePx * sheetProgress.value + dragOffsetPx
+        val focusKey = request.focusKey
+        val focusedItemKey = KpModalFocusState.focusedItem?.key
+        val measuredSheetBounds = sheetBoundsOnScreen
+        SideEffect {
+            if (focusKey != null && focusedItemKey == focusKey && measuredSheetBounds != null) {
+                KpModalFocusState.updateTargetAboveSheet(
+                    focusKey,
+                    measuredSheetBounds,
+                    sheetOffsetYPx,
+                    with(density) { 12.dp.toPx() },
+                )
+            }
+        }
         Box(
             Modifier
                 .fillMaxSize()
@@ -488,11 +558,13 @@ internal fun KpFocusedSheetHost() {
                 .heightIn(max = maxSheetHeight)
                 .offset { IntOffset(0, sheetOffsetYPx.roundToInt()) }
                 .onGloballyPositioned { coordinates ->
+                    val bounds = coordinates.boundsOnScreen(view)
+                    sheetBoundsOnScreen = bounds
                     sheetHeightPx = coordinates.size.height
                     request.focusKey?.let { focusKey ->
                         KpModalFocusState.updateTargetAboveSheet(
                             focusKey,
-                            coordinates.boundsOnScreen(view),
+                            bounds,
                             sheetOffsetYPx,
                             with(density) { 12.dp.toPx() },
                         )

@@ -61,7 +61,8 @@ check(
   "the live focused row stays composed in its source slot and replays one graphics layer, with no bitmap or duplicate content",
   focus.includes("LocalGraphicsContext.current") &&
     focus.includes("createGraphicsLayer()") &&
-    focus.includes("focusLayer?.record") &&
+    focus.includes("capturePending && layer != null") &&
+    focus.includes("layer.record {") &&
     focus.includes("drawLayer(item.graphicsLayer)") &&
     focus.includes("content(requestFocus)") &&
     focus.includes("LocalPinnableContainer.current") &&

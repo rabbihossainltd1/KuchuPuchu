@@ -61,7 +61,8 @@ check(
   focus.includes("LocalGraphicsContext.current") &&
     focus.includes("createGraphicsLayer()") &&
     focus.includes("releaseGraphicsLayer(layer)") &&
-    focus.includes("focusLayer?.record") &&
+    focus.includes("layer.record {") &&
+    focus.includes("capturePending && layer != null") &&
     focus.includes("drawLayer(item.graphicsLayer)") &&
     focus.includes("content(requestFocus)") &&
     focus.includes("LocalPinnableContainer.current") &&

@@ -73,9 +73,21 @@ check(
     chatList.includes('key = "chat:$convId"'),
 );
 check(
-  "the focused row keeps its measured source slot, pins the Lazy item, and draws above the bottom sheet",
-  focus.includes("if (focused) {") &&
-    focus.includes("focusLayer?.record") &&
+  "the source stays visible until its pinned live GraphicsLayer has been recorded, then the root overlay takes over",
+  focus.includes("capturePending && layer != null") &&
+    focus.includes("layer.record {") &&
+    focus.includes("captureScope.launch") &&
+    focus.includes("fun beginCapture(key: String)") &&
+    focus.includes("fun cancelCapture(key: String)") &&
+    chatList.includes("KpModalFocusState.pendingFocusKey") &&
+    chatList.includes("LaunchedEffect(sheetKey, focusKey)") &&
+    focus.includes("LaunchedEffect(request.key, request.focusKey, closing)") &&
+    focus.includes("KpFocusSheetState.request?.focusKey == key && !KpFocusSheetState.closing") &&
+    focus.includes(
+      "while ((layer.size.width <= 0 || layer.size.height <= 0) && waitedFrames < 3)",
+    ) &&
+    focus.includes("if (focused && layer != null)") &&
+    focus.includes("drawContent()") &&
     focus.includes("content(requestFocus)") &&
     focus.includes("LocalPinnableContainer.current") &&
     focus.includes("pinnableContainer?.pin()") &&
@@ -83,6 +95,7 @@ check(
     focus.includes("val finalSheetTop = sheetBoundsOnScreen.top - sheetOffsetYPx.roundToInt()") &&
     focus.includes("val top = finalSheetTop - source.height - gapPx") &&
     focusedHost.includes("KpModalFocusState.updateTargetAboveSheet(") &&
+    focusedHost.includes("snapshotFlow {\n                    KpModalFocusState.focusedItem") &&
     !focusedHost.includes("KpModalFocusAnchor(") &&
     focusedHost.indexOf("KpModalFocusState.updateTargetAboveSheet(") <
       focusedHost.indexOf("request.content(this)"),
@@ -145,7 +158,8 @@ check(
   "one recorded Compose layer is replayed in the root above the blurred screen and sheet, without a second tree or bitmap",
   focus.includes("LocalGraphicsContext.current") &&
     focus.includes("createGraphicsLayer()") &&
-    focus.includes("focusLayer?.record") &&
+    focus.includes("capturePending && layer != null") &&
+    focus.includes("layer.record {") &&
     focus.includes("drawLayer(item.graphicsLayer)") &&
     kpApp.indexOf("Surface(Modifier.fillMaxSize().blur(modalBlurRadius)") <
       kpApp.indexOf("KpFocusedSheetHost()") &&
