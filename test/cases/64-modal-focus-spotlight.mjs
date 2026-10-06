@@ -101,6 +101,8 @@ check(
     messageSlot.includes("key = focusKey") &&
     messageSlot.includes("Modifier.wrapContentSize(unbounded = true)") &&
     messageSlot.includes("targetScale = 1f") &&
+    chat.includes("focusKey = focusKey,") &&
+    !chat.includes("focusKey = focusKey.takeIf") &&
     chat.includes('if (pressed.optString("kind") != "DELETED") requestFocus()'),
 );
 check(
@@ -120,9 +122,8 @@ check(
     messageActions.indexOf("Row(") < messageActions.indexOf('listOf("👍"') &&
     messageActions.indexOf('KpSheetRow(Icons.AutoMirrored.Filled.Reply, "Reply")') >
       messageActions.indexOf('listOf("👍"') &&
-    messageActions.includes(
-      "focusKey = focusKey.takeIf { KpModalFocusState.focusedItem?.key == it }",
-    ) &&
+    messageActions.includes("focusKey = focusKey,") &&
+    !messageActions.includes("focusKey = focusKey.takeIf") &&
     focus.includes("KpModalFocusState.updateTargetAboveSheet(") &&
     focus.includes("val top = finalSheetTop - source.height - gapPx") &&
     focusedHost.indexOf("KpModalFocusState.updateTargetAboveSheet(") <

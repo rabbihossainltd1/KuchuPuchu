@@ -1,7 +1,6 @@
 package app.kuchupuchu.android
 
 import android.graphics.PixelFormat
-import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.view.Gravity
 import android.view.WindowManager
@@ -126,7 +125,6 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -1001,12 +999,14 @@ internal fun HomeBottomNavigation(
     val pillFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.92f) else Card.copy(alpha = 0.92f)
     val itemH = 44.dp
     val gap = 4.dp
-    val capsuleHorizontalPadding = 6.dp
-    val capsuleVerticalPadding = 3.dp
-    val capsuleWidth = 240.dp
-    val capsuleHeight = 50.dp
-    val capsuleWidthPx = with(density) { capsuleWidth.roundToPx() }
-    val capsuleHeightPx = with(density) { capsuleHeight.roundToPx() }
+    val capsulePadding = 6.dp
+    // Preserve the pill window and icon/tap layout; shrink only the painted card.
+    val navWindowWidth = 248.dp
+    val navWindowHeight = 56.dp
+    val backgroundCardWidth = 216.dp
+    val backgroundCardHeight = 46.dp
+    val navWindowWidthPx = with(density) { navWindowWidth.roundToPx() }
+    val navWindowHeightPx = with(density) { navWindowHeight.roundToPx() }
     val bottomOffsetPx = WindowInsets.navigationBars.getBottom(density) + with(density) { 16.dp.roundToPx() }
     val indicatorSize = 40.dp
     val indicatorEasing = remember { CubicBezierEasing(0.34f, 1.45f, 0.5f, 1f) }
@@ -1017,12 +1017,10 @@ internal fun HomeBottomNavigation(
     val navDialogContext = remember(baseContext) {
         android.view.ContextThemeWrapper(baseContext, R.style.KpNavDialogTheme)
     }
-    val pillWindowBackground = remember(capsuleHeightPx, pillFill) {
-        GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = capsuleHeightPx / 2f
-            setColor(pillFill.toArgb())
-        }
+    // Keep the Dialog window transparent so the smaller Compose capsule below
+    // is the only visible card; its full-size window still hosts the same icons.
+    val pillWindowBackground = remember {
+        android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
     }
 
     LaunchedEffect(visible, modalOpen) {
@@ -1041,8 +1039,8 @@ internal fun HomeBottomNavigation(
             val dialogWindow = (dialogView.parent as? DialogWindowProvider)?.window
             DisposableEffect(
                 dialogWindow,
-                capsuleWidthPx,
-                capsuleHeightPx,
+                navWindowWidthPx,
+                navWindowHeightPx,
                 bottomOffsetPx,
                 pillWindowBackground,
             ) {
@@ -1060,8 +1058,8 @@ internal fun HomeBottomNavigation(
                     dialogWindow.setDimAmount(0f)
                     val params = dialogWindow.attributes
                     params.format = PixelFormat.TRANSLUCENT
-                    params.width = capsuleWidthPx
-                    params.height = capsuleHeightPx
+                    params.width = navWindowWidthPx
+                    params.height = navWindowHeightPx
                     params.windowAnimations = R.style.KpNavWindowAnimations
                     params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
                     params.x = 0
@@ -1087,18 +1085,25 @@ internal fun HomeBottomNavigation(
             }
             BoxWithConstraints(
                 Modifier
-                    .size(capsuleWidth, capsuleHeight)
+                    .size(navWindowWidth, navWindowHeight)
                     .then(if (windowInteractive) Modifier else Modifier.clearAndSetSemantics {})
                     .clip(CircleShape),
             ) {
-                val slotWidth = (maxWidth - capsuleHorizontalPadding * 2 - gap * 3) / 4
+                Box(
+                    Modifier
+                        .align(Alignment.Center)
+                        .size(backgroundCardWidth, backgroundCardHeight)
+                        .clip(CircleShape)
+                        .background(pillFill),
+                )
+                val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4
                 val indicatorX by animateDpAsState(
-                    targetValue = capsuleHorizontalPadding + (slotWidth - indicatorSize) * 0.5f +
+                    targetValue = capsulePadding + (slotWidth - indicatorSize) * 0.5f +
                         (slotWidth + gap) * tab.coerceIn(0, 3).toFloat(),
                     animationSpec = tween(450, easing = indicatorEasing),
                     label = "navIndicatorX",
                 )
-                val indicatorY = capsuleVerticalPadding + (itemH - indicatorSize) * 0.5f
+                val indicatorY = capsulePadding + (itemH - indicatorSize) * 0.5f
                 Box(
                     Modifier
                         .offset(x = indicatorX, y = indicatorY)
@@ -1107,7 +1112,7 @@ internal fun HomeBottomNavigation(
                         .background(indicatorColor),
                 )
                 Row(
-                    Modifier.fillMaxSize().padding(horizontal = capsuleHorizontalPadding, vertical = capsuleVerticalPadding),
+                    Modifier.fillMaxSize().padding(horizontal = capsulePadding, vertical = capsulePadding),
                     horizontalArrangement = Arrangement.spacedBy(gap),
                 ) {
                     NavItem(

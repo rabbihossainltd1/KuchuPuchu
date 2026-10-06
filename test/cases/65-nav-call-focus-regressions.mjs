@@ -81,9 +81,9 @@ check(
 check(
   "four equally sized tab slots share a centered indicator with the demo's 450ms easing",
   (nav.match(/Modifier\.weight\(1f\)/g) ?? []).length >= 4 &&
-    nav.includes("val slotWidth = (maxWidth - capsuleHorizontalPadding * 2 - gap * 3) / 4") &&
+    nav.includes("val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4") &&
     nav.includes("val indicatorSize = 40.dp") &&
-    nav.includes("capsuleHorizontalPadding + (slotWidth - indicatorSize) * 0.5f") &&
+    nav.includes("capsulePadding + (slotWidth - indicatorSize) * 0.5f") &&
     nav.includes("(slotWidth + gap) * tab.coerceIn(0, 3).toFloat()") &&
     nav.includes("CubicBezierEasing(0.34f, 1.45f, 0.5f, 1f)") &&
     nav.includes("tween(450, easing = indicatorEasing)") &&
@@ -122,16 +122,16 @@ check(
     !homeRoute.includes("slideInVertically") &&
     !homeRoute.includes("slideOutVertically") &&
     chatRoute.includes('"chat/{id}"') &&
-    chatRoute.includes("fadeIn(tween(210, easing = FastOutSlowInEasing))") &&
+    chatRoute.includes("fadeIn(tween(260, easing = FastOutSlowInEasing))") &&
     chatRoute.includes(
-      "slideInHorizontally(tween(210, easing = FastOutSlowInEasing)) { it / 20 }",
+      "slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { it / 4 }",
     ) &&
-    chatRoute.includes("fadeOut(tween(150, easing = FastOutSlowInEasing))") &&
+    chatRoute.includes("fadeOut(tween(180, easing = FastOutSlowInEasing))") &&
     chatRoute.includes(
-      "popEnterTransition = { fadeIn(tween(200, easing = FastOutSlowInEasing)) }",
+      "popEnterTransition = { fadeIn(tween(240, easing = FastOutSlowInEasing)) }",
     ) &&
     chatRoute.includes(
-      "slideOutHorizontally(tween(190, easing = FastOutSlowInEasing)) { it / 20 }",
+      "slideOutHorizontally(tween(250, easing = FastOutSlowInEasing)) { it / 4 }",
     ) &&
     !nav.includes("windowYOffsetPx") &&
     nav.includes("R.style.KpNavWindowAnimations"),
@@ -140,7 +140,10 @@ check(
   "the rounded floating pill uses a high-opacity native surface without platform blur",
   nav.includes("val pillFill =") &&
     nav.includes("copy(alpha = 0.92f)") &&
-    nav.includes("GradientDrawable()") &&
+    nav.includes("val backgroundCardWidth = 216.dp") &&
+    nav.includes("val backgroundCardHeight = 46.dp") &&
+    nav.includes(".background(pillFill)") &&
+    nav.includes("ColorDrawable(android.graphics.Color.TRANSPARENT)") &&
     nav.includes("dialogWindow.setBackgroundDrawable(pillWindowBackground)") &&
     !nav.includes("setBackgroundBlurRadius(") &&
     nav.includes(".clip(CircleShape)") &&

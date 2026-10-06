@@ -267,19 +267,19 @@ fun KpApp() {
                 }
                 composable(
                     "chat/{id}",
-                    // A longer cross-fade with only a small horizontal drift
-                    // softens the jump into the thread without replaying the
-                    // full NavHost slide over the chat's first layout frames.
+                    // Give the thread a perceptible but restrained horizontal
+                    // entrance with a cross-fade; it no longer appears in place
+                    // with only a barely visible 1/20-width drift.
                     // Device frame-time profiling is still needed to verify it.
                     enterTransition = {
-                        fadeIn(tween(210, easing = FastOutSlowInEasing)) +
-                            slideInHorizontally(tween(210, easing = FastOutSlowInEasing)) { it / 20 }
+                        fadeIn(tween(260, easing = FastOutSlowInEasing)) +
+                            slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { it / 4 }
                     },
-                    exitTransition = { fadeOut(tween(150, easing = FastOutSlowInEasing)) },
-                    popEnterTransition = { fadeIn(tween(200, easing = FastOutSlowInEasing)) },
+                    exitTransition = { fadeOut(tween(180, easing = FastOutSlowInEasing)) },
+                    popEnterTransition = { fadeIn(tween(240, easing = FastOutSlowInEasing)) },
                     popExitTransition = {
-                        fadeOut(tween(160, easing = FastOutSlowInEasing)) +
-                            slideOutHorizontally(tween(190, easing = FastOutSlowInEasing)) { it / 20 }
+                        fadeOut(tween(180, easing = FastOutSlowInEasing)) +
+                            slideOutHorizontally(tween(250, easing = FastOutSlowInEasing)) { it / 4 }
                     },
                 ) { entry ->
                     val id = entry.arguments?.getString("id") ?: ""

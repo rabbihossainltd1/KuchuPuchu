@@ -4727,7 +4727,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                     KpFocusSheetRequest(
                         key = "message-actions:$focusKey",
                         ownerRoute = "chat/$convId",
-                        focusKey = focusKey.takeIf { KpModalFocusState.focusedItem?.key == it },
+                        // Pass the stable source key unconditionally. The root host waits
+                        // for its live layer/target, avoiding a one-shot null snapshot.
+                        focusKey = focusKey,
                         onDismiss = {
                             actionFor = null
                             reactionFor = null

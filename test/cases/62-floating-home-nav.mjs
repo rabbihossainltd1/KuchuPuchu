@@ -41,22 +41,24 @@ check(
   "home navigation distributes all four tabs in equal-width slots",
   nav.includes("horizontalArrangement = Arrangement.spacedBy(gap)") &&
     (nav.match(/Modifier\.weight\(1f\)/g) ?? []).length >= 4 &&
-    nav.includes("val slotWidth = (maxWidth - capsuleHorizontalPadding * 2 - gap * 3) / 4"),
+    nav.includes("val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4"),
 );
 check(
   "selected indicator is centered within the selected slot on the icon baseline",
   nav.includes("val indicatorSize = 40.dp") &&
-    nav.includes("capsuleHorizontalPadding + (slotWidth - indicatorSize) * 0.5f") &&
-    nav.includes("val indicatorY = capsuleVerticalPadding + (itemH - indicatorSize) * 0.5f") &&
+    nav.includes("capsulePadding + (slotWidth - indicatorSize) * 0.5f") &&
+    nav.includes("val indicatorY = capsulePadding + (itemH - indicatorSize) * 0.5f") &&
     nav.includes("animateDpAsState") &&
     nav.includes(".offset(x = indicatorX, y = indicatorY)"),
 );
 check(
-  "the background capsule is compacted without shrinking the four 24dp nav glyphs",
-  nav.includes("val capsuleWidth = 240.dp") &&
-    nav.includes("val capsuleHeight = 50.dp") &&
-    nav.includes("val capsuleHorizontalPadding = 6.dp") &&
-    nav.includes("val capsuleVerticalPadding = 3.dp") &&
+  "only the painted rounded card shrinks; the 248x56 window, slots, and 24dp glyphs stay put",
+  nav.includes("val navWindowWidth = 248.dp") &&
+    nav.includes("val navWindowHeight = 56.dp") &&
+    nav.includes("val backgroundCardWidth = 216.dp") &&
+    nav.includes("val backgroundCardHeight = 46.dp") &&
+    nav.includes(".size(backgroundCardWidth, backgroundCardHeight)") &&
+    nav.includes("ColorDrawable(android.graphics.Color.TRANSPARENT)") &&
     (nav.match(/modifier = Modifier\.size\(24\.dp\)/g) ?? []).length >= 3 &&
     nav.includes("StatusGlyphIcon(tint, 24.dp)"),
 );
