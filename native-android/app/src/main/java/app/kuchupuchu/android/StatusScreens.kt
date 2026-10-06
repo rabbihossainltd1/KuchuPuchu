@@ -1436,14 +1436,30 @@ private fun ViewersSheet(
     onOpenChat: (String) -> Unit,
 ) {
     var shown by remember { mutableStateOf(false) }
+    var closing by remember { mutableStateOf(false) }
+    var openChatAfterClose by remember { mutableStateOf<String?>(null) }
     val progress by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (shown) 0f else 1f,
+        targetValue = if (shown && !closing) 0f else 1f,
         animationSpec = androidx.compose.animation.core.tween(220),
         label = "sheet",
     )
     LaunchedEffect(Unit) { shown = true }
-    KpRegisterModalBlur()
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    val blurRegistration = KpRegisterModalBlur()
+    fun dismiss() {
+        if (closing) return
+        closing = true
+        // Release the shared backdrop at the beginning of the slide-out,
+        // not when the Dialog is finally removed from composition.
+        blurRegistration.release()
+    }
+    LaunchedEffect(closing) {
+        if (closing) {
+            delay(220)
+            onClose()
+            openChatAfterClose?.let(onOpenChat)
+        }
+    }
+    Dialog(onDismissRequest = ::dismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         val dialogView = androidx.compose.ui.platform.LocalView.current
         val dialogWindow = (dialogView.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
         androidx.compose.runtime.SideEffect {
@@ -1454,7 +1470,7 @@ private fun ViewersSheet(
             Modifier
                 .fillMaxSize()
                 .background(Color(0x1F000000))
-                .clickable(onClick = onClose),
+                .clickable(onClick = ::dismiss),
         ) {
             Column(
                 Modifier
@@ -1474,7 +1490,7 @@ private fun ViewersSheet(
                 ) {
                     Text("Viewed by", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Ink)
                     Spacer(Modifier.weight(1f))
-                    IconButton(onClick = onClose) {
+                    IconButton(onClick = ::dismiss) {
                         Icon(Icons.Filled.Close, "Close", tint = Muted)
                     }
                 }
@@ -1508,7 +1524,10 @@ private fun ViewersSheet(
                                 Row(
                                     Modifier
                                         .fillMaxWidth()
-                                        .clickable { onOpenChat(uid) }
+                                        .clickable {
+                                            openChatAfterClose = uid
+                                            dismiss()
+                                        }
                                         .padding(horizontal = 18.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {

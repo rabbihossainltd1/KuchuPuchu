@@ -14,7 +14,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -46,30 +45,6 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
-
-/**
- * A destination-local entrance that does not depend on NavHost's animated-content
- * scheduling: the first composed frame starts slightly right and settles in over
- * 380 ms, so opening a chat is visibly animated even on the device path.
- */
-@Composable
-private fun ChatRouteEntryMotion(content: @Composable () -> Unit) {
-    val progress = remember { Animatable(0f) }
-    LaunchedEffect(progress) {
-        progress.animateTo(1f, tween(380, easing = FastOutSlowInEasing))
-    }
-    Box(
-        Modifier
-            .fillMaxSize()
-            .graphicsLayer {
-                val fraction = progress.value.coerceIn(0f, 1f)
-                translationX = size.width * 0.30f * (1f - fraction)
-                alpha = 0.90f + 0.10f * fraction
-            },
-    ) {
-        content()
-    }
-}
 
 /**
  * Root of the v3 app. Auth gate → main tabs (Chats / Status / Calls) with
@@ -205,10 +180,9 @@ fun KpApp() {
         if (modalActive) {
             modalBlur.animateTo(30f, tween(260, easing = FastOutSlowInEasing))
         } else {
-            // Clear at a steady rate from the first exit frame. FastOutSlowIn
-            // eased the start too gently, so the backdrop looked blurred until
-            // late in the close and then seemed to snap clear.
-            modalBlur.animateTo(0f, tween(280, easing = LinearEasing))
+            // Release the backdrop early in the sheet's exit, not after the
+            // surface has nearly disappeared; keep the reduction even throughout.
+            modalBlur.animateTo(0f, tween(160, easing = LinearEasing))
         }
     }
     val modalBlurRadius = modalBlur.value.dp
@@ -294,10 +268,13 @@ fun KpApp() {
                 }
                 composable(
                     "chat/{id}",
-                    // The entry motion is driven inside the destination instead
-                    // of relying on NavHost's animated-content scheduling, which
-                    // was not perceptible on device. Keep the reverse/pop motion.
-                    enterTransition = { EnterTransition.None },
+                    // Use NavHost's normal content transition for the chat page:
+                    // it moves the destination surface without layering/recomposing
+                    // the whole large ChatScreen on every animation frame.
+                    enterTransition = {
+                        fadeIn(tween(240, easing = FastOutSlowInEasing)) +
+                            slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 }
+                    },
                     exitTransition = { fadeOut(tween(180, easing = FastOutSlowInEasing)) },
                     popEnterTransition = { fadeIn(tween(240, easing = FastOutSlowInEasing)) },
                     popExitTransition = {
@@ -306,7 +283,7 @@ fun KpApp() {
                     },
                 ) { entry ->
                     val id = entry.arguments?.getString("id") ?: ""
-                    ChatRouteEntryMotion { ChatScreen(nav, id) }
+                    ChatScreen(nav, id)
                 }
                 composable("settings") { SettingsScreen(nav) }
                 // Owner round 31: Settings is a hub — each section is its own screen.

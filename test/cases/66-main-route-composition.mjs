@@ -46,18 +46,14 @@ check(
     nav.includes("val unseenStatus = ScreenStore.statuses.any"),
 );
 check(
-  "home remains stationary and chat entry uses a destination-local, perceptible slide-and-fade",
+  "home remains stationary and chat entry uses the smoother, more visible NavHost-managed fade/slide",
   mainRoute.includes('"main"') &&
     mainRoute.includes("enterTransition = { EnterTransition.None }") &&
     mainRoute.includes("exitTransition = { ExitTransition.None }") &&
     app.includes('"chat/{id}"') &&
-    app.includes("private fun ChatRouteEntryMotion(") &&
-    app.includes("Animatable(0f)") &&
-    app.includes("progress.animateTo(1f, tween(380, easing = FastOutSlowInEasing))") &&
-    app.includes("translationX = size.width * 0.30f * (1f - fraction)") &&
-    app.includes("alpha = 0.90f + 0.10f * fraction") &&
-    app.includes("enterTransition = { EnterTransition.None }") &&
-    app.includes("ChatRouteEntryMotion { ChatScreen(nav, id) }") &&
+    app.includes("fadeIn(tween(240, easing = FastOutSlowInEasing))") &&
+    app.includes("slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 }") &&
+    !app.includes("private fun ChatRouteEntryMotion(") &&
     app.includes("slideInHorizontally(tween(260))") &&
     app.includes("slideOutHorizontally(tween(260))"),
 );

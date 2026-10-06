@@ -1003,8 +1003,8 @@ internal fun HomeBottomNavigation(
     // Preserve the pill window and icon/tap layout; shrink only the painted card.
     val navWindowWidth = 248.dp
     val navWindowHeight = 56.dp
-    // Add a little more breathing room at both ends without moving or resizing any slot.
-    val backgroundCardWidth = 208.dp
+    // Extend only the painted card a little farther to the left and right.
+    val backgroundCardWidth = 224.dp
     val backgroundCardHeight = 46.dp
     val navWindowWidthPx = with(density) { navWindowWidth.roundToPx() }
     val navWindowHeightPx = with(density) { navWindowHeight.roundToPx() }

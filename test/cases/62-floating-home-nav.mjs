@@ -52,10 +52,10 @@ check(
     nav.includes(".offset(x = indicatorX, y = indicatorY)"),
 );
 check(
-  "only the painted rounded card shrinks further; the 248x56 window, slots, and 24dp glyphs stay put",
+  "only the painted rounded card extends horizontally; the 248x56 window, slots, and 24dp glyphs stay put",
   nav.includes("val navWindowWidth = 248.dp") &&
     nav.includes("val navWindowHeight = 56.dp") &&
-    nav.includes("val backgroundCardWidth = 208.dp") &&
+    nav.includes("val backgroundCardWidth = 224.dp") &&
     nav.includes("val backgroundCardHeight = 46.dp") &&
     nav.includes(".size(backgroundCardWidth, backgroundCardHeight)") &&
     nav.includes("ColorDrawable(android.graphics.Color.TRANSPARENT)") &&

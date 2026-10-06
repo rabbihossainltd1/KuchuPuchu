@@ -1837,13 +1837,11 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
-    "chat entry uses a destination-local slide-and-fade; unrelated bornHere and flight diagnostics stay unchanged",
+    "chat entry uses NavHost's smoother third-width fade/slide instead of a whole-screen graphics-layer animation; unrelated flight diagnostics stay unchanged",
     kpapp4.includes('"chat/{id}"') &&
-      kpapp4.includes("private fun ChatRouteEntryMotion(") &&
-      kpapp4.includes("progress.animateTo(1f, tween(380, easing = FastOutSlowInEasing))") &&
-      kpapp4.includes("translationX = size.width * 0.30f * (1f - fraction)") &&
-      kpapp4.includes("alpha = 0.90f + 0.10f * fraction") &&
-      kpapp4.includes("ChatRouteEntryMotion { ChatScreen(nav, id) }") &&
+      kpapp4.includes("fadeIn(tween(240, easing = FastOutSlowInEasing))") &&
+      kpapp4.includes("slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 }") &&
+      !kpapp4.includes("ChatRouteEntryMotion(") &&
       kpapp4.includes(
         "popEnterTransition = { fadeIn(tween(240, easing = FastOutSlowInEasing)) }",
       ) &&

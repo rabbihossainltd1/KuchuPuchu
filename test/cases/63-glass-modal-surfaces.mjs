@@ -21,6 +21,9 @@ const sharedSheet = ui.slice(sharedSheetStart, sharedSheetEnd);
 const countryStart = login.indexOf("fun CountryPickerSheet(");
 const statusMenuStart = status.indexOf("private fun StatusMenuSheet(");
 const emojiStart = chat.indexOf("private fun EmojiSheetDialog(");
+const viewersSheetStart = status.indexOf("private fun ViewersSheet(");
+const viewersSheetEnd = status.indexOf("/**\n * Status clip player", viewersSheetStart);
+const viewersSheet = status.slice(viewersSheetStart, viewersSheetEnd);
 
 const lines = [];
 const check = (name, condition, detail = "") =>
@@ -51,7 +54,7 @@ check(
     ui.includes("internal fun KpRememberModalBottomSheetState(") &&
     kpApp.includes(".blur(modalBlurRadius)") &&
     kpApp.includes("modalBlur.animateTo(30f, tween(260, easing = FastOutSlowInEasing))") &&
-    kpApp.includes("modalBlur.animateTo(0f, tween(280, easing = LinearEasing))"),
+    kpApp.includes("modalBlur.animateTo(0f, tween(160, easing = LinearEasing))"),
 );
 check(
   "focus keeps one Compose subtree in the source slot and replays its recorded layer without bitmap or duplicate content",
@@ -139,6 +142,15 @@ check(
     ui.includes(".background(GlassSheetSurface)") &&
     ui.includes(".border(1.dp, GlassSheetEdge") &&
     ui.includes("KpRegisterModalBlur()"),
+);
+check(
+  "custom status-viewer sheet starts the shared blur exit with its slide-out and disposes after the same motion",
+  viewersSheet.includes("var closing by remember { mutableStateOf(false) }") &&
+    viewersSheet.includes("targetValue = if (shown && !closing) 0f else 1f") &&
+    viewersSheet.includes("blurRegistration.release()") &&
+    viewersSheet.includes("Dialog(onDismissRequest = ::dismiss") &&
+    viewersSheet.includes("delay(220)") &&
+    viewersSheet.includes(".clickable(onClick = ::dismiss)"),
 );
 check(
   "root update popup and forward-picker footer use the same glass treatment",
