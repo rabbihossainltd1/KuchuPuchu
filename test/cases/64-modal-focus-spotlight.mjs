@@ -58,6 +58,12 @@ const messageSlot = chat.slice(messageSlotStart, messageSlotEnd);
 const messageActionStart = chat.indexOf("/* ---------------- message action sheet");
 const messageActionEnd = chat.indexOf("// r103-4: the message-info sheet", messageActionStart);
 const messageActions = chat.slice(messageActionStart, messageActionEnd);
+const actionBodyStart = messageActions.indexOf("val body: @Composable");
+const actionBodyEnd = messageActions.indexOf("val latestBody", actionBodyStart);
+const actionSheetBody = messageActions.slice(actionBodyStart, actionBodyEnd);
+const quickBarStart = chat.indexOf("private fun MessageQuickReactionBar(");
+const quickBarEnd = chat.indexOf("/** Owner round 16: reaction chips", quickBarStart);
+const quickReactionBar = chat.slice(quickBarStart, quickBarEnd);
 const hostStart = focus.indexOf("internal fun KpFocusedSheetHost()");
 const focusedHost = focus.slice(hostStart);
 const closeStart = focusedHost.indexOf("} else {\n            blurRegistration.release()");
@@ -142,15 +148,17 @@ check(
     focus.includes("KpModalFocusState.clear()"),
 );
 check(
-  "message bubble's context sheet places the live bubble above quick reactions and action options without overlap",
-  messageActions.includes('listOf("👍", "❤️", "😂", "😮", "😢", "🙏")') &&
-    messageActions.indexOf("Row(") < messageActions.indexOf('listOf("👍"') &&
-    messageActions.indexOf('KpSheetRow(Icons.AutoMirrored.Filled.Reply, "Reply")') >
-      messageActions.indexOf('listOf("👍"') &&
-    messageActions.includes("focusKey = focusKey,") &&
-    !messageActions.includes("focusKey = focusKey.takeIf") &&
+  "quick reactions float above the selected live message while actions stay in the sheet and the '+' keeps a fixed seat",
+  quickReactionBar.includes('val quickEmojis = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")') &&
+    quickReactionBar.includes(".weight(1f)") &&
+    quickReactionBar.includes(".width(38.dp)") &&
+    chat.includes("floatingContent = hostedFloating") &&
+    !actionSheetBody.includes("MessageQuickReactionBar(") &&
+    actionSheetBody.includes('KpSheetRow(Icons.AutoMirrored.Filled.Reply, "Reply")') &&
+    focus.includes("val floatingContent =") &&
+    focus.includes("val barTopPx =") &&
+    focus.includes("floatingContent()") &&
     focus.includes("KpModalFocusState.updateTargetAboveSheet(") &&
-    focus.includes("val top = finalSheetTop - source.height - gapPx") &&
     focusedHost.indexOf("KpModalFocusState.updateTargetAboveSheet(") <
       focusedHost.indexOf("request.content(this)"),
 );
@@ -177,7 +185,7 @@ check(
       kpApp.indexOf("KpFocusedSheetHost()") &&
     kpApp.indexOf("KpFocusedSheetHost()") < kpApp.indexOf("KpRootFocusOverlayHost()") &&
     focus.includes("internal fun KpRootFocusOverlayHost()") &&
-    focus.includes("Box(Modifier.fillMaxSize().zIndex(1f))") &&
+    focus.includes("BoxWithConstraints(Modifier.fillMaxSize().zIndex(1f))") &&
     !focus.includes("androidx.compose.runtime.movableContentOf") &&
     !focus.includes("item.content()") &&
     !focus.includes("PixelCopy") &&

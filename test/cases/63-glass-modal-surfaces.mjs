@@ -91,7 +91,7 @@ check(
     kpApp.indexOf("KpFocusedSheetHost()") < kpApp.indexOf("KpRootFocusOverlayHost()") &&
     focus.includes("internal fun KpRootFocusOverlayHost()") &&
     focus.includes("internal fun KpModalFocusOverlay(progress: Float)") &&
-    focus.includes("Box(Modifier.fillMaxSize().zIndex(1f))"),
+    focus.includes("BoxWithConstraints(Modifier.fillMaxSize().zIndex(1f))"),
 );
 check(
   "focused live row is measured to the sheet top and rests above the surface without an in-sheet spacer",
@@ -163,14 +163,14 @@ check(
     chat.includes(".border(0.5.dp, GlassSheetEdge)"),
 );
 check(
-  "home nav keeps modal suppression and uses an opaque floating fill without platform blur",
+  "home nav keeps modal suppression and a translucent floating fill with native background blur",
   nav.includes("if (dialogAttached)") &&
     nav.includes("dialogWindowRef[0]?.setWindowAnimations(0)") &&
     !nav.includes("slideProgress") &&
     nav.includes("Dialog(") &&
     nav.includes("WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE") &&
-    nav.includes("copy(alpha = 0.92f)") &&
-    !nav.includes("setBackgroundBlurRadius(") &&
+    nav.includes("copy(alpha = 0.82f)") &&
+    chatList.includes("setBackgroundBlurRadius(") &&
     kpApp.includes("modalOpen = modalWindowVisible"),
 );
 
