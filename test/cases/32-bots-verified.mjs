@@ -3729,7 +3729,10 @@ const convBetween = (db, a, b) =>
             cl.includes(
               'convs.filter { ScreenStore.isArchived(it.optString("id")) && !it.optBoolean("hidden") }',
             ) &&
-            kt("KpApp.kt").includes(
+            cl.includes(
+              'val unreadChats = ScreenStore.convs.count { !it.optBoolean("hidden") && it.optInt("unread", 0) > 0 }',
+            ) &&
+            !kt("KpApp.kt").includes(
               'unreadChats = ScreenStore.convs.count { !it.optBoolean("hidden") && it.optInt("unread", 0) > 0 }',
             ),
         );

@@ -67,10 +67,10 @@ check(
     !focus.includes("duplicateContent"),
 );
 check(
-  "Compose BOM is pinned to the newer stable runtime for movable-content/slot-table fixes",
-  build.includes("androidx.compose:compose-bom:2026.09.00") &&
-    build.includes("Runtime 1.12.1") &&
-    focus.includes("Runtime 1.12.1+"),
+  "Compose BOM keeps a compatible stable runtime with the movable-content exception fix",
+  build.includes("androidx.compose:compose-bom:2026.06.00") &&
+    build.includes("Runtime 1.11.3") &&
+    focus.includes("Runtime 1.11.2+"),
 );
 check(
   "supplied chat vector stays tintable, outlined, and free of the attached metadata",
