@@ -7264,9 +7264,15 @@ const convBetween = (db, a, b) =>
         settings.includes("if (available == true) haptics.tap() else haptics.reject()"),
     );
     check(
-      "r32-40: chat — the reply swipe taps once when it ARMS (all five bubble kinds), the select bar's actions buzz (copy confirms; r68-8: the single Delete taps, and the popup's own Delete thuds), the ⋮ taps, an error line rejects once when it appears, schedule-sheet chips / steppers / theme swatches tap, a parked message's X thuds, voice play taps",
-      // r71-20: the once-text bubble is the sixth kind with the same arming tap.
-      (chat.match(/if \(!wasArmed && kotlin\.math\.abs\(replyDrag\) >= /g) || []).length === 6 &&
+      "r32-40: chat — text and media reply swipes buzz once when armed, the select bar's actions buzz (copy confirms; r68-8: the single Delete taps, and the popup's own Delete thuds), the ⋮ taps, an error line rejects once when it appears, schedule-sheet chips / steppers / theme swatches tap, a parked message's X thuds, voice play taps",
+      // r71-20: once-text keeps its own arming tap; photo and album share the
+      // stable photoReplySwipe wrapper, whose arming callback is one tap.
+      (chat.match(/if \(!wasArmed && kotlin\.math\.abs\(replyDrag\) >= /g) || []).length === 4 &&
+        (chat.match(/onArmed = \{ haptics\.tap\(\) \}/g) || []).length === 2 &&
+        chat.includes(
+          "if (!armed && MessageReplySwipePolicy.shouldReply(dx, dy, mine, baseThresholdPx))",
+        ) &&
+        chat.includes("armedCallback.value()") &&
         chat.includes(
           'cm.setPrimaryClip(android.content.ClipData.newPlainText("KuchuPuchu", text))\n                        haptics.confirm()',
         ) &&
