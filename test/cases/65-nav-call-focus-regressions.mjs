@@ -138,7 +138,7 @@ check(
     nav.includes("R.style.KpNavWindowAnimations"),
 );
 check(
-  "the full floating pill is enlarged, icons stay 27dp, contents sit 3dp lower, and the background card sits 6dp lower",
+  "the full floating pill is enlarged, icons stay 27dp, contents sit 3dp lower, and rounded native blur keeps its translucent fallback",
   nav.includes("val pillFill =") &&
     nav.includes("copy(alpha = 0.82f)") &&
     nav.includes("val navScale = 1.2f") &&
@@ -149,13 +149,13 @@ check(
     nav.includes("val backgroundCardHeight = 46.dp * navScale") &&
     nav.includes("val navContentYOffset = 3.dp") &&
     nav.includes(".offset(y = navContentYOffset)") &&
-    nav.includes("backgroundCardYOffset") &&
+    nav.includes("+ navContentYOffset") &&
     nav.includes("navContentYOffsetPx") &&
     nav.includes(
       "val insetBottom = (navWindowHeightPx - backgroundCardHeightPx - insetY).coerceAtLeast(0)",
     ) &&
     nav.includes(
-      ".offset(y = backgroundCardYOffset)\n                        .size(backgroundCardWidth, backgroundCardHeight)",
+      ".offset(y = navContentYOffset)\n                        .size(backgroundCardWidth, backgroundCardHeight)",
     ) &&
     nav.includes(".background(pillFill)") &&
     nav.includes("InsetDrawable(") &&
