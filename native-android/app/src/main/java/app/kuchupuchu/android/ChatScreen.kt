@@ -4202,21 +4202,16 @@ fun ChatScreen(nav: NavController, convId: String) {
                         tween(if (flashing) 180 else 700),
                         label = "quoteflash",
                     )
-                    // r103-3 (owner: "2 ta user e jodi continues massage
-                    // kore tobe last massage a just double tick+ time eshob
-                    // dekhabe baki gulai na"): a run of consecutive messages
-                    // from the same sender carries its time (+ ticks) only on
-                    // the LAST row - WhatsApp-style. The marker rides a COPY
-                    // of the message so every row renderer can honor it.
-                    val nextSender =
-                        groupedMsgs.getOrNull(idx + 1)?.optString("senderId")
-                            ?: if (echoRows.isNotEmpty()) Store.myId() else null
+                    // Android message status policy: keep the timestamp/tick
+                    // visible only on the newest message in the thread. Older
+                    // bubbles retain their status internally, but do not paint
+                    // it until the bubble is explicitly opened/tapped.
+                    // The marker rides a copy so the server/cache JSON is never
+                    // mutated and all media/text renderers share the rule.
+                    val hasPendingAfterHistory = echoRows.isNotEmpty()
+                    val isLatestVisibleMessage = !hasPendingAfterHistory && idx == groupedMsgs.lastIndex
                     val rowM =
-                        if (nextSender != null && nextSender == m.optString("senderId")) {
-                            JSONObject(m.toString()).put("kpHideStamp", true)
-                        } else {
-                            m
-                        }
+                        if (!isLatestVisibleMessage) JSONObject(m.toString()).put("kpHideStamp", true) else m
                     // r76-27 (audit #15): a VANISHED / deleted row fades away
                     // on its way out (fadeInSpec stays null - arrivals belong
                     // to the flight system, untouched).

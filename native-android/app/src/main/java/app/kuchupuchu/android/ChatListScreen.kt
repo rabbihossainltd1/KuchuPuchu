@@ -1010,7 +1010,7 @@ internal fun HomeBottomNavigation(
     val pillFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.82f) else Card.copy(alpha = 0.82f)
     // Enlarge the complete capsule and its slots while keeping the glyphs at 27dp.
     val navScale = 1.2f
-    val navContentYOffset = 3.dp
+    val navContentYOffset = 6.dp
     val itemH = 44.dp * navScale
     val gap = 4.dp * navScale
     val capsulePadding = 6.dp * navScale
