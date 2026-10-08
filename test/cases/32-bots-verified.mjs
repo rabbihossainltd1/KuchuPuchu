@@ -8210,8 +8210,8 @@ const convBetween = (db, a, b) =>
       chat14.includes("if (selecting) onToggleSelect(m) else onLongPress(m)") &&
         chat14.includes("onClick = {\n                        if (selecting && !pendingEcho) {") &&
         chat14.includes("selecting: Boolean = false,") &&
-        chat14.includes(
-          "theme, onOpenDoc, onToggleSelect, onFocusedLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)",
+        /"FILE" -> FileBubble\(\s*m,\s*mine,\s*player,\s*pendingEcho,\s*onOpenImage,\s*onOpenVideo,\s*theme,\s*onOpenDoc,\s*onToggleSelect,\s*onFocusedLongPress,\s*selecting = selectedIds\.isNotEmpty\(\),\s*onCancelSend = onCancelSend,\s*fxGrow = fxFresh,\s*onRevealStamp = onRevealStamp,?\s*\)/.test(
+          chat14,
         ),
     );
   }
