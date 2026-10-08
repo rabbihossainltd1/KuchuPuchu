@@ -73,16 +73,19 @@ check(
     nav.includes("StatusGlyphIcon(tint, navIconSize)"),
 );
 check(
-  "the translucent background card and native-blur mask follow the same 3dp downward alignment as the nav contents",
-  nav.includes("val navContentYOffsetPx = with(density) { navContentYOffset.roundToPx() }") &&
+  "the background card and native-blur mask sit 1.5dp below the icon/indicator baseline without moving the contents",
+  nav.includes("val backgroundCardYOffset = navContentYOffset + 1.5.dp") &&
     nav.includes(
-      ".align(Alignment.Center)\n                        .offset(y = navContentYOffset)\n                        .size(backgroundCardWidth, backgroundCardHeight)",
+      "val backgroundCardYOffsetPx = with(density) { backgroundCardYOffset.roundToPx() }",
     ) &&
-    nav.includes("+ navContentYOffsetPx).coerceAtLeast(0)") &&
+    nav.includes(
+      ".align(Alignment.Center)\n                        .offset(y = backgroundCardYOffset)\n                        .size(backgroundCardWidth, backgroundCardHeight)",
+    ) &&
+    nav.includes("+ backgroundCardYOffsetPx).coerceAtLeast(0)") &&
     nav.includes(
       "val insetBottom = (navWindowHeightPx - backgroundCardHeightPx - insetY).coerceAtLeast(0)",
     ) &&
-    nav.includes("navContentYOffsetPx,") &&
+    nav.includes("backgroundCardYOffsetPx,") &&
     nav.includes("            insetBottom,"),
 );
 check(

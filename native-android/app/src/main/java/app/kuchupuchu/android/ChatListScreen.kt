@@ -1011,6 +1011,9 @@ internal fun HomeBottomNavigation(
     // Enlarge the complete capsule and its slots while keeping the glyphs at 27dp.
     val navScale = 1.2f
     val navContentYOffset = 3.dp
+    // The reference screenshot shows the glass card about 4 px above the
+    // icon row; offset only the card (and its native blur mask) another 1.5 dp.
+    val backgroundCardYOffset = navContentYOffset + 1.5.dp
     val itemH = 44.dp * navScale
     val gap = 4.dp * navScale
     val capsulePadding = 6.dp * navScale
@@ -1023,7 +1026,7 @@ internal fun HomeBottomNavigation(
     val navWindowHeightPx = with(density) { navWindowHeight.roundToPx() }
     val backgroundCardWidthPx = with(density) { backgroundCardWidth.roundToPx() }
     val backgroundCardHeightPx = with(density) { backgroundCardHeight.roundToPx() }
-    val navContentYOffsetPx = with(density) { navContentYOffset.roundToPx() }
+    val backgroundCardYOffsetPx = with(density) { backgroundCardYOffset.roundToPx() }
     val navBlurRadiusPx = with(density) { 24.dp.roundToPx() }
     val bottomOffsetPx = WindowInsets.navigationBars.getBottom(density) + with(density) { 16.dp.roundToPx() }
     val indicatorSize = 40.dp * navScale
@@ -1042,10 +1045,11 @@ internal fun HomeBottomNavigation(
         navWindowHeightPx,
         backgroundCardWidthPx,
         backgroundCardHeightPx,
-        navContentYOffsetPx,
+        backgroundCardYOffsetPx,
     ) {
         val insetX = ((navWindowWidthPx - backgroundCardWidthPx) / 2).coerceAtLeast(0)
-        val insetY = ((navWindowHeightPx - backgroundCardHeightPx) / 2 + navContentYOffsetPx).coerceAtLeast(0)
+        val insetY =
+            ((navWindowHeightPx - backgroundCardHeightPx) / 2 + backgroundCardYOffsetPx).coerceAtLeast(0)
         val insetBottom = (navWindowHeightPx - backgroundCardHeightPx - insetY).coerceAtLeast(0)
         val rounded =
             GradientDrawable().apply {
@@ -1157,7 +1161,7 @@ internal fun HomeBottomNavigation(
                 Box(
                     Modifier
                         .align(Alignment.Center)
-                        .offset(y = navContentYOffset)
+                        .offset(y = backgroundCardYOffset)
                         .size(backgroundCardWidth, backgroundCardHeight)
                         .clip(CircleShape)
                         .background(pillFill),
