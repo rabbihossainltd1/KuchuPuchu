@@ -14,7 +14,7 @@ KuchuPuchu is a messenger for Free Fire players with a native Android app and a 
 | Web | Dependency-free HTML/CSS/JavaScript PWA (`public/`) | no build step | Served as same-origin Worker assets; WebCrypto KP1 message E2EE and roaming key backup |
 | Auth | Phone + Google recovery; one active Android and one active Web session per account | — | New-device login supports six-digit in-app OTP or approval; browser reports `sim: UNAVAILABLE` |
 | Push | FCM (data + notification) | — | Worker credentials live in Worker secrets; secret names only in docs |
-| Tests | tsx + in-memory D1/R2 shim (`test/d1shim.mjs`) | 49 cases, 2046 assertions | `npm test` runs all; CI also runs Android tests/lint and builds the release APK |
+| Tests | tsx + in-memory D1/R2 shim (`test/d1shim.mjs`) | 71 case files (current 2026-10-08) | `npm test` runs all; CI also runs Android tests/lint and builds the release APK |
 | Node | >=20 (sandbox has 20.20.2) | TS 5.9.3, Prettier 3.9.6, tsx 4.23.12, better-sqlite3 12.11.1 |
 
 ## 3. Repository Map
@@ -169,4 +169,13 @@ Auth: `Authorization: Bearer <90d token>` (sha256 stored). CORS `*`.
 - Workspace after the approved shallow clone: 16 MB and 595 tracked working-tree files (excluding `.git`); full history was not cloned.
 - Bootstrap branch `chore/project-bootstrap-v274` contains documentation-only updates to `README.md`, `PROJECT_UNDERSTANDING.md`, and `memory.md`. No product source/dependency changes, Worker deployment, or release were made.
 - Security: local runtime credentials are stored only in `/home/user/.env` outside the repository; no secret value was added to tracked project files.
-- Next: read the newest `memory.md` tail and the owner's current issue list before code work; do not infer a new bug from the old v211 handoff.
+- Historical next step (superseded by §16): read the newest `memory.md` tail and the owner's current issue list before code work; do not infer a new bug from the old v211 handoff.
+
+
+## 16. Android polish — 2026-10-08 (supersedes §15 working-branch / next-step details)
+- Current code branch `fix/android-chat-polish`, based on `f18bf49` (`main`). Three Conventional Commits are present: `5cdb813` (floating navigation card), `d62f870` (tap-to-reveal status), `2e596d5` (cold emoji fallback). No release/deploy was performed.
+- Navigation card and its native blur mask share a new `backgroundCardYOffset` (`3.dp + 1.5.dp`); content/indicator remain at `3.dp`.
+- Message status policy stays compatible with r103: latest visible row by default; tapping an older row reveals only that row. `MessageStampPolicy.kt` is a pure policy with JVM tests; `ChatScreen.kt` passes callbacks to all message tap targets and uses current callback state for persistent gestures.
+- The first-frame fallback in `EmojiAnim.kt` is sized independently of user font scale; line height, one-line layout, and `includeFontPadding = false` prevent the system emoji from overflowing its fixed dp box. Lottie rendering remains unchanged.
+- Regression checks passed locally: cases 37, 47, 62, 65, 68, 70, 71; source-contract case 32's updated witnesses were checked directly, but the full case requires missing `better-sqlite3`. Modified JavaScript test files passed Prettier and syntax checks; `git diff --check` clean.
+- Full `npm test`, Android JVM tests, lint, APK build, and emulator verification remain pending GitHub PR CI/device smoke testing. Local sandbox lacks project `node_modules`, Android SDK/`adb`, and JDK 17 (only Java 11). `gh` and GitHub credentials are absent; no credentials were copied or stored. Next: push/PR if authentication can be supplied or configured; otherwise share the branch compare URL and PR title/body. Separate owner approval is still required before any release/deployment.
