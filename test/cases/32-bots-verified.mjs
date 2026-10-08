@@ -1724,7 +1724,7 @@ const convBetween = (db, a, b) =>
       chat.includes("if (mine) replyThreshold * 1.5f else replyThreshold") &&
       // v163: the row also hands the ✕ (cancel send) down.
       chat.includes(
-        'ImageMessageRow(\n                    m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect,\n                    onOpenImage, onReply,\n                    onLongPress = { pressed ->\n                        if (pressed.optString("kind") != "DELETED") requestFocus()\n                        onLongPress(pressed)\n                    },\n                    theme = theme,\n                    onCancelSend = onCancelSend,\n                    onDoubleTapHeart = onDoubleTapHeart,\n                )',
+        'ImageMessageRow(\n                    m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect,\n                    onOpenImage, onReply,\n                    onLongPress = { pressed ->\n                        if (pressed.optString("kind") != "DELETED") requestFocus()\n                        onLongPress(pressed)\n                    },\n                    theme = theme,\n                    onCancelSend = onCancelSend,\n                    onDoubleTapHeart = onDoubleTapHeart,\n                    onRevealStamp = onRevealStamp,\n                )',
       ),
   );
   check(
@@ -3010,8 +3010,8 @@ const convBetween = (db, a, b) =>
         chat.includes("if (isImage && !asDocument) {") &&
         // r31-27: the call site now also hands the chat theme down (voice bars).
         // v163: the doc row also hands the ✕ (cancel send) down.
-        chat.includes(
-          '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onFocusedLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)',
+        /"FILE" -> FileBubble\(\s*m,\s*mine,\s*player,\s*pendingEcho,\s*onOpenImage,\s*onOpenVideo,\s*theme,\s*onOpenDoc,\s*onToggleSelect,\s*onFocusedLongPress,\s*selecting = selectedIds\.isNotEmpty\(\),\s*onCancelSend = onCancelSend,\s*fxGrow = fxFresh,\s*onRevealStamp = onRevealStamp,?\s*\)/.test(
+          chat,
         ) &&
         readFileSync("src/worker/index.ts", "utf8").includes(
           "...(incomingMeta.document === true ? { document: true } : {}),",
@@ -4132,8 +4132,8 @@ const convBetween = (db, a, b) =>
           chat.includes(
             '.also { mm -> vm.optJSONArray("waveform")?.let { mm.put("waveform", it) } },',
           ) &&
-          chat.includes(
-            '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onFocusedLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)',
+          /"FILE" -> FileBubble\(\s*m,\s*mine,\s*player,\s*pendingEcho,\s*onOpenImage,\s*onOpenVideo,\s*theme,\s*onOpenDoc,\s*onToggleSelect,\s*onFocusedLongPress,\s*selecting = selectedIds\.isNotEmpty\(\),\s*onCancelSend = onCancelSend,\s*fxGrow = fxFresh,\s*onRevealStamp = onRevealStamp,?\s*\)/.test(
+            chat,
           ),
       );
     }
@@ -6171,9 +6171,13 @@ const convBetween = (db, a, b) =>
     );
     check(
       "r32-32: the TEXT bubble annotates its body (plain Text again in select mode so taps go to the bubble) and shows LinkPreviewCard for the first link above the text",
-      chat.includes("else Links.annotate(full, bodyInk) { u -> Links.open(ctx, u) }") &&
+      /else Links\.annotate\(full, bodyInk\) \{ u ->\s*revealStamp\.value\(\)\s*Links\.open\(ctx, u\)\s*\}/.test(
+        chat,
+      ) &&
         chat.includes("val firstLink = remember(full) { Links.first(full) }") &&
-        chat.includes("onOpen = if (selecting) null else ({ Links.open(ctx, firstLink) }),") &&
+        /onOpen\s*=\s*if \(selecting\)\s*\{\s*null\s*\}\s*else\s*\{\s*\{\s*revealStamp\.value\(\)\s*Links\.open\(ctx, firstLink\)\s*\}\s*\}/.test(
+          chat,
+        ) &&
         chat.includes("linked,\n                                        fontSize = 14.5.sp,") &&
         chat.includes("maxLines = if (capped) BODY_COLLAPSE_LINES else Int.MAX_VALUE,") &&
         chat.indexOf("LinkPreviewCard(") < chat.indexOf("linked,"),
@@ -6550,18 +6554,18 @@ const convBetween = (db, a, b) =>
         "if (isViewOnce(m)) {\n        KpMessageFocusSlot(focusKey) { requestFocus ->\n            Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {",
       ) &&
         chat.includes('if (pressed.optString("kind") != "DELETED") requestFocus()') &&
-        chat.includes(
-          "OnceTextRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onFocusedLongPress, theme, onDoubleTapHeart)",
+        /OnceTextRow\(\s*m = m,\s*mine = mine,[\s\S]{0,500}?onDoubleTapHeart = onDoubleTapHeart,\s*onRevealStamp = onRevealStamp,?\s*\)/.test(
+          chat,
         ) &&
-        chat.includes(
-          "ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onFocusedLongPress, theme, onDoubleTapHeart)",
+        /ViewOnceRow\(\s*m = m,\s*mine = mine,[\s\S]{0,700}?onDoubleTapHeart = onDoubleTapHeart,\s*onRevealStamp = onRevealStamp,?\s*\)/.test(
+          chat,
         ) &&
         chat.indexOf("if (isViewOnce(m)) {") <
           chat.indexOf(
             'if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {',
           ) &&
         onceRow.includes("val openable = !mine && !pendingEcho") &&
-        onceRow.includes("openable -> if (video) onOpenVideo(m) else onOpenImage(m)") &&
+        onceRow.includes("canOpen -> if (video) onOpenVideo(m) else onOpenImage(m)") &&
         onceRow.includes("detectHorizontalDragGestures(") &&
         onceRow.includes("if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)") &&
         onceRow.includes(".transformations(ViewOnceBlur)") &&
@@ -8096,7 +8100,7 @@ const convBetween = (db, a, b) =>
       "r33-19: video bubble — VideoMessageRow takes pendingEcho + otherReadAt, reads UploadProgress for its clientId, decodes the pending frame from the local copy (docPath), swaps the play circle for a determinate ring + percentage while sending (indeterminate during the POST), ignores taps on the echo, and draws a scrim with the time and TickIcon (sending / sent / delivered / seen) like a photo; the duration moves to the top-start corner",
       // v163: the row also hands the ✕ (cancel send) down.
       chat.includes(
-        'VideoMessageRow(\n                    m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect,\n                    onReply,\n                    onLongPress = { pressed ->\n                        if (pressed.optString("kind") != "DELETED") requestFocus()\n                        onLongPress(pressed)\n                    },\n                    onOpen = onOpenVideo,\n                    theme = theme,\n                    onCancelSend = onCancelSend,\n                    onDoubleTapHeart = onDoubleTapHeart,\n                )',
+        'VideoMessageRow(\n                    m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect,\n                    onReply,\n                    onLongPress = { pressed ->\n                        if (pressed.optString("kind") != "DELETED") requestFocus()\n                        onLongPress(pressed)\n                    },\n                    onOpen = onOpenVideo,\n                    theme = theme,\n                    onCancelSend = onCancelSend,\n                    onDoubleTapHeart = onDoubleTapHeart,\n                    onRevealStamp = onRevealStamp,\n                )',
       ) &&
         vid.includes(
           "    pendingEcho: Boolean,\n    otherReadAt: String?,\n    selectedIds: List<String>,",

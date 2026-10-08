@@ -4066,6 +4066,8 @@ fun ChatScreen(nav: NavController, convId: String) {
             val groupedMsgs by remember {
                 androidx.compose.runtime.derivedStateOf { foldAlbums(visibleMsgs) }
             }
+            // Reveal an older row's existing status without changing cached/server JSON.
+            var revealedStampKey by remember(convId) { mutableStateOf("") }
             // Owner round 33 (item 17): tap a quote → scroll to the original
             // (paging back through history when it is not loaded yet, bounded)
             // and flash its row once. A deleted / hidden original is left alone.
@@ -4210,8 +4212,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // mutated and all media/text renderers share the rule.
                     val hasPendingAfterHistory = echoRows.isNotEmpty()
                     val isLatestVisibleMessage = !hasPendingAfterHistory && idx == groupedMsgs.lastIndex
+                    val stampVisible = MessageStampPolicy.isVisible(
+                        isLatestVisible = isLatestVisibleMessage,
+                        rowKey = rowKey,
+                        revealedKey = revealedStampKey,
+                    )
                     val rowM =
-                        if (!isLatestVisibleMessage) JSONObject(m.toString()).put("kpHideStamp", true) else m
+                        if (stampVisible) m else JSONObject(m.toString()).put("kpHideStamp", true)
                     // r76-27 (audit #15): a VANISHED / deleted row fades away
                     // on its way out (fadeInSpec stays null - arrivals belong
                     // to the flight system, untouched).
@@ -4341,6 +4348,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             onCancelSend = ::cancelSend,
                             // r71-21: double tap = ❤️ (every row kind).
                             onDoubleTapHeart = ::heartReact,
+                            onRevealStamp = { revealedStampKey = rowKey },
                             onUnblockAsk = { msg ->
                                 scope.launch {
                                     val ok = runCatching {
@@ -4402,8 +4410,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                     historyFxKeys.remove(rowKey)
                     // r103-3: a burst of echoes shows the stamp on the last
                     // one only (the run's newest row).
+                    val echoStampVisible = MessageStampPolicy.isVisible(
+                        isLatestVisible = m === echoRows.lastOrNull(),
+                        rowKey = rowKey,
+                        revealedKey = revealedStampKey,
+                    )
                     val echoM =
-                        if (m !== echoRows.lastOrNull()) JSONObject(m.toString()).put("kpHideStamp", true) else m
+                        if (echoStampVisible) m else JSONObject(m.toString()).put("kpHideStamp", true)
                     Box(
                         Modifier
                             .fillMaxWidth()
@@ -4424,6 +4437,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             onCancelSend = ::cancelSend,
                             // r71-21: double tap = ❤️ (every row kind).
                             onDoubleTapHeart = ::heartReact,
+                            onRevealStamp = { revealedStampKey = rowKey },
                         )
                     }
                 }
@@ -8078,9 +8092,11 @@ private fun MessageRow(
     // emoji ta"): a DOUBLE TAP on a bubble drops the heart reaction — a real
     // reaction (same server route, same chip, mirrored like a picked one).
     onDoubleTapHeart: (JSONObject) -> Unit = {},
+    onRevealStamp: () -> Unit = {},
 ) {
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
+    val revealStamp = rememberUpdatedState(onRevealStamp)
     // Owner round 21: event sounds (reply swipe) play from the row itself.
     val ctx = LocalContext.current
     // r67-3 (owner: "massage send hole agei chat a place hoye abar animate hoye
@@ -8289,6 +8305,7 @@ private fun MessageRow(
                     },
                     theme = theme,
                     onDoubleTapHeart = onDoubleTapHeart,
+                    onRevealStamp = onRevealStamp,
                 )
             }
         }
@@ -8309,9 +8326,36 @@ private fun MessageRow(
                     onLongPress(pressed)
                 }
                 if (kind == "TEXT" && m.optText("body").isNotBlank()) {
-                    OnceTextRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onFocusedLongPress, theme, onDoubleTapHeart)
+                    OnceTextRow(
+                        m = m,
+                        mine = mine,
+                        pendingEcho = pendingEcho,
+                        otherReadAt = otherReadAt,
+                        selectedIds = selectedIds,
+                        onToggleSelect = onToggleSelect,
+                        onReply = onReply,
+                        onLongPress = onFocusedLongPress,
+                        theme = theme,
+                        onDoubleTapHeart = onDoubleTapHeart,
+                        onRevealStamp = onRevealStamp,
+                    )
                 } else {
-                    ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onFocusedLongPress, theme, onDoubleTapHeart)
+                    ViewOnceRow(
+                        m = m,
+                        mine = mine,
+                        pendingEcho = pendingEcho,
+                        otherReadAt = otherReadAt,
+                        player = player,
+                        selectedIds = selectedIds,
+                        onToggleSelect = onToggleSelect,
+                        onOpenImage = onOpenImage,
+                        onOpenVideo = onOpenVideo,
+                        onReply = onReply,
+                        onLongPress = onFocusedLongPress,
+                        theme = theme,
+                        onDoubleTapHeart = onDoubleTapHeart,
+                        onRevealStamp = onRevealStamp,
+                    )
                 }
             }
         }
@@ -8330,6 +8374,7 @@ private fun MessageRow(
                     theme = theme,
                     onCancelSend = onCancelSend,
                     onDoubleTapHeart = onDoubleTapHeart,
+                    onRevealStamp = onRevealStamp,
                 )
             }
         }
@@ -8351,6 +8396,7 @@ private fun MessageRow(
                     theme = theme,
                     onCancelSend = onCancelSend,
                     onDoubleTapHeart = onDoubleTapHeart,
+                    onRevealStamp = onRevealStamp,
                 )
             }
         }
@@ -8554,11 +8600,14 @@ private fun MessageRow(
                         onClick = {
                             if (selectedIds.isNotEmpty() && !pendingEcho) {
                                 onToggleSelect(m)
-                            } else if (!pendingEcho && longBody && !typing && msgExpanded) {
-                                // r57 (owner: "see more a click korle expand hobe massage body te click korle collapse hobe"):
-                                // clicking message body collapses an expanded long message with smooth spring animation.
-                                msgExpanded = false
-                                runCatching { haptics.tap() }
+                            } else {
+                                revealStamp.value()
+                                if (!pendingEcho && longBody && !typing && msgExpanded) {
+                                    // r57 (owner: "see more a click korle expand hobe massage body te click korle collapse hobe"):
+                                    // clicking message body collapses an expanded long message with smooth spring animation.
+                                    msgExpanded = false
+                                    runCatching { haptics.tap() }
+                                }
                             }
                         },
                         onLongClick = {
@@ -8632,6 +8681,7 @@ private fun MessageRow(
                                     if (selectedIds.isNotEmpty()) {
                                         if (!pendingEcho) onToggleSelect(m)
                                     } else {
+                                        revealStamp.value()
                                         haptics.tap()
                                         onJumpTo(rid)
                                     }
@@ -8668,9 +8718,35 @@ private fun MessageRow(
                         "STICKER" -> {
                             val st = m.optString("body")
                             if (EmojiRepo.isCustomId(st)) CustomEmojiOrFallback(st)
-                            else EmojiGlyphRow(st, 56f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onFocusedLongPress(m) } }, onDoubleTap = { if (!pendingEcho) onDoubleTapHeart(m) }, danceKey = fxKey)
+                            else {
+                                EmojiGlyphRow(st, 56f, fxEmoji, m.optString("id"),
+                                    onLongPress = {
+                                        if (!pendingEcho) {
+                                            if (selectedIds.isNotEmpty()) onToggleSelect(m) else onFocusedLongPress(m)
+                                        }
+                                    },
+                                    onDoubleTap = { if (!pendingEcho) onDoubleTapHeart(m) },
+                                    onTap = onRevealStamp,
+                                    danceKey = fxKey,
+                                )
+                            }
                         }
-                        "FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onFocusedLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)
+                        "FILE" -> FileBubble(
+                            m,
+                            mine,
+                            player,
+                            pendingEcho,
+                            onOpenImage,
+                            onOpenVideo,
+                            theme,
+                            onOpenDoc,
+                            onToggleSelect,
+                            onFocusedLongPress,
+                            selecting = selectedIds.isNotEmpty(),
+                            onCancelSend = onCancelSend,
+                            fxGrow = fxFresh,
+                            onRevealStamp = onRevealStamp,
+                        )
                         // Owner round 33 (item 5): the stamp is placed by
                         // measurement after the last line (KpStamped) — the
                         // old no-break-space reserve is gone from every text
@@ -8689,12 +8765,28 @@ private fun MessageRow(
                             // bubble (outside) for every kind now.
                             // v206: single only animates, long-press shows actions
                             if (emojiOnly == 1) {
-                                EmojiGlyphRow(m.optText("body").trim(), 66f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onFocusedLongPress(m) } }, danceKey = fxKey)
+                                EmojiGlyphRow(m.optText("body").trim(), 66f, fxEmoji, m.optString("id"),
+                                    onLongPress = {
+                                        if (!pendingEcho) {
+                                            if (selectedIds.isNotEmpty()) onToggleSelect(m) else onFocusedLongPress(m)
+                                        }
+                                    },
+                                    onTap = onRevealStamp,
+                                    danceKey = fxKey,
+                                )
                             } else {
                                 // N3r: every glyph dances its own 3D move for
                                 // 3 s (arrival / tap / the other side's tap).
                                 // v206: multiple emojis don't animate, but long-press still works
-                                EmojiGlyphRow(m.optText("body").trim(), 40f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onFocusedLongPress(m) } }, danceKey = fxKey)
+                                EmojiGlyphRow(m.optText("body").trim(), 40f, fxEmoji, m.optString("id"),
+                                    onLongPress = {
+                                        if (!pendingEcho) {
+                                            if (selectedIds.isNotEmpty()) onToggleSelect(m) else onFocusedLongPress(m)
+                                        }
+                                    },
+                                    onTap = onRevealStamp,
+                                    danceKey = fxKey,
+                                )
                             }
                         } else {
                             val full = m.optText("body")
@@ -8706,7 +8798,10 @@ private fun MessageRow(
                             val linked =
                                 remember(full, bodyInk, selecting) {
                                     if (selecting) null
-                                    else Links.annotate(full, bodyInk) { u -> Links.open(ctx, u) }
+                                    else Links.annotate(full, bodyInk) { u ->
+                                        revealStamp.value()
+                                        Links.open(ctx, u)
+                                    }
                                 }
                             val firstLink = remember(full) { Links.first(full) }
                             if (firstLink != null) {
@@ -8714,7 +8809,15 @@ private fun MessageRow(
                                     url = firstLink,
                                     mine = mine,
                                     ink = bodyInk,
-                                    onOpen = if (selecting) null else ({ Links.open(ctx, firstLink) }),
+                                    onOpen =
+                                        if (selecting) {
+                                            null
+                                        } else {
+                                            {
+                                                revealStamp.value()
+                                                Links.open(ctx, firstLink)
+                                            }
+                                        },
                                 )
                             }
                             if (revealChars != null && revealChars < full.length) {
@@ -8775,6 +8878,7 @@ private fun MessageRow(
                                 .heightIn(min = 40.dp)
                                 .pointerInput(Unit) {
                                     detectTapGestures {
+                                        revealStamp.value()
                                         msgExpanded = !msgExpanded
                                         runCatching { haptics.tap() }
                                     }
@@ -9198,6 +9302,7 @@ private fun VideoMessageRow(
     onCancelSend: (String) -> Unit = {},
     // r71-21: a double tap on this bubble drops the heart reaction.
     onDoubleTapHeart: (JSONObject) -> Unit = {},
+    onRevealStamp: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -9393,7 +9498,10 @@ private fun VideoMessageRow(
                     onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
                     onClick = {
                         if (pendingEcho) return@combinedClickable
-                        if (selectedIds.isNotEmpty()) onToggleSelect(m) else onOpen(m)
+                        if (selectedIds.isNotEmpty()) onToggleSelect(m) else {
+                            onRevealStamp()
+                            onOpen(m)
+                        }
                     },
                     onLongClick = {
                         if (pendingEcho) return@combinedClickable
@@ -9577,6 +9685,7 @@ private fun OnceTextRow(
     onLongPress: (JSONObject) -> Unit,
     theme: String,
     onDoubleTapHeart: (JSONObject) -> Unit = {},
+    onRevealStamp: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -9670,16 +9779,17 @@ private fun OnceTextRow(
                     .combinedClickable(
                         onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
                         onClick = {
-                            when {
-                                pendingEcho -> {}
-                                selectedIds.isNotEmpty() -> onToggleSelect(m)
+                            if (pendingEcho) return@combinedClickable
+                            if (selectedIds.isNotEmpty()) {
+                                onToggleSelect(m)
+                            } else {
+                                onRevealStamp()
                                 // The far side's tap IS the opening (and starts the
                                 // five seconds); mine just reads what I wrote.
-                                !mine && !revealed -> {
+                                if (!mine && !revealed) {
                                     haptics.tap()
                                     revealed = true
                                 }
-                                else -> {}
                             }
                         },
                         onLongClick = {
@@ -9752,6 +9862,7 @@ private fun VoiceOnceTile(
     player: VoicePlayer,
     playing: Boolean,
     onSpent: () -> Unit,
+    onRevealStamp: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -9781,6 +9892,7 @@ private fun VoiceOnceTile(
                 .clip(CircleShape)
                 .background(Color(0x33FFFFFF))
                 .clickable(enabled = ready) {
+                    onRevealStamp()
                     haptics.tap()
                     // r71-19b: playing it once IS the opening.
                     player.toggle(ctx, id, source) { onSpent() }
@@ -9803,6 +9915,7 @@ private fun VoiceOnceTile(
             // no seeking on a once-only note: it is heard once, from the top
             onSeek = {},
             onScrub = {},
+            onTap = onRevealStamp,
             modifier = Modifier.weight(1f).height(20.dp),
         )
         // r76-10 (owner): the duration rides the RIGHT side, vertically
@@ -9851,6 +9964,7 @@ private fun ViewOnceRow(
     theme: String,
     // r71-21: a double tap on this bubble drops the heart reaction.
     onDoubleTapHeart: (JSONObject) -> Unit = {},
+    onRevealStamp: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -10029,15 +10143,19 @@ private fun ViewOnceRow(
                     .combinedClickable(
                         onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
                         onClick = {
-                            when {
-                                pendingEcho -> {}
-                                selectedIds.isNotEmpty() -> onToggleSelect(m)
-                                // r71-19b: the voice card owns its own play
-                                // target (and its own spend), so a tap on the
-                                // card body only selects / replies.
-                                voice -> {}
-                                canOpen -> if (video) onOpenVideo(m) else onOpenImage(m) // openable -> if (video) onOpenVideo(m) else onOpenImage(m)
-                                else -> {}
+                            if (pendingEcho) return@combinedClickable
+                            if (selectedIds.isNotEmpty()) {
+                                onToggleSelect(m)
+                            } else {
+                                onRevealStamp()
+                                when {
+                                    // r71-19b: the voice card owns its own play
+                                    // target (and its own spend), so a tap on the
+                                    // card body only selects / replies.
+                                    voice -> {}
+                                    canOpen -> if (video) onOpenVideo(m) else onOpenImage(m)
+                                    else -> {}
+                                }
                             }
                         },
                         onLongClick = {
@@ -10050,7 +10168,15 @@ private fun ViewOnceRow(
                 contentAlignment = Alignment.Center,
             ) {
                 if (voice) {
-                    VoiceOnceTile(m = m, mine = mine, pendingEcho = pendingEcho, player = player, playing = player.playingId == m.optString("id"), onSpent = { if (!mine) ViewOnce.spend(m.optString("id")) })
+                    VoiceOnceTile(
+                        m = m,
+                        mine = mine,
+                        pendingEcho = pendingEcho,
+                        player = player,
+                        playing = player.playingId == m.optString("id"),
+                        onSpent = { if (!mine) ViewOnce.spend(m.optString("id")) },
+                        onRevealStamp = onRevealStamp,
+                    )
                 } else {
                 if (photoUrl != null) {
                     val imageRequest = remember(photoUrl) {
@@ -10302,6 +10428,7 @@ private fun ImageMessageRow(
     onCancelSend: ((String) -> Unit)? = null,
     // r71-21: a double tap on this bubble drops the heart reaction.
     onDoubleTapHeart: (JSONObject) -> Unit = {},
+    onRevealStamp: () -> Unit = {},
 ) {
     // r76-29: the viewer is its OWN fullscreen window - the tile's seat is
     // stored in SCREEN pixels so the hero starts exactly on the tile.
@@ -10396,7 +10523,10 @@ private fun ImageMessageRow(
                     onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
                     onClick = {
                         if (pendingEcho) return@combinedClickable
-                        if (selectedIds.isNotEmpty()) onToggleSelect(m) else onOpenImage(m)
+                        if (selectedIds.isNotEmpty()) onToggleSelect(m) else {
+                            onRevealStamp()
+                            onOpenImage(m)
+                        }
                     },
                     onLongClick = {
                         if (!pendingEcho) {
@@ -10662,6 +10792,7 @@ private fun AlbumMessageRow(
     theme: String,
     // r71-21: a double tap on this bubble drops the heart reaction.
     onDoubleTapHeart: (JSONObject) -> Unit = {},
+    onRevealStamp: () -> Unit = {},
 ) {
     val photos = albumPhotos(m)
     val haptics = rememberHaptics()
@@ -10685,7 +10816,10 @@ private fun AlbumMessageRow(
             onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
             onClick = {
                 if (pendingEcho) return@combinedClickable
-                if (selectedIds.isNotEmpty()) onToggleSelect(m) else onTap()
+                if (selectedIds.isNotEmpty()) onToggleSelect(m) else {
+                    onRevealStamp()
+                    onTap()
+                }
             },
             onLongClick = { longPress() },
         )
@@ -10960,6 +11094,7 @@ internal fun VoiceWave(
     onScrub: ((Float?) -> Unit)? = null,
     // r44 (pack): a live arrival grows the bars one by one (60 + i·22 ms).
     grow: Boolean = false,
+    onTap: (() -> Unit)? = null,
 ) {
     var growAt by remember(grow) { mutableStateOf(-1L) }
     LaunchedEffect(grow) {
@@ -10976,6 +11111,7 @@ internal fun VoiceWave(
     // (12x a second while playing) never restart a drag in flight.
     val seek by rememberUpdatedState(onSeek)
     val scrub by rememberUpdatedState(onScrub)
+    val revealStamp by rememberUpdatedState(onTap)
     Canvas(
         // A quick tap seeks; the down is NOT consumed, so the bubble's own
         // long-press (action sheet) keeps working on the bars — only the
@@ -11022,6 +11158,7 @@ internal fun VoiceWave(
                 val up = currentEvent.changes.firstOrNull { it.id == down.id }
                 if (!dragged && up != null && up.changedToUp()) {
                     up.consume()
+                    revealStamp?.invoke()
                     seek((up.position.x / size.width).coerceIn(0f, 1f))
                 }
             }
@@ -11386,6 +11523,7 @@ private fun FileBubble(
     onCancelSend: (String) -> Unit = {},
     // r44 (pack): a live arrival grows the voice bars / pops the document.
     fxGrow: Boolean = false,
+    onRevealStamp: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -11494,6 +11632,7 @@ private fun FileBubble(
                     .clip(CircleShape)
                     .background(if (mine) Color(0x33FFFFFF) else chatAccent(theme).copy(alpha = 0.18f))
                     .clickable(interactionSource = interaction, indication = null) {
+                        onRevealStamp()
                         if (pendingEcho || fileKey.isBlank()) return@clickable // still uploading
                         haptics.tap()
                         player.toggle(ctx, id, fileKey)
@@ -11535,6 +11674,7 @@ private fun FileBubble(
                 onScrub = { frac ->
                     scrubAt = if (!pendingEcho && fileKey.isNotBlank()) frac else null
                 },
+                onTap = onRevealStamp,
             )
             Spacer(Modifier.width(8.dp))
             Text(
@@ -11557,6 +11697,7 @@ private fun FileBubble(
             // playback speed instead: 1x -> 2x -> 3x -> 4x -> 1x.
             Box(
                 Modifier.size(34.dp).clickable {
+                    onRevealStamp()
                     haptics.tap()
                     player.cycleSpeed(id)
                 },
@@ -11603,6 +11744,7 @@ private fun FileBubble(
                             onToggleSelect(m)
                             return@combinedClickable
                         }
+                    onRevealStamp()
                     if (!ready) {
                         android.widget.Toast.makeText(ctx, "This file is no longer available.", android.widget.Toast.LENGTH_SHORT).show()
                         return@combinedClickable

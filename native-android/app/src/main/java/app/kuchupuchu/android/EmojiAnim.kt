@@ -368,6 +368,7 @@ internal fun EmojiGlyphRow(
     // r87-1: the row's stable fxKey (clientId-first) - the birth dance clock
     // is keyed on it so the echo->server swap resumes the same frame.
     danceKey: String = mid,
+    onTap: (() -> Unit)? = null,
 ) {
     val clusters = remember(body) { splitEmojiClusters(body) }
     val isSingle = clusters.size == 1
@@ -384,7 +385,18 @@ internal fun EmojiGlyphRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         clusters.forEachIndexed { i, ch ->
-            NotoEmojiGlyph(ch, sizeSp, active && shouldAnimate, mid, i, isSingle, onLongPress, onDoubleTap, danceKey)
+            NotoEmojiGlyph(
+                ch,
+                sizeSp,
+                active && shouldAnimate,
+                mid,
+                i,
+                isSingle,
+                onLongPress,
+                onDoubleTap,
+                danceKey,
+                onTap,
+            )
         }
     }
 }
@@ -404,6 +416,7 @@ private fun NotoEmojiGlyph(
     onDoubleTap: (() -> Unit)?,
     // r87-1: the row's stable key for the global birth-dance clock.
     danceKey: String = mid,
+    onTap: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
@@ -490,6 +503,7 @@ private fun NotoEmojiGlyph(
     Box(
         modifier = Modifier.combinedClickable(
             onClick = {
+                onTap?.invoke()
                 // r67-4: replay() owns the buzz now (haptics.reaction()) — the
                 // tap and the replay from the other phone must feel the same.
                 // r71-21: count the taps first, so a double tap drops the heart

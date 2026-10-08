@@ -202,7 +202,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       emo.includes("onDoubleTap: (() -> Unit)? = null,") &&
       (
         chat.match(
-          /onDoubleTap = \{ if \(!pendingEcho\) onDoubleTapHeart\(m\) \}, danceKey = fxKey\)/g,
+          /onDoubleTap = \{ if \(!pendingEcho\) onDoubleTapHeart\(m\) \},\s*onTap = onRevealStamp,\s*danceKey = fxKey,/g,
         ) || []
       ).length === 1 &&
       chat.includes('EmojiGlyphRow(m.optText("body").trim(), 66f') &&
@@ -428,8 +428,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
     "r71-19b: a view-once VOICE renders as its own card — ViewOnceRow takes the voice player, routes a voice row to VoiceOnceTile instead of the blurred photo tile, and sizes it wide and short; r76-13 keeps the r76-11 picture and the wave subsamples to its canvas so the duration never overlaps it",
     chat.includes("player: VoicePlayer,") &&
       chat.includes("val voice = !sentAsDocument(m) && fileLooksVoice(m)") &&
-      chat.includes(
-        'VoiceOnceTile(m = m, mine = mine, pendingEcho = pendingEcho, player = player, playing = player.playingId == m.optString("id"), onSpent = { if (!mine) ViewOnce.spend(m.optString("id")) })',
+      /VoiceOnceTile\(\s*m = m,\s*mine = mine,\s*pendingEcho = pendingEcho,\s*player = player,\s*playing = player\.playingId == m\.optString\("id"\),\s*onSpent = \{ if \(!mine\) ViewOnce\.spend\(m\.optString\("id"\)\) \},\s*onRevealStamp = onRevealStamp,?\s*\)/.test(
+        chat,
       ) &&
       chat.includes(".widthIn(max = if (voice) 196.dp else 138.dp)") &&
       chat.includes("else -> List(fit) { bars[it * bars.size / fit] }") &&
@@ -444,8 +444,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
       ) &&
       chat.includes("Modifier.heightIn(min = 44.dp)") &&
       chat.includes("KpMessageFocusSlot(focusKey) { requestFocus ->") &&
-      chat.includes(
-        "ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onFocusedLongPress, theme, onDoubleTapHeart)",
+      /ViewOnceRow\(\s*m = m,\s*mine = mine,[\s\S]{0,700}?onDoubleTapHeart = onDoubleTapHeart,\s*onRevealStamp = onRevealStamp,?\s*\)/.test(
+        chat,
       ),
   );
   check(
@@ -493,8 +493,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
     chat.includes('if (kind == "TEXT" && m.optText("body").isNotBlank()) {') &&
       chat.includes("KpMessageFocusSlot(focusKey) { requestFocus ->") &&
       chat.includes("val onFocusedLongPress: (JSONObject) -> Unit = { pressed ->") &&
-      chat.includes(
-        "OnceTextRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onFocusedLongPress, theme, onDoubleTapHeart)",
+      /OnceTextRow\(\s*m = m,\s*mine = mine,[\s\S]{0,500}?onDoubleTapHeart = onDoubleTapHeart,\s*onRevealStamp = onRevealStamp,?\s*\)/.test(
+        chat,
       ) &&
       chat.includes(
         "@Composable\n@OptIn(ExperimentalFoundationApi::class)\nprivate fun OnceTextRow(",
@@ -511,7 +511,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
       ) &&
       chat.includes("Modifier.blur(7.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)") &&
       chat.includes("val veil = !revealed") &&
-      chat.includes("!mine && !revealed -> {") &&
+      chat.includes("if (!mine && !revealed) {") &&
+      chat.includes("onRevealStamp()") &&
       chat.includes('Text("${((leftMs + 999) / 1000)}s", color = Red, fontSize = 10.sp)'),
   );
   check(
@@ -1642,7 +1643,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
       anim4.includes(
         "liveDanceKey = if (active && isSingle && animScale > 0f) danceKey else null",
       ) &&
-      (chat4.match(/danceKey = fxKey\)/g) || []).length === 3,
+      [...chat4.matchAll(/EmojiGlyphRow\([\s\S]*?^\s*\)/gm)].length === 3 &&
+      [...chat4.matchAll(/EmojiGlyphRow\([\s\S]*?^\s*\)/gm)].every(
+        ([call]) => call.includes("danceKey = fxKey,") && call.includes("onTap = onRevealStamp,"),
+      ),
   );
 
   check(
