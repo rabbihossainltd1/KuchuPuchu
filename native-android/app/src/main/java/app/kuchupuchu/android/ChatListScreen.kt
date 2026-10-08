@@ -1010,7 +1010,8 @@ internal fun HomeBottomNavigation(
     val pillFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.82f) else Card.copy(alpha = 0.82f)
     // Enlarge the complete capsule and its slots while keeping the glyphs at 27dp.
     val navScale = 1.2f
-    val navContentYOffset = 6.dp
+    val navContentYOffset = 3.dp
+    val backgroundCardYOffset = 6.dp
     val itemH = 44.dp * navScale
     val gap = 4.dp * navScale
     val capsulePadding = 6.dp * navScale
@@ -1043,9 +1044,10 @@ internal fun HomeBottomNavigation(
         backgroundCardWidthPx,
         backgroundCardHeightPx,
         navContentYOffsetPx,
+        backgroundCardYOffset,
     ) {
         val insetX = ((navWindowWidthPx - backgroundCardWidthPx) / 2).coerceAtLeast(0)
-        val insetY = ((navWindowHeightPx - backgroundCardHeightPx) / 2 + navContentYOffsetPx).coerceAtLeast(0)
+        val insetY = ((navWindowHeightPx - backgroundCardHeightPx) / 2 + with(density) { backgroundCardYOffset.roundToPx() }).coerceAtLeast(0)
         val insetBottom = (navWindowHeightPx - backgroundCardHeightPx - insetY).coerceAtLeast(0)
         val rounded =
             GradientDrawable().apply {
@@ -1157,7 +1159,7 @@ internal fun HomeBottomNavigation(
                 Box(
                     Modifier
                         .align(Alignment.Center)
-                        .offset(y = navContentYOffset)
+                        .offset(y = backgroundCardYOffset)
                         .size(backgroundCardWidth, backgroundCardHeight)
                         .clip(CircleShape)
                         .background(pillFill),

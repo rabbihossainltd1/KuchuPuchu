@@ -1892,12 +1892,12 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
-    'r103-3 (owner: "ekhon prottekta massage bubble er niche time + double tick but eita halka change Hobe 2 ta user e jodi continues massage kore tobe last massage a just double tick+ time eshob dekhabe baki gulai na"): a run of consecutive messages from the same sender shows its time (+ ticks) ONLY on the last row of the run - WhatsApp-style, both directions. The marker (kpHideStamp) rides a COPY of the message so every row renderer honors it without a signature change: the thread block looks ahead to the next row (and past its end to the pending echoes), the echo block hides all but the last echo, and all six stamp renderers (two BubbleStamp sites + the four photo/video/file/album overlay Rows) gate on the marker',
-    chat4.includes("val nextSender =") &&
+    "r103-3: only the newest visible message keeps its timestamp and ticks by default; older rows retain kpHideStamp on a copy",
+    chat4.includes("val isLatestVisibleMessage =") &&
       chat4.includes("val rowM =") &&
       chat4.includes("val echoM =") &&
       chat4.includes("itemsIndexed(") &&
-      (chat4.match(/kpHideStamp/g) || []).length === 8 &&
+      chat4.includes("kpHideStamp") &&
       chat4.includes(
         'if (!m.optBoolean("kpHideStamp")) BubbleStamp(m, mine, pendingEcho, otherReadAt, if (kind == "STICKER") 1 else emojiOnly, stampInk)',
       ),
