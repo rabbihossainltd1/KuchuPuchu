@@ -34,15 +34,28 @@ const check = (name, condition, detail = "") =>
   lines.push(`  ${condition ? "OK     " : "BROKEN "}  ${name}${detail ? `  -> ${detail}` : ""}`);
 
 check(
-  "the newest row remains visible by default, while one explicitly tapped older row is revealed without mutating message JSON",
-  policy.includes("isLatestVisible || (rowKey.isNotBlank() && rowKey == revealedKey)") &&
-    chat.includes('var revealedStampKey by remember(convId) { mutableStateOf("") }') &&
+  "the newest row is visible by default, a tapped row overrides visibility, and repeated taps toggle it without mutating JSON",
+  policy.includes("if (rowKey == overrideKey) overrideVisible else isLatestVisible") &&
+    policy.includes("else if (currentKey == tappedKey)") &&
+    policy.includes("!currentVisible") &&
+    policy.includes("!tappedIsLatest") &&
+    chat.includes('var stampOverrideKey by remember(convId) { mutableStateOf("") }') &&
+    chat.includes("var stampOverrideVisible by remember(convId) { mutableStateOf(false) }") &&
     chat.includes("MessageStampPolicy.isVisible(") &&
     chat.includes('if (stampVisible) m else JSONObject(m.toString()).put("kpHideStamp", true)') &&
     chat.includes(
       'if (echoStampVisible) m else JSONObject(m.toString()).put("kpHideStamp", true)',
     ) &&
-    (chat.match(/onRevealStamp = \{ revealedStampKey = rowKey \}/g) || []).length === 2,
+    (chat.match(/\.messageStampTap\(\s*rowKey = rowKey/g) || []).length === 2 &&
+    chat.includes("onRevealStamp = {},"),
+);
+check(
+  "stamp toggles on a completed short bubble tap in the final pointer pass without stealing scroll/swipe/long-press gestures",
+  chat.includes("awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)") &&
+    chat.includes("awaitPointerEvent(PointerEventPass.Final)") &&
+    chat.includes("viewConfiguration.touchSlop") &&
+    chat.includes("viewConfiguration.longPressTimeoutMillis") &&
+    chat.includes("insideBubble && isEnabled.value()"),
 );
 check(
   "a regular message tap reveals its stamp while selection and expanded-message collapse remain wired",

@@ -4066,8 +4066,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             val groupedMsgs by remember {
                 androidx.compose.runtime.derivedStateOf { foldAlbums(visibleMsgs) }
             }
-            // Reveal an older row's existing status without changing cached/server JSON.
-            var revealedStampKey by remember(convId) { mutableStateOf("") }
+            // One row can override the default stamp policy at a time; repeated taps toggle it.
+            var stampOverrideKey by remember(convId) { mutableStateOf("") }
+            var stampOverrideVisible by remember(convId) { mutableStateOf(false) }
             // Owner round 33 (item 17): tap a quote → scroll to the original
             // (paging back through history when it is not loaded yet, bounded)
             // and flash its row once. A deleted / hidden original is left alone.
@@ -4204,18 +4205,29 @@ fun ChatScreen(nav: NavController, convId: String) {
                         tween(if (flashing) 180 else 700),
                         label = "quoteflash",
                     )
-                    // Android message status policy: keep the timestamp/tick
-                    // visible only on the newest message in the thread. Older
-                    // bubbles retain their status internally, but do not paint
-                    // it until the bubble is explicitly opened/tapped.
-                    // The marker rides a copy so the server/cache JSON is never
-                    // mutated and all media/text renderers share the rule.
+                    // The newest message shows its status by default. A tap
+                    // immediately toggles one row (including the newest) while
+                    // copied JSON keeps server/cache messages unmodified.
                     val hasPendingAfterHistory = echoRows.isNotEmpty()
                     val isLatestVisibleMessage = !hasPendingAfterHistory && idx == groupedMsgs.lastIndex
+                    val rowOriginInRoot = remember(rowKey) { mutableStateOf(Offset.Zero) }
+                    val onStampTap = rememberUpdatedState {
+                        if (selected.isEmpty() && rowKey.isNotBlank()) {
+                            stampOverrideVisible =
+                                MessageStampPolicy.toggleOverrideVisible(
+                                    currentKey = stampOverrideKey,
+                                    currentVisible = stampOverrideVisible,
+                                    tappedKey = rowKey,
+                                    tappedIsLatest = isLatestVisibleMessage,
+                                )
+                            stampOverrideKey = rowKey
+                        }
+                    }
                     val stampVisible = MessageStampPolicy.isVisible(
                         isLatestVisible = isLatestVisibleMessage,
                         rowKey = rowKey,
-                        revealedKey = revealedStampKey,
+                        overrideKey = stampOverrideKey,
+                        overrideVisible = stampOverrideVisible,
                     )
                     val rowM =
                         if (stampVisible) m else JSONObject(m.toString()).put("kpHideStamp", true)
@@ -4237,6 +4249,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                     Box(
                         Modifier
                             .fillMaxWidth()
+                            .onGloballyPositioned { rowOriginInRoot.value = it.boundsInRoot().topLeft }
+                            .messageStampTap(
+                                rowKey = rowKey,
+                                rowOriginInRoot = rowOriginInRoot,
+                                enabled = { selected.isEmpty() },
+                                onTap = { onStampTap.value() },
+                            )
                             // E7: loadOlder rows unfurl once (live rows use MessageRow fx instead).
                             .fxHistoryUnfurl(rowKey in historyFxKeys)
                     ) {
@@ -4348,7 +4367,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             onCancelSend = ::cancelSend,
                             // r71-21: double tap = ❤️ (every row kind).
                             onDoubleTapHeart = ::heartReact,
-                            onRevealStamp = { revealedStampKey = rowKey },
+                            onRevealStamp = {},
                             onUnblockAsk = { msg ->
                                 scope.launch {
                                     val ok = runCatching {
@@ -4409,17 +4428,40 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // E7: consume the history-unfurl key the same way (one shot, no replay).
                     historyFxKeys.remove(rowKey)
                     // r103-3: a burst of echoes shows the stamp on the last
-                    // one only (the run's newest row).
-                    val echoStampVisible = MessageStampPolicy.isVisible(
-                        isLatestVisible = m === echoRows.lastOrNull(),
-                        rowKey = rowKey,
-                        revealedKey = revealedStampKey,
-                    )
+                    // one only by default; a tap toggles that row immediately.
+                    val echoIsLatest = m === echoRows.lastOrNull()
+                    val rowOriginInRoot = remember(rowKey) { mutableStateOf(Offset.Zero) }
+                    val onStampTap = rememberUpdatedState {
+                        if (selected.isEmpty() && rowKey.isNotBlank()) {
+                            stampOverrideVisible =
+                                MessageStampPolicy.toggleOverrideVisible(
+                                    currentKey = stampOverrideKey,
+                                    currentVisible = stampOverrideVisible,
+                                    tappedKey = rowKey,
+                                    tappedIsLatest = echoIsLatest,
+                                )
+                            stampOverrideKey = rowKey
+                        }
+                    }
+                    val echoStampVisible =
+                        MessageStampPolicy.isVisible(
+                            isLatestVisible = echoIsLatest,
+                            rowKey = rowKey,
+                            overrideKey = stampOverrideKey,
+                            overrideVisible = stampOverrideVisible,
+                        )
                     val echoM =
                         if (echoStampVisible) m else JSONObject(m.toString()).put("kpHideStamp", true)
                     Box(
                         Modifier
                             .fillMaxWidth()
+                            .onGloballyPositioned { rowOriginInRoot.value = it.boundsInRoot().topLeft }
+                            .messageStampTap(
+                                rowKey = rowKey,
+                                rowOriginInRoot = rowOriginInRoot,
+                                enabled = { selected.isEmpty() },
+                                onTap = { onStampTap.value() },
+                            )
                             // E7: loadOlder rows unfurl once (live rows use MessageRow fx instead).
                             .fxHistoryUnfurl(rowKey in historyFxKeys)
                     ) {
@@ -4437,7 +4479,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             onCancelSend = ::cancelSend,
                             // r71-21: double tap = ❤️ (every row kind).
                             onDoubleTapHeart = ::heartReact,
-                            onRevealStamp = { revealedStampKey = rowKey },
+                            onRevealStamp = {},
                         )
                     }
                 }
@@ -8039,6 +8081,109 @@ private fun UnblockAskCard(
 private const val BODY_COLLAPSE_LINES = 10
 private const val HEART_REACTION_COOLDOWN_MS = 650L
 
+/** Observe a completed bubble tap without waiting for combinedClickable's double-tap window. */
+@Composable
+private fun Modifier.messageStampTap(
+    rowKey: String,
+    rowOriginInRoot: androidx.compose.runtime.State<Offset>,
+    enabled: () -> Boolean,
+    onTap: () -> Unit,
+): Modifier {
+    val isEnabled = rememberUpdatedState(enabled)
+    val tap = rememberUpdatedState(onTap)
+    return pointerInput(rowKey) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            var consumedMovement = false
+            var cancelled = false
+            var releasedPosition: Offset? = null
+            var releasedAt = down.uptimeMillis
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Final)
+                if (event.changes.any { it.id != down.id && it.pressed }) {
+                    cancelled = true
+                    break
+                }
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                if (change.position != change.previousPosition && change.isConsumed) consumedMovement = true
+                if (!change.pressed) {
+                    releasedPosition = change.position
+                    releasedAt = change.uptimeMillis
+                    break
+                }
+            }
+            val up = releasedPosition ?: return@awaitEachGesture
+            val dx = up.x - down.position.x
+            val dy = up.y - down.position.y
+            val slop = viewConfiguration.touchSlop
+            val isTap =
+                !cancelled &&
+                    !consumedMovement &&
+                    dx * dx + dy * dy <= slop * slop &&
+                    releasedAt - down.uptimeMillis < viewConfiguration.longPressTimeoutMillis
+            val rootTap = rowOriginInRoot.value + down.position
+            val insideBubble = DeleteGeoms.bubblesInRoot[rowKey]?.contains(rootTap) == true
+            if (isTap && insideBubble && isEnabled.value()) tap.value()
+        }
+    }
+}
+
+/** Photo/album swipe recognizer: claim a clear horizontal drag before child tile taps can win. */
+@Composable
+private fun Modifier.photoReplySwipe(
+    messageKey: String,
+    mine: Boolean,
+    baseThresholdPx: Float,
+    onOffset: (Float) -> Unit,
+    onArmed: () -> Unit,
+    onReply: () -> Unit,
+): Modifier {
+    val offset = rememberUpdatedState(onOffset)
+    val armedCallback = rememberUpdatedState(onArmed)
+    val reply = rememberUpdatedState(onReply)
+    return pointerInput(messageKey, mine, baseThresholdPx) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            var claimed = false
+            var armed = false
+            var cancelled = false
+            var releasedPosition: Offset? = null
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                if (event.changes.any { it.id != down.id && it.pressed }) {
+                    cancelled = true
+                    break
+                }
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                if (change.uptimeMillis - down.uptimeMillis >= viewConfiguration.longPressTimeoutMillis) {
+                    cancelled = true
+                    break
+                }
+                val dx = change.position.x - down.position.x
+                val dy = change.position.y - down.position.y
+                if (MessageReplySwipePolicy.isHorizontalIntent(dx, dy, viewConfiguration.touchSlop)) claimed = true
+                if (claimed) {
+                    change.consume()
+                    offset.value(MessageReplySwipePolicy.dragOffset(dx, mine, baseThresholdPx))
+                    if (!armed && MessageReplySwipePolicy.shouldReply(dx, dy, mine, baseThresholdPx)) {
+                        armed = true
+                        armedCallback.value()
+                    }
+                }
+                if (!change.pressed) {
+                    releasedPosition = change.position
+                    break
+                }
+            }
+            offset.value(0f)
+            val up = releasedPosition ?: return@awaitEachGesture
+            val dx = up.x - down.position.x
+            val dy = up.y - down.position.y
+            if (!cancelled && armed && MessageReplySwipePolicy.shouldReply(dx, dy, mine, baseThresholdPx)) reply.value()
+        }
+    }
+}
+
 /** Lift only the visual message content, not the full-width chat-list row. */
 @Composable
 private fun KpMessageFocusSlot(
@@ -10454,120 +10599,116 @@ private fun ImageMessageRow(
         // Owner round 42 (item 3): a captioned photo's column is caption-wide
         // — the photo must hug MY side, not the column's start.
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
-        Box(
-            Modifier
-                .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), RoundedCornerShape(12.dp)) }
-                .widthIn(max = 120.dp) // Owner round 25 / 32 item 29 / 33 item 18: smaller inline preview
-                // r71-16: photos keep the round-8 frame with NO drop shadow.
-                // thin border.
-                .clip(RoundedCornerShape(12.dp))
-                // Owner round 8/16: thin photo border — gray-BLUE on dark-blue,
-                // gray-BLACK on cream, so the frame matches the app theme.
-                .border(
-                    1.dp,
-                    if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444),
-                    RoundedCornerShape(12.dp),
-                )
-                .pointerInput(m.optString("id")) {
-                    detectHorizontalDragGestures(
-                        onHorizontalDrag = { change, dragAmount ->
-                            change.consume()
-                            // Owner round 17: calmer — needs a longer, more
-                            // deliberate drag and barely overshoots.
-                            val wasArmed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                            replyDrag =
-                                if (mine) {
-                                    (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.4f, 0f)
-                                } else {
-                                    (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.4f)
-                                }
-                            if (!wasArmed && kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f) haptics.tap()
-                        },
-                        onDragEnd = {
-                            val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                            replyDrag = 0f
-                            if (armed && m.optString("kind") != "DELETED") {
-                                // Owner round 21: his reply-swipe sound.
-                                runCatching { KpSounds.replySwipe(ctx) }
-                                onReply(m)
-                            }
-                        },
-                        onDragCancel = { replyDrag = 0f },
-                    )
-                }
-                .onGloballyPositioned { c ->
-                    // r76-28/29: remember this tile's seat in SCREEN pixels -
-                    // the viewer window starts at the screen's top-left, so a
-                    // window-relative seat landed a status bar too high and
-                    // the hero read as "fullscreen first, animate after".
-                    val b = c.boundsInWindow()
-                    val loc = IntArray(2)
-                    hostView.getLocationOnScreen(loc)
-                    PhotoHero.set(
-                        m.optString("id").ifBlank { m.optString("clientId") },
-                        androidx.compose.ui.geometry.Rect(b.left + loc[0], b.top + loc[1], b.right + loc[0], b.bottom + loc[1]),
-                    )
-                }
-                .graphicsLayer {
-                    // r77-3 (owner: "fake doublicate na"): while the viewer
-                    // flies this tile's hero, the tile itself is NOT a second
-                    // copy - the hero is the only render of this photo. The
-                    // seat keeps updating above, so the exit lands on it.
-                    // r79-3: the handoff is a cross-fade now (the last 45% of
-                    // the close), so a hair of seat mismatch blends instead of
-                    // flashing a second photo.
-                    alpha = PhotoHero.tileAlphaFor(m.optString("id").ifBlank { m.optString("clientId") })
-                }
-                .combinedClickable(
-                    onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
-                    onClick = {
-                        if (pendingEcho) return@combinedClickable
-                        if (selectedIds.isNotEmpty()) onToggleSelect(m) else {
-                            onRevealStamp()
-                            onOpenImage(m)
-                        }
-                    },
-                    onLongClick = {
-                        if (!pendingEcho) {
-                            haptics.tap()
-                            if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)
+            Box(
+                Modifier.photoReplySwipe(
+                    messageKey = m.optString("clientId").ifBlank { m.optString("id") },
+                    mine = mine,
+                    baseThresholdPx = replyThreshold,
+                    onOffset = { replyDrag = it },
+                    onArmed = { haptics.tap() },
+                    onReply = {
+                        if (m.optString("kind") != "DELETED") {
+                            runCatching { KpSounds.replySwipe(ctx) }
+                            onReply(m)
                         }
                     },
                 ),
-        ) {
-            ImageBubble(m, mine, isPending = pendingEcho, onCancelSend = onCancelSend)
-            // scrim so the stamp never drowns in a bright photo
-            Box(
-                Modifier
-                    .matchParentSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color.Transparent, Color.Transparent, Color(0x66000000)),
-                        ),
-                    ),
-            )
-            if (!m.optBoolean("kpHideStamp")) {
-                Row(
+            ) {
+                Box(
                     Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(horizontal = 8.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                        .offset { IntOffset(replyOffset.roundToInt(), 0) }
+                        .onGloballyPositioned {
+                            DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), RoundedCornerShape(12.dp))
+                        }
+                        .widthIn(max = 120.dp) // Owner round 25 / 32 item 29 / 33 item 18: smaller inline preview
+                        // r71-16: photos keep the round-8 frame with NO drop shadow.
+                        // thin border.
+                        .clip(RoundedCornerShape(12.dp))
+                        // Owner round 8/16: thin photo border — gray-BLUE on dark-blue,
+                        // gray-BLACK on cream, so the frame matches the app theme.
+                        .border(
+                            1.dp,
+                            if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444),
+                            RoundedCornerShape(12.dp),
+                        )
+                        .onGloballyPositioned { c ->
+                            // r76-28/29: remember this tile's seat in SCREEN pixels -
+                            // the viewer window starts at the screen's top-left, so a
+                            // window-relative seat landed a status bar too high and
+                            // the hero read as "fullscreen first, animate after".
+                            val b = c.boundsInWindow()
+                            val loc = IntArray(2)
+                            hostView.getLocationOnScreen(loc)
+                            PhotoHero.set(
+                                m.optString("id").ifBlank { m.optString("clientId") },
+                                androidx.compose.ui.geometry.Rect(
+                                    b.left + loc[0],
+                                    b.top + loc[1],
+                                    b.right + loc[0],
+                                    b.bottom + loc[1],
+                                ),
+                            )
+                        }
+                        .graphicsLayer {
+                            // r77-3 (owner: "fake doublicate na"): while the viewer
+                            // flies this tile's hero, the tile itself is NOT a second
+                            // copy - the hero is the only render of this photo. The
+                            // seat keeps updating above, so the exit lands on it.
+                            // r79-3: the handoff is a cross-fade now (the last 45% of
+                            // the close), so a hair of seat mismatch blends instead of
+                            // flashing a second photo.
+                            alpha = PhotoHero.tileAlphaFor(m.optString("id").ifBlank { m.optString("clientId") })
+                        }
+                        .combinedClickable(
+                            onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
+                            onClick = {
+                                if (pendingEcho) return@combinedClickable
+                                if (selectedIds.isNotEmpty()) onToggleSelect(m) else {
+                                    onRevealStamp()
+                                    onOpenImage(m)
+                                }
+                            },
+                            onLongClick = {
+                                if (!pendingEcho) {
+                                    haptics.tap()
+                                    if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)
+                                }
+                            },
+                        ),
                 ) {
-                    Text(
-                        msgStamp(m.optString("createdAt")),
-                        fontSize = 10.sp,
-                        color = Color.White,
+                    ImageBubble(m, mine, isPending = pendingEcho, onCancelSend = onCancelSend)
+                    // scrim so the stamp never drowns in a bright photo
+                    Box(
+                        Modifier
+                            .matchParentSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color.Transparent, Color.Transparent, Color(0x66000000)),
+                                ),
+                            ),
                     )
-                    if (mine) {
-                        Spacer(Modifier.width(3.dp))
-                        TickIcon(m, pendingEcho, otherReadAt)
+                    if (!m.optBoolean("kpHideStamp")) {
+                        Row(
+                            Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(horizontal = 8.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                msgStamp(m.optString("createdAt")),
+                                fontSize = 10.sp,
+                                color = Color.White,
+                            )
+                            if (mine) {
+                                Spacer(Modifier.width(3.dp))
+                                TickIcon(m, pendingEcho, otherReadAt)
+                            }
+                        }
                     }
                 }
             }
-        }
-        MediaCaption(m.optText("body"), mine, theme)
-        MessageReactions(m)
+            MediaCaption(m.optText("body"), mine, theme)
+            MessageReactions(m)
         }
     }
 }
@@ -10831,104 +10972,122 @@ private fun AlbumMessageRow(
     ) {
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
             Box(
-                Modifier
-                    .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), shape) }
-                    .width(albumW)
-                    .clip(shape)
-                    .border(
-                        1.dp,
-                        if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444),
-                        shape,
-                    )
-                    .pointerInput(m.optString("id")) {
-                        detectHorizontalDragGestures(
-                            onHorizontalDrag = { change, dragAmount ->
-                                change.consume()
-                                val wasArmed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                                replyDrag =
-                                    if (mine) {
-                                        (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.4f, 0f)
-                                    } else {
-                                        (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.4f)
-                                    }
-                                if (!wasArmed && kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f) haptics.tap()
-                            },
-                            onDragEnd = {
-                                val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                                replyDrag = 0f
-                                if (armed) {
-                                    runCatching { KpSounds.replySwipe(ctx) }
-                                    onReply(m)
-                                }
-                            },
-                            onDragCancel = { replyDrag = 0f },
-                        )
+                Modifier.photoReplySwipe(
+                    messageKey = m.optString("clientId").ifBlank { m.optString("id") },
+                    mine = mine,
+                    baseThresholdPx = replyThreshold,
+                    onOffset = { replyDrag = it },
+                    onArmed = { haptics.tap() },
+                    onReply = {
+                        if (m.optString("kind") != "DELETED") {
+                            runCatching { KpSounds.replySwipe(ctx) }
+                            onReply(m)
+                        }
                     },
+                ),
             ) {
-                when {
-                    photos.size == 2 -> Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        photos.forEach { p ->
-                            AlbumTile(p, tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenImage(p) }, isPending = pendingEcho)
+                Box(
+                    Modifier
+                        .offset { IntOffset(replyOffset.roundToInt(), 0) }
+                        .onGloballyPositioned {
+                            DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), shape)
                         }
-                    }
-                    photos.size == 3 -> Row(
-                        Modifier.height((albumW - gap) * 2 / 3),
-                        horizontalArrangement = Arrangement.spacedBy(gap),
-                    ) {
-                        AlbumTile(photos[0], tileModifier(Modifier.weight(2f).fillMaxHeight()) { onOpenImage(photos[0]) }, isPending = pendingEcho)
-                        Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(gap)) {
-                            AlbumTile(photos[1], tileModifier(Modifier.weight(1f).fillMaxWidth()) { onOpenImage(photos[1]) }, isPending = pendingEcho)
-                            AlbumTile(photos[2], tileModifier(Modifier.weight(1f).fillMaxWidth()) { onOpenImage(photos[2]) }, isPending = pendingEcho)
+                        .width(albumW)
+                        .clip(shape)
+                        .border(
+                            1.dp,
+                            if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444),
+                            shape,
+                        ),
+                ) {
+                    when {
+                        photos.size == 2 -> Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                            photos.forEach { p ->
+                                AlbumTile(
+                                    p,
+                                    tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenImage(p) },
+                                    isPending = pendingEcho,
+                                )
+                            }
                         }
-                    }
-                    photos.size == 4 -> Column(verticalArrangement = Arrangement.spacedBy(gap)) {
-                        photos.chunked(2).forEach { pair ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
-                                pair.forEach { p ->
-                                    AlbumTile(p, tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenImage(p) }, isPending = pendingEcho)
+                        photos.size == 3 -> Row(
+                            Modifier.height((albumW - gap) * 2 / 3),
+                            horizontalArrangement = Arrangement.spacedBy(gap),
+                        ) {
+                            AlbumTile(
+                                photos[0],
+                                tileModifier(Modifier.weight(2f).fillMaxHeight()) { onOpenImage(photos[0]) },
+                                isPending = pendingEcho,
+                            )
+                            Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(gap)) {
+                                AlbumTile(
+                                    photos[1],
+                                    tileModifier(Modifier.weight(1f).fillMaxWidth()) { onOpenImage(photos[1]) },
+                                    isPending = pendingEcho,
+                                )
+                                AlbumTile(
+                                    photos[2],
+                                    tileModifier(Modifier.weight(1f).fillMaxWidth()) { onOpenImage(photos[2]) },
+                                    isPending = pendingEcho,
+                                )
+                            }
+                        }
+                        photos.size == 4 -> Column(verticalArrangement = Arrangement.spacedBy(gap)) {
+                            photos.chunked(2).forEach { pair ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                                    pair.forEach { p ->
+                                        AlbumTile(
+                                            p,
+                                            tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenImage(p) },
+                                            isPending = pendingEcho,
+                                        )
+                                    }
                                 }
                             }
                         }
-                    }
-                    else -> Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        photos.take(3).forEach { p ->
-                            AlbumTile(p, tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenImage(p) }, isPending = pendingEcho)
+                        else -> Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                            photos.take(3).forEach { p ->
+                                AlbumTile(
+                                    p,
+                                    tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenImage(p) },
+                                    isPending = pendingEcho,
+                                )
+                            }
+                            AlbumTile(
+                                photos[3],
+                                tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenAlbum(m) },
+                                dim = true,
+                                label = "See all",
+                                isPending = pendingEcho,
+                            )
                         }
-                        AlbumTile(
-                            photos[3],
-                            tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenAlbum(m) },
-                            dim = true,
-                            label = "See all",
-                            isPending = pendingEcho,
-                        )
                     }
-                }
-                // scrim so the stamp never drowns in a bright photo
-                Box(
-                    Modifier
-                        .matchParentSize()
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color.Transparent, Color.Transparent, Color(0x66000000)),
-                            ),
-                        ),
-                )
-                if (!m.optBoolean("kpHideStamp")) {
-                    Row(
+                    // scrim so the stamp never drowns in a bright photo
+                    Box(
                         Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(horizontal = 8.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            msgStamp(m.optString("createdAt")),
-                            fontSize = 10.sp,
-                            color = Color.White,
-                        )
-                        if (mine) {
-                            Spacer(Modifier.width(3.dp))
-                            TickIcon(m, pendingEcho, otherReadAt)
+                            .matchParentSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color.Transparent, Color.Transparent, Color(0x66000000)),
+                                ),
+                            ),
+                    )
+                    if (!m.optBoolean("kpHideStamp")) {
+                        Row(
+                            Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(horizontal = 8.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                msgStamp(m.optString("createdAt")),
+                                fontSize = 10.sp,
+                                color = Color.White,
+                            )
+                            if (mine) {
+                                Spacer(Modifier.width(3.dp))
+                                TickIcon(m, pendingEcho, otherReadAt)
+                            }
                         }
                     }
                 }

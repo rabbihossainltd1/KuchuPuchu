@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -294,9 +295,12 @@ internal fun NotoAnimatedEmoji(
     }
     val animatable = rememberLottieAnimatable()
     var isPlaying by remember(emoji) { mutableStateOf(false) }
-    // The box is measured in dp; convert that physical size back to sp so the
-    // cold system-emoji fallback cannot grow with the user's font scale.
-    val fallbackFontSize = (sizeSp / LocalDensity.current.fontScale).sp
+    // The box is measured in dp; keep the fallback's physical glyph size
+    // independent of font scale, but let its actual font metrics overdraw the
+    // fixed box. The extra line-height slack prevents bottom clipping.
+    val fallbackFontSize =
+        EmojiFallbackSizingPolicy.fontSizeSp(sizeSp, LocalDensity.current.fontScale).sp
+    val fallbackLineHeight = EmojiFallbackSizingPolicy.lineHeightSp(fallbackFontSize.value).sp
     LaunchedEffect(composition, replayKey) {
         val comp = composition ?: return@LaunchedEffect
         // r88-1 (owner r88 #1: "first time animates hoi na ... tap korleo
@@ -355,11 +359,11 @@ internal fun NotoAnimatedEmoji(
             Text(
                 text = emoji,
                 fontSize = fallbackFontSize,
-                lineHeight = fallbackFontSize,
+                lineHeight = fallbackLineHeight,
                 maxLines = 1,
                 softWrap = false,
                 style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)),
-                modifier = Modifier.align(Alignment.Center),
+                modifier = Modifier.align(Alignment.Center).wrapContentSize(unbounded = true),
             )
         }
     }

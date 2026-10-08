@@ -1,14 +1,13 @@
-// Source-contract coverage for the first-frame Noto fallback and its fixed dp-sized container.
+// Source-contract coverage for the cold Noto fallback's unbounded glyph ink and dp-sized box.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "../..");
-const emoji = fs.readFileSync(
-  path.join(root, "native-android/app/src/main/java/app/kuchupuchu/android/EmojiAnim.kt"),
-  "utf8",
-);
+const app = path.join(root, "native-android/app/src/main/java/app/kuchupuchu/android");
+const emoji = fs.readFileSync(path.join(app, "EmojiAnim.kt"), "utf8");
+const policy = fs.readFileSync(path.join(app, "EmojiFallbackSizingPolicy.kt"), "utf8");
 const start = emoji.indexOf("internal fun NotoAnimatedEmoji(");
 const end = emoji.indexOf("internal fun EmojiGlyphRow(", start);
 const renderer = start >= 0 && end > start ? emoji.slice(start, end) : "";
@@ -17,22 +16,28 @@ const check = (name, condition, detail = "") =>
   lines.push(`  ${condition ? "OK     " : "BROKEN "}  ${name}${detail ? `  -> ${detail}` : ""}`);
 
 check(
-  "the cold system-emoji fallback is scaled to the same physical size as its dp container, independent of font scale",
-  renderer.includes("modifier = modifier.size(sizeSp.dp)") &&
-    renderer.includes("val fallbackFontSize = (sizeSp / LocalDensity.current.fontScale).sp") &&
+  "the cold fallback keeps a font-scale-independent physical glyph size and extra line-metric slack",
+  policy.includes("LINE_HEIGHT_MULTIPLIER = 1.2f") &&
+    policy.includes("boxSizeDp / fontScale") &&
+    policy.includes("fontSizeSp * LINE_HEIGHT_MULTIPLIER") &&
+    renderer.includes("modifier = modifier.size(sizeSp.dp)") &&
+    renderer.includes(
+      "EmojiFallbackSizingPolicy.fontSizeSp(sizeSp, LocalDensity.current.fontScale).sp",
+    ) &&
+    renderer.includes("EmojiFallbackSizingPolicy.lineHeightSp(fallbackFontSize.value).sp") &&
     renderer.includes("fontSize = fallbackFontSize") &&
-    renderer.includes("lineHeight = fallbackFontSize") &&
+    renderer.includes("lineHeight = fallbackLineHeight") &&
     !renderer.includes("fontSize = sizeSp.sp"),
 );
 check(
-  "fallback text stays on one line without Android font padding, avoiding first-frame crop",
+  "fallback text is centered and measured unbounded so the glyph's bottom/right ink is not clipped by the fixed box",
   renderer.includes("maxLines = 1") &&
     renderer.includes("softWrap = false") &&
     renderer.includes("PlatformTextStyle(includeFontPadding = false)") &&
-    renderer.includes("modifier = Modifier.align(Alignment.Center)"),
+    renderer.includes("Modifier.align(Alignment.Center).wrapContentSize(unbounded = true)"),
 );
 check(
-  "the loaded Lottie frame still fills the identical emoji box; only fallback text sizing changes",
+  "the loaded Lottie frame still fills the original emoji box; only cold fallback text measurement changes",
   renderer.includes("modifier = Modifier.fillMaxSize()") &&
     renderer.includes("progress = { 1f }") &&
     renderer.includes("LottieAnimation("),
