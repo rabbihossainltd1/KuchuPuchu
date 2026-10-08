@@ -28,6 +28,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.airbnb.lottie.compose.LottieAnimation
@@ -291,6 +294,9 @@ internal fun NotoAnimatedEmoji(
     }
     val animatable = rememberLottieAnimatable()
     var isPlaying by remember(emoji) { mutableStateOf(false) }
+    // The box is measured in dp; convert that physical size back to sp so the
+    // cold system-emoji fallback cannot grow with the user's font scale.
+    val fallbackFontSize = (sizeSp / LocalDensity.current.fontScale).sp
     LaunchedEffect(composition, replayKey) {
         val comp = composition ?: return@LaunchedEffect
         // r88-1 (owner r88 #1: "first time animates hoi na ... tap korleo
@@ -348,7 +354,11 @@ internal fun NotoAnimatedEmoji(
         } else {
             Text(
                 text = emoji,
-                fontSize = sizeSp.sp,
+                fontSize = fallbackFontSize,
+                lineHeight = fallbackFontSize,
+                maxLines = 1,
+                softWrap = false,
+                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)),
                 modifier = Modifier.align(Alignment.Center),
             )
         }
