@@ -57,10 +57,21 @@ check("calls mock serves { items }", callsHelpers.includes("items: conversations
 check("status mock serves { items }", statusHelpers.includes("{ items: [] }"));
 check("forward spec override serves { items }", forwardSpec.includes("items: ["));
 
-// 3. the CSP contract
-const cspMatch = indexHtml.match(/Content-Security-Policy"\s+content="([^"]+)"/);
+// 3. the CSP contract — slice J: the CSP moved from a <meta> tag to the
+// Worker's assets rules header (frame-ancestors is impossible in meta), so
+// the single source of truth is wrangler.toml.
+const wranglerToml = read("../../wrangler.toml");
+const cspMatch = wranglerToml.match(/Content-Security-Policy = "([^"]+)"/);
 const csp = cspMatch?.[1] ?? "";
-check("the react shell ships a meta CSP", csp !== "", csp.slice(0, 60));
+check("the assets rules ship a server CSP", csp !== "", csp.slice(0, 60));
+check(
+  "the react shell no longer carries a meta CSP (one source of truth)",
+  !/http-equiv="Content-Security-Policy"/i.test(indexHtml),
+);
+check(
+  "frame-ancestors is now enforced (deploy-day promise from slice I)",
+  /frame-ancestors 'self'/.test(csp),
+);
 check("default-src is same-origin", /default-src 'self'/.test(csp));
 check(
   "scripts come only from the app and Google Identity Services",

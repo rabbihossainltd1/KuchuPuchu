@@ -53,6 +53,7 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 | **H** Web Push (VAPID doorbell) | ✅ merged | PR #89 → `main` @ `e5ee47a` |
 | hotfix — legacy web empty list (`{items}` + SW cache bump) | ✅ merged | PR #90 → `main` @ `eab68c3` |
 | **I** hardening (themes, motion, a11y, CSP, IDB) | ✅ merged | PR #91 → `main` @ `1af2694` |
+| **J** production cutover (React PWA at /) | ✅ built | এই branch; নিচের হিসাব |
 
 **Slice D-তে যা নামলো** (Worker বা Android-এ একটি লাইনও বদলায়নি):
 
@@ -142,6 +143,32 @@ fix. Full review in `docs/web-hardening.md`.
   (outbox+drafts), best-effort; E2E proves the database is gone.
 - Gates: new `test:web:hardening:e2e` (20 tests), case 78 (19 checks), full
   `npm run ci` green. Worker/Android/legacy route code unchanged this slice.
+
+## Slice J — Production cutover ✅
+
+The React PWA (`web/dist`) replaced the legacy `public/` shell at the Worker's
+assets root — owner-approved direct replacement. Full mechanics in
+`docs/web-cutover.md`.
+
+- **Build hook:** `wrangler.toml [build] command = "npm run build:web:prod"` —
+  `wrangler deploy`/`versions upload` build the web app themselves, so assets
+  can never be stale and no dashboard change was needed.
+- **Prod flags:** account + messaging + statuses + media on; calls off (plan
+  default), push off (VAPID unset).
+- **Headers:** `[[assets.rules]]` — immutable hashed bundles, `no-store`
+  `/sw.js`, and the CSP as a server header including `frame-ancestors 'self'`
+  (slice I's deploy-day promise); the meta CSP left `index.html`.
+- **SW migration:** the new worker deletes retired `kp-shell-*` caches on
+  activation; rollback is symmetric (legacy activate deletes ours). Existing
+  installs cross over in about one reload.
+- **Retirement:** `public/` kept only as fixtures/rollback reference
+  (`public/RETIRED.md`).
+- Gates: case 79 (22 checks), new `test:web:cutover:e2e` (3 tests, the only
+  suite with service workers allowed, built with the exact prod script), full
+  `npm run ci` green; live `curl -sI` header check after deploy.
+- Folded hardening: the voice player's `ended` state is now honest
+  (paused-at-end, replay on next tap/key; no sourcemaps in the public asset
+  upload) — this also removed a real keyboard-seek race the gate kept catching.
 
 ## কাজের নিয়ম (আগের বার যে ভুলটা হয়েছিল)
 

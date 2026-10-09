@@ -171,6 +171,23 @@ export function useVoicePlayer(api: ApiClient | null): VoicePlayer {
         if (startAt > 0 && Number.isFinite(audio.duration) && audio.duration > 0) {
           audio.currentTime = startAt * audio.duration;
         }
+        // A finished note is not a playing one: clear the playing id so the
+        // next tap/seek takes the honest "start again" path instead of the
+        // stale "pause" path (slice J hardening; also steadies the keyboard
+        // seek gate).
+        audio.onended = () => {
+          stopTick();
+          // Paused-at-end, not playing: the bubble keeps showing the finished
+          // position (active rows render progress) and the next tap or key
+          // takes the honest "start again" path.
+          setState((current) => ({
+            ...current,
+            playingId: "",
+            loadingId: "",
+            pausedId: current.playingId === row.id ? row.id : current.pausedId,
+            progress: 1,
+          }));
+        };
         void audio.play().catch(() => {
           setState((current) => ({
             ...current,
@@ -221,6 +238,7 @@ export function useVoicePlayer(api: ApiClient | null): VoicePlayer {
           stopTick();
           setState((current) => ({ ...current, playingId: "", pausedId: id }));
         } else {
+          if (audio.ended) audio.currentTime = 0;
           audio.playbackRate = speedsRef.current[id] ?? 1;
           void audio.play().catch(() => undefined);
           setState((current) => ({

@@ -175,8 +175,13 @@ test.describe("Web voice notes", () => {
     const afterArrows = Number((await slider.getAttribute("aria-valuenow")) ?? "0");
     expect(afterArrows).toBeGreaterThan(0);
 
+    // Re-focus before each key: playback-state repaints can move focus in the
+    // headless shell, and the contract under test is "the slider answers the
+    // keyboard while focused", not "focus never moves".
+    await slider.focus();
     await page.keyboard.press("End");
     await expect(slider).toHaveAttribute("aria-valuenow", "100");
+    await slider.focus();
     await page.keyboard.press("Home");
     await expect(slider).toHaveAttribute("aria-valuenow", "0");
 

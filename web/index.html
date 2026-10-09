@@ -3,21 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- Slice I security contract (docs/web-hardening.md): same-origin app,
-         one allowlisted third party (Google Identity Services), no inline
-         scripts, no object/embed, navigations cannot escape the origin.
-         style-src keeps 'unsafe-inline' because GSI injects style attributes;
-         scripts never need it. -->
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws: wss: https://accounts.google.com; frame-src https://accounts.google.com; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'"
-    />
+    <!-- Slice J cutover (docs/web-cutover.md): the CSP — same-origin app, one
+         allowlisted third party (Google Identity Services), no inline scripts,
+         no object/embed, navigations cannot escape the origin, plus
+         frame-ancestors which a <meta> cannot carry — is served as a SERVER
+         header by the Worker's assets rules (wrangler.toml [[assets.rules]],
+         pinned by contract case 79). One source of truth: no meta CSP here. -->
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#0d1524" />
     <meta
       name="description"
-      content="KuchuPuchu Web account and navigation preview. Browser sign-in is available only in opt-in builds; messaging, status, media and calls remain disabled."
+      content="KuchuPuchu messages, photos and more — right in your browser."
     />
-    <title>KuchuPuchu Web · Account preview</title>
+    <title>KuchuPuchu</title>
   </head>
   <body>
     <div id="root"></div>

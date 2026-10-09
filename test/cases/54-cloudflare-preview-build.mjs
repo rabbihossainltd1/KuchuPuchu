@@ -21,8 +21,10 @@ const checks = [
     previewLines.has("preview_urls = false"),
   ],
   [
-    "preview uses the existing Worker entry point and static assets",
-    previewLines.has('main = "src/worker/index.ts"') && previewLines.has('directory = "./public"'),
+    "preview uses the existing Worker entry point and the built React assets (slice J)",
+    previewLines.has('main = "src/worker/index.ts"') &&
+      previewLines.has('directory = "./web/dist"') &&
+      previewLines.has('command = "npm run build:web:prod"'),
   ],
   [
     "preview config excludes production D1, R2, and Durable Object bindings",
