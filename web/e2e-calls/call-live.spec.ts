@@ -233,10 +233,15 @@ test("a screen share that cannot be granted is reported and changes nothing", as
   await ringPeer("Voice");
   await connect();
 
-  // Headless Chromium has no picker to grant, so `getDisplayMedia` refuses. What
-  // matters is that the refusal is SPOKEN and the call carries on: a voice call
-  // stays a voice call, and no media flag is posted for a share that never
-  // started.
+  // Headless Chromium has no picker to grant, but HOW it refuses is a browser
+  // detail — some builds hang, some hand back a fake capture. The refusal the
+  // app has to handle is the one a real user produces: closing the picker,
+  // which rejects with NotAllowedError. So that is the refusal installed here.
+  await caller.evaluate(() => {
+    (navigator.mediaDevices as { getDisplayMedia?: unknown }).getDisplayMedia = () =>
+      Promise.reject(new DOMException("Permission denied", "NotAllowedError"));
+  });
+
   await expect(control(caller, "Share screen")).toBeEnabled();
   await control(caller, "Share screen").click();
 
@@ -246,4 +251,20 @@ test("a screen share that cannot be granted is reported and changes nothing", as
   expect(worker.mediaPosts.some((post) => post.screen === true)).toBe(false);
   expect(worker.calls.get(CALL_ID)?.kind).toBe("AUDIO");
   await expect(status(caller)).toHaveText(clock);
+});
+
+test("the audio-output picker opens into labelled options on a connected call", async () => {
+  await ringPeer("Voice");
+  await connect();
+
+  const trigger = stage(caller).getByRole("button", { name: "Audio output" });
+  if ((await trigger.count()) === 0) {
+    // A browser without setSinkId states the limit instead of drawing a picker.
+    await expect(stage(caller).getByText("no device picker for call audio")).toBeVisible();
+    return;
+  }
+  await trigger.click();
+  // Every option is a labelled, selectable row — no icon-only device list.
+  const picker = stage(caller).getByRole("listbox", { name: "Audio output" });
+  await expect(picker.getByRole("option").first()).toBeVisible();
 });

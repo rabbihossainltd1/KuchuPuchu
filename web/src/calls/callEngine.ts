@@ -1027,11 +1027,17 @@ export function createCallEngine(options: EngineOptions): CallEngine {
         // the user cannot read is the same as no refusal at all.
         await teardown("");
         publish({ error: copy, phase: busy ? "busy" : "idle" });
-        if (busy) {
-          // LINE_BUSY lives for one beat on the calling screen, like the phone's
-          // own notice, instead of ringing forever or vanishing instantly.
-          clock.schedule(() => publish({ phase: "idle", error: "" }), CALL_NOTICE_MS);
-        }
+        // A refusal the server has already finalised — LINE_BUSY, a block, a
+        // declined ring — lives for one beat on the calling screen, like the
+        // phone's own notice, and then clears itself. The user should never
+        // have to dismiss a row that no longer exists on the server.
+        clock.schedule(() => {
+          // Only wipe THIS refusal: if a new call started in the meantime the
+          // stage has a live phase again, and a newer error replaced the copy.
+          if (state.error === copy && (state.phase === "busy" || state.phase === "idle")) {
+            publish({ phase: "idle", error: "" });
+          }
+        }, CALL_NOTICE_MS);
         return;
       }
 

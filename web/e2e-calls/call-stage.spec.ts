@@ -126,13 +126,20 @@ test.describe("an outgoing call", () => {
   }) => {
     await startVoiceCall(page);
 
-    const picker = stage(page).getByRole("listbox", { name: "Audio output" });
+    // The picker renders as a labelled trigger with a listbox contract; the
+    // listbox itself only exists once the trigger is open, so the trigger is
+    // what proves the control on a closed stage.
+    const picker = stage(page).getByRole("button", { name: "Audio output" });
     const honest = stage(page).getByText("no device picker for call audio");
     const hasPicker = (await picker.count()) > 0;
-    expect(hasPicker || (await honest.count()) > 0).toBe(true);
+    const hasHonest = (await honest.count()) > 0;
+    expect(hasPicker || hasHonest).toBe(true);
+    // Never both at once: a browser either moves the audio itself or says so.
+    expect(hasPicker && hasHonest).toBe(false);
     if (hasPicker) {
-      // Every option is a labelled, selectable row — no icon-only device list.
-      await expect(picker.getByRole("option").first()).toBeVisible();
+      await expect(picker).toHaveAttribute("aria-haspopup", "listbox");
+    } else {
+      await expect(honest.first()).toBeVisible();
     }
   });
 
