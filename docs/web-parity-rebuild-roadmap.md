@@ -58,7 +58,7 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 | **K** production statuses on | ✅ merged | PR #95 → `main` @ `41cfa971492be11750a0f356fb53572fc04df45b` |
 | **O** WS socket tickets (plan §7.2) | ✅ merged | PR #96 → `main` @ `892714df4831ef3bcae0554292a720ce89254159` |
 | **P** production web-push on | ✅ merged | PR #97 → `main` @ `433adb652d44197d848127b105ed5b240a485bda` |
-| **Q** production calls on (owner-approved) | ✅ built | এই branch; নিচের হিসাব |
+| **Q** production calls on (owner-approved) | ✅ merged | PR #98 → `main` @ `1373065cfde46545fcbcfb30f1d19a8381a3f7eb` |
 
 **Slice D-তে যা নামলো** (Worker বা Android-এ একটি লাইনও বদলায়নি):
 
