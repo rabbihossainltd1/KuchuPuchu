@@ -923,3 +923,222 @@ a:focus-visible {
   white-space: nowrap;
   border: 0;
 }
+
+/* Slice I accessibility utility: labels that screen readers get but the eye
+ * does not need (the fieldset legend, skip-free form semantics). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * Slice I — Light Cream structural overrides.
+ *
+ * The dark-blue shell paints many surfaces with literal navy values; the
+ * light theme re-points them here, surface-and-ink together, so a converted
+ * text never floats on an unconverted background. Values mirror Theme.kt's
+ * light mode (Cream #F7F6F4 / Card #FFF / Ink #1C1917 / Muted #7A6F63 /
+ * Line #E8E4DE, GoldDeep #B45309 for amber copy). Deeper component surfaces
+ * already ride the CSS tokens and flip for free.
+ */
+:root[data-kp-theme="light"] .nav-rail {
+  background: #f3f1ed;
+}
+
+:root[data-kp-theme="light"] .brand-wordmark,
+:root[data-kp-theme="light"] .list-pane {
+  background: linear-gradient(180deg, #ffffff, #f7f6f4);
+}
+
+:root[data-kp-theme="light"] .preview-banner {
+  border-bottom-color: rgba(180, 83, 9, 0.25);
+  background: linear-gradient(
+    90deg,
+    rgba(254, 243, 199, 0.9),
+    rgba(247, 246, 244, 0.96) 38%,
+    rgba(247, 246, 244, 0.96) 62%,
+    rgba(254, 243, 199, 0.9)
+  );
+  color: #713f12;
+}
+
+:root[data-kp-theme="light"] .preview-banner strong {
+  color: #b45309;
+}
+
+:root[data-kp-theme="light"] .preview-banner__divider {
+  background: rgba(180, 83, 9, 0.3);
+}
+
+:root[data-kp-theme="light"] .list-header h1,
+:root[data-kp-theme="light"] .list-content h2,
+:root[data-kp-theme="light"] .welcome-card h3 {
+  color: #1c1917;
+}
+
+:root[data-kp-theme="light"] .eyebrow {
+  color: var(--kp-muted);
+}
+
+:root[data-kp-theme="light"] .icon-button {
+  border-color: rgba(122, 111, 99, 0.25);
+  background: #f0ece5;
+  color: #44403a;
+}
+
+:root[data-kp-theme="light"] .icon-button:hover:not(:disabled) {
+  border-color: rgba(180, 83, 9, 0.4);
+  color: #1c1917;
+}
+
+:root[data-kp-theme="light"] .nav-button.is-active {
+  border-color: rgba(180, 83, 9, 0.25);
+  background: linear-gradient(145deg, rgba(245, 158, 11, 0.2), rgba(245, 158, 11, 0.08));
+  color: #92400e;
+}
+
+:root[data-kp-theme="light"] .nav-button.is-active::before {
+  background: #b45309;
+}
+
+:root[data-kp-theme="light"] .nav-button:disabled,
+:root[data-kp-theme="light"] .icon-button:disabled {
+  color: #a8a29e;
+}
+
+:root[data-kp-theme="light"] .account-chip {
+  border-color: rgba(122, 111, 99, 0.35);
+  background: linear-gradient(145deg, #fffdf9, #efe9df);
+}
+
+:root[data-kp-theme="light"] .account-chip__avatar {
+  color: #78350f;
+}
+
+:root[data-kp-theme="light"] .account-chip__status {
+  border-color: #f7f6f4;
+}
+
+:root[data-kp-theme="light"] .search-field {
+  background: #f0ece5;
+}
+
+:root[data-kp-theme="light"] .search-field input {
+  color: #1c1917;
+}
+
+:root[data-kp-theme="light"] .search-field input::placeholder {
+  color: var(--kp-muted);
+}
+
+:root[data-kp-theme="light"] .search-field kbd {
+  border-color: rgba(122, 111, 99, 0.3);
+  color: var(--kp-muted);
+}
+
+:root[data-kp-theme="light"] .list-footer {
+  border-top-color: rgba(122, 111, 99, 0.2);
+  color: var(--kp-muted);
+}
+
+:root[data-kp-theme="light"] .footer-version {
+  color: var(--kp-muted);
+}
+
+:root[data-kp-theme="light"] .connection-indicator {
+  background: #78716c;
+}
+
+:root[data-kp-theme="light"] .empty-list-icon {
+  border-color: rgba(180, 83, 9, 0.25);
+  background: rgba(245, 158, 11, 0.12);
+  color: #92400e;
+}
+
+:root[data-kp-theme="light"] .list-content p,
+:root[data-kp-theme="light"] .integration-badge,
+:root[data-kp-theme="light"] .welcome-card__note {
+  color: var(--kp-muted);
+}
+
+:root[data-kp-theme="light"] .integration-badge,
+:root[data-kp-theme="light"] .welcome-points span {
+  border-color: rgba(122, 111, 99, 0.25);
+  background: rgba(122, 111, 99, 0.08);
+}
+
+:root[data-kp-theme="light"] .welcome-card {
+  border-color: rgba(122, 111, 99, 0.25);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.9), rgba(250, 248, 245, 0.94));
+  box-shadow:
+    0 24px 75px rgba(28, 25, 23, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+:root[data-kp-theme="light"] .welcome-card__sparkle {
+  border-color: rgba(180, 83, 9, 0.3);
+  background: #fef3c7;
+  color: #b45309;
+}
+
+:root[data-kp-theme="light"] .welcome-card .eyebrow {
+  color: #92400e;
+}
+
+:root[data-kp-theme="light"] .welcome-card__body {
+  color: #57534e;
+}
+
+:root[data-kp-theme="light"] .welcome-points span {
+  color: #57534e;
+}
+
+:root[data-kp-theme="light"] .welcome-points i {
+  background: #b45309;
+}
+
+:root[data-kp-theme="light"] .conversation-pane {
+  background:
+    radial-gradient(ellipse at 53% 44%, rgba(232, 228, 222, 0.5), transparent 53%),
+    linear-gradient(145deg, #f7f6f4, #fbfaf8);
+}
+
+:root[data-kp-theme="light"] .conversation-header,
+:root[data-kp-theme="light"] .composer-preview {
+  border-color: rgba(122, 111, 99, 0.2);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+:root[data-kp-theme="light"] .composer-preview__attach {
+  background: #efe9df;
+}
+
+:root[data-kp-theme="light"] .composer-preview__input {
+  border-color: rgba(122, 111, 99, 0.25);
+  background: #f0ece5;
+  color: var(--kp-muted);
+}
+
+:root[data-kp-theme="light"] .canvas-glow--blue {
+  background: #f59e0b;
+  opacity: 0.08;
+}
+
+:root[data-kp-theme="light"] .canvas-glow--amber {
+  opacity: 0.06;
+}
+
+:root[data-kp-theme="light"] .conversation-header__copy h2 {
+  color: #1c1917;
+}
+
+:root[data-kp-theme="light"] .conversation-header__copy p {
+  color: var(--kp-muted);
+}

@@ -457,7 +457,7 @@ export async function createMockCallsWorker(
         }
         worker.requests.push("GET /api/conversations");
         return json(route, {
-          conversations: conversationsFor(options, otherUser, otherIdentity.u),
+          items: conversationsFor(options, otherUser, otherIdentity.u),
         });
       });
 

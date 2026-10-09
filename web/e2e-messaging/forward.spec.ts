@@ -249,7 +249,7 @@ test.describe("Web multi-select and forwarding", () => {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          conversations: [
+          items: [
             {
               id: CHAT_ID,
               isGroup: false,

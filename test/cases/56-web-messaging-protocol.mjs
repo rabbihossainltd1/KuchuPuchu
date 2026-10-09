@@ -67,7 +67,7 @@ const check = (name, condition, detail = "") =>
 /* ------------------------------------------------------- payload parsing --- */
 
 const conversationPayload = {
-  conversations: [
+  items: [
     {
       id: "c_1",
       isGroup: false,
@@ -111,13 +111,16 @@ check("total unread sums the visible rows only", totalUnread(list) === 4);
 check("list order is newest activity first", list[0].id === "c_1");
 check(
   "a hostile payload yields an empty list instead of throwing",
-  parseConversationList(null).length === 0 &&
-    parseConversationList({ conversations: "nope" }).length === 0,
+  parseConversationList(null).length === 0 && parseConversationList({ items: "nope" }).length === 0,
+);
+check(
+  "the removed `conversations` envelope no longer feeds the list (production drift pin)",
+  parseConversationList({ conversations: conversationPayload.items }).length === 0,
 );
 check(
   "detail parsing accepts {conversation} and a bare row",
-  parseConversationDetail({ conversation: conversationPayload.conversations[0] }).id === "c_1" &&
-    parseConversationDetail(conversationPayload.conversations[2]).id === "c_group",
+  parseConversationDetail({ conversation: conversationPayload.items[0] }).id === "c_1" &&
+    parseConversationDetail(conversationPayload.items[2]).id === "c_group",
 );
 
 check(
@@ -128,7 +131,7 @@ check(
     ) === "five",
 );
 function parseConversationRowish(value) {
-  return parseConversationList({ conversations: [value] })[0];
+  return parseConversationList({ items: [value] })[0];
 }
 check(
   'initials fall back through title -> peer -> "Chat" and are never empty',

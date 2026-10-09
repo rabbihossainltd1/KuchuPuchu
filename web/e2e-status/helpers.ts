@@ -496,7 +496,7 @@ export async function createMockStatusWorker(
           },
         });
       }
-      return json(route, { conversations: [] });
+      return json(route, { items: [] });
     });
 
     /* ---- uploads, for a photo too big to post inline or a clip ---- */

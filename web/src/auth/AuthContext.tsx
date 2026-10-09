@@ -28,6 +28,7 @@ import {
   writeRefreshedAt,
   TOKEN_STORAGE_KEY,
 } from "./storage";
+import { deleteMessagingDatabase } from "../messaging/outbox";
 
 export type AuthStatus = "disabled" | "restoring" | "signed-out" | "signed-in" | "unverified";
 
@@ -67,6 +68,10 @@ export function AuthProvider({ enabled, children }: PropsWithChildren<{ enabled:
   const clearLocalSession = useCallback(() => {
     tokenRef.current = "";
     clearAuthSession();
+    // Slice I (account isolation): the IndexedDB outbox/drafts belong to the
+    // account that queued them. Wipe the whole database on any sign-out —
+    // explicit or 401-forced — so the next login never inherits unsent bytes.
+    void deleteMessagingDatabase();
     setToken("");
     setUser(null);
     setRestoreError("");

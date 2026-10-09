@@ -48,10 +48,11 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 | **D** attachments + photo editor | ✅ merged | PR #83 → `main` @ `d0a44ae0` |
 | **E1** viewers + shared media + view-once + albums | ✅ merged | PR #84 → `main` @ `de54086` |
 | **E2** voice note + document preview + forward + multi-select | ✅ merged | PR #86 → `main` @ `aaa206d` |
-| **F** status (feed + composer + viewer + privacy) | ✅ built | এই branch; নিচের হিসাব |
+| **F** status (feed + composer + viewer + privacy) | ✅ merged | PR #87 → `main` @ `88dec89` |
 | **G** calls (flag-gated 1:1) | ✅ merged | PR #88 → `main` @ `375be10e` |
-| **H** Web Push (VAPID doorbell) | ✅ built | এই branch; নিচের হিসাব |
-| **I** | ⏳ বাকি | — |
+| **H** Web Push (VAPID doorbell) | ✅ merged | PR #89 → `main` @ `e5ee47a` |
+| hotfix — legacy web empty list (`{items}` + SW cache bump) | ✅ merged | PR #90 → `main` @ `eab68c3` |
+| **I** hardening (themes, motion, a11y, CSP, IDB) | ✅ built | এই branch; নিচের হিসাব |
 
 **Slice D-তে যা নামলো** (Worker বা Android-এ একটি লাইনও বদলায়নি):
 
@@ -113,6 +114,34 @@ Flag-gated browser doorbell: VAPID subscriptions, Worker delivery, service-worke
 - **Worker:** `web_push_subs` registry (separate from the FCM `devices` table per plan §7.4), `GET/POST/DELETE /api/push/web`, RFC 8292 ES256 JWT + RFC 8291 `aes128gcm` on SubtleCrypto, fan-out to message (no-live-socket members only), missed call and ringing call, 404/410 + 5xx-streak cleanup, 8-browser cap. Off unless `VAPID_PRIVATE_KEY` is set (503/fail-closed).
 - **Web:** `VITE_KP_WEB_PUSH` flag (default off); Account → Notifications card with honest unsupported/denied/best-effort copy; the app-shell service worker (`web/service-worker.template.js`, NOT `public/sw.js`) shows the generic notification and hands the app a `kp-push-nav` message — call knocks land on Calls only in a calls-enabled build.
 - Gates: contract **78/78 case** (case 77 = 43 check), browser **6 test** (`test:web:push:e2e`), `verify:web-sw` pins the doorbell copy.
+
+## Slice I — Web hardening ✅
+
+Theme/motion/accessibility/security parity and the production contract-drift
+fix. Full review in `docs/web-hardening.md`.
+
+- **Contract drift (production bug):** both web clients and all four E2E mocks
+  read/served the removed `conversations` key while the Worker ships
+  `{ items, marker }`. Live repro showed 200 + six chats rendering as an empty
+  list. Fixed in `protocol.ts`, `public/app.js` (PR #90), and every mock;
+  pinned three ways (case 04 server / case 55 legacy / case 78 react+mocks).
+- **Global appearance:** Dark Blue (default) + Light Cream, device-local like
+  Android's SharedPreferences, applied before first paint via
+  `data-kp-theme`. Account → Appearance card.
+- **Per-chat themes:** the five Android palettes (darkblue/default/mint/rose/
+  night) ported value-for-value from `ChatScreen.kt`, stored via the existing
+  `PATCH /api/conversations/:id {theme}`, optimistic with rollback, group
+  non-owners get an honest lock. Picker is a labelled radiogroup dropdown.
+- **Motion:** all animation rides `--kp-motion-*`; `prefers-reduced-motion`
+  zeroes the tokens and the global kill-switch holds.
+- **A11y/contrast:** 4-breakpoint × 2-theme screenshot matrix + axe WCAG
+  A/AA with zero violations; light muted deepened to `#6B6156` for 4.5:1.
+- **CSP/XSS:** meta CSP on the React shell (same-origin + GSI only, no inline
+  scripts); origin-coverage pin in case 78; no `innerHTML` in `web/src`.
+- **IDB isolation:** any sign-out (manual or 401) deletes `kp-web-messaging`
+  (outbox+drafts), best-effort; E2E proves the database is gone.
+- Gates: new `test:web:hardening:e2e` (20 tests), case 78 (19 checks), full
+  `npm run ci` green. Worker/Android/legacy route code unchanged this slice.
 
 ## কাজের নিয়ম (আগের বার যে ভুলটা হয়েছিল)
 

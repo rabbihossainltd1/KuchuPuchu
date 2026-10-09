@@ -1,3 +1,8 @@
+/* KuchuPuchu design tokens. The dark-blue palette is the default (Android's
+ * KpThemeMode ships `dark_blue` as the factory theme); the light-cream
+ * override below reproduces Theme.kt's `light` mode token-for-token so the two
+ * clients never drift apart. Slice I: the palette is switched by a single
+ * `data-kp-theme` attribute on <html> (web/src/theme/appTheme.ts). */
 :root {
   color-scheme: dark;
   --kp-bg: #0d1524;
@@ -16,4 +21,47 @@
   --kp-radius-sheet: 22px;
   --kp-motion-fast: 150ms;
   --kp-motion-normal: 220ms;
+  /* Slice I semantic aliases: components paint actions and soft fills with
+   * these, and the light theme re-points them exactly the way Theme.kt does
+   * (dark-blue mode's action accent is BLUE; light-cream keeps classic GOLD). */
+  --kp-accent: #2f6fed;
+  --kp-accent-deep: #60a5fa;
+  --kp-accent-ink: #ffffff;
+  --kp-amber-deep: #f5a623;
+  --kp-amber-soft: #2a2c3d;
+  --kp-overlay: rgba(5, 10, 20, 0.62);
+  --kp-shadow: 0 18px 42px rgba(2, 6, 16, 0.5);
+}
+
+/* Theme.kt light mode: Cream bg, white Card, Ink #1C1917, Muted #7A6F63,
+ * Line #E8E4DE, GoldDeep #B45309, GoldSoft #FEF3C7, action accent GOLD. */
+:root[data-kp-theme="light"] {
+  color-scheme: light;
+  --kp-bg: #f7f6f4;
+  --kp-card: #ffffff;
+  --kp-card-raised: #fffdf9;
+  --kp-ink: #1c1917;
+  /* Theme.kt ships #7A6F63, but at the Web's 9 px rail labels that lands at
+   * 4.34:1 on the cream rail — below WCAG AA. One shade darker keeps the warm
+   * muted character and clears 4.5:1 on every light surface. */
+  --kp-muted: #6b6156;
+  --kp-line: #e8e4de;
+  --kp-focus: #b45309;
+  --kp-accent: #f59e0b;
+  --kp-accent-deep: #b45309;
+  --kp-accent-ink: #fffbeb;
+  --kp-amber-deep: #b45309;
+  --kp-amber-soft: #fef3c7;
+  --kp-overlay: rgba(28, 25, 23, 0.45);
+  --kp-shadow: 0 18px 42px rgba(28, 25, 23, 0.18);
+}
+
+/* Slice I (motion parity, plan §4.3 "Motion rules"): every animation and
+ * transition in the app runs on these two custom properties, so a single
+ * reduced-motion override stills the whole UI without hunting selectors. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --kp-motion-fast: 0ms;
+    --kp-motion-normal: 0ms;
+  }
 }

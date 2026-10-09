@@ -996,3 +996,183 @@
     font-size: 10px;
   }
 }
+
+/* Slice I: the Appearance card. Swatches are miniature theme previews painted
+ * from the SAME values Theme.kt ships, so the picker promises what it paints. */
+.appearance-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.appearance-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--kp-line);
+  background: var(--kp-card);
+  color: var(--kp-ink);
+  cursor: pointer;
+  transition:
+    border-color var(--kp-motion-fast) ease,
+    box-shadow var(--kp-motion-fast) ease;
+}
+
+.appearance-option:hover {
+  border-color: var(--kp-accent);
+}
+
+.appearance-option.is-selected {
+  border-color: var(--kp-accent);
+  box-shadow: 0 0 0 1px var(--kp-accent) inset;
+}
+
+.appearance-option input {
+  accent-color: var(--kp-accent);
+  margin: 0;
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+.appearance-swatch {
+  width: 44px;
+  height: 32px;
+  border-radius: 9px;
+  flex: none;
+  border: 1px solid rgba(127, 127, 127, 0.35);
+}
+
+.appearance-swatch--dark_blue {
+  background: linear-gradient(135deg, #2f6fed 0 38%, transparent 38%), #0d1524;
+}
+
+.appearance-swatch--light {
+  background: linear-gradient(135deg, #f59e0b 0 38%, transparent 38%), #f7f6f4;
+}
+
+.appearance-option__text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.appearance-option__title {
+  font-weight: 600;
+}
+
+.appearance-option__note {
+  color: var(--kp-muted);
+  font-size: 12.5px;
+}
+
+/* Slice I — Light Cream overrides for the account/auth surfaces. The cards
+ * already ride var(--kp-card) (white in light); these flip the literal inks
+ * so copy never sits light-on-light. Semantic reds/greens keep their meaning
+ * but deepen for contrast on cream. */
+:root[data-kp-theme="light"] .settings-header .eyebrow,
+:root[data-kp-theme="light"] .account-hero__identity .eyebrow {
+  color: #92400e;
+}
+
+:root[data-kp-theme="light"] .notice-card h1,
+:root[data-kp-theme="light"] .settings-header h1,
+:root[data-kp-theme="light"] .account-hero__identity h2,
+:root[data-kp-theme="light"] .settings-card__heading h2,
+:root[data-kp-theme="light"] .approval-summary strong {
+  color: #1c1917;
+}
+
+:root[data-kp-theme="light"] .auth-copy,
+:root[data-kp-theme="light"] .field-label,
+:root[data-kp-theme="light"] .account-hero__details span,
+:root[data-kp-theme="light"] .phone-dial {
+  color: #44403c;
+}
+
+:root[data-kp-theme="light"] .auth-input {
+  color: #1c1917;
+  background: #ffffff;
+}
+
+:root[data-kp-theme="light"] .auth-input::placeholder {
+  color: var(--kp-muted);
+}
+
+:root[data-kp-theme="light"] .settings-footnote,
+:root[data-kp-theme="light"] .auth-footer p,
+:root[data-kp-theme="light"] .approval-summary__expiry,
+:root[data-kp-theme="light"] .account-hero__identity p:last-child,
+:root[data-kp-theme="light"] .account-hero__details strong,
+:root[data-kp-theme="light"] .google-action__loading {
+  color: var(--kp-muted);
+}
+
+:root[data-kp-theme="light"] .secondary-button {
+  border-color: rgba(122, 111, 99, 0.35);
+  color: #44403c;
+}
+
+:root[data-kp-theme="light"] .secondary-button:hover:not(:disabled) {
+  border-color: rgba(180, 83, 9, 0.45);
+  color: #1c1917;
+}
+
+:root[data-kp-theme="light"] .auth-back-link,
+:root[data-kp-theme="light"] .settings-card__icon {
+  color: #92400e;
+}
+
+:root[data-kp-theme="light"] .auth-back-link:hover {
+  color: #78350f;
+}
+
+:root[data-kp-theme="light"] .auth-notice--info {
+  border-color: rgba(29, 78, 216, 0.25);
+  color: #1e40af;
+}
+
+:root[data-kp-theme="light"] .auth-notice--success {
+  border-color: rgba(22, 101, 52, 0.3);
+  color: #166534;
+}
+
+:root[data-kp-theme="light"] .auth-inline-error,
+:root[data-kp-theme="light"] .settings-error,
+:root[data-kp-theme="light"] .google-action__error {
+  border-color: rgba(185, 28, 28, 0.3);
+  color: #b91c1c;
+}
+
+:root[data-kp-theme="light"] .account-avatar {
+  color: #78350f;
+}
+
+:root[data-kp-theme="light"] .rollout-note {
+  color: #713f12;
+}
+
+:root[data-kp-theme="light"] .rollout-note svg {
+  color: #b45309;
+}
+
+:root[data-kp-theme="light"] .settings-success {
+  color: #15803d;
+}
+
+:root[data-kp-theme="light"] .field-help--checking {
+  color: #92400e;
+}
+
+:root[data-kp-theme="light"] .auth-page {
+  background: #f7f6f4;
+}
+
+:root[data-kp-theme="light"] .auth-card,
+:root[data-kp-theme="light"] .notice-card {
+  background: #ffffff;
+}

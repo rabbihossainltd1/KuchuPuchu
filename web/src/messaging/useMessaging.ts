@@ -75,6 +75,7 @@ import {
 import { EMPTY_SHARED_MEDIA, sharedMediaRefusal, type SharedMedia } from "./sharedMedia";
 import { VANISH_GRACE_MS, createViewOnceSpender } from "./viewOnce";
 import { isVanishedMarker } from "./protocol";
+import { chatThemeOr, type ChatTheme } from "./chatTheme";
 
 const TYPING_THROTTLE_MS = 2_000;
 const TYPING_IDLE_MS = 3_000;
@@ -150,6 +151,8 @@ export type MessagingActions = {
   closeSharedMedia: () => void;
   dismissNotice: () => void;
   announce: (message: string) => void;
+  /** Slice I: change this chat's theme (Android's per-chat theme picker). */
+  setChatTheme: (theme: ChatTheme) => Promise<void>;
 };
 
 export type MessagingController = MessagingState & MessagingActions;
@@ -1342,6 +1345,37 @@ export function useMessaging(options: Options): MessagingController {
     [conversations],
   );
 
+  /**
+   * Slice I (chat-theme parity): optimistic PATCH, rolled back when the server
+   * refuses (a non-owner cannot re-theme a group — the Worker answers 403).
+   * The row keeps its theme across reloads because the Worker stores it on the
+   * conversation and every list/detail payload carries it back.
+   */
+  const setChatTheme = useCallback(
+    async (theme: ChatTheme) => {
+      const current = selectedRef.current;
+      if (!current) return;
+      const nextTheme = chatThemeOr(theme);
+      if (current.theme === nextTheme) return;
+      const previous = current;
+      const next = { ...current, theme: nextTheme };
+      setSelected(next);
+      setConversations((rows) => rows.map((row) => (row.id === next.id ? next : row)));
+      try {
+        await messagingApi.setConversationTheme(api, current.id, nextTheme);
+      } catch {
+        setSelected(previous);
+        setConversations((rows) => rows.map((row) => (row.id === previous.id ? previous : row)));
+        announce(
+          current.isGroup
+            ? "Only the group owner can change the chat theme — the phone app works the same way."
+            : "The chat theme could not be saved. Check the connection and try again.",
+        );
+      }
+    },
+    [api, announce],
+  );
+
   return {
     conversations,
     listStatus,
@@ -1396,6 +1430,7 @@ export function useMessaging(options: Options): MessagingController {
     closeSharedMedia,
     dismissNotice,
     announce,
+    setChatTheme,
   };
 }
 

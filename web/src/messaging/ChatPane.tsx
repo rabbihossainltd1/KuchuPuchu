@@ -33,6 +33,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
@@ -49,6 +50,8 @@ import type { ApiClient } from "../auth/authApi";
 import type { EditModel } from "../media/imageEdit";
 
 import { attachmentCategory, formatBytes, isAttachmentKind } from "../media/uploadContract";
+import { useAppTheme } from "../theme/appTheme";
+import { CHAT_THEME_LABELS, chatThemeCssVars, chatThemeOr, chatThemeStyle } from "./chatTheme";
 import { AttachMenu, type AttachSource } from "./AttachMenu";
 import { AlbumGrid, AttachmentRow } from "./AttachmentRow";
 import { OnceText } from "./OnceText";
@@ -199,6 +202,23 @@ export function ChatPane({
 
   const conversation = controller.selected;
   const isEditing = editingId !== "";
+
+  // Slice I chat themes: the palette rides on CSS custom properties scoped to
+  // this pane, so two open conversations can never leak colours into each
+  // other and the app-wide appearance switch still re-keys every surface.
+  const appTheme = useAppTheme();
+  const chatPaneStyle = useMemo(
+    () =>
+      conversation
+        ? (chatThemeCssVars(
+            chatThemeStyle(chatThemeOr(conversation.theme), appTheme),
+          ) as CSSProperties)
+        : undefined,
+    [conversation, appTheme],
+  );
+  const canPickTheme = !!conversation && (!conversation.isGroup || conversation.ownerId === meId);
+  const chatThemeLabel = (value: string): string =>
+    CHAT_THEME_LABELS.find((option) => option.value === chatThemeOr(value))?.label ?? "Dark Blue";
   // Photos that share an album id and a sender fold into one row, exactly as
   // the phone's `foldAlbums` does, so a five-photo send is one bubble.
   const days = useMemo(() => groupByDay(foldAlbums(controller.messages)), [controller.messages]);
@@ -630,6 +650,8 @@ export function ChatPane({
     <main
       className={`conversation-pane${selectedId ? " is-mobile-visible" : ""}`}
       aria-labelledby="conversation-heading"
+      style={chatPaneStyle}
+      data-chat-theme={chatThemeOr(conversation.theme)}
     >
       <header className="conversation-header">
         <div className="conversation-header__identity">
@@ -739,6 +761,44 @@ export function ChatPane({
               ) : null}
             </ul>
           </details>
+
+          {canPickTheme ? (
+            <details className="chat-theme-menu">
+              <summary>Theme · থিম</summary>
+              <div className="chat-theme-menu__panel" role="radiogroup" aria-label="Chat theme">
+                <p className="chat-theme-picker__label">
+                  Chat theme <span>{chatThemeLabel(conversation.theme)}</span>
+                </p>
+                <div className="chat-theme-picker__options">
+                  {CHAT_THEME_LABELS.map((option) => {
+                    const active = chatThemeOr(conversation.theme) === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        className={`chat-theme-swatch${active ? " is-active" : ""}`}
+                        data-theme={option.value}
+                        title={`${option.label} · ${option.bangla}`}
+                        aria-label={`Chat theme ${option.label} (${option.bangla})`}
+                        onClick={() => void controller.setChatTheme(option.value)}
+                      >
+                        <span aria-hidden="true" />
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="chat-theme-picker__note">
+                  Saved for everyone in this chat — the phone shows the same five themes.
+                </p>
+              </div>
+            </details>
+          ) : (
+            <p className="chat-theme-picker__locked">
+              Only the group owner can change this chat&apos;s theme.
+            </p>
+          )}
         </div>
       </header>
 

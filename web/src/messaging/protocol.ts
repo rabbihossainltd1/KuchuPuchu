@@ -49,6 +49,19 @@ export type ConversationRow = {
   readonly isGroup: boolean;
   readonly title: string;
   readonly hidden: boolean;
+  /**
+   * Slice I (chat-theme parity): the phone's per-chat theme — `darkblue`,
+   * `default` (classic cream), `mint`, `rose`, `night`. Android's `cTheme()`
+   * treats a missing/blank value as `darkblue`, so the parser applies the same
+   * default instead of leaking an empty string to the theme tables.
+   */
+  readonly theme: string;
+  /**
+   * The group's owner id (null for solo chats). The Worker lets only the owner
+   * change shared settings of a GROUP conversation, so the chat-theme picker
+   * needs this to stand down honestly for non-owners.
+   */
+  readonly ownerId: string;
   readonly muted: boolean;
   readonly unread: number;
   readonly lastMessageAt: string;
@@ -390,6 +403,10 @@ export function parseConversationRow(value: unknown): ConversationRow | null {
     id,
     isGroup,
     title: text(value.title, 120),
+    // Mirror Android's `cTheme()`: blank/absent means the dark-blue default,
+    // never an empty string the palette tables cannot match.
+    theme: text(value.theme, 20) || "darkblue",
+    ownerId: text(value.ownerId, 64),
     hidden: booleanish(value.hidden),
     muted: booleanish(value.muted),
     unread: Math.max(0, Math.trunc(number(value.unread))),
@@ -412,8 +429,13 @@ export function parseConversationRow(value: unknown): ConversationRow | null {
 }
 
 export function parseConversationList(payload: unknown): readonly ConversationRow[] {
-  if (!isRecord(payload) || !Array.isArray(payload.conversations)) return [];
-  const rows = payload.conversations
+  // The Worker wraps the list as { items, marker } — the contract pinned by
+  // case 04 and served by production. Slice I retired a stale parser that read
+  // a removed `conversations` key: the E2E mocks repeated the same stale key,
+  // so the suites stayed green while a real server would have rendered an
+  // empty chat list (the exact bug hotfix PR #90 shipped for the legacy PWA).
+  if (!isRecord(payload) || !Array.isArray(payload.items)) return [];
+  const rows = payload.items
     .map(parseConversationRow)
     .filter((row): row is ConversationRow => row !== null);
   // Hidden chats must not leak into the list, its counts or its notifications.
