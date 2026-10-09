@@ -9,7 +9,6 @@ export type AuthPrivacy = {
   lastSeen: "nobody" | "contacts" | "public";
   groups: "nobody" | "contacts" | "public";
   status: "nobody" | "contacts" | "public";
-  readReceipts: boolean;
   privateProfile: boolean;
 };
 

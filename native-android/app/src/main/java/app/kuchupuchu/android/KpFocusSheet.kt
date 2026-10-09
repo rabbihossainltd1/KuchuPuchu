@@ -439,8 +439,8 @@ internal fun KpModalFocusOverlay(progress: Float) {
             )
         }
         if (floatingContent != null && t > 0.78f && !KpFocusSheetState.closing) {
-            val floatingBarHeight = 52.dp
-            val floatingBarWidth = (maxWidth - 24.dp).coerceAtLeast(1.dp).coerceAtMost(320.dp)
+            val floatingBarHeight = 44.dp
+            val floatingBarWidth = (maxWidth - 24.dp).coerceAtLeast(1.dp).coerceAtMost(292.dp)
             val barWidthPx = with(density) { floatingBarWidth.roundToPx() }
             val barHeightPx = with(density) { floatingBarHeight.roundToPx() }
             val rootWidthPx = with(density) { maxWidth.roundToPx() }

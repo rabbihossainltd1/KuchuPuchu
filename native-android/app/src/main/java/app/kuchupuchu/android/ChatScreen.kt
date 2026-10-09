@@ -506,8 +506,6 @@ fun ChatScreen(nav: NavController, convId: String) {
     var privAllowShot by remember(convId) { mutableStateOf(true) }
     var privAllowRec by remember(convId) { mutableStateOf(false) }
     var privReadReceipts by remember(convId) { mutableStateOf(true) }
-    var privReadReceiptsOverride by remember(convId) { mutableStateOf<Boolean?>(null) }
-    var globalReadReceipts by remember(convId) { mutableStateOf(true) }
     // r76-19 (owner item 3: "options gula rapidly on off korle majhe majhe
     // auto off hochhe"): while a privacy write is on its way, the pokes of
     // the OLDER writes must not repaint the sheet - the switch flipped back
@@ -916,9 +914,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                                         pv.optBoolean("meAllowShot", true) != pr.optBoolean("allowShot", true) ||
                                         pv.optBoolean("meAllowRec", false) != pr.optBoolean("allowRec", false))) ||
                                 (pr != null && pv.has("readReceipts") &&
-                                    (pv.optBoolean("readReceipts", true) != pr.optBoolean("readReceipts", true) ||
-                                        pv.optBoolean("globalReadReceipts", true) != pr.optBoolean("globalReadReceipts", true) ||
-                                        pv.opt("readReceiptsOverride")?.toString() != pr.opt("readReceiptsOverride")?.toString())))
+                                    pv.optBoolean("readReceipts", true) != pr.optBoolean("readReceipts", true)))
                     if (drifted) {
                         Cache.bust("/api/conversations/$convId")
                         refreshMeta()
@@ -1017,7 +1013,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // ...and the OS notification cards too (Owner round 4):
                     // reading live must shrink the number instantly, on every
                     // surface there is.
-                    runCatching { KpNotify.cancelConversation(ctx, convId) }
+                    runCatching { KpNotify.cancelConversation(ctx, convId, ScreenStore.totalUnreadMessages()) }
                 }
             } catch (_: Exception) {
             } finally {
@@ -1353,7 +1349,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         }
                         // Viewed live with the chat open: the notification
                         // card for this conversation is already stale.
-                        runCatching { KpNotify.cancelConversation(ctx, convId) }
+                        runCatching { KpNotify.cancelConversation(ctx, convId, ScreenStore.totalUnreadMessages()) }
                         if (msgSyncPending.compareAndSet(false, true)) {
                             scope.launch {
                                 // Force the authoritative GET: a realtime event is
@@ -1756,8 +1752,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         save: Boolean? = null,
         allowShot: Boolean? = null,
         allowRec: Boolean? = null,
-        readReceiptsOverride: Boolean? = null,
-        updateReadReceipts: Boolean = false,
+        readReceipts: Boolean? = null,
     ) {
         if (shot != null) privShot = shot
         if (rec != null) privRec = rec
@@ -1765,10 +1760,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         // r76-18 (owner item 3): the Allow switches ride the same POST.
         if (allowShot != null) privAllowShot = allowShot
         if (allowRec != null) privAllowRec = allowRec
-        if (updateReadReceipts) {
-            privReadReceiptsOverride = readReceiptsOverride
-            privReadReceipts = readReceiptsOverride ?: globalReadReceipts
-        }
+        if (readReceipts != null) privReadReceipts = readReceipts
         privWrites++
         scope.launch {
             try {
@@ -1784,8 +1776,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 save?.let { put("save", it) }
                                 allowShot?.let { put("allowShot", it) }
                                 allowRec?.let { put("allowRec", it) }
-                                if (updateReadReceipts)
-                                    put("readReceiptsOverride", readReceiptsOverride ?: JSONObject.NULL)
+                                readReceipts?.let { put("readReceipts", it) }
                             },
                         )
                     }
@@ -3134,12 +3125,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         // off; public: shot on, rec off, save on).
         privAllowShot = pr.optBoolean("allowShot", true)
         privAllowRec = pr.optBoolean("allowRec")
-        globalReadReceipts = pr.optBoolean("globalReadReceipts", true)
-        privReadReceipts = pr.optBoolean("readReceipts", globalReadReceipts)
-        privReadReceiptsOverride =
-            if (pr.has("readReceiptsOverride") && !pr.isNull("readReceiptsOverride"))
-                pr.optBoolean("readReceiptsOverride")
-            else null
+        privReadReceipts = pr.optBoolean("readReceipts", true)
     }
     val peerSaveOk = c?.optBoolean("peerSave", true) != false
     // r76-18 (owner item 4): the peer's Allow switches — when either is off my
@@ -5685,8 +5671,6 @@ fun ChatScreen(nav: NavController, convId: String) {
             rec = privRec,
             save = privSave,
             readReceipts = privReadReceipts,
-            readReceiptsOverride = privReadReceiptsOverride,
-            globalReadReceipts = globalReadReceipts,
             // r76-18 (owner item 3): the two Allow switches — the alert rows
             // only exist while their Allow switch is on.
             allowShot = privAllowShot,
@@ -5720,9 +5704,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 }
             },
             onSave = { setChatPrivacy(save = it) },
-            onReadReceiptsOverride = {
-                setChatPrivacy(readReceiptsOverride = it, updateReadReceipts = true)
-            },
+            onReadReceipts = { setChatPrivacy(readReceipts = it) },
             onAllowShot = { setChatPrivacy(allowShot = it) },
             onAllowRec = { setChatPrivacy(allowRec = it) },
         )
@@ -8251,6 +8233,7 @@ private fun Modifier.messageReplySwipe(
 private fun KpMessageFocusSlot(
     focusKey: String?,
     rowMine: Boolean? = null,
+    targetScale: Float = 1f,
     content: @Composable (requestFocus: () -> Unit) -> Unit,
 ) {
     // Keep the live focus layer bubble-sized. Media rows contain their own
@@ -8264,7 +8247,7 @@ private fun KpMessageFocusSlot(
             KpLiveFocusItem(
                 key = focusKey,
                 modifier = Modifier.wrapContentSize(unbounded = true),
-                targetScale = 1f,
+                targetScale = targetScale,
                 content = content,
             )
         }
@@ -8540,7 +8523,11 @@ private fun MessageRow(
     // opens the media ONCE for the recipient; the opening deletes the row
     // for everyone, so there is no opened state left to render.
     if (isViewOnce(m)) {
-        KpMessageFocusSlot(focusKey, rowMine = mine) { requestFocus ->
+        KpMessageFocusSlot(
+            focusKey,
+            rowMine = mine,
+            targetScale = if (kind == "TEXT") 1.05f else 1f,
+        ) { requestFocus ->
             Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
                 // r71-20: a view-once TEXT is its own bubble (veiled, one tap to
                 // reveal, five seconds, then gone for both) — the photo / video /
@@ -8744,7 +8731,10 @@ private fun MessageRow(
                 report(r)
                 if (r.lineCount > bodyLines) bodyLines = r.lineCount
             }
-            KpMessageFocusSlot(focusKey) { requestFocus ->
+            KpMessageFocusSlot(
+                focusKey,
+                targetScale = if (kind == "TEXT") 1.05f else 1f,
+            ) { requestFocus ->
                 val onFocusedLongPress: (JSONObject) -> Unit = { pressed ->
                     if (pressed.optString("kind") != "DELETED") requestFocus()
                     onLongPress(pressed)
@@ -9123,13 +9113,13 @@ private fun MessageQuickReactionBar(
     onMore: () -> Unit,
 ) {
     val quickEmojis = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
-    val shape = RoundedCornerShape(28.dp)
+    val shape = RoundedCornerShape(24.dp)
     Row(
         Modifier
             .fillMaxSize()
             .clip(shape)
             .background(Card)
-            .padding(horizontal = 5.dp, vertical = 4.dp),
+            .padding(horizontal = 4.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         quickEmojis.forEach { emoji ->
@@ -9142,21 +9132,21 @@ private fun MessageQuickReactionBar(
                     .clickable { onReact(emoji) },
                 contentAlignment = Alignment.Center,
             ) {
-                Text(emoji, fontSize = 24.sp, maxLines = 1)
+                Text(emoji, fontSize = 20.sp, maxLines = 1)
             }
         }
         // A dedicated fixed-width seat keeps the final '+' visible on narrow
         // screens instead of letting the emoji labels push it outside the bar.
         Box(
             Modifier
-                .width(38.dp)
+                .width(32.dp)
                 .fillMaxHeight()
                 .clip(CircleShape)
                 .background(ActionBlue.copy(alpha = 0.14f))
                 .clickable(onClick = onMore),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Filled.Add, "More emojis", tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
+            Icon(Icons.Filled.Add, "More emojis", tint = ActionBlueDeep, modifier = Modifier.size(18.dp))
         }
     }
 }
@@ -9191,12 +9181,10 @@ private fun MessageReactions(m: JSONObject) {
     byUser.values.forEach { emoji -> grouped[emoji] = (grouped[emoji] ?: 0) + 1 }
     if (grouped.isEmpty()) return
     val dark = KpThemeMode.darkBlue
-    val chipFill = if (dark) Color(0xE61D3151) else Color(0xF7FFFFFF)
-    val chipLine = if (dark) Color.White.copy(alpha = 0.14f) else Color(0x1F273247)
     val popStartOffsetPx = with(LocalDensity.current) { (-10).dp.toPx() }
     Row(
-        Modifier.offset(y = (-4).dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        Modifier.offset(y = (-5).dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         grouped.forEach { (emoji, count) ->
             val popScale = remember(messageKey, emoji) { Animatable(1f) }
@@ -9220,7 +9208,6 @@ private fun MessageReactions(m: JSONObject) {
                     popAlpha.animateTo(1f, tween(durationMillis = 180, easing = FastOutSlowInEasing))
                 }
             }
-            val chipShape = RoundedCornerShape(12.dp)
             Box(
                 Modifier
                     .graphicsLayer {
@@ -9229,16 +9216,13 @@ private fun MessageReactions(m: JSONObject) {
                         alpha = popAlpha.value
                         translationY = popOffsetY.value
                     }
-                    .clip(chipShape)
-                    .background(chipFill)
-                    .border(1.dp, chipLine, chipShape)
-                    .padding(horizontal = 6.dp, vertical = 1.dp),
+                    .padding(horizontal = 2.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(emoji, fontSize = 16.sp)
+                    Text(emoji, fontSize = 15.sp)
                     if (count > 1) {
                         Spacer(Modifier.width(2.dp))
-                        Text("$count", fontSize = 10.sp, color = if (dark) Color(0xFFE2E9F5) else Muted)
+                        Text("$count", fontSize = 9.5.sp, color = if (dark) Color(0xFFE2E9F5) else Muted)
                     }
                 }
             }
@@ -12262,8 +12246,6 @@ private fun ChatPrivacySheet(
     rec: Boolean,
     save: Boolean,
     readReceipts: Boolean,
-    readReceiptsOverride: Boolean?,
-    globalReadReceipts: Boolean,
     // r76-18 (owner item 3): the two Allow switches. Profile defaults come
     // from the server (private: off; public: shot on, rec off, save on); the
     // alert rows below only show while their Allow switch is on.
@@ -12277,7 +12259,7 @@ private fun ChatPrivacySheet(
     onShot: (Boolean) -> Unit,
     onRec: (Boolean) -> Unit,
     onSave: (Boolean) -> Unit,
-    onReadReceiptsOverride: (Boolean?) -> Unit,
+    onReadReceipts: (Boolean) -> Unit,
     onAllowShot: (Boolean) -> Unit,
     onAllowRec: (Boolean) -> Unit,
 ) {
@@ -12288,11 +12270,13 @@ private fun ChatPrivacySheet(
     // The screen-recording row stays Android 15+ — a recording leaves no file
     // to read, so claiming it below that would be a lie.
     KpSheet(onDismiss = onClose, title = "Chat privacy") {
-        ReadReceiptsChoice(
-            selectedOverride = readReceiptsOverride,
-            globalEnabled = globalReadReceipts,
-            effectiveEnabled = readReceipts,
-            onSelect = onReadReceiptsOverride,
+        PrivacyToggle(
+            icon = Icons.Filled.DoneAll,
+            label = "Read receipts",
+            sub = if (readReceipts) "Others can see when I read messages" else "Read times are hidden in this chat",
+            checked = readReceipts,
+            enabled = true,
+            onChange = onReadReceipts,
         )
         // r76-18 (owner item 3): "allow screenshot" first, its alert second —
         // and the alert row only EXISTS while the Allow switch is on. The
@@ -12358,62 +12342,6 @@ private fun ChatPrivacySheet(
     }
 }
 
-/** Account-default / per-chat read-receipt choice. */
-@Composable
-private fun ReadReceiptsChoice(
-    selectedOverride: Boolean?,
-    globalEnabled: Boolean,
-    effectiveEnabled: Boolean,
-    onSelect: (Boolean?) -> Unit,
-) {
-    val haptics = rememberHaptics()
-    val choices = listOf(null to "Use global", true to "On", false to "Off")
-    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.DoneAll, "Read receipts", tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(12.dp))
-            Column {
-                Text("Read receipts", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                Text(
-                    "${if (selectedOverride == null) "Using global" else if (effectiveEnabled) "On for this chat" else "Off for this chat"} · global ${if (globalEnabled) "On" else "Off"}",
-                    color = Muted,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                )
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            choices.forEach { (choice, label) ->
-                val selected = choice == selectedOverride
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(11.dp))
-                        .background(if (selected) ActionBlue.copy(alpha = 0.14f) else Color.Transparent)
-                        .border(1.dp, if (selected) ActionBlue else Line, RoundedCornerShape(11.dp))
-                        .clickable {
-                            haptics.tap()
-                            onSelect(choice)
-                        }
-                        .padding(vertical = 9.dp, horizontal = 2.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        label,
-                        color = if (selected) ActionBlueDeep else Ink,
-                        fontSize = 11.sp,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                        maxLines = 1,
-                        softWrap = false,
-                    )
-                }
-            }
-        }
-    }
-}
-
-/** One row of the Chat privacy sheet: switch, label, and what it does. */
 @Composable
 private fun PrivacyToggle(
     icon: ImageVector,

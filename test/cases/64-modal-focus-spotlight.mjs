@@ -131,14 +131,17 @@ check(
     messageSlot.includes("KpLiveFocusItem(") &&
     messageSlot.includes("key = focusKey") &&
     messageSlot.includes("Modifier.wrapContentSize(unbounded = true)") &&
-    messageSlot.includes("targetScale = 1f") &&
+    messageSlot.includes("targetScale: Float = 1f") &&
+    chat.includes('targetScale = if (kind == "TEXT") 1.05f else 1f,') &&
     chat.includes("focusKey = focusKey,") &&
     !chat.includes("focusKey = focusKey.takeIf") &&
     chat.includes('if (pressed.optString("kind") != "DELETED") requestFocus()'),
 );
 check(
-  "message bubble stays at original size while its pinned, measured source returns smoothly after dismissal",
-  messageSlot.includes("targetScale = 1f") &&
+  "message bubble enlarges slightly in the pinned focus layer and returns smoothly to its original size after dismissal",
+  messageSlot.includes("targetScale: Float = 1f") &&
+    chat.includes('targetScale = if (kind == "TEXT") 1.05f else 1f,') &&
+    focus.includes("val scale = 1f + (item.targetScale - 1f) * t") &&
     focus.includes("sourceBounds.value = currentBounds") &&
     focus.includes("KpModalFocusState.updateSource(key, currentBounds)") &&
     focus.includes("val source = if (KpModalFocusState.isReturning) item.returnBoundsOnScreen") &&
@@ -151,7 +154,7 @@ check(
   "quick reactions float above the selected live message while actions stay in the sheet and the '+' keeps a fixed seat",
   quickReactionBar.includes('val quickEmojis = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")') &&
     quickReactionBar.includes(".weight(1f)") &&
-    quickReactionBar.includes(".width(38.dp)") &&
+    quickReactionBar.includes(".width(32.dp)") &&
     chat.includes("floatingContent = hostedFloating") &&
     !actionSheetBody.includes("MessageQuickReactionBar(") &&
     actionSheetBody.includes('KpSheetRow(Icons.AutoMirrored.Filled.Reply, "Reply")') &&

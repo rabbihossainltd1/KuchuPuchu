@@ -433,6 +433,7 @@ class KpPushService : FirebaseMessagingService() {
     private fun handleMessage(data: Map<String, String>) {
         val convoId = data["convoId"] ?: return
         val mid = data["mid"]
+        val pushedUnreadTotal = data["unreadTotal"]?.toIntOrNull()?.coerceAtLeast(0)
         // Mute is honored on BOTH sides of the wire: the worker tags the push
         // with the recipient's flag, and we also re-check the locally cached
         // conversation (covers a push sent between the user tapping Mute and
@@ -441,10 +442,11 @@ class KpPushService : FirebaseMessagingService() {
         // only still notifies normally.
         val muted = data["muted"] == "1" || ScreenStore.isMsgMuted(convoId)
         // Owner round 31 (item 26): a HIDDEN chat is silent on this device —
-        // no card, no tone, no badge flash (the worker already skips the push
-        // once it knows; this covers a push racing the hide).
+        // no card or tone. A racing push still syncs the authoritative total
+        // unread-message badge because the launcher count spans every chat.
         if (ScreenStore.isHidden(convoId)) {
             ScreenStore.pokeInbox()
+            pushedUnreadTotal?.let { KpNotify.syncUnreadBadge(this, it) }
             return
         }
         // A query/arg on the route (chat/<id>?media=1 style) used to defeat the
@@ -470,6 +472,7 @@ class KpPushService : FirebaseMessagingService() {
             // r67-2: the preview handed to the list is the opened text or a neutral
             // label — with the chat open the row repaints from the thread itself.
             ScreenStore.bumpUnread(convoId, PushSeal.cardText(fgPlan, fgPlain, data["body"]))
+            KpNotify.syncUnreadBadge(this, pushedUnreadTotal ?: ScreenStore.totalUnreadMessages())
             // Owner round 10: his "in app massage" sound plays only when the
             // user is inside the app but NOT on this chat's screen — the open
             // chat itself stays silent (the bubble arriving is the feedback).
@@ -493,13 +496,17 @@ class KpPushService : FirebaseMessagingService() {
         // Background (process alive): message card WITH Reply / Like / Mark-as-read.
         // Badge jumps instantly; the next list refresh confirms the same number.
         ScreenStore.bumpUnread(convoId, cardText)
+        val unreadMessages = pushedUnreadTotal ?: ScreenStore.totalUnreadMessages()
         // r69 (owner: "mute kore rekhechi tokhono notification ashe"): a muted
         // chat posts NO card at all. The old path only moved it to the silent
         // channel — the card still appeared in the shade, with a badge and a
         // locked-screen line, which reads as "notification ashe". The unread
         // count and the list row still move (bumpUnread above), so nothing is
         // lost: the trace lives in the app, not on the lock screen.
-        if (muted) return
+        if (muted) {
+            KpNotify.syncUnreadBadge(this, unreadMessages)
+            return
+        }
         // Owner round 32 (item 35): a photo message's push names the picture
         // (kp_media, an authorized API path); the card shows the photo itself
         // instead of "photo.jpg". The fetch is bounded (FCM gives this handler
@@ -532,6 +539,7 @@ class KpPushService : FirebaseMessagingService() {
             mid = mid,
             loginRequestId = data["kp_login_req"],
             picture = picture,
+            unreadMessages = unreadMessages,
         )
     }
 

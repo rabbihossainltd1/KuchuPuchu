@@ -9,7 +9,6 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.ui.draw.scale
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Contacts
-import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.LocationOn
@@ -379,9 +378,6 @@ fun PrivacySettingsScreen(nav: NavController) {
         }
         Spacer(Modifier.height(12.dp))
         SectionCard {
-            ToggleRow(Icons.Filled.DoneAll, "Read receipts", privacy.optBoolean("readReceipts", true)) { on ->
-                savePrivacy("readReceipts", on)
-            }
             ToggleRow(Icons.Filled.VisibilityOff, "Private profile", privacy.optBoolean("privateProfile", false)) { on ->
                 savePrivacy("privateProfile", on)
             }

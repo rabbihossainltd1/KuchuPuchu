@@ -3649,6 +3649,8 @@ async function ensureSchema(db: D1Database) {
     // included (exactly the pre-round rule), 'contacts' = 1:1 contacts only,
     // 'nobody' = the author alone.
     `ALTER TABLE users ADD COLUMN priv_status TEXT`,
+    // Legacy account-wide column retained for old databases; receipt logic
+    // now reads and writes only the per-member conversation setting.
     `ALTER TABLE users ADD COLUMN read_receipts INTEGER`,
     `ALTER TABLE users ADD COLUMN home_nav_order TEXT`,
     `ALTER TABLE users ADD COLUMN private_profile INTEGER`,
@@ -3788,7 +3790,6 @@ type UserRow = {
   priv_last_seen: string | null;
   priv_groups: string | null;
   priv_status: string | null;
-  read_receipts: number | null;
   private_profile: number | null;
   e2ee_public_key: string | null;
 };
@@ -3828,22 +3829,16 @@ function privacyOf(row: UserRow) {
     lastSeen: privLevel(row.priv_last_seen, PRIVACY_DEFAULTS.lastSeen),
     groups: privLevel(row.priv_groups, PRIVACY_DEFAULTS.groups),
     status: privLevel(row.priv_status, PRIVACY_DEFAULTS.status),
-    readReceipts: Number(row.read_receipts ?? 1) !== 0,
     privateProfile: Number(row.private_profile ?? 0) !== 0,
   };
 }
 
-const receiptsOn = (row: { read_receipts?: number | null } | undefined) =>
-  Number(row?.read_receipts ?? 1) !== 0;
-
-/** Per-chat override (NULL) inherits the account-wide setting. */
+/** Each chat/group owns its receipt switch. Unset legacy rows default ON,
+ *  never inherit an account-wide preference. */
 export function readReceiptsOnForChat(
   member: { priv_read_receipts?: number | null } | null | undefined,
-  user: { read_receipts?: number | null } | null | undefined,
 ): boolean {
-  return member?.priv_read_receipts == null
-    ? receiptsOn(user ?? undefined)
-    : Number(member.priv_read_receipts) !== 0;
+  return member?.priv_read_receipts == null || Number(member.priv_read_receipts) !== 0;
 }
 
 const HOME_NAV_ITEMS = ["chats", "status", "calls", "profile"] as const;
@@ -4744,6 +4739,9 @@ async function pushToUser(
       "SELECT token FROM devices WHERE user_id = ?",
       userId,
     );
+    const badgeCount = Number(data.unreadTotal ?? 0);
+    const notificationCount =
+      Number.isSafeInteger(badgeCount) && badgeCount > 0 ? badgeCount : null;
     if (rows.length === 0) {
       // No token ever registered for this recipient: a "missing" notification
       // that is entirely explainable — surface it in tail instead of silence.
@@ -4786,6 +4784,9 @@ async function pushToUser(
                             // only card a MIUI/ColorOS-blocked process ever shows.
                             icon: "ic_stat_kp",
                             color: "#F59E0B",
+                            ...(notificationCount != null
+                              ? { notification_count: notificationCount }
+                              : {}),
                             // Same tag on a call's ring card and its missed-call
                             // card: the OS REPLACES the first with the second, so
                             // "X is calling" cannot stay in the shade after the
@@ -7066,10 +7067,6 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       sets.push(`${column} = ?`);
       values.push(level);
     }
-    if (body.readReceipts !== undefined) {
-      sets.push("read_receipts = ?");
-      values.push(body.readReceipts ? 1 : 0);
-    }
     if (body.homeNavOrder !== undefined) {
       const order = normalizeHomeNavOrder(body.homeNavOrder);
       if (!order) fail(400, "Bad home-tab order.", "BAD_HOME_NAV_ORDER");
@@ -7117,7 +7114,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       // their saved copy of the user — and their safety code — refresh.
       body.e2eePublicKey !== undefined;
     if (identityChanged) ctx.waitUntil(fanOutProfileChange(env, db, uid));
-    else if (body.readReceipts !== undefined || body.homeNavOrder !== undefined)
+    else if (body.homeNavOrder !== undefined)
       ctx.waitUntil(
         broadcastRoomEvent(env, `user:${uid}`, {
           type: "profile",
@@ -8381,28 +8378,18 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       readMatch[1]!,
       uid,
     );
-    // The member's per-chat setting overrides the account default. In groups,
-    // each member controls only their own receipt; direct chats keep the
-    // existing mutual-privacy rule (either side Off hides receipts both ways).
-    const myReceiptsOn = readReceiptsOnForChat(readConv, me);
-    if (!myReceiptsOn) return json({ ok: true });
+    // Receipts are conversation-local. In groups, each member controls only
+    // their own receipt; direct chats keep the mutual-privacy rule (either side
+    // Off hides receipts both ways).
+    if (!readReceiptsOnForChat(readConv)) return json({ ok: true });
     if (readConv.kind === "SOLO") {
-      const peer = await one<{
-        priv_read_receipts: number | null;
-        read_receipts: number | null;
-      }>(
+      const peer = await one<{ priv_read_receipts: number | null }>(
         db,
-        `SELECT m.priv_read_receipts, u.read_receipts FROM members m JOIN users u ON u.id = m.user_id
-          WHERE m.conv_id = ? AND m.user_id != ? LIMIT 1`,
+        "SELECT priv_read_receipts FROM members WHERE conv_id = ? AND user_id != ? LIMIT 1",
         readMatch[1]!,
         uid,
       );
-      if (
-        !readReceiptsOnForChat(
-          { priv_read_receipts: peer?.priv_read_receipts },
-          { read_receipts: peer?.read_receipts },
-        )
-      )
+      if (!readReceiptsOnForChat({ priv_read_receipts: peer?.priv_read_receipts }))
         return json({ ok: true });
     }
     // Realtime: the sender's ticks flip blue the moment this lands, not on
@@ -8558,14 +8545,20 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         : before?.priv_allow_rec != null
           ? Number(before.priv_allow_rec) === 1
           : null;
-    let readReceiptsOverride: boolean | null =
-      before?.priv_read_receipts == null ? null : Number(before.priv_read_receipts) === 1;
-    if (Object.prototype.hasOwnProperty.call(body, "readReceiptsOverride")) {
+    let readReceipts =
+      before?.priv_read_receipts == null ? true : Number(before.priv_read_receipts) === 1;
+    if (Object.prototype.hasOwnProperty.call(body, "readReceipts")) {
+      if (typeof body.readReceipts !== "boolean")
+        fail(400, "Bad read-receipts value.", "BAD_PRIVACY");
+      readReceipts = body.readReceipts;
+    } else if (Object.prototype.hasOwnProperty.call(body, "readReceiptsOverride")) {
+      // Older clients used a nullable override; NULL now resets to the
+      // per-chat default, never to an account-wide preference.
       if (body.readReceiptsOverride !== null && typeof body.readReceiptsOverride !== "boolean")
         fail(400, "Bad read-receipts value.", "BAD_PRIVACY");
-      readReceiptsOverride = body.readReceiptsOverride as boolean | null;
+      readReceipts =
+        body.readReceiptsOverride === null ? true : (body.readReceiptsOverride as boolean);
     }
-    const readReceipts = readReceiptsOverride ?? receiptsOn(me);
     await run(
       db,
       "UPDATE members SET priv_shot = ?, priv_rec = ?, priv_save = ?, priv_allow_shot = ?, priv_allow_rec = ?, priv_read_receipts = ? WHERE conv_id = ? AND user_id = ?",
@@ -8574,7 +8567,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       save ? 1 : 0,
       allowShot == null ? null : allowShot ? 1 : 0,
       allowRec == null ? null : allowRec ? 1 : 0,
-      readReceiptsOverride == null ? null : readReceiptsOverride ? 1 : 0,
+      readReceipts ? 1 : 0,
       convId,
       uid,
     );
@@ -8591,8 +8584,6 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         allowShot: allowShot ?? true,
         allowRec: allowRec ?? false,
         readReceipts,
-        readReceiptsOverride,
-        globalReadReceipts: receiptsOn(me),
       },
     });
   }
@@ -9278,15 +9269,14 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       db,
       `SELECT MIN(m.last_read_at) AS r,
               SUM(CASE WHEN m.last_read_at IS NULL THEN 1 ELSE 0 END) AS unreadMembers,
-              MIN(CASE WHEN m.priv_read_receipts IS NULL THEN COALESCE(u.read_receipts, 1)
-                       ELSE m.priv_read_receipts END) AS receipts
-       FROM members m JOIN users u ON u.id = m.user_id
+              MIN(COALESCE(m.priv_read_receipts, 1)) AS receipts
+       FROM members m
        WHERE m.conv_id = ? AND m.user_id != ?`,
       convId,
       uid,
     );
     const receiptsHidden =
-      !readReceiptsOnForChat({ priv_read_receipts: conv.priv_read_receipts }, me) ||
+      !readReceiptsOnForChat({ priv_read_receipts: conv.priv_read_receipts }) ||
       Number(readRow?.receipts ?? 1) === 0;
     const readAt =
       readRow && !receiptsHidden && Number(readRow.unreadMembers || 0) === 0 ? readRow.r : null;
@@ -9321,12 +9311,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // now ALSO carries the same privacy truth convFrom computes (identical
     // NULL/profile defaults), and the marker seals it: a flip busts
     // `unchanged` and lands within a tick, socket or no socket.
-    const readReceiptOverride =
-      conv.priv_read_receipts == null ? null : Number(conv.priv_read_receipts) === 1;
     const readReceiptSettings = {
-      readReceipts: readReceiptsOnForChat({ priv_read_receipts: conv.priv_read_receipts }, me),
-      readReceiptsOverride: readReceiptOverride,
-      globalReadReceipts: receiptsOn(me),
+      readReceipts: readReceiptsOnForChat({ priv_read_receipts: conv.priv_read_receipts }),
     };
     let priv: Record<string, unknown> = { ...readReceiptSettings };
     if (conv.kind === "GROUP") {
@@ -9893,6 +9879,18 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       const fallbackNote = needsDeviceRendering
         ? undefined
         : recipientAlert(memberId, preview, me.display_name, live);
+      // Numeric launcher badges are driven by notifications on Android. Carry
+      // the authoritative post-increment unread-message total so both our app
+      // handler and a Play-services fallback can set the same count.
+      const unreadTotalRow =
+        (memberId.has_device ?? 0) > 0
+          ? await one<{ unread_total: number }>(
+              db,
+              "SELECT COALESCE(SUM(unread), 0) AS unread_total FROM members WHERE user_id = ?",
+              memberId.user_id,
+            )
+          : null;
+      const unreadTotal = Math.max(0, Number(unreadTotalRow?.unread_total ?? 0));
       const pushed = await pushToUser(
         env,
         db,
@@ -9904,6 +9902,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           kind: conv.kind,
           fromName: me.display_name,
           body: preview.slice(0, 120),
+          ...(unreadTotalRow ? { unreadTotal: String(unreadTotal) } : {}),
           kp_chat: convId,
           // r69: the MESSAGE half silences a message card — a chat muted for
           // calls only keeps its message tone (owner: "jeta korbe otay mute
@@ -12904,11 +12903,7 @@ function buildConvDetail(
   // opted-in members remain visible to everyone.
   const solo = conv.kind === "SOLO";
   const meMember = memberRows.find((row) => row.user_id === uid);
-  const meUser = users.get(uid);
-  const meReceipts = readReceiptsOnForChat(meMember, meUser);
-  const globalMeReceipts = receiptsOn(meUser);
-  const meReceiptOverride =
-    meMember?.priv_read_receipts == null ? null : Number(meMember.priv_read_receipts) === 1;
+  const meReceipts = readReceiptsOnForChat(meMember);
   for (const row of memberRows) {
     const user = users.get(row.user_id);
     if (!user) continue;
@@ -12942,7 +12937,7 @@ function buildConvDetail(
           blocked: true,
         }
       : shaped;
-    const memberReceipts = readReceiptsOnForChat(row, user);
+    const memberReceipts = readReceiptsOnForChat(row);
     members.push({
       user: memberUser,
       role: row.role,
@@ -13022,8 +13017,6 @@ function buildConvDetail(
       allowShot: meAllowShot,
       allowRec: meAllowRec,
       readReceipts: meReceipts,
-      readReceiptsOverride: meReceiptOverride,
-      globalReadReceipts: globalMeReceipts,
     },
     peerSave: solo ? (otherSave ?? true) : true,
     // r76-18: the peer's Allow switches — my phone sets FLAG_SECURE on

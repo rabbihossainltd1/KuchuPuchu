@@ -122,6 +122,11 @@ async function main() {
       JSON.stringify(recent?.message?.android ?? {}),
     );
     check("recent recipient push carries payload data", !!recent?.message?.android?.data?.type);
+    check(
+      "recent push carries the total unread-message count, not unread conversations",
+      recent?.message?.android?.data?.unreadTotal === "1",
+      JSON.stringify(recent?.message?.android?.data ?? {}),
+    );
 
     // 2) Idle recipient (age last_active > IDLE_PUSH_WINDOW_MS = 5 min) -> payload.
     ageLastActive(b.user.id, 6);
@@ -142,6 +147,48 @@ async function main() {
     check(
       "idle recipient payload uses the message channel",
       idle?.message?.android?.notification?.channel_id === "kp_messages_v2",
+    );
+    check(
+      "system-rendered payload carries the exact unread-message total as its launcher badge number",
+      idle?.message?.android?.data?.unreadTotal === "2" &&
+        idle?.message?.android?.notification?.notification_count === 2,
+      JSON.stringify(idle?.message?.android ?? {}),
+    );
+
+    // A second conversation proves this is the recipient's total across chats,
+    // not merely the unread count inside the conversation being pushed.
+    const c = await reg("psc@x.com", "psc");
+    const secondConv = await call("POST", "/api/conversations", { userId: b.user.id }, c.token);
+    const secondConvId = secondConv.json.conversation.id;
+    sent.length = 0;
+    await call(
+      "POST",
+      `/api/conversations/${secondConvId}/messages`,
+      { kind: "TEXT", body: "hello second chat" },
+      c.token,
+    );
+    const crossChat = sent.find((m) => m.message?.android?.data?.type === "message");
+    check(
+      "launcher badge total includes unread messages in a different chat",
+      crossChat?.message?.android?.data?.unreadTotal === "3" &&
+        crossChat?.message?.android?.notification?.notification_count === 3,
+      JSON.stringify(crossChat?.message?.android ?? {}),
+    );
+    await call("POST", `/api/conversations/${secondConvId}/hide`, { hidden: true }, b.token);
+    ageLastActive(b.user.id, 6);
+    sent.length = 0;
+    await call(
+      "POST",
+      `/api/conversations/${convId}/messages`,
+      { kind: "TEXT", body: "hello after hiding another chat" },
+      a.token,
+    );
+    const afterHide = sent.find((m) => m.message?.android?.data?.type === "message");
+    check(
+      "launcher badge total still includes unread messages in a hidden chat",
+      afterHide?.message?.android?.data?.unreadTotal === "4" &&
+        afterHide?.message?.android?.notification?.notification_count === 4,
+      JSON.stringify(afterHide?.message?.android ?? {}),
     );
     // Owner round 32 (items 1A/1B/26): the OS-drawn payload card carries the
     // brand status icon + colour (the launcher icon is adaptive and renders as

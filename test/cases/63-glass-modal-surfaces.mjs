@@ -161,7 +161,7 @@ check(
       ".background(GlassSheetSurface)\n                        .padding(horizontal = 16.dp, vertical = 10.dp)",
     ) &&
     !chat.includes("GlassSheetEdge") &&
-    chat.includes(".border(1.dp, if (selected) ActionBlue else Line, RoundedCornerShape(11.dp)"),
+    chat.includes(".border(1.dp, if (on) ActionBlue else Line, RoundedCornerShape(14.dp)"),
 );
 check(
   "floating reaction popup, search results card, and all modal surfaces are borderless without removing inner control outlines",

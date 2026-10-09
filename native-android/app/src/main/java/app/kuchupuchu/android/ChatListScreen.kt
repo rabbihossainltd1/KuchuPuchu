@@ -120,6 +120,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -254,6 +255,7 @@ fun ChatListScreen(nav: NavController, selectedTab: MutableIntState) {
                 }
                 ScreenStore.convsMarker = data.optString("marker")
                 val items = data.arr("items").objects()
+                val unreadMessages = items.sumOf { it.optInt("unread", 0).coerceAtLeast(0) }
                 // NON-FOREGROUND guard: posting a card here (on a fresh list
                 // sync) used to fire even when the app was open on ANOTHER
                 // screen, which is the locked "open other screen -> sound only,
@@ -272,10 +274,17 @@ fun ChatListScreen(nav: NavController, selectedTab: MutableIntState) {
                         val name =
                             if (c.optBoolean("isGroup")) c.optString("title").ifBlank { "Group" }
                             else c.optJSONObject("other")?.optText("displayName")?.ifBlank { "KuchuPuchu" } ?: "KuchuPuchu"
-                        KpNotify.message(ctx, name, friendlyPreview(c.optString("lastMessage")), id)
+                        KpNotify.message(
+                            ctx,
+                            name,
+                            friendlyPreview(c.optString("lastMessage")),
+                            id,
+                            unreadMessages = unreadMessages,
+                        )
                     }
                 }
                 ScreenStore.setConvs(items)
+                KpNotify.syncUnreadBadge(ctx, ScreenStore.totalUnreadMessages())
                 Api.PollCadence.succeeded()
                 loading = false
                 if (refreshAgain.get()) delay(200)
@@ -1013,6 +1022,12 @@ internal fun HomeBottomNavigation(
     var dragDistancePx by remember(userId) { mutableStateOf(0f) }
     var dragOffsetPx by remember(userId) { mutableStateOf(0f) }
     var dragChanged by remember(userId) { mutableStateOf(false) }
+    var settlingId by remember(userId) { mutableStateOf<String?>(null) }
+    var settlingStartOffsetPx by remember(userId) { mutableStateOf(0f) }
+    var settlingOffsetReady by remember(userId) { mutableStateOf(false) }
+    var settleGeneration by remember(userId) { mutableStateOf(0) }
+    val settlingOffset = remember(userId) { Animatable(0f) }
+    val reorderScope = rememberCoroutineScope()
     val reorderHaptics = rememberHaptics()
     LaunchedEffect(userId, initialOrder) {
         if (draggingId == null) navOrder = HomeNavOrderPolicy.normalize(initialOrder)
@@ -1209,9 +1224,23 @@ internal fun HomeBottomNavigation(
                         .offset(y = navContentYOffset),
                     horizontalArrangement = Arrangement.spacedBy(gap),
                 ) {
-                    navOrder.forEach { itemId ->
+                    HomeNavOrderPolicy.defaultOrder.forEach { itemId ->
                         key(itemId) {
                             val pageIndex = HomeNavOrderPolicy.defaultOrder.indexOf(itemId)
+                            val basePosition = pageIndex.coerceAtLeast(0)
+                            val orderedPosition = navOrder.indexOf(itemId).coerceIn(0, 3)
+                            val targetOffsetPx = (orderedPosition - basePosition) * reorderStepPx
+                            val animatedSlotOffsetPx by animateFloatAsState(
+                                targetValue = targetOffsetPx,
+                                animationSpec = spring(dampingRatio = 0.84f, stiffness = 620f),
+                                label = "navSlot-$itemId",
+                            )
+                            val itemOffsetPx = when {
+                                draggingId == itemId -> targetOffsetPx + dragOffsetPx
+                                settlingId == itemId ->
+                                    if (settlingOffsetReady) settlingOffset.value else settlingStartOffsetPx
+                                else -> animatedSlotOffsetPx
+                            }
                             val label = when (itemId) {
                                 "status" -> "Status"
                                 "calls" -> "Calls"
@@ -1232,9 +1261,12 @@ internal fun HomeBottomNavigation(
                                 selectedTint = selectedTint,
                                 reorderable = true,
                                 isDragging = draggingId == itemId,
-                                reorderOffsetPx = if (draggingId == itemId) dragOffsetPx else 0f,
+                                reorderOffsetPx = itemOffsetPx,
                                 onClick = { onSelect(pageIndex) },
                                 onReorderStart = {
+                                    settleGeneration++
+                                    settlingId = null
+                                    settlingOffsetReady = false
                                     draggingId = itemId
                                     dragStartOrder = navOrder
                                     dragStartIndex = navOrder.indexOf(itemId).coerceAtLeast(0)
@@ -1261,11 +1293,35 @@ internal fun HomeBottomNavigation(
                                 },
                                 onReorderEnd = { cancelled ->
                                     if (draggingId == itemId) {
+                                        val basePosition = HomeNavOrderPolicy.defaultOrder.indexOf(itemId).coerceAtLeast(0)
+                                        val oldPosition = navOrder.indexOf(itemId).coerceAtLeast(0)
+                                        val fromOffsetPx = (oldPosition - basePosition) * reorderStepPx + dragOffsetPx
                                         if (cancelled && dragChanged) navOrder = dragStartOrder
                                         val saveOrder = !cancelled && dragChanged
+                                        val targetPosition = navOrder.indexOf(itemId).coerceAtLeast(0)
+                                        val targetOffsetPx = (targetPosition - basePosition) * reorderStepPx
                                         draggingId = null
                                         dragOffsetPx = 0f
                                         dragChanged = false
+                                        settleGeneration++
+                                        val thisSettle = settleGeneration
+                                        settlingStartOffsetPx = fromOffsetPx
+                                        settlingOffsetReady = false
+                                        settlingId = itemId
+                                        reorderScope.launch {
+                                            settlingOffset.snapTo(fromOffsetPx)
+                                            if (settleGeneration == thisSettle && settlingId == itemId) {
+                                                settlingOffsetReady = true
+                                                settlingOffset.animateTo(
+                                                    targetOffsetPx,
+                                                    spring(dampingRatio = 0.82f, stiffness = 620f),
+                                                )
+                                                if (settleGeneration == thisSettle && settlingId == itemId) {
+                                                    settlingId = null
+                                                    settlingOffsetReady = false
+                                                }
+                                            }
+                                        }
                                         if (saveOrder) onOrderChanged(navOrder)
                                     }
                                 },
@@ -1344,6 +1400,11 @@ private fun NavItem(
     icon: @Composable (Color) -> Unit,
 ) {
     val tint by animateColorAsState(if (selected) selectedTint else idleTint, tween(250), label = "navTint")
+    val holdScale by animateFloatAsState(
+        targetValue = if (isDragging) 1.06f else 1f,
+        animationSpec = spring(dampingRatio = 0.78f, stiffness = 700f),
+        label = "navHoldScale",
+    )
     val pop = remember { Animatable(1f) }
     val firstRun = remember { booleanArrayOf(true) }
     val popEasing = remember { CubicBezierEasing(0.34f, 1.56f, 0.64f, 1f) }
@@ -1403,10 +1464,11 @@ private fun NavItem(
             // Do not clip this hit target: the unread badge intentionally
             // overhangs the icon's corner and must remain completely visible.
             .graphicsLayer {
-                translationX = if (isDragging) reorderOffsetPx else 0f
-                scaleX = if (isDragging) 1.08f else 1f
-                scaleY = if (isDragging) 1.08f else 1f
+                translationX = reorderOffsetPx
+                scaleX = holdScale
+                scaleY = holdScale
             }
+            .zIndex(if (isDragging) 1f else 0f)
             .then(reorderGesture)
             .semantics(mergeDescendants = true) {
                 contentDescription = accessibilityLabel
@@ -1442,7 +1504,6 @@ private fun NavItem(
                         )
                         .clip(CircleShape)
                         .background(Color(0xFFE24B4A))
-                        .border(1.5.dp * sizeScale, if (KpThemeMode.darkBlue) Color(0xFF14203D) else Card, CircleShape)
                         .graphicsLayer { scaleX = badgeScale.value; scaleY = badgeScale.value }
                         .padding(horizontal = 4.dp * sizeScale, vertical = 1.dp * sizeScale),
                     contentAlignment = Alignment.Center,

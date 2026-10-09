@@ -564,7 +564,7 @@ const convBetween = (db, a, b) =>
   );
   check(
     "viewing messages cancels their OS notification cards instantly",
-    chat.includes("KpNotify.cancelConversation(ctx, convId)"),
+    chat.includes("KpNotify.cancelConversation(ctx, convId, ScreenStore.totalUnreadMessages())"),
   );
 
   // ---- Owner round 5 (2026-09-04) ----
@@ -1167,7 +1167,7 @@ const convBetween = (db, a, b) =>
       chat.includes("floatingContent = hostedFloating") &&
       chat.includes("onReact = { emoji -> close { applyReaction(m, emoji) } }") &&
       chat.includes("showEmojiSheet = true") &&
-      chat.includes("KpMessageFocusSlot(focusKey) { requestFocus ->") &&
+      chat.includes('targetScale = if (kind == "TEXT") 1.05f else 1f,') &&
       chat.includes("val onFocusedLongPress: (JSONObject) -> Unit = { pressed ->") &&
       chat.includes('if (pressed.optString("kind") != "DELETED") requestFocus()') &&
       chat.includes("onLongPress(pressed)") &&
@@ -4673,7 +4673,6 @@ const convBetween = (db, a, b) =>
         '"Messages"',
         '"Last seen"',
         '"Add to groups"',
-        '"Read receipts"',
         '"Private profile"',
         '"Sounds"',
         '"Themes"',
@@ -4681,6 +4680,7 @@ const convBetween = (db, a, b) =>
         '"Check for updates"',
         '"About us"',
       ].every((l) => settings.includes(l)) &&
+      !settings.includes('"Read receipts"') &&
       !settings.includes("AlertDialog(") &&
       !settings.includes("PrivacyPickerDialog") &&
       settings.includes("KpConfirmSheet(") &&
@@ -4706,7 +4706,7 @@ const convBetween = (db, a, b) =>
       shape.json.user?.privacy?.messages === "public" &&
       shape.json.user?.privacy?.lastSeen === "public" &&
       shape.json.user?.privacy?.groups === "public" &&
-      shape.json.user?.privacy?.readReceipts === true &&
+      shape.json.user?.privacy?.readReceipts === undefined &&
       shape.json.user?.privacy?.privateProfile === false,
     JSON.stringify(shape.json.user?.privacy),
   );
@@ -4871,79 +4871,83 @@ const convBetween = (db, a, b) =>
       ),
     JSON.stringify({ byId: byId.json.user.privateProfile, row: rowB?.other?.privateProfile }),
   );
-  // read receipts off → the peer never gets my read mark (poll + list + live frame)
-  await k.call("PATCH", "/api/me", { readReceipts: false }, a.token);
-  await k.call("POST", `/api/conversations/${cid}/read`, {}, a.token);
-  const peerPage = await k.call("GET", `/api/conversations/${cid}/messages`, undefined, b.token);
-  const peerList = await k.call("GET", "/api/conversations", undefined, b.token);
-  const peerConv = (peerList.json.items ?? []).find((c) => c.id === cid);
-  const aRow = (peerConv?.members ?? []).find((m) => m.user?.id === a.user.id);
-  check(
-    "r30-2: read receipts off → readAt null on the peer's poll and lastReadAt null in their list; unread still resets",
-    peerPage.json.readAt == null &&
-      aRow &&
-      aRow.lastReadAt == null &&
-      k.db._db
-        .prepare("SELECT unread FROM members WHERE conv_id = ? AND user_id = ?")
-        .get(cid, a.user.id).unread === 0,
-    JSON.stringify({ readAt: peerPage.json.readAt, aRow }).slice(0, 160),
-  );
-  // Per-chat override can contradict the account default, and NULL returns to the global value.
-  await k.call("PATCH", "/api/me", { readReceipts: false }, a.token);
-  const soloOn = await k.call(
-    "POST",
-    `/api/conversations/${cid}/privacy`,
-    { readReceiptsOverride: true },
-    a.token,
-  );
-  await k.call("POST", `/api/conversations/${cid}/read`, {}, a.token);
-  const soloDetail = (await k.call("GET", `/api/conversations/${cid}`, undefined, a.token)).json
+  // Read receipts are one stored switch per conversation; the legacy account
+  // preference is deliberately ignored and cannot affect an unset chat.
+  k.db._db.prepare("UPDATE users SET read_receipts = 0 WHERE id = ?").run(a.user.id);
+  const defaultSolo = (await k.call("GET", `/api/conversations/${cid}`, undefined, a.token)).json
     .conversation;
-  const soloPageB = await k.call("GET", `/api/conversations/${cid}/messages`, undefined, b.token);
-  check(
-    "per-chat On overrides global Off in a 1:1 chat and remains visible to the peer",
-    soloOn.json.privacy?.globalReadReceipts === false &&
-      soloOn.json.privacy?.readReceipts === true &&
-      soloDetail?.privacy?.readReceiptsOverride === true &&
-      soloDetail?.privacy?.readReceipts === true &&
-      soloPageB.json.readAt != null,
-    JSON.stringify({ privacy: soloDetail?.privacy, readAt: soloPageB.json.readAt }),
-  );
-  await k.call(
-    "POST",
-    `/api/conversations/${cid}/privacy`,
-    { readReceiptsOverride: null },
-    a.token,
-  );
   await k.call("POST", `/api/conversations/${cid}/read`, {}, a.token);
-  const soloReset = (await k.call("GET", `/api/conversations/${cid}`, undefined, a.token)).json
-    .conversation;
-  const soloPageBAfterReset = await k.call(
+  const defaultSoloPage = await k.call(
     "GET",
     `/api/conversations/${cid}/messages`,
     undefined,
     b.token,
   );
+  const defaultSoloList = await k.call("GET", "/api/conversations", undefined, b.token);
+  const defaultSoloPeer = (defaultSoloList.json.items ?? []).find((c) => c.id === cid);
+  const defaultSoloMember = defaultSoloPeer?.members?.find((m) => m.user?.id === a.user.id);
   check(
-    "Use global clears the 1:1 override and follows global Off on every server read",
-    soloReset?.privacy?.readReceiptsOverride == null &&
-      soloReset?.privacy?.globalReadReceipts === false &&
-      soloReset?.privacy?.readReceipts === false &&
-      soloPageBAfterReset.json.readAt == null,
-    JSON.stringify({ privacy: soloReset?.privacy, readAt: soloPageBAfterReset.json.readAt }),
+    "an unset 1:1 receipt switch is independent of the legacy account preference and exposes one per-chat boolean",
+    defaultSolo?.privacy?.readReceipts === true &&
+      !("readReceiptsOverride" in (defaultSolo?.privacy ?? {})) &&
+      !("globalReadReceipts" in (defaultSolo?.privacy ?? {})) &&
+      defaultSoloPage.json.readAt != null &&
+      typeof defaultSoloMember?.lastReadAt === "string",
+    JSON.stringify({ privacy: defaultSolo?.privacy, readAt: defaultSoloPage.json.readAt }),
   );
-
-  // In a group only the opted-out member's own timestamp is hidden. Their own
-  // Off must not hide other members' timestamps, but disables the all-read aggregate.
-  await k.call("PATCH", "/api/me", { readReceipts: true }, a.token);
-  await k.call("POST", `/api/conversations/${gid}/read`, {}, a.token);
-  await k.call("POST", `/api/conversations/${gid}/read`, {}, b.token);
-  await k.call(
+  const soloOff = await k.call(
     "POST",
-    `/api/conversations/${gid}/privacy`,
-    { readReceiptsOverride: false },
+    `/api/conversations/${cid}/privacy`,
+    { readReceipts: false },
     a.token,
   );
+  await k.call("POST", `/api/conversations/${cid}/read`, {}, a.token);
+  const soloOffDetail = (await k.call("GET", `/api/conversations/${cid}`, undefined, a.token)).json
+    .conversation;
+  const soloOffPageB = await k.call(
+    "GET",
+    `/api/conversations/${cid}/messages`,
+    undefined,
+    b.token,
+  );
+  const soloOffListB = await k.call("GET", "/api/conversations", undefined, b.token);
+  const soloOffPeer = (soloOffListB.json.items ?? []).find((c) => c.id === cid);
+  const soloOffMember = soloOffPeer?.members?.find((m) => m.user?.id === a.user.id);
+  check(
+    "turning receipts Off stores false only in this 1:1 chat, hides its read time, and still clears unread",
+    soloOff.status === 200 &&
+      soloOff.json.privacy?.readReceipts === false &&
+      soloOffDetail?.privacy?.readReceipts === false &&
+      soloOffPageB.json.readAt == null &&
+      soloOffMember?.lastReadAt == null &&
+      k.db._db
+        .prepare("SELECT unread FROM members WHERE conv_id = ? AND user_id = ?")
+        .get(cid, a.user.id).unread === 0,
+    JSON.stringify({ privacy: soloOffDetail?.privacy, readAt: soloOffPageB.json.readAt }),
+  );
+
+  // A separate group keeps its own default and its members' own choices.
+  await k.call("POST", `/api/conversations/${gid}/read`, {}, a.token);
+  await k.call("POST", `/api/conversations/${gid}/read`, {}, b.token);
+  const groupDefaultA = (await k.call("GET", `/api/conversations/${gid}`, undefined, a.token)).json
+    .conversation;
+  const groupDefaultPageB = await k.call(
+    "GET",
+    `/api/conversations/${gid}/messages`,
+    undefined,
+    b.token,
+  );
+  const groupDefaultDetailB = (await k.call("GET", `/api/conversations/${gid}`, undefined, b.token))
+    .json.conversation;
+  const groupDefaultARow = groupDefaultDetailB?.members?.find((m) => m.user?.id === a.user.id);
+  check(
+    "the Off switch in the 1:1 does not alter the separate group's default or its read times",
+    groupDefaultA?.privacy?.readReceipts === true &&
+      groupDefaultPageB.json.readAt != null &&
+      typeof groupDefaultARow?.lastReadAt === "string",
+    JSON.stringify({ privacy: groupDefaultA?.privacy, readAt: groupDefaultPageB.json.readAt }),
+  );
+  await k.call("POST", `/api/conversations/${gid}/privacy`, { readReceipts: false }, a.token);
   await k.call("POST", `/api/conversations/${gid}/read`, {}, a.token);
   const groupPageBOff = await k.call(
     "GET",
@@ -4964,12 +4968,7 @@ const convBetween = (db, a, b) =>
       groupPageBOff.json.readAt == null,
     JSON.stringify({ groupARowOff, groupBRowVisibleToA, readAt: groupPageBOff.json.readAt }),
   );
-  await k.call(
-    "POST",
-    `/api/conversations/${gid}/privacy`,
-    { readReceiptsOverride: true },
-    a.token,
-  );
+  await k.call("POST", `/api/conversations/${gid}/privacy`, { readReceipts: true }, a.token);
   await k.call("POST", `/api/conversations/${gid}/read`, {}, a.token);
   const groupPageBOn = await k.call(
     "GET",
@@ -6696,7 +6695,7 @@ const convBetween = (db, a, b) =>
       "r34-16a: app — a view-once message renders ViewOnceRow: the photo at its original ratio (ImageRatios-cached) blurred past recognition via ViewOnceBlur, the ViewOnceOneIcon mark in the middle, a dark tile for video / uploads; the recipient opens it (sender's tap does nothing), the shared reply swipe + long-press stay intact, no 'Opened' state anywhere; the album fold, resend and the media grid never take it",
       // r71-20: the once-TEXT bubble sits in front of the tile.
       chat.includes(
-        "if (isViewOnce(m)) {\n        KpMessageFocusSlot(focusKey, rowMine = mine) { requestFocus ->\n            Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {",
+        'if (isViewOnce(m)) {\n        KpMessageFocusSlot(\n            focusKey,\n            rowMine = mine,\n            targetScale = if (kind == "TEXT") 1.05f else 1f,\n        ) { requestFocus ->\n            Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {',
       ) &&
         chat.includes('if (pressed.optString("kind") != "DELETED") requestFocus()') &&
         /OnceTextRow\(\s*m = m,\s*mine = mine,[\s\S]{0,500}?onDoubleTapHeart = onDoubleTapHeart,\s*onRevealStamp = onRevealStamp,?\s*\)/.test(
@@ -8027,9 +8026,8 @@ const convBetween = (db, a, b) =>
         !fp.includes('"📄 Document"') &&
         cl.includes('friendlyPreview(conv.optText("lastMessage"))') &&
         cl.includes("ChatPreviewText.seen(") &&
-        cl.includes(
-          'KpNotify.message(ctx, name, friendlyPreview(c.optString("lastMessage")), id)',
-        ) &&
+        cl.includes("KpNotify.message(") &&
+        cl.includes("unreadMessages = unreadMessages,") &&
         // r67-2: the card's text comes from the seal path (opened plaintext,
         // else a neutral label) and still passes through friendlyPreview.
         kt("KpPush.kt").includes('PushSeal.cardText(plan, opened, data["body"])') &&

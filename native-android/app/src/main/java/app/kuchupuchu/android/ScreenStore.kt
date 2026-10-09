@@ -429,6 +429,11 @@ object ScreenStore {
         }
     }
 
+    /** Total unread message count used for Android launcher notification badges. */
+    fun totalUnreadMessages(): Int =
+        convs.asSequence()
+            .sumOf { it.optInt("unread", 0).coerceAtLeast(0) }
+
     /** Instant local removal after a swipe-delete; the server delete runs behind. */
     fun dropConv(id: String) {
         convs.removeAll { it.optString("id") == id }

@@ -17,7 +17,6 @@ type Profile = {
     lastSeen: "nobody" | "contacts" | "public";
     groups: "nobody" | "contacts" | "public";
     status: "nobody" | "contacts" | "public";
-    readReceipts: boolean;
     privateProfile: boolean;
   };
 };
@@ -48,7 +47,6 @@ const baseProfile: Profile = {
     lastSeen: "public",
     groups: "public",
     status: "public",
-    readReceipts: true,
     privateProfile: false,
   },
 };
@@ -151,7 +149,6 @@ async function mockWorker(
         privLastSeen: "lastSeen",
         privGroups: "groups",
         privStatus: "status",
-        readReceipts: "readReceipts",
         privateProfile: "privateProfile",
       };
       const nextPrivacy = { ...profile.privacy };
@@ -231,6 +228,7 @@ test.describe("opt-in Worker-backed account flows", () => {
     await page.getByRole("button", { name: "Save profile" }).click();
     await expect(page.getByText("Profile saved.")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Amina Updated" })).toBeVisible();
+    await expect(page.getByText("Read receipts", { exact: true })).toHaveCount(0);
 
     await page.getByLabel("Phone number visibility").selectOption("nobody");
     await expect.poll(() => getProfile().privacy.phone).toBe("nobody");

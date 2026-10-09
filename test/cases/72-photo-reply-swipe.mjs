@@ -65,7 +65,7 @@ check(
     ) &&
     [
       'if (m.has("kpAlbum")) {\n        KpMessageFocusSlot(focusKey, rowMine = mine)',
-      "if (isViewOnce(m)) {\n        KpMessageFocusSlot(focusKey, rowMine = mine)",
+      'if (isViewOnce(m)) {\n        KpMessageFocusSlot(\n            focusKey,\n            rowMine = mine,\n            targetScale = if (kind == "TEXT") 1.05f else 1f,\n        )',
       'if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {\n        KpMessageFocusSlot(focusKey, rowMine = mine)',
       'if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {\n        KpMessageFocusSlot(focusKey, rowMine = mine)',
     ].every((site) => message.includes(site)) &&

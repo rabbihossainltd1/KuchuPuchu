@@ -51,7 +51,7 @@ check(
   "all six quick reactions use flexible slots and the '+' button retains a fixed-width visible seat",
   quickBar.includes('val quickEmojis = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")') &&
     quickBar.includes(".weight(1f)") &&
-    quickBar.includes(".width(38.dp)") &&
+    quickBar.includes(".width(32.dp)") &&
     quickBar.includes("More emojis"),
 );
 check(
@@ -65,9 +65,11 @@ check(
     chips.includes("popOffsetY.snapTo(popStartOffsetPx)") &&
     chips.includes("popOffsetY.animateTo(0f, spring") &&
     chips.includes("translationY = popOffsetY.value") &&
-    chips.includes("Modifier.offset(y = (-4).dp)") &&
+    chips.includes("Modifier.offset(y = (-5).dp)") &&
     !chips.includes("Modifier.padding(start = 6.dp)") &&
-    chips.includes("RoundedCornerShape(12.dp)") &&
+    !chips.includes(".background(") &&
+    !chips.includes(".border(") &&
+    !chips.includes("RoundedCornerShape(") &&
     messageRow.indexOf("MessageReactions(m)") >= 0 &&
     messageRow.indexOf("MessageReactions(m)") < messageRow.indexOf("BubbleStamp(m, mine"),
 );

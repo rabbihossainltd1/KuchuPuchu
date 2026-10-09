@@ -49,12 +49,13 @@ object KpNotify {
         if (convoId.isNotBlank()) convMsgs.remove(convoId)
     }
 
-    /** Cancel every message card posted for a conversation (+ the summary). */
-    fun cancelConversation(ctx: Context, convId: String) {
+    /** Cancel every message card posted for a conversation and refresh the remaining badge. */
+    fun cancelConversation(ctx: Context, convId: String, unreadMessages: Int? = null) {
         convMsgs.remove(convId)
         val mgr = NotificationManagerCompat.from(ctx)
         cardsByConv.remove(convId)?.forEach { runCatching { mgr.cancel(it) } }
         runCatching { mgr.cancel(GROUP.hashCode()) }
+        if (unreadMessages != null) syncUnreadBadge(ctx, unreadMessages)
     }
 
     private const val CHAT_CHANNEL = "kp_messages_v2"
@@ -73,6 +74,58 @@ object KpNotify {
     // sound, no DND bypass. The worker's payload fallback names the same id.
     private const val MISSED_CHANNEL = "kp_missed_v1"
     private const val GROUP = "kp_chats"
+
+    /**
+     * Best-effort launcher unread count for Android launchers that support
+     * numeric notification badges. Do not create a badge-only shade card:
+     * muted chats must remain notification-free. An existing grouped message
+     * card carries the number; no unread messages clears the summary.
+     */
+    @SuppressLint("MissingPermission")
+    fun syncUnreadBadge(ctx: Context, unreadMessages: Int) {
+        val mgrCompat = NotificationManagerCompat.from(ctx)
+        if (unreadMessages <= 0) {
+            runCatching { mgrCompat.cancel(GROUP.hashCode()) }
+            return
+        }
+        val hasMessageCard =
+            if (Build.VERSION.SDK_INT >= 23) {
+                runCatching {
+                    val manager = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    manager.activeNotifications.any { active ->
+                        active.id != GROUP.hashCode() &&
+                            active.notification.group == GROUP &&
+                            (active.notification.flags and android.app.Notification.FLAG_GROUP_SUMMARY) == 0
+                    }
+                }.getOrDefault(false)
+            } else {
+                cardsByConv.values.any { it.isNotEmpty() }
+            }
+        if (!hasMessageCard) {
+            runCatching { mgrCompat.cancel(GROUP.hashCode()) }
+            return
+        }
+        ensureChannels(ctx)
+        runCatching {
+            mgrCompat.notify(GROUP.hashCode(), summaryNotification(ctx, unreadMessages))
+        }
+    }
+
+    private fun summaryNotification(ctx: Context, unreadMessages: Int) =
+        NotificationCompat.Builder(ctx, toneChannelFor(ctx))
+            .setSmallIcon(R.mipmap.ic_stat_kp)
+            .setLargeIcon(roundLogo(ctx))
+            .setContentTitle("KuchuPuchu")
+            .setGroup(GROUP)
+            .setGroupSummary(true)
+            .setNumber(unreadMessages.coerceAtLeast(0))
+            .setAutoCancel(false)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setShowWhen(false)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .build()
 
     fun ensureChannels(ctx: Context) {
         // NotificationChannel is API 26 and the module ships minSdk 24, so on
@@ -111,6 +164,7 @@ object KpNotify {
             NotificationChannel(CHAT_CHANNEL, "Messages", NotificationManager.IMPORTANCE_HIGH)
                 .apply {
                     description = "New chat messages"
+                    setShowBadge(true)
                     // Owner round 21: the channel rings the tone picked in
                     // Settings > Sounds > Notification ringtone.
                     setSound(
@@ -140,6 +194,7 @@ object KpNotify {
             NotificationChannel(toneChannel, "Messages", NotificationManager.IMPORTANCE_HIGH)
                 .apply {
                     description = "New chat messages"
+                    setShowBadge(true)
                     setSound(
                         android.net.Uri.parse(
                             "android.resource://" + ctx.packageName + "/" + SoundPrefs.notificationRingRes(ctx),
@@ -153,6 +208,7 @@ object KpNotify {
             NotificationChannel(SILENT_CHANNEL, "Muted chats", NotificationManager.IMPORTANCE_DEFAULT)
                 .apply {
                     description = "Messages from muted conversations"
+                    setShowBadge(true)
                     setSound(null, null)
                     // Single-zero pattern = no vibration (works on every API
                     // level; setVibrationEnabled() is API 30+ only).
@@ -266,6 +322,7 @@ object KpNotify {
         mid: String? = null,
         loginRequestId: String? = null,
         picture: android.graphics.Bitmap? = null,
+        unreadMessages: Int = ScreenStore.totalUnreadMessages(),
     ) {
         ensureChannels(ctx)
         // WhatsApp-style direct actions: reply straight from the
@@ -374,6 +431,7 @@ object KpNotify {
                 .setContentText(body)
                 .setAutoCancel(true)
                 .setGroup(GROUP)
+                .setNumber(unreadMessages.coerceAtLeast(0))
                 .setWhen(System.currentTimeMillis())
                 .setContentIntent(chatTap(ctx, convoId))
                 // Owner round 32 (item 35): a photo message shows the photo —
@@ -445,16 +503,7 @@ object KpNotify {
         // visible in the shade. This was part of "message notification
         // jacche na" — messages WERE posted, some launchers just never
         // surfaced them.
-        val summary = NotificationCompat.Builder(ctx, toneChannelFor(ctx))
-                .setSmallIcon(R.mipmap.ic_stat_kp)
-                .setLargeIcon(roundLogo(ctx))
-                .setContentTitle("KuchuPuchu")
-                .setGroup(GROUP)
-                .setGroupSummary(true)
-                .setAutoCancel(true)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-                .build()
+        val summary = summaryNotification(ctx, unreadMessages)
         val mgr = NotificationManagerCompat.from(ctx)
         if (!mgr.areNotificationsEnabled()) {
             return
@@ -687,6 +736,14 @@ object KpNotify {
 
 /** Handles Reply / Like / Mark-as-read straight from the message notification. */
 class KpNotifActionReceiver : android.content.BroadcastReceiver() {
+    private fun refreshUnreadBadge(ctx: Context) {
+        runCatching {
+            val items = Api.get("/api/conversations", true).arr("items").objects()
+            ScreenStore.setConvs(items)
+            KpNotify.syncUnreadBadge(ctx, ScreenStore.totalUnreadMessages())
+        }
+    }
+
     override fun onReceive(ctx: Context, intent: Intent) {
         val convoId = intent.getStringExtra("convoId") ?: return
         // The exact card this action came from (worker `mid` in the extras).
@@ -741,6 +798,7 @@ class KpNotifActionReceiver : android.content.BroadcastReceiver() {
                     }
                     runCatching { Api.post("/api/conversations/$convoId/read") }
                     runCatching { ScreenStore.markRead(convoId) }
+                    refreshUnreadBadge(ctx)
                     pending.finish()
                 }.start()
             }
@@ -752,6 +810,7 @@ class KpNotifActionReceiver : android.content.BroadcastReceiver() {
                 Thread {
                     runCatching { Api.post("/api/conversations/$convoId/read") }
                     runCatching { ScreenStore.markRead(convoId) }
+                    refreshUnreadBadge(ctx)
                     pending.finish()
                 }.start()
             }

@@ -443,7 +443,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
         "lineHeight = 20.sp,\n                                modifier = Modifier.padding(vertical = 6.dp),",
       ) &&
       chat.includes("Modifier.heightIn(min = 44.dp)") &&
-      chat.includes("KpMessageFocusSlot(focusKey) { requestFocus ->") &&
+      chat.includes('targetScale = if (kind == "TEXT") 1.05f else 1f,') &&
       /ViewOnceRow\(\s*m = m,\s*mine = mine,[\s\S]{0,700}?onDoubleTapHeart = onDoubleTapHeart,\s*onRevealStamp = onRevealStamp,?\s*\)/.test(
         chat,
       ),
@@ -495,7 +495,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     "r71-20: the once-text row is dispatched to its own bubble (never the blurred-photo tile), and that row keeps the reply swipe, the long press and the heart",
     chat.includes('if (kind == "TEXT" && m.optText("body").isNotBlank()) {') &&
-      chat.includes("KpMessageFocusSlot(focusKey) { requestFocus ->") &&
+      chat.includes('targetScale = if (kind == "TEXT") 1.05f else 1f,') &&
       chat.includes("val onFocusedLongPress: (JSONObject) -> Unit = { pressed ->") &&
       /OnceTextRow\(\s*m = m,\s*mine = mine,[\s\S]{0,500}?onDoubleTapHeart = onDoubleTapHeart,\s*onRevealStamp = onRevealStamp,?\s*\)/.test(
         chat,
@@ -727,9 +727,12 @@ const main = (f) => read(`${ANDROID}/${f}`);
     "r71-18: the switches are the server's (read from the conversation, written back one at a time) and a capture alert lands as a red chip with one buzz",
     chat.includes('c?.optJSONObject("privacy")') &&
       chat.includes(
-        "fun setChatPrivacy(\n        shot: Boolean? = null,\n        rec: Boolean? = null,\n        save: Boolean? = null,\n        allowShot: Boolean? = null,\n        allowRec: Boolean? = null,\n        readReceiptsOverride: Boolean? = null,\n        updateReadReceipts: Boolean = false,\n    )",
+        "fun setChatPrivacy(\n        shot: Boolean? = null,\n        rec: Boolean? = null,\n        save: Boolean? = null,\n        allowShot: Boolean? = null,\n        allowRec: Boolean? = null,\n        readReceipts: Boolean? = null,\n    )",
       ) &&
       chat.includes('"/api/conversations/$convId/privacy"') &&
+      chat.includes('readReceipts?.let { put("readReceipts", it) }') &&
+      !chat.includes("readReceiptsOverride") &&
+      !chat.includes("globalReadReceipts") &&
       // r76-19 (owner item 3: rapid flips auto-reverted): pokes are ignored
       // while a write is in flight, and the writes serialize on a mutex, so
       // the last flip is the last write and its poke is the final word.

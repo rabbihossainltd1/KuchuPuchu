@@ -80,7 +80,8 @@ check(
 );
 check(
   "four equally sized tab slots share a centered indicator with the demo's 450ms easing",
-  nav.includes("navOrder.forEach { itemId ->") &&
+  nav.includes("HomeNavOrderPolicy.defaultOrder.forEach { itemId ->") &&
+    nav.includes("val animatedSlotOffsetPx by animateFloatAsState(") &&
     (nav.match(/Modifier\.weight\(1f\)/g) ?? []).length === 1 &&
     nav.includes("val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4") &&
     nav.includes("val indicatorSize = 40.dp") &&
@@ -211,10 +212,11 @@ check(
       .includes(".border("),
 );
 check(
-  "focused message replays the original-size Compose layer above reactions, without bitmap capture or touch-through",
+  "focused message eases into a slight scale-up above reactions and returns without bitmap capture or touch-through",
   chat.includes("DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), bubbleShape)") &&
     chat.includes('focusKey = "message:$rowKey"') &&
-    chat.includes("targetScale = 1f") &&
+    chat.includes('targetScale = if (kind == "TEXT") 1.05f else 1f') &&
+    focus.includes("val scale = 1f + (item.targetScale - 1f) * t") &&
     focus.includes("LocalGraphicsContext.current") &&
     focus.includes("createGraphicsLayer()") &&
     focus.includes("capturePending && layer != null") &&

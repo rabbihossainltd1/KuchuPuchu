@@ -52,7 +52,8 @@ check(
   "home navigation distributes all four tabs in equal-width slots",
   nav.includes("horizontalArrangement = Arrangement.spacedBy(gap)") &&
     (nav.match(/Modifier\.weight\(1f\)/g) ?? []).length >= 1 &&
-    nav.includes("navOrder.forEach { itemId ->") &&
+    nav.includes("HomeNavOrderPolicy.defaultOrder.forEach { itemId ->") &&
+    nav.includes("val orderedPosition = navOrder.indexOf(itemId)") &&
     nav.includes("val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4"),
 );
 check(
@@ -217,6 +218,20 @@ check(
     navPolicy.includes("fun move(order: List<String>, itemId: String, destination: Int)") &&
     navPolicyTest.includes("HomeNavOrderPolicy.move(") &&
     navPolicyTest.includes("HomeNavOrderPolicy.normalize("),
+);
+check(
+  "dragged tabs alone scale smoothly while stationary siblings animate into their reordered slots",
+  nav.includes("val animatedSlotOffsetPx by animateFloatAsState(") &&
+    nav.includes("reorderOffsetPx = itemOffsetPx") &&
+    nav.includes("settlingOffset.animateTo(") &&
+    chatList.includes("targetValue = if (isDragging) 1.06f else 1f") &&
+    chatList.includes('label = "navHoldScale"') &&
+    chatList.includes("translationX = reorderOffsetPx"),
+);
+check(
+  "the Chats unread badge is red and circular with no outline",
+  chatList.includes(".background(Color(0xFFE24B4A))") &&
+    !chatList.includes(".border(1.5.dp * sizeScale"),
 );
 check(
   "chat overflow action stays above the floating nav reservation",

@@ -14,7 +14,7 @@ import {
 type PrivacyValue = "nobody" | "contacts" | "public";
 type PrivacyField =
   "privPhone" | "privAvatar" | "privMessages" | "privLastSeen" | "privGroups" | "privStatus";
-type BooleanPrivacyField = "readReceipts" | "privateProfile";
+type BooleanPrivacyField = "privateProfile";
 
 const defaultPrivacy: AuthPrivacy = {
   phone: "contacts",
@@ -23,7 +23,6 @@ const defaultPrivacy: AuthPrivacy = {
   lastSeen: "public",
   groups: "public",
   status: "public",
-  readReceipts: true,
   privateProfile: false,
 };
 
@@ -380,15 +379,6 @@ export function AccountSettingsPage({
                   </select>
                 </label>
               ))}
-              <label className="privacy-row privacy-row--toggle">
-                <span>Read receipts</span>
-                <input
-                  type="checkbox"
-                  checked={privacy.readReceipts}
-                  onChange={(event) => void updatePrivacy("readReceipts", event.target.checked)}
-                  disabled={privacyBusy !== null}
-                />
-              </label>
               <label className="privacy-row privacy-row--toggle">
                 <span>Private profile</span>
                 <input

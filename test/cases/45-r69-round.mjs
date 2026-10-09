@@ -324,7 +324,8 @@ const detail = (k, who, convId) =>
   );
   check(
     "r69 mute: a muted chat posts NO card at all — the badge/list still move, but nothing lands in the shade (the silent channel still drew one), and a call-muted chat's missed-call card is withheld too (the ring never happened)",
-    push.includes("if (muted) return") &&
+    push.includes("if (muted) {") &&
+      push.includes("KpNotify.syncUnreadBadge(this, unreadMessages)") &&
       src.includes("if (muteRow?.muted_call === 1) return;") &&
       src.includes('// r69: the chat is muted for CALLS — the ring was withheld, so a "Missed'),
   );
