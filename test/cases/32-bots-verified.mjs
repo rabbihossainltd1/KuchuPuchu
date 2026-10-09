@@ -6574,7 +6574,7 @@ const convBetween = (db, a, b) =>
       "r34-16a: app — a view-once message renders ViewOnceRow: the photo at its original ratio (ImageRatios-cached) blurred past recognition via ViewOnceBlur, the ViewOnceOneIcon mark in the middle, a dark tile for video / uploads; the recipient opens it (sender's tap does nothing), the shared reply swipe + long-press stay intact, no 'Opened' state anywhere; the album fold, resend and the media grid never take it",
       // r71-20: the once-TEXT bubble sits in front of the tile.
       chat.includes(
-        "if (isViewOnce(m)) {\n        KpMessageFocusSlot(focusKey) { requestFocus ->\n            Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {",
+        "if (isViewOnce(m)) {\n        KpMessageFocusSlot(focusKey, rowMine = mine) { requestFocus ->\n            Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {",
       ) &&
         chat.includes('if (pressed.optString("kind") != "DELETED") requestFocus()') &&
         /OnceTextRow\(\s*m = m,\s*mine = mine,[\s\S]{0,500}?onDoubleTapHeart = onDoubleTapHeart,\s*onRevealStamp = onRevealStamp,?\s*\)/.test(

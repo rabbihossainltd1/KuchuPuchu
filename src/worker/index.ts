@@ -7843,15 +7843,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (ids.length) {
       for (const r of await all<ConvPreviewRow>(
         db,
-        `SELECT ${CONV_PREVIEW_COLS}, ${UNREAD_PREVIEW_SAMPLE} AS unread_sample
-           FROM json_each(?) j
-           JOIN messages m ON m.rowid = (
-             SELECT rowid FROM messages
-             WHERE conv_id = json_extract(j.value, '$.id')
-               AND created_at = json_extract(j.value, '$.at') AND kind != 'DELETED'
-             ORDER BY rowid DESC LIMIT 1
-           )
-           JOIN members viewer_member ON viewer_member.conv_id = m.conv_id AND viewer_member.user_id = ?`,
+        CONV_LIST_PREVIEW_QUERY,
         JSON.stringify(ids.map((id) => ({ id, at: convs.get(id)?.last_message_at ?? null }))),
         uid,
       )) {
@@ -12255,6 +12247,23 @@ export const UNREAD_PREVIEW_SAMPLE = `CASE WHEN viewer_member.unread BETWEEN 1 A
     ORDER BY created_at DESC, rowid DESC LIMIT 32
   ) recent
 ) ELSE NULL END`;
+
+/**
+ * The list route supplies at most 44 conversation ids through json_each. Keep
+ * that virtual table as the outer loop: a plain JOIN lets SQLite reorder to
+ * members → messages by conv_id and scan every message in each chat just to
+ * test one rowid. CROSS JOIN is a deliberate optimizer barrier; D1's plan must
+ * be `SEARCH m USING INTEGER PRIMARY KEY (rowid=?)` for each requested preview.
+ */
+export const CONV_LIST_PREVIEW_QUERY = `SELECT ${CONV_PREVIEW_COLS}, ${UNREAD_PREVIEW_SAMPLE} AS unread_sample
+  FROM json_each(?) j
+  CROSS JOIN messages m ON m.rowid = (
+    SELECT rowid FROM messages
+    WHERE conv_id = json_extract(j.value, '$.id')
+      AND created_at = json_extract(j.value, '$.at') AND kind != 'DELETED'
+    ORDER BY rowid DESC LIMIT 1
+  )
+  JOIN members viewer_member ON viewer_member.conv_id = m.conv_id AND viewer_member.user_id = ?`;
 
 function previewCategory(row: Pick<MsgRow, "kind" | "meta_json">): string {
   const meta = parseJson<Record<string, unknown>>(row.meta_json, {});

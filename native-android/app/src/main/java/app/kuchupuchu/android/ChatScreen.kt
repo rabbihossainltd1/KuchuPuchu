@@ -8187,20 +8187,37 @@ private fun Modifier.messageReplySwipe(
 @Composable
 private fun KpMessageFocusSlot(
     focusKey: String?,
+    rowMine: Boolean? = null,
     content: @Composable (requestFocus: () -> Unit) -> Unit,
 ) {
-    if (focusKey == null) {
-        content {}
+    // Keep the live focus layer bubble-sized. Media rows contain their own
+    // fillMaxWidth/Arrangement.End row; because the focus layer measures its
+    // child with an unbounded width, that inner row otherwise has no spare
+    // width to arrange into and an outgoing photo lands at the left edge.
+    val focusSlot: @Composable () -> Unit = {
+        if (focusKey == null) {
+            content {}
+        } else {
+            KpLiveFocusItem(
+                key = focusKey,
+                modifier = Modifier.wrapContentSize(unbounded = true),
+                targetScale = 1f,
+                content = content,
+            )
+        }
+    }
+    if (rowMine == null) {
+        focusSlot()
     } else {
-        KpLiveFocusItem(
-            key = focusKey,
-            // Media rows use fillMaxWidth for their normal chat alignment. Let
-            // that inner row measure to its bubble here, so the captured live
-            // layer and its lift target do not span the whole thread width.
-            modifier = Modifier.wrapContentSize(unbounded = true),
-            targetScale = 1f,
-            content = content,
-        )
+        // Bound the alignment row OUTSIDE the unbounded focus slot. The slot
+        // still captures only the bubble, while sent media gets its existing
+        // end alignment without changing bubble size or swipe geometry.
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = if (rowMine) Arrangement.End else Arrangement.Start,
+        ) {
+            focusSlot()
+        }
     }
 }
 
@@ -8438,7 +8455,7 @@ private fun MessageRow(
     // image uploads (picked as documents) get the same treatment.
     // Owner round 31 (item 29): photos sent together = one grouped bubble.
     if (m.has("kpAlbum")) {
-        KpMessageFocusSlot(focusKey) { requestFocus ->
+        KpMessageFocusSlot(focusKey, rowMine = mine) { requestFocus ->
             Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
                 AlbumMessageRow(
                     m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect,
@@ -8460,7 +8477,7 @@ private fun MessageRow(
     // opens the media ONCE for the recipient; the opening deletes the row
     // for everyone, so there is no opened state left to render.
     if (isViewOnce(m)) {
-        KpMessageFocusSlot(focusKey) { requestFocus ->
+        KpMessageFocusSlot(focusKey, rowMine = mine) { requestFocus ->
             Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
                 // r71-20: a view-once TEXT is its own bubble (veiled, one tap to
                 // reveal, five seconds, then gone for both) — the photo / video /
@@ -8506,7 +8523,7 @@ private fun MessageRow(
         return
     }
     if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {
-        KpMessageFocusSlot(focusKey) { requestFocus ->
+        KpMessageFocusSlot(focusKey, rowMine = mine) { requestFocus ->
             Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
                 ImageMessageRow(
                     m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect,
@@ -8527,7 +8544,7 @@ private fun MessageRow(
     // Owner round 20: videos render as a tappable video bubble and play
     // IN-APP (the system player could never stream these auth-only files).
     if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {
-        KpMessageFocusSlot(focusKey) { requestFocus ->
+        KpMessageFocusSlot(focusKey, rowMine = mine) { requestFocus ->
             Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
                 VideoMessageRow(
                     m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect,

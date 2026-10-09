@@ -62,6 +62,9 @@ object KpNotify {
     // no vibration (IMPORTANCE_DEFAULT). The mute toggle used to change only
     // the bell icon — every message still rang on the loud channel above.
     private const val SILENT_CHANNEL = "kp_silent_v1"
+    // Reply confirmations remain visible in the shade but must never reuse a
+    // per-tone message channel (that channel intentionally rings).
+    private const val REPLY_CHANNEL = "kp_reply_silent_v1"
     private const val CALL_CHANNEL = "kp_calls_v5"
     // Owner round 31 (item 24): missed-call cards used to ride the incoming-
     // call channel above, which RINGS (alarm stream, DND bypass, ring
@@ -154,6 +157,14 @@ object KpNotify {
                     // Single-zero pattern = no vibration (works on every API
                     // level; setVibrationEnabled() is API 30+ only).
                     setVibrationPattern(longArrayOf(0))
+                },
+        )
+        mgr.createNotificationChannel(
+            NotificationChannel(REPLY_CHANNEL, "Sent replies", NotificationManager.IMPORTANCE_LOW)
+                .apply {
+                    description = "Quiet confirmations after replying from a notification"
+                    setSound(null, null)
+                    enableVibration(false)
                 },
         )
         // v5: the user wants incoming calls to RING even on silent (like an
@@ -588,10 +599,11 @@ object KpNotify {
         }
 
     /**
-     * Quiet confirmation shown after replying from the notification.
+     * Silent confirmation shown after replying from the notification.
      * `cardId` (the original card's id) is reused so this REPLACES the card
      * in place — a second, differently-id'd "Sent" card used to pile up next
-     * to the one that failed to dismiss.
+     * to the one that failed to dismiss. It must not ride a per-tone channel:
+     * those channels are explicitly configured to sound for incoming messages.
      */
     // NotificationManagerCompat.notify() does NOT throw when POST_NOTIFICATIONS is
     // not granted — the system drops the notification — and message() gates on
@@ -600,14 +612,18 @@ object KpNotify {
     // per call keeps that one gate in one place.
     @SuppressLint("MissingPermission")
     fun replySent(ctx: Context, convoId: String, text: String, cardId: Int) {
-        val n = NotificationCompat.Builder(ctx, toneChannelFor(ctx))
-                .setSmallIcon(R.mipmap.ic_stat_kp)
-                .setContentTitle("Sent")
-                .setContentText(text.take(80))
-                .setAutoCancel(true)
-                .setContentIntent(chatTap(ctx, convoId))
-                .setPriority(NotificationCompat.PRIORITY_MIN)
-                .build()
+        val n = NotificationCompat.Builder(ctx, REPLY_CHANNEL)
+            .setSmallIcon(R.mipmap.ic_stat_kp)
+            .setContentTitle("Sent")
+            .setContentText(text.take(80))
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setSound(null)
+            .setVibrate(null)
+            .setDefaults(0)
+            .setContentIntent(chatTap(ctx, convoId))
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .build()
         runCatching { NotificationManagerCompat.from(ctx).notify(cardId, n) }
     }
 

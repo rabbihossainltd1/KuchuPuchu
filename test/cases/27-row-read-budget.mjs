@@ -124,6 +124,20 @@ const plan = (raw, sql, ...bind) =>
     ),
     previewPlan,
   );
+  const listPreviewPlan = raw
+    .prepare(`EXPLAIN QUERY PLAN ${mod.CONV_LIST_PREVIEW_QUERY}`)
+    .all("[]", "u-preview")
+    .map((r) => r.detail)
+    .join(" | ");
+  check(
+    "conversation-list previews drive each requested message by rowid instead of scanning that chat's history",
+    listPreviewPlan.includes("SCAN j VIRTUAL TABLE") &&
+      listPreviewPlan.includes("SEARCH m USING INTEGER PRIMARY KEY (rowid=?)") &&
+      !/SEARCH m USING (?:COVERING )?INDEX idx_messages_dedupe \(conv_id=\?\)/.test(
+        listPreviewPlan,
+      ),
+    listPreviewPlan,
+  );
   const oneToOneIcePlan = raw
     .prepare(
       "EXPLAIN QUERY PLAN SELECT rowid, sender_id, candidate_json, created_at FROM call_ice WHERE call_id = ? AND sender_id != ? AND rowid > ? ORDER BY rowid ASC",

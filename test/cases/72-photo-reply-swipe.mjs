@@ -26,6 +26,11 @@ const swipe = section(
   "private fun Modifier.messageReplySwipe(",
   "/** Lift only the visual message content",
 );
+const focusSlot = section(
+  chat,
+  "private fun KpMessageFocusSlot(",
+  "@OptIn(ExperimentalFoundationApi::class)",
+);
 const message = section(
   chat,
   "private fun MessageRow(",
@@ -49,6 +54,23 @@ check(
     unit.includes("requiredDistance(baseThresholdPx = 36f)") &&
     unit.includes("deltaX = 51f, deltaY = 4f, mine = false") &&
     unit.includes("deltaX = -51f, deltaY = 4f, mine = true"),
+);
+check(
+  "media keeps a bubble-sized focus target but aligns the bounded outer slot to the sender side",
+  focusSlot.includes("rowMine: Boolean? = null") &&
+    focusSlot.includes("Modifier.wrapContentSize(unbounded = true)") &&
+    focusSlot.includes("Modifier.fillMaxWidth()") &&
+    focusSlot.includes(
+      "horizontalArrangement = if (rowMine) Arrangement.End else Arrangement.Start",
+    ) &&
+    [
+      'if (m.has("kpAlbum")) {\n        KpMessageFocusSlot(focusKey, rowMine = mine)',
+      "if (isViewOnce(m)) {\n        KpMessageFocusSlot(focusKey, rowMine = mine)",
+      'if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {\n        KpMessageFocusSlot(focusKey, rowMine = mine)',
+      'if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {\n        KpMessageFocusSlot(focusKey, rowMine = mine)',
+    ].every((site) => message.includes(site)) &&
+    image.includes("horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start") &&
+    image.includes("Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start)"),
 );
 check(
   "text/sticker/voice/file/document rows use the shared recognizer on a stable parent while the visual bubble moves",
