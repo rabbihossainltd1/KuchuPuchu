@@ -38,13 +38,14 @@ worker সহ একমাত্র সুট), voice player-এর honest `ende
 ### প্রোডাকশন রেসিপি
 
 `build:web:prod` = `VITE_KP_WEB_ACCOUNT_INTEGRATION=true
-VITE_KP_WEB_MESSAGING=true VITE_KP_WEB_STATUSES=true VITE_KP_WEB_PUSH=true` —
-অ্যাকাউন্ট + চ্যাট + স্ট্যাটাস + ওয়েব-পুশ। স্ট্যাটাস slice K-তে চালু (ফোন-প্যারিটি;
-slice F-এর গেটেড + টেস্টেড সারফেস, ২৩-টেস্টের সুট সহ); পুশ slice P-তে চালু
-(সার্ভারে `VAPID_PRIVATE_KEY` সিক্রেট বসানো হয়েছে, তাই সেটিংস-কার্ড এখন সত্যিকারের
-সাবস্ক্রিপশন অফার করে)। কলস স্থায়ী নির্দেশনায় ডিফল্ট-অফ; `media` ফ্ল্যাগ
-reserved — কিছুই গেট করে না, চালু করার কিছু নেই (#92 সেটা উল্টেছিল;
-integration-এ ফেরানো)। ভিট কনফিগে `sourcemap: false` — ডিপ্লয়ের পর `web/dist`-এর সব ফাইল
+VITE_KP_WEB_MESSAGING=true VITE_KP_WEB_STATUSES=true VITE_KP_WEB_PUSH=true
+VITE_KP_WEB_CALLS=true` — অ্যাকাউন্ট + চ্যাট + স্ট্যাটাস + ওয়েব-পুশ + ১:১ কল।
+স্ট্যাটাস slice K-তে চালু (ফোন-প্যারিটি; slice F-এর গেটেড + টেস্টেড সারফেস,
+২৩-টেস্টের সুট সহ); পুশ slice P-তে চালু (সার্ভারে `VAPID_PRIVATE_KEY` সিক্রেট
+বসানো হয়েছে, তাই সেটিংস-কার্ড এখন সত্যিকারের সাবস্ক্রিপশন অফার করে); কলস
+slice Q-তে মালিক-অনুমোদনে চালু (১:১ WebRTC; ব্রাউজার-সীমা `docs/web-calls.md`-এ,
+TURN ক্রেডেনশিয়াল সার্ভারে আগে থেকেই বসানো)। `media` ফ্ল্যাগ reserved — কিছুই গেট
+করে না, চালু করার কিছু নেই (#92 সেটা উল্টেছিল; integration-এ ফেরানো)। ভিট কনফিগে `sourcemap: false` — ডিপ্লয়ের পর `web/dist`-এর সব ফাইল
 world-readable, লেগ্যাসি কখনো `.map` ছাপেনি।
 
 ## ২. সিকিউরিটি হেডার
