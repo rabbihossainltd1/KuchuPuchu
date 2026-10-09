@@ -488,6 +488,10 @@ const convBetween = (db, a, b) =>
     "native-android/app/src/main/java/app/kuchupuchu/android/ChatScreen.kt",
     "utf8",
   );
+  const replySwipe = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/MessageReplySwipePolicy.kt",
+    "utf8",
+  );
   check(
     "header shows the first name only (honorific MD skipped, bots/groups full)",
     chat.includes('w.equals("MD", true)') && chat.includes("if (botChat || isGroup) rawTitle"),
@@ -966,8 +970,13 @@ const convBetween = (db, a, b) =>
       ).includes("KpThemeMode.load(this)"),
   );
   check(
-    "13b hotfix: reply swipe uses the standard gesture detector (no scroll fight)",
-    chat.includes("detectHorizontalDragGestures(") && !chat.includes("var consumed = false"),
+    "13b hotfix: shared reply recognizer claims clear horizontal intent without a hand-rolled consume state",
+    chat.includes("private fun Modifier.messageReplySwipe(") &&
+      chat.includes(
+        "MessageReplySwipePolicy.isHorizontalIntent(dx, dy, viewConfiguration.touchSlop)",
+      ) &&
+      chat.includes("change.consume()") &&
+      !chat.includes("var consumed = false"),
   );
   check(
     "13b hotfix: archive pull-hold observes crossings (no per-pixel restarts)",
@@ -1135,11 +1144,12 @@ const convBetween = (db, a, b) =>
     chat.includes("color = if (mine) Color(0xE6FFFFFF) else Ink"),
   );
   check(
-    "r17-12/18: reply swipes calmer — text own-swipe 1.5x, photo 1.4x (no more 1.8x hair-trigger)",
-    chat.includes("replyThreshold * 1.5f") &&
-      chat.includes("if (mine) replyThreshold * 1.5f else replyThreshold") &&
-      chat.includes("replyThreshold * 1.4f") &&
-      !chat.includes("replyThreshold * 1.8f, 0f)\n                                    } else {"),
+    "r17-12/18: the shared reply policy has one 1.4× release distance and rejects mostly-vertical drags for every message type",
+    replySwipe.includes(
+      "fun requiredDistance(baseThresholdPx: Float): Float = baseThresholdPx * 1.4f",
+    ) &&
+      replySwipe.includes("abs(deltaX) >= abs(deltaY) * 1.25f") &&
+      chat.includes("Modifier.messageReplySwipe("),
   );
   check(
     "r17-13/r31-8: long-press keeps the focused action sheet; quick reactions float above the selected bubble, then Reply/Copy/Forward/Edit/Delete/Select remain in the sheet; one Delete popup and live-bubble return",
@@ -1718,10 +1728,10 @@ const convBetween = (db, a, b) =>
     src.includes("user:${userId}"),
   );
   check(
-    "16: own-message LEFT-swipe reply + photo reply drag + theme-aware photo border (r17: calmer 1.5x)",
-    chat.includes("if (mine) {") &&
-      chat.includes("(replyDrag + dragAmount).coerceIn(-replyThreshold * 1.5f, 0f)") &&
-      chat.includes("if (mine) replyThreshold * 1.5f else replyThreshold") &&
+    "16: the shared reply policy sends own messages LEFT and incoming messages RIGHT across text and photo rows",
+    replySwipe.includes("if (mine) deltaX < 0f else deltaX > 0f") &&
+      chat.includes("modifier = Modifier.messageReplySwipe(") &&
+      chat.includes("Modifier.messageReplySwipe(") &&
       // v163: the row also hands the ✕ (cancel send) down.
       chat.includes(
         'ImageMessageRow(\n                    m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect,\n                    onOpenImage, onReply,\n                    onLongPress = { pressed ->\n                        if (pressed.optString("kind") != "DELETED") requestFocus()\n                        onLongPress(pressed)\n                    },\n                    theme = theme,\n                    onCancelSend = onCancelSend,\n                    onDoubleTapHeart = onDoubleTapHeart,\n                    onRevealStamp = onRevealStamp,\n                )',
@@ -5910,6 +5920,10 @@ const convBetween = (db, a, b) =>
       src.indexOf("function previewOf(row: MsgRow): string {"),
       src.indexOf("async function fanOutProfileChange("),
     );
+    const cardStyle = notify.slice(
+      notify.indexOf("// A just-arrived photo always takes precedence"),
+      notify.indexOf("// The official notification account is one-way"),
+    );
     check(
       "r32-35: worker — send preview comes from previewOf (no 'photo.jpg'), image/video/audio media files read as words (r33-12: Documents read 'Document'), push data carries kp_media only for a picture",
       src.includes("const preview = previewOf({") &&
@@ -5919,10 +5933,16 @@ const convBetween = (db, a, b) =>
         previewOf.includes('if (type.startsWith("video/")) return `Video${once}`;') &&
         previewOf.includes("if (meta.document !== true) {") &&
         src.includes("const pictureUrl =\n      message.hasImage && !message.viewOnce") &&
-        src.includes("...(pictureUrl ? { kp_media: pictureUrl } : {}),"),
+        src.includes("...(pictureUrl ? { kp_media: pictureUrl } : {}),") &&
+        src.includes(
+          "const needsDeviceRendering = (!!sealedBody && !message.viewOnce) || !!pictureUrl;",
+        ) &&
+        src.includes(
+          'data.type === "message" && (data.kp_e2ee === "1" || !!data.kp_media?.startsWith("/api/"));',
+        ),
     );
     check(
-      "r32-35: app — bounded fetch (Api.downloadWithin via Bitmaps.fetchWithin, cache-first, stored for the chat), only an /api/ path is fetched, the card sets the large icon + BigPictureStyle and keeps Reply / Like / Mark-as-read",
+      "r32-35: app — bounded fetch (Api.downloadWithin via Bitmaps.fetchWithin, cache-first, stored for the chat), only an /api/ path is fetched, the actual image takes BigPictureStyle precedence over stacked-thread style, and Reply / Like / Mark-as-read remain",
       api.includes("fun downloadWithin(pathOrKey: String, millis: Long): ByteArray? {") &&
         api.includes("http.newBuilder().callTimeout(millis, TimeUnit.MILLISECONDS).build()") &&
         ui.includes("fun fetchWithin(url: String, millis: Long, maxSide: Int = 720): Bitmap? {") &&
@@ -5932,9 +5952,12 @@ const convBetween = (db, a, b) =>
         push.includes("Bitmaps.ensureInit(this)") &&
         push.includes("picture = picture,") &&
         notify.includes("picture: android.graphics.Bitmap? = null,") &&
-        notify.includes("NotificationCompat.BigPictureStyle()") &&
-        notify.includes(".bigPicture(picture)") &&
-        notify.includes("setLargeIcon(picture)") &&
+        cardStyle.includes("if (picture != null) {") &&
+        cardStyle.indexOf("if (picture != null) {") <
+          cardStyle.indexOf("else if (stacked != null && stacked.size >= 2)") &&
+        cardStyle.includes("NotificationCompat.BigPictureStyle()") &&
+        cardStyle.includes(".bigPicture(picture)") &&
+        cardStyle.includes("setLargeIcon(picture)") &&
         notify.indexOf("NotificationCompat.BigPictureStyle()") <
           notify.indexOf('if (!convoId.contains("kp_official_bot")) addAction(replyAction)') &&
         notify.includes(".addAction(readAction)"),
@@ -6548,7 +6571,7 @@ const convBetween = (db, a, b) =>
       chat.indexOf("internal fun sentAsDocument(m: JSONObject): Boolean ="),
     );
     check(
-      "r34-16a: app — a view-once message renders ViewOnceRow: the photo at its original ratio (ImageRatios-cached) blurred past recognition via ViewOnceBlur, the ViewOnceOneIcon mark in the middle, a dark tile for video / uploads; the recipient opens it (sender's tap does nothing), reply-drag + long-press intact, no 'Opened' state anywhere; the album fold, resend and the media grid never take it",
+      "r34-16a: app — a view-once message renders ViewOnceRow: the photo at its original ratio (ImageRatios-cached) blurred past recognition via ViewOnceBlur, the ViewOnceOneIcon mark in the middle, a dark tile for video / uploads; the recipient opens it (sender's tap does nothing), the shared reply swipe + long-press stay intact, no 'Opened' state anywhere; the album fold, resend and the media grid never take it",
       // r71-20: the once-TEXT bubble sits in front of the tile.
       chat.includes(
         "if (isViewOnce(m)) {\n        KpMessageFocusSlot(focusKey) { requestFocus ->\n            Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {",
@@ -6566,7 +6589,8 @@ const convBetween = (db, a, b) =>
           ) &&
         onceRow.includes("val openable = !mine && !pendingEcho") &&
         onceRow.includes("canOpen -> if (video) onOpenVideo(m) else onOpenImage(m)") &&
-        onceRow.includes("detectHorizontalDragGestures(") &&
+        onceRow.includes("modifier = Modifier.messageReplySwipe(") &&
+        onceRow.includes("onLongClick = {") &&
         onceRow.includes("if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)") &&
         onceRow.includes(".transformations(ViewOnceBlur)") &&
         onceRow.includes("coil.compose.AsyncImage(") &&
@@ -7200,9 +7224,8 @@ const convBetween = (db, a, b) =>
         // Owner round 42 (item 3): every media column hugs MY side — r72-20
         // gives the once-view text row the same wrapper (bubble + its stamp).
         (
-          chat.match(
-            /Column\(horizontalAlignment = if \(mine\) Alignment\.End else Alignment\.Start\) \{/g,
-          ) || []
+          chat.match(/horizontalAlignment = if \(mine\) Alignment\.End else Alignment\.Start/g) ||
+          []
         ).length === 6 &&
         // r64 E2EE: the four forwards carry bodyOut (re-sealed per target
         // key); the ImageBubble copy still reads the opened row body as-is.
@@ -7265,10 +7288,8 @@ const convBetween = (db, a, b) =>
     );
     check(
       "r32-40: chat — text and media reply swipes buzz once when armed, the select bar's actions buzz (copy confirms; r68-8: the single Delete taps, and the popup's own Delete thuds), the ⋮ taps, an error line rejects once when it appears, schedule-sheet chips / steppers / theme swatches tap, a parked message's X thuds, voice play taps",
-      // r71-20: once-text keeps its own arming tap; photo and album share the
-      // stable photoReplySwipe wrapper, whose arming callback is one tap.
-      (chat.match(/if \(!wasArmed && kotlin\.math\.abs\(replyDrag\) >= /g) || []).length === 4 &&
-        (chat.match(/onArmed = \{ haptics\.tap\(\) \}/g) || []).length === 2 &&
+      // Every message row now shares the same arming callback and policy.
+      (chat.match(/onArmed = \{ haptics\.tap\(\) \}/g) || []).length === 6 &&
         chat.includes(
           "if (!armed && MessageReplySwipePolicy.shouldReply(dx, dy, mine, baseThresholdPx))",
         ) &&
@@ -7873,7 +7894,7 @@ const convBetween = (db, a, b) =>
         !src.includes('"📷 Photo"'),
     );
     check(
-      "r33-12: app — friendlyPreview is shared (internal), returns Photo / Voice message / Video / Document with no emoji, treats links and multi-line text as text, and is applied to the list row, both Search chat rows, the push card and the poll fallback card",
+      "r33-12: app — friendlyPreview is shared (internal), returns Photo / Voice message / Video / Document with no emoji, treats links and multi-line text as text, and is applied directly or through the E2EE-safe conversationSearchPreview to the list, both Search rows, the push card and the poll fallback card",
       fp.length > 0 &&
         fp.includes('lower == "video" || lower == "🎬 video" -> "Video"') &&
         fp.includes('lower == "document" || lower == "📄 document" -> "Document"') &&
@@ -7891,7 +7912,7 @@ const convBetween = (db, a, b) =>
         // else a neutral label) and still passes through friendlyPreview.
         kt("KpPush.kt").includes('PushSeal.cardText(plan, opened, data["body"])') &&
         kt("KpPush.kt").includes("friendlyPreview(cardText),") &&
-        (kt("SearchScreen.kt").match(/friendlyPreview\(/g) || []).length === 2,
+        (kt("SearchScreen.kt").match(/conversationSearchPreview\(/g) || []).length === 2,
     );
   }
   // r33 items 13 + 15: "Call update failed" toasts, calls stuck on
@@ -10312,7 +10333,7 @@ const convBetween = (db, a, b) =>
         .prepare("SELECT body FROM messages WHERE client_id = ?")
         .get("e2ee_1")?.body;
       check(
-        "r64-e2ee: the account publishes its public key via PATCH /api/me (bad shape refused), the key rides /api/me AND the peer's conversation detail (the phone seals with it), and a sealed envelope stores verbatim while the chat-list preview + push read only the lock — at the SAME four-wave / six-trip send cost",
+        "r64-e2ee: the account publishes its public key via PATCH /api/me (bad shape refused), the key rides /api/me AND the peer's conversation detail (the phone seals with it), and a sealed envelope stores verbatim while the server preview stays neutral — at the SAME four-wave / six-trip send cost",
         badKey.status === 400 &&
           badKey.json.error?.code === "BAD_E2EE_KEY" &&
           upA.status === 200 &&
@@ -10322,7 +10343,7 @@ const convBetween = (db, a, b) =>
           sealed.r.status === 201 &&
           sealed.r.json.message?.body === envBody &&
           storedBody === envBody &&
-          convRow()?.last_message === "🔒" &&
+          convRow()?.last_message === "New message" &&
           sealed.waves === 4 &&
           sealed.trips === 6 &&
           sealed.concurrent === 3,
@@ -10465,7 +10486,7 @@ const convBetween = (db, a, b) =>
       );
       // Edit path: an edited sealed message is re-sealed on the phone. The
       // edited row is the CONVERSATION'S newest, so the chat-list preview must
-      // follow the new envelope and still read only the lock.
+      // follow the new envelope while the server-side list marker stays neutral.
       const lastEnv = "KP1." + Buffer.from("final sealed").toString("base64");
       const lastMsg = await send({ kind: "TEXT", body: lastEnv, clientId: "e2ee_5" });
       const reSealed = "KP1." + Buffer.from("edited plain").toString("base64");
@@ -10476,10 +10497,10 @@ const convBetween = (db, a, b) =>
         a.token,
       );
       check(
-        "r64-e2ee: editing the newest sealed message stores the NEW envelope and the chat-list preview stays the lock",
+        "r64-e2ee: editing the newest sealed message stores the NEW envelope and the chat-list preview stays neutral",
         edit.status === 200 &&
           edit.json.message?.body === reSealed &&
-          convRow()?.last_message === "🔒",
+          convRow()?.last_message === "New message",
         JSON.stringify({
           s: edit.status,
           body: edit.json.message?.body?.slice(0, 12),
@@ -10520,7 +10541,7 @@ const convBetween = (db, a, b) =>
         k.db._db.prepare("SELECT body FROM messages WHERE id = ?").get(sent.json.message.id)
           ?.body === envelope &&
         k.db._db.prepare("SELECT last_message FROM conversations WHERE id = ?").get(cid)
-          ?.last_message === "🔒",
+          ?.last_message === "New message",
     );
     const detail = await k.call("GET", `/api/conversations/${cid}`, undefined, a.token);
     const denied = await k.call("GET", `/api/conversations/${cid}`, undefined, outsider.token);
@@ -10541,7 +10562,7 @@ const convBetween = (db, a, b) =>
     );
     const edited = await getList(a.token, stable.json.marker);
     check(
-      "r66-3: editing ciphertext moves the list marker even though stored last_message is the same lock",
+      "r66-3: editing ciphertext moves the list marker even though stored last_message stays neutral",
       !edited.json.unchanged &&
         edited.json.items?.find((c) => c.id === cid)?.lastMessagePreview?.body === editedEnvelope,
     );
@@ -10825,11 +10846,11 @@ const convBetween = (db, a, b) =>
 
   // r64-e2ee: end-to-end encrypted messages (worker half) — the worker is a
   // faithful CARRIER: it stores and forwards the sealed envelope, serves the
-  // public key, and shows the lock in every surface that used to show text.
+  // public key, and keeps server-side previews neutral until the device opens them.
   {
     const src = readFileSync(new URL("../../src/worker/index.ts", import.meta.url), "utf8");
     check(
-      "r64-e2ee: worker — KP1. prefix + full UTF-8 envelope headroom on the send AND edit paths, the e2ee_public_key column migration, the key in every user shape (userFrom) + PATCH /api/me shape check, the lock preview for sealed rows, and the key in the list freshness marker",
+      "r64-e2ee: worker — KP1. prefix + full UTF-8 envelope headroom on the send AND edit paths, the e2ee_public_key column migration, the key in every user shape (userFrom) + PATCH /api/me shape check, the neutral preview for sealed rows, and the key in the list freshness marker",
       src.includes('const E2EE_PREFIX = "KP1.";') &&
         src.includes("3 * MESSAGE_MAX_LENGTH + 28") &&
         src.includes("`ALTER TABLE users ADD COLUMN e2ee_public_key TEXT`") &&
@@ -10842,8 +10863,8 @@ const convBetween = (db, a, b) =>
         src.includes("const text = checkedMessageBody(rawBody);") &&
         src.includes("const text = checkedMessageBody(rawEdit);") &&
         src.includes("const e2ee = !!row.body && row.body.startsWith(E2EE_PREFIX);") &&
-        src.includes('const E2EE_PREVIEW = "\\uD83D\\uDD12";') &&
-        // r67-2: the same lock, now named once and reused by the push fallback.
+        src.includes('const E2EE_PREVIEW = "New message";') &&
+        // r67-2: the neutral label is reused by chat-list and fallback previews.
         src.includes('return e2ee ? E2EE_PREVIEW : (row.body || "Message").slice(0, 120);') &&
         src.includes("(c.other as Record<string, unknown>).e2eePublicKey ?? null,") &&
         // the worker never learns to open an envelope — no crypto in the file

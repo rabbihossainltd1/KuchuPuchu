@@ -35,8 +35,9 @@ import kotlinx.coroutines.withContext
  *
  *  - Settings › Privacy › "Message key backup" locks the CURRENT message
  *    identity under a passphrase and stores the sealed blob on the server
- *    (the server holds ciphertext it cannot open — the old plaintext
- *    auto-upload is retired);
+ *    (the server holds ciphertext it cannot open — new clients never create
+ *    a plaintext backup; an older KP1 backup is import-only until an explicit
+ *    passphrase migration replaces it);
  *  - a fresh install that finds a locked backup shows [E2eeRestoreGate]:
  *    the passphrase unlocks the history (old rows unseal on the spot), and
  *    until then the app runs on a fresh keypair so sending never waits.
@@ -54,6 +55,7 @@ fun KeyBackupSheet(onClose: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var passDialog by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    val legacyBackup = remote?.let { it.isNotBlank() && !it.startsWith("KP2.") } == true
     LaunchedEffect(Unit) { remote = E2eeMsg.remoteBackup() }
 
     KpSheet(onDismiss = onClose, title = "Message key backup") {
@@ -61,21 +63,28 @@ fun KeyBackupSheet(onClose: () -> Unit) {
             when {
                 remote == null -> "Checking…"
                 remote!!.startsWith("KP2.") -> "On — locked with your passphrase"
-                remote!!.isNotBlank() -> "On (automatic) — set a passphrase to lock it"
-                else -> "Setting up…"
+                remote!!.isNotBlank() -> "Legacy backup — not passphrase-locked"
+                else -> "Off — key stays on this device"
             },
             color = Muted,
             fontSize = 12.5.sp,
             modifier = Modifier.padding(horizontal = 14.dp).padding(bottom = 4.dp),
         )
-        KpSheetRow(Icons.Filled.Key, if (remote.isNullOrBlank()) "Set backup passphrase" else "Change passphrase") {
+        KpSheetRow(
+            Icons.Filled.Key,
+            when {
+                remote.isNullOrBlank() -> "Set backup passphrase"
+                legacyBackup -> "Lock legacy backup"
+                else -> "Change passphrase"
+            },
+        ) {
             passDialog = true
         }
         if (!remote.isNullOrBlank()) {
             KpSheetRow(Icons.Filled.Delete, "Delete backup", tint = Red) { confirmDelete = true }
         }
         Text(
-            "Your passphrase seals the key that opens your message history. On a new phone (or after a reinstall) it unlocks every old message. If you forget it, locked messages cannot be recovered.",
+            "The key is encrypted on this device before upload; the server stores only the locked blob. A legacy automatic backup stays unchanged until you save a passphrase-locked replacement or delete it. On a new phone, the passphrase restores your history. If you forget it, locked messages cannot be recovered.",
             color = Muted,
             fontSize = 11.5.sp,
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
@@ -84,7 +93,11 @@ fun KeyBackupSheet(onClose: () -> Unit) {
 
     if (passDialog) {
         PassphraseDialog(
-            title = if (remote.isNullOrBlank()) "Set backup passphrase" else "Change passphrase",
+            title = when {
+                remote.isNullOrBlank() -> "Set backup passphrase"
+                legacyBackup -> "Lock legacy backup"
+                else -> "Change passphrase"
+            },
             confirmLabel = "Save",
             busy = busy,
             onClose = { passDialog = false },
@@ -100,7 +113,7 @@ fun KeyBackupSheet(onClose: () -> Unit) {
                         remote = E2eeMsg.remoteBackup()
                         passDialog = false
                     } else {
-                        android.widget.Toast.makeText(ctx, "Could not reach the server", android.widget.Toast.LENGTH_SHORT).show()
+                        android.widget.Toast.makeText(ctx, "Could not save backup — restore your current key first", android.widget.Toast.LENGTH_SHORT).show()
                     }
                 }
             },

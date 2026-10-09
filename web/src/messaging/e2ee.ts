@@ -298,11 +298,7 @@ export async function unlockPassphraseBackup(
   }
 }
 
-/** KP1 plaintext backup blob: base64 of JSON {p,u} — what a reinstall restores. */
-export function encodePlaintextBackup(identity: E2eeIdentity): string {
-  return bytesToBase64(new TextEncoder().encode(JSON.stringify({ p: identity.p, u: identity.u })));
-}
-
+/** Import-only decoder for old base64 JSON {p,u} backups; never upload this format. */
 export function decodePlaintextBackup(blob: string): E2eeIdentity | null {
   if (!blob || blob.startsWith(KP2_PREFIX)) return null;
   try {

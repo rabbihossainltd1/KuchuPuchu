@@ -467,6 +467,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
 {
   const chat = main("ChatScreen.kt");
   const list = main("ChatListScreen.kt");
+  const onceTextRow = chat.slice(
+    chat.indexOf("private fun OnceTextRow("),
+    chat.indexOf("private fun VoiceOnceTile("),
+  );
   check(
     "r71-20 + r76-17: the once-text lives in the SCHEDULE sheet now (owner: double tap remove, schedule er vetor once icon) — the sheet's View-once toggle rides scheduleText's once flag into the stored payload; the seat's tap is instant (no double-tap seat), and `sendText` still takes the flag through the meta, the payload and the optimistic echo",
     chat.includes(
@@ -499,7 +503,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes(
         "@Composable\n@OptIn(ExperimentalFoundationApi::class)\nprivate fun OnceTextRow(",
       ) &&
-      chat.includes("detectHorizontalDragGestures(") &&
+      onceTextRow.includes("Modifier.messageReplySwipe(") &&
+      onceTextRow.includes("onLongClick = {") &&
       chat.includes("if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)"),
   );
   check(
@@ -550,8 +555,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
         'theme == "darkblue" ->\n            if (KpThemeMode.darkBlue) Color(0xFFA9C4F2) else Color(0xFF5B7FC7)',
       ) &&
       chat.includes('Text("${((leftMs + 999) / 1000)}s", color = Red, fontSize = 10.sp)') &&
-      // and the bubble + its stamp share one column, so the stamp sits below it
-      chat.includes("Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {"),
+      // and the bubble + its stamp share a column with the common row swipe host
+      chat.includes("modifier = Modifier.messageReplySwipe(") &&
+      chat.includes("horizontalAlignment = if (mine) Alignment.End else Alignment.Start"),
   );
   check(
     'r74-2 (owner, r74: "kichui na icon o na kono text level o na just blur thakbe" and "ami send korbo amar kache + je receive korbe tar kacheo blur"): the once-text bubble is ONLY the blur — the 1 mark (r73-20, then 28 dp) and the "Tap to view" hint are both gone — and the veil covers both sides, with the below-API-31 placeholder marks as the platform-legal stand-in',
@@ -573,11 +579,13 @@ const main = (f) => read(`${ANDROID}/${f}`);
       seal.includes(
         "data class Plan(val sealed: Boolean, val envelope: String?, val once: Boolean = false)",
       ) &&
-      seal.includes("return Plan(sealed, env ?: bodyEnv, isOnceLabel(body))") &&
+      seal.includes('return Plan(sealed, env ?: bodyEnv, kpOnce == "1" || isOnceLabel(body))') &&
       seal.includes("if (!plan.sealed || plan.once) return null") &&
-      seal.includes('if (plan.once || isOnceLabel(raw)) return raw.ifBlank { "New message" }') &&
+      seal.includes('return raw.takeIf { isOnceLabel(it) } ?: "Message · View once"') &&
       push.includes('PushSeal.cardText(plan, opened, data["body"])') &&
-      push.includes('PushSeal.plan(data["kp_e2ee"], data["kp_env"], data["body"])'),
+      push.includes(
+        'PushSeal.plan(data["kp_e2ee"], data["kp_env"], data["body"], data["kp_once"])',
+      ),
   );
 }
 
@@ -920,9 +928,13 @@ const main = (f) => read(`${ANDROID}/${f}`);
       e2.includes("fun tryRestore(ctx: Context, pass: String): Boolean") &&
       e2.includes("pendingRestore = remote") &&
       e2.includes("PBKDF2WithHmacSHA256") &&
-      // r76-29: the automatic (KP1) upload is back - the passphrase is now an
-      // UPGRADE on top of it, not a replacement.
-      e2.includes("private fun backupLocal(ctx: Context): Boolean =") &&
+      // New identities never upload KP1; a legacy blob is only replaced by
+      // the explicit passphrase flow after its decoded pair matches locally.
+      e2.includes("val legacy = decodeLegacyBackup(remote)") &&
+      e2.includes("if (legacy != pair) return@runCatching false") &&
+      !e2.includes("backupLocal(") &&
+      backup.includes("Legacy backup — not passphrase-locked") &&
+      backup.includes("Lock legacy backup") &&
       backup.includes("fun KeyBackupSheet(onClose: () -> Unit)") &&
       backup.includes("fun E2eeRestoreGate()") &&
       backup.includes("Wrong passphrase \u2014 try again") &&
@@ -1023,7 +1035,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
   const e2 = main("E2eeMsg.kt");
   const worker = read("src/worker/index.ts");
   check(
-    "r76-29: the ack arms the flight (deterministic 0.5 s, swap-proof), 150dp sub-switch column, my gifs render from the cached CDN url, hero starts on the tile with no platform dim and reverses on close, pill slimmer, backup auto by default",
+    "r76-29: the ack arms the flight (deterministic 0.5 s, swap-proof), 150dp sub-switch column, my gifs render from the cached CDN url, hero starts on the tile with no platform dim and reverses on close, pill slimmer, private-key backup is opt-in and passphrase-locked",
     flight.includes("f.goAt = android.os.SystemClock.uptimeMillis() + delayMs") &&
       flight.includes("if (f.goAt > android.os.SystemClock.uptimeMillis()) {") &&
       // r77-1/r77-6 superseded the ack-arm: the arm now lands at the echo's
@@ -1042,8 +1054,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
       viewer.includes("onDismissRequest = dismiss,") &&
       viewer.includes("alpha = dim * hero.value") &&
       status.includes(".padding(vertical = 4.dp)") &&
-      e2.includes("return@runCatching backupLocal(ctx)") &&
-      e2.includes("if (remote.isBlank()) return@runCatching backupLocal(ctx)"),
+      e2.includes("identity(ctx)") &&
+      e2.includes("packBackup(pair.first, pair.second, pass)") &&
+      !e2.includes("backupLocal(") &&
+      e2.includes("never uploaded automatically"),
   );
 }
 

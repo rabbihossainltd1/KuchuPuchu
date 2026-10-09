@@ -6,11 +6,10 @@
 //    eitar sathe sync rekho". One height for the whole bar now (40 dp), and the
 //    view-once glyph is pinned to its own (smaller) seat so it cannot push the
 //    pill back up. Measured ink, not a claim: the seat is asserted by number.
-// 2. notification: an E2EE 1:1 message arrives as an opaque envelope, so the card
-//    said the lock. "massage phone a asha matroi decrypt hoye jabe. same as old
-//    version" — the push handler now opens the envelope on arrival (a short one
-//    straight from the push, a long one from the newest page) and the card is
-//    posted with plaintext + Reply still attached.
+// 2. notification: an E2EE 1:1 message arrives as an opaque envelope. The
+//    push handler opens it on the phone (short envelope from FCM, longer body
+//    from the newest page) and posts readable text + Reply; no lock marker or
+//    server-side plaintext is used.
 // 3. one message = ONE animation. "agei place hoye abar animate hoye" — a send
 //    used to appear in place (the pending echo) and then re-fly when the server
 //    row replaced it. The flight is now claimed ONCE per stable key
@@ -97,6 +96,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
   const worker = read("src/worker/index.ts");
   const seal = main("PushSeal.kt");
   const push = main("KpPush.kt");
+  const e2ee = main("E2eeMsg.kt");
+  const chatList = main("ChatListScreen.kt");
+  const web = read("public/app.js");
   check(
     "r67-2: the worker MARKS a sealed push and rides the envelope when it fits the FCM budget — r72-20: never for a view-once row, which carries its masked label and the kp_once marker instead",
     worker.includes('...(sealedBody && !message.viewOnce ? { kp_e2ee: "1" } : {})') &&
@@ -111,13 +113,26 @@ const main = (f) => read(`${ANDROID}/${f}`);
     worker.includes("const sealedBody = text.startsWith(E2EE_PREFIX) ? text : null;"),
   );
   check(
-    "r67-2: the system-drawn fallback card never inks the lock as if it were the message",
+    "r67-2: server previews stay neutral and sealed/photo pushes bypass system-drawn cards so the phone can render them",
     worker.includes('body: preview === E2EE_PREVIEW ? "New message" : preview.slice(0, 120),') &&
-      worker.includes('const E2EE_PREVIEW = "\\uD83D\\uDD12";'),
+      worker.includes('const E2EE_PREVIEW = "New message";') &&
+      worker.includes(
+        "const needsDeviceRendering = (!!sealedBody && !message.viewOnce) || !!pictureUrl;",
+      ) &&
+      worker.includes("const fallbackNote = needsDeviceRendering"),
+  );
+  check(
+    "view-once marker is authoritative on-device: it blocks opening and masks even an accidental envelope",
+    seal.includes('kpOnce == "1" || isOnceLabel(body)') &&
+      seal.includes("if (!plan.sealed || plan.once) return null") &&
+      seal.includes('return raw.takeIf { isOnceLabel(it) } ?: "Message · View once"') &&
+      push.includes('data["kp_once"]'),
   );
   check(
     "r67-2: the phone opens the envelope on arrival — push-borne first, one bounded fetch otherwise",
-    seal.includes("fun plan(kpE2ee: String?, kpEnv: String?, body: String?): Plan") &&
+    seal.includes(
+      "fun plan(kpE2ee: String?, kpEnv: String?, body: String?, kpOnce: String? = null): Plan",
+    ) &&
       seal.includes(
         "fun openBounded(ctx: Context, convoId: String, mid: String?, plan: Plan, budgetMs: Long): String?",
       ) &&
@@ -137,10 +152,19 @@ const main = (f) => read(`${ANDROID}/${f}`);
       main("KpNotify.kt").includes("NotificationCompat.BigPictureStyle()"),
   );
   check(
-    "r67-2: ciphertext and the bare lock can never become the card's text",
+    "r67-2: ciphertext and a legacy sealed placeholder can never become the card's text",
     seal.includes(
-      'if (plan.sealed && (raw == LOCK || E2eeMsg.isEnvelope(raw))) return "New message"',
+      "if (raw == LEGACY_SEALED_PREVIEW || (plan.sealed && E2eeMsg.isEnvelope(raw))) {",
     ) && push.includes('PushSeal.cardText(plan, opened, data["body"])'),
+  );
+  check(
+    "E2EE failures and stale previews use neutral text instead of a lock emoji on Android and web",
+    e2ee.includes('private const val UNREADABLE_MESSAGE = "Unable to decrypt message"') &&
+      seal.includes("LEGACY_SEALED_PREVIEW") &&
+      chatList.includes('return if (legacySealedMarker) "Message" else friendlyPreview(raw)') &&
+      web.includes('const E2EE_PREVIEW = "এনক্রিপ্ট করা মেসেজ";') &&
+      web.includes('const E2EE_OPEN_FAILED = "এই ডিভাইসে মেসেজটি খোলা যায়নি";') &&
+      !web.includes("const LOCK = "),
   );
   check(
     "r67-2: the foreground badge preview goes through the same judgement (list, not the shade)",

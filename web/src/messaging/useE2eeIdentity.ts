@@ -12,7 +12,6 @@ import type { ApiClient } from "../auth/authApi";
 import { E2EE_STORAGE_KEY } from "../auth/storage";
 import {
   decodePlaintextBackup,
-  encodePlaintextBackup,
   generateIdentity,
   isPassphraseBackup,
   isValidPublicKey,
@@ -69,9 +68,9 @@ export function useE2eeIdentity(
   const identityRef = useRef(identity);
   identityRef.current = identity;
 
-  /** Publish the adopted key and store a backup when the account had none. */
+  /** Publish only the adopted public key; private backups require explicit KP2. */
   const publishIdentity = useCallback(
-    async (adopted: E2eeIdentity, remoteWasEmpty: boolean) => {
+    async (adopted: E2eeIdentity) => {
       try {
         if (!isValidPublicKey(serverPublicKey) || serverPublicKey !== adopted.u) {
           await messagingApi.publishPublicKey(api, adopted.u);
@@ -80,13 +79,6 @@ export function useE2eeIdentity(
         setNotice(
           "Secure chat keys could not be published yet. Sending stays disabled until the next retry.",
         );
-      }
-      if (remoteWasEmpty) {
-        try {
-          await messagingApi.putBackup(api, encodePlaintextBackup(adopted));
-        } catch {
-          // The phone can still create the backup; retry on the next load.
-        }
       }
     },
     [api, serverPublicKey],
@@ -132,7 +124,7 @@ export function useE2eeIdentity(
     const existing = decodePlaintextBackup(remote);
     if (existing) {
       adopt(existing);
-      await publishIdentity(existing, false);
+      await publishIdentity(existing);
       return;
     }
 
@@ -144,10 +136,11 @@ export function useE2eeIdentity(
       return;
     }
 
-    // No backup anywhere: first-device behaviour, same as the app.
+    // No backup anywhere: keep the minted private identity in browser storage;
+    // publish only its public half. KP2 backup requires explicit user consent.
     const minted = await generateIdentity();
     adopt(minted);
-    await publishIdentity(minted, true);
+    await publishIdentity(minted);
   }, [adopt, api, enabled, publishIdentity]);
 
   useEffect(() => {
@@ -163,7 +156,7 @@ export function useE2eeIdentity(
         return false;
       }
       adopt(pair);
-      await publishIdentity(pair, false);
+      await publishIdentity(pair);
       setNotice("Secure chat unlocked. Encrypted messages can now be read and sent.");
       return true;
     },

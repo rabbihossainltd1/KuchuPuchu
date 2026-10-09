@@ -1886,6 +1886,15 @@ internal fun friendlyPreview(raw: String): String {
     }
 }
 
+/** Search results do not open E2EE content; never surface a stale server placeholder. */
+internal fun conversationSearchPreview(conv: JSONObject): String {
+    val raw = conv.optText("lastMessage")
+    val wire = conv.optJSONObject("lastMessagePreview")?.optText("body").orEmpty()
+    val legacySealedMarker = raw == PushSeal.LEGACY_SEALED_PREVIEW &&
+        (wire.isBlank() || E2eeMsg.isEnvelope(wire))
+    return if (legacySealedMarker) "Message" else friendlyPreview(raw)
+}
+
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 private fun ConvCard(

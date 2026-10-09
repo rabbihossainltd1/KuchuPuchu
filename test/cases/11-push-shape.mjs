@@ -1,21 +1,15 @@
-// Push shape guard (regression test for the WhatsApp-style delivery).
+// Push shape guard for device-rendered E2EE and photo notifications.
 //
-// The whole point of the recent work is: a REACHABLE recipient (whether or not
-// a socket is open) must get a DATA-ONLY FCM message so onMessageReceived runs
-// and the app draws its OWN rich card (Reply / Like / Mark-as-read, etc.). Only
-// a genuinely IDLE recipient (>= IDLE_PUSH_WINDOW_MS, i.e. frozen / dead /
-// force-stopped) gets the system notification payload so at least a plain tray
-// card shows.
+// A sealed message must reach KpPush as high-priority data so the receiving
+// phone opens it locally; photo pushes likewise need the handler to fetch the
+// authorized thumbnail and post a BigPictureStyle card. Those two shapes must
+// never carry an FCM system-notification payload, because Play services draws
+// that payload without running onMessageReceived. Plain text and view-once
+// labels can retain the safe idle fallback.
 //
 // This drives the real worker against the in-memory D1/R2 shim, injects a fake
-// FCM service-account so the worker's token exchange + send actually run, and
-// captures the FCM HTTP body. A message to a *recent* recipient must have NO
-// `android.notification` (data-only); a message to an *idle* recipient (we age
-// its last_active_at) MUST have `android.notification`.
-//
-// The same rule drives message, missed_call and incoming-call pushes (they all
-// route through recipientAlert / the same idle check), so this guards the whole
-// class.
+// FCM service-account so token exchange + send actually run, and captures the
+// FCM HTTP body. It checks both fallback-safe messages and local-render cases.
 
 import { generateKeyPairSync } from "node:crypto";
 import { makeD1, makeR2, makeCtx } from "../d1shim.mjs";
@@ -161,6 +155,37 @@ async function main() {
       JSON.stringify(idle?.message?.android?.notification ?? {}),
     );
 
+    // A sealed body is not readable by the worker. It carries only the opaque
+    // envelope plus a neutral data preview; the phone decrypts before posting.
+    const privateText = "device-only message text";
+    const envelope = "KP1." + Buffer.from(privateText).toString("base64");
+    sent.length = 0;
+    await call(
+      "POST",
+      `/api/conversations/${convId}/messages`,
+      { kind: "TEXT", body: envelope },
+      a.token,
+    );
+    const sealed = sent.find((m) => m.message?.android?.data?.type === "message");
+    const sealedData = sealed?.message?.android?.data ?? {};
+    const sealedJson = JSON.stringify(sealed?.message?.android ?? {});
+    check(
+      "E2EE: idle sealed text is data-only, marked, and carries the intact envelope for local opening",
+      !!sealed &&
+        !sealed.message.android.notification &&
+        sealedData.kp_e2ee === "1" &&
+        sealedData.kp_env === envelope &&
+        sealedData.body === "New message",
+      JSON.stringify(sealed?.message?.android ?? {}),
+    );
+    check(
+      "E2EE: no plaintext or private key is sent in the FCM payload; server row remains sealed",
+      !sealedJson.includes(privateText) &&
+        !sealedJson.includes("privateKey") &&
+        db._db.prepare("SELECT body FROM messages WHERE id = ?").get(sealedData.mid)?.body ===
+          envelope,
+    );
+
     // 3) Data-only payload still carries the fields the client needs for the
     //    rich card (fromName + body + convoId + muted).
     check(
@@ -186,25 +211,68 @@ async function main() {
     });
     const key = up.json.fileKey;
     sent.length = 0;
+    const caption = "private photo caption";
+    const captionEnvelope = "KP1." + Buffer.from(caption).toString("base64");
     await call(
       "POST",
       `/api/conversations/${convId}/messages`,
-      { kind: "FILE", fileKey: key, fileName: "photo.jpg", fileType: "image/jpeg", fileSize: 10 },
+      {
+        kind: "FILE",
+        fileKey: key,
+        fileName: "photo.jpg",
+        fileType: "image/jpeg",
+        fileSize: 10,
+        body: captionEnvelope,
+      },
       a.token,
     );
     const photo = sent.find((m) => m.message?.android?.data?.type === "message");
     check(
-      "r32-35: photo push previews as 'Photo' and names the picture (kp_media = /api/files/<key>)",
+      "r32-35: photo push is data-only so Android can fetch the authorized image for its rich notification",
       photo?.message?.android?.data?.body === "Photo" &&
         photo?.message?.android?.data?.kp_media === `/api/files/${key}` &&
-        photo?.message?.android?.notification?.body === "Photo",
-      JSON.stringify(photo?.message?.android?.data ?? {}),
+        photo?.message?.android?.data?.kp_e2ee === "1" &&
+        photo?.message?.android?.data?.kp_env === captionEnvelope &&
+        !photo?.message?.android?.notification,
+      JSON.stringify(photo?.message?.android ?? {}),
+    );
+    check(
+      "r32-35: the E2EE photo caption stays opaque in FCM while the photo reference stays an authorized API path",
+      !JSON.stringify(photo?.message?.android ?? {}).includes(caption) &&
+        photo?.message?.android?.data?.kp_media === `/api/files/${key}`,
     );
     const list = await call("GET", "/api/conversations", undefined, b.token);
     check(
       "r32-35: the chat list preview says 'Photo' too",
       list.json.items?.find((c) => c.id === convId)?.lastMessage === "Photo",
       JSON.stringify(list.json.items?.map((c) => c.lastMessage)),
+    );
+    ageLastActive(b.user.id, 6);
+    sent.length = 0;
+    await call(
+      "POST",
+      `/api/conversations/${convId}/messages`,
+      {
+        kind: "FILE",
+        fileKey: key,
+        fileName: "photo.jpg",
+        fileType: "image/jpeg",
+        fileSize: 10,
+        body: captionEnvelope,
+        meta: { viewOnce: true },
+      },
+      a.token,
+    );
+    const once = sent.find((m) => m.message?.android?.data?.type === "message");
+    check(
+      "view-once stays private: label only, no caption envelope or picture reference",
+      once?.message?.android?.data?.body === "Photo · View once" &&
+        once?.message?.android?.notification?.body === "Photo · View once" &&
+        once?.message?.android?.data?.kp_once === "1" &&
+        once?.message?.android?.data?.kp_media === undefined &&
+        once?.message?.android?.data?.kp_env === undefined &&
+        once?.message?.android?.data?.kp_e2ee === undefined,
+      JSON.stringify(once?.message?.android ?? {}),
     );
     const up2 = await call("POST", "/api/files?name=scan.jpg&type=image/jpeg", undefined, a.token, {
       headers: { "content-type": "application/octet-stream" },

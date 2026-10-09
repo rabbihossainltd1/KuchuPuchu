@@ -307,8 +307,8 @@ fun PrivacySettingsScreen(nav: NavController) {
         backupState.value =
             when {
                 b.startsWith("KP2.") -> "On (locked)"
-                b.isNotBlank() -> "On (auto)"
-                else -> "Off"
+                b.isNotBlank() -> "Legacy — lock it"
+                else -> "Off (device only)"
             }
     }
 

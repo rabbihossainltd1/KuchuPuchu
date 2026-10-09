@@ -16,7 +16,7 @@ const check = (name, condition, detail = "") =>
   lines.push(`  ${condition ? "OK     " : "BROKEN "}  ${name}${detail ? `  -> ${detail}` : ""}`);
 
 const roamingStart = e2ee.indexOf("private fun restoreRoaming(");
-const roamingEnd = e2ee.indexOf("private fun encodeBackup(", roamingStart);
+const roamingEnd = e2ee.indexOf("internal fun decodeLegacyBackup(", roamingStart);
 const roaming =
   roamingStart >= 0 && roamingEnd > roamingStart ? e2ee.slice(roamingStart, roamingEnd) : "";
 const tryRestoreStart = e2ee.indexOf("fun tryRestore(");

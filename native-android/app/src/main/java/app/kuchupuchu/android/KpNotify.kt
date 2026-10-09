@@ -370,12 +370,21 @@ object KpNotify {
                 // the right (the brand logo steps aside for it). The style only
                 // changes the body; Reply / Like / Mark-as-read stay below it.
                 .apply {
-                    // r103-2: consecutive messages from the same account stack
-                    // into the conversation's ONE card - the shade renders the
-                    // thread (MessagingStyle) and each new message updates the
-                    // card instead of a new one. A lone message keeps the exact
-                    // look it always had (big text / big picture).
-                    if (stacked != null && stacked.size >= 2) {
+                    // A just-arrived photo always takes precedence over the
+                    // thread style so the actual bitmap remains visible even
+                    // when this conversation already has stacked messages.
+                    if (picture != null) {
+                        setLargeIcon(picture)
+                        setStyle(
+                            NotificationCompat.BigPictureStyle()
+                                .bigPicture(picture)
+                                .bigLargeIcon(null as android.graphics.Bitmap?)
+                                .setSummaryText(body),
+                        )
+                    } else if (stacked != null && stacked.size >= 2) {
+                        // r103-2: consecutive text messages from the same
+                        // account stack into one conversation card. Preserve
+                        // that thread view whenever this arrival has no image.
                         setStyle(
                             NotificationCompat.MessagingStyle(
                                 androidx.core.app.Person.Builder().setName("Me").build(),
@@ -392,14 +401,6 @@ object KpNotify {
                                         )
                                     }
                                 },
-                        )
-                    } else if (picture != null) {
-                        setLargeIcon(picture)
-                        setStyle(
-                            NotificationCompat.BigPictureStyle()
-                                .bigPicture(picture)
-                                .bigLargeIcon(null as android.graphics.Bitmap?)
-                                .setSummaryText(body),
                         )
                     } else {
                         // r67-2 (owner: "notification a age jemon shob dekha jeto"):

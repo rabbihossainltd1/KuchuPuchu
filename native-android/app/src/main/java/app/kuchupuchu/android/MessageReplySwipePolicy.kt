@@ -2,10 +2,10 @@ package app.kuchupuchu.android
 
 import kotlin.math.abs
 
-/** Direction, threshold, and drag feedback shared by photo and album reply swipes. */
+/** Direction, threshold, and drag feedback shared by every reply-swipe row. */
 internal object MessageReplySwipePolicy {
-    fun requiredDistance(baseThresholdPx: Float, mine: Boolean): Float =
-        baseThresholdPx * if (mine) 1.5f else 1f
+    /** One release distance for sent and received rows, regardless of media type. */
+    fun requiredDistance(baseThresholdPx: Float): Float = baseThresholdPx * 1.4f
 
     fun isHorizontalIntent(deltaX: Float, deltaY: Float, touchSlopPx: Float): Boolean =
         abs(deltaX) > touchSlopPx && abs(deltaX) >= abs(deltaY) * 1.25f
@@ -14,7 +14,7 @@ internal object MessageReplySwipePolicy {
         if (mine) deltaX < 0f else deltaX > 0f
 
     fun dragOffset(deltaX: Float, mine: Boolean, baseThresholdPx: Float): Float {
-        val limit = requiredDistance(baseThresholdPx, mine) * 1.4f
+        val limit = requiredDistance(baseThresholdPx) * 1.4f
         return if (mine) deltaX.coerceIn(-limit, 0f) else deltaX.coerceIn(0f, limit)
     }
 
@@ -25,6 +25,6 @@ internal object MessageReplySwipePolicy {
         baseThresholdPx: Float,
     ): Boolean =
         isReplyDirection(deltaX, mine) &&
-            abs(deltaX) >= requiredDistance(baseThresholdPx, mine) &&
+            abs(deltaX) >= requiredDistance(baseThresholdPx) &&
             abs(deltaX) >= abs(deltaY) * 1.25f
 }

@@ -957,7 +957,7 @@ const AI_BOT_ID = "kp_ai_bot";
 // message body. The worker stores and forwards the envelope OPAQUE — it
 // never decrypts and never holds a private key; only the two phones can.
 /** The chat-list / push preview of a sealed body (owner round 64). */
-const E2EE_PREVIEW = "\uD83D\uDD12";
+const E2EE_PREVIEW = "New message";
 const E2EE_PREFIX = "KP1.";
 // r66: a UTF-16 character can require THREE UTF-8 bytes (e.g. Bengali).
 // KP1 carries a 12-byte nonce and 16-byte GCM tag, then base64. Cutting any
@@ -4115,9 +4115,8 @@ function recipientAlert(
 ): { title: string; body: string; channel: string } | undefined {
   const sysCard = () => ({
     title: fromName || "KuchuPuchu",
-    // r67-2: the system draws this card without our process, so nothing can be
-    // decrypted here — never ink the lock as if it were the message. The app's
-    // own (data-only) card carries the opened text instead.
+    // The system draws this card without our process, so it cannot decrypt;
+    // sealed pushes bypass this fallback and the app builds their card locally.
     body: preview === E2EE_PREVIEW ? "New message" : preview.slice(0, 120),
     channel: "kp_messages_v2",
   });
@@ -4409,8 +4408,8 @@ async function broadcastRoomEvent(env: Env, roomKey: string, event: Record<strin
  * record lives in each socket's attachment so it survives the object's
  * hibernation — an in-memory map made a woken object answer 0 for a socket
  * that had heartbeated seconds earlier, i.e. bare payload card, no rich card)
- * the app process is demonstrably running. Senders use that number to decide
- * whether a push may be data-only — see recipientAlert().
+ * the app process is demonstrably running. Senders use that number when
+ * deciding whether a safe system-card fallback is available.
  */
 async function pokeUserConversation(
   env: Env,
@@ -4570,7 +4569,12 @@ async function pushMessageUnlessHidden(
     userId,
   );
   if (Number(m?.hidden ?? 0) === 1) return false;
-  return pushToUser(env, db, userId, data, note);
+  // Bot-generated photos and any explicitly sealed payload also need the app
+  // process so it can fetch/decrypt locally; never let Play services draw a
+  // placeholder card that bypasses that work.
+  const needsDeviceRendering =
+    data.type === "message" && (data.kp_e2ee === "1" || !!data.kp_media?.startsWith("/api/"));
+  return pushToUser(env, db, userId, data, needsDeviceRendering ? undefined : note);
 }
 
 /**
@@ -6999,8 +7003,21 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     return json({ backup: (row?.e2ee_backup as string) ?? null });
   }
   if (path === "/api/e2ee/backup" && method === "PUT") {
-    const b = String(body.backup ?? "").slice(0, 4096);
-    if (b && !/^[A-Za-z0-9+/=]{16,4096}$/.test(b)) fail(400, "Bad backup.", "BAD_E2EE_BACKUP");
+    const b = String(body.backup ?? "");
+    const parts = b.startsWith("KP2.") ? b.slice(4).split(".") : [];
+    const [salt = "", iv = "", ciphertext = ""] = parts;
+    const isKp2Blob =
+      b.length <= 4096 &&
+      parts.length === 3 &&
+      /^[A-Za-z0-9+/]{22}==$/.test(salt) &&
+      /^[A-Za-z0-9+/]{16}$/.test(iv) &&
+      ciphertext.length >= 32 &&
+      ciphertext.length % 4 === 0 &&
+      /^[A-Za-z0-9+/]+={0,2}$/.test(ciphertext);
+    // Never accept the legacy base64 {private, public} blob on a write. Old
+    // rows remain readable for explicit client-side migration, but all new
+    // backups must be AES-GCM ciphertext under a user passphrase.
+    if (b && !isKp2Blob) fail(400, "Backup must be passphrase-locked.", "BAD_E2EE_BACKUP");
     await run(db, "UPDATE users SET e2ee_backup = ? WHERE id = ?", b || null, uid);
     return json({ ok: true });
   }
@@ -9621,10 +9638,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           ? `/api/files/${message.fileKey}`
           : message.mediaUrl
         : undefined;
-    // Push: every other member gets a high-priority message. The chat-list poke
-    // doubles as a live-connectivity probe, and its answer decides whether the
-    // push is data-only (app connected -> our rich card with actions) or
-    // carries a system payload (app not connected -> only the tray can show it).
+    // Push: every other member gets a high-priority message. Sealed bodies and
+    // photos must be handled by the receiving app (local decrypt / authorized
+    // thumbnail fetch), so those pushes are data-only even when no socket is
+    // open. Plain previews and view-once labels may use the safe system fallback.
     for (const memberId of members) {
       if (memberId.user_id === uid) continue;
       ctx.waitUntil(
@@ -9640,17 +9657,13 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
     // Hoisted below so the poke + the push stay one fire-and-forget unit.
     async function pushMessageToMember(memberId: (typeof members)[number], live: number) {
-      // Shape is decided per recipient, by the socket count above, not globally:
-      // data-only routes through onMessageReceived -> KpNotify.message() and so
-      // carries our rich card (Reply / Like / Mark-as-read); a combined
-      // notification+data payload is instead drawn straight into the tray by
-      // Google Play services while the app is backgrounded, and onMessageReceived
-      // never runs — rich actions would be lost on exactly the device that needs
-      // them. So: connected recipient => data-only; disconnected recipient =>
-      // recipientAlert() attaches the system payload, because a tray card beats
-      // silence. (Before this, the payload was dropped for everyone, which is
-      // when "background e message ashe na" started: ac3ffbf had it, 6ab562a
-      // removed it, and the idle-only fallback in 8e66af4 almost never fired.)
+      // E2EE and photo messages must be data-only: if a system notification
+      // payload is present while the app is backgrounded, Play services draws
+      // it without calling onMessageReceived, so the phone cannot decrypt the
+      // text or fetch the authorized picture. The high-priority data handler
+      // does both locally, then posts the rich card with Reply / Like / Read.
+      // Plain messages and view-once labels keep the safe idle fallback because
+      // they need no hidden content or media to be rendered on-device.
       // ("from" is a reserved FCM key — hence fromName.)
       // `muted`: the recipient's per-conversation mute. The push still goes
       // out (the badge/list must update) but the client routes it to a
@@ -9711,6 +9724,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         await stampDelivered();
         stamped = true;
       }
+      const needsDeviceRendering = (!!sealedBody && !message.viewOnce) || !!pictureUrl;
+      const fallbackNote = needsDeviceRendering
+        ? undefined
+        : recipientAlert(memberId, preview, me.display_name, live);
       const pushed = await pushToUser(
         env,
         db,
@@ -9746,7 +9763,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             : {}),
           ...(message.viewOnce ? { kp_once: "1" } : {}),
         },
-        recipientAlert(memberId, preview, me.display_name, live),
+        fallbackNote,
       );
       // N4 -> r84-4 (owner r84 #4: "massage delivered double tick er system a
       // problem ache opponent all open na korle double tick hoi na mane user
@@ -12343,8 +12360,8 @@ async function syncPreviewAfterEdit(db: D1Database, msg: MsgRow, body: string) {
     "UPDATE conversations SET last_message = ? WHERE id = ?",
     // The NEW text — the caller still holds the pre-edit row, so reading
     // `msg.body` here would rewrite the preview with exactly what was there.
-    // E2EE (owner round 64): a re-sealed body previews as the lock, never a
-    // byte of the envelope.
+    // E2EE (owner round 64): a re-sealed body keeps the neutral preview label,
+    // never a byte of the envelope.
     previewOf({ ...msg, body }),
     msg.conv_id,
   );
@@ -12512,8 +12529,8 @@ async function sweepExpiredStatuses(env: Env, db: D1Database): Promise<number> {
 
 /** Chat-list preview text for a stored row — mirrors what the send path writes. */
 function previewOf(row: MsgRow): string {
-  // E2EE (owner round 64): a sealed body is an opaque envelope — the chat
-  // list and the push say the lock, never a byte of ciphertext.
+  // E2EE (owner round 64): a sealed body is an opaque envelope — server-side
+  // previews stay neutral; only the receiving device can open it.
   const e2ee = !!row.body && row.body.startsWith(E2EE_PREFIX);
   const meta = parseJson<{
     name?: string;

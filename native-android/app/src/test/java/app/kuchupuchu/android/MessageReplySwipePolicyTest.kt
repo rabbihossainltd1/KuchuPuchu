@@ -7,24 +7,23 @@ import org.junit.Test
 
 class MessageReplySwipePolicyTest {
     @Test
-    fun `incoming photo replies on a long horizontal swipe to the right`() {
-        assertTrue(MessageReplySwipePolicy.shouldReply(deltaX = 48f, deltaY = 4f, mine = false, baseThresholdPx = 36f))
+    fun `sent and received rows share one threshold and reply in opposite directions`() {
+        assertEquals(50.4f, MessageReplySwipePolicy.requiredDistance(baseThresholdPx = 36f), 0.01f)
+        assertTrue(MessageReplySwipePolicy.shouldReply(deltaX = 51f, deltaY = 4f, mine = false, baseThresholdPx = 36f))
+        assertTrue(MessageReplySwipePolicy.shouldReply(deltaX = -51f, deltaY = 4f, mine = true, baseThresholdPx = 36f))
     }
 
     @Test
-    fun `own photo replies on a longer horizontal swipe to the left`() {
-        assertTrue(MessageReplySwipePolicy.shouldReply(deltaX = -60f, deltaY = 4f, mine = true, baseThresholdPx = 36f))
-    }
-
-    @Test
-    fun `wrong direction and short movement do not reply`() {
+    fun `wrong direction and movement below the shared threshold do not reply`() {
         assertFalse(MessageReplySwipePolicy.shouldReply(deltaX = -60f, deltaY = 0f, mine = false, baseThresholdPx = 36f))
-        assertFalse(MessageReplySwipePolicy.shouldReply(deltaX = 35f, deltaY = 0f, mine = false, baseThresholdPx = 36f))
+        assertFalse(MessageReplySwipePolicy.shouldReply(deltaX = 60f, deltaY = 0f, mine = true, baseThresholdPx = 36f))
+        assertFalse(MessageReplySwipePolicy.shouldReply(deltaX = 50f, deltaY = 0f, mine = false, baseThresholdPx = 36f))
+        assertFalse(MessageReplySwipePolicy.shouldReply(deltaX = -50f, deltaY = 0f, mine = true, baseThresholdPx = 36f))
     }
 
     @Test
     fun `dominant vertical movement does not reply`() {
-        assertFalse(MessageReplySwipePolicy.shouldReply(deltaX = 48f, deltaY = 50f, mine = false, baseThresholdPx = 36f))
+        assertFalse(MessageReplySwipePolicy.shouldReply(deltaX = 51f, deltaY = 52f, mine = false, baseThresholdPx = 36f))
     }
 
     @Test
@@ -35,9 +34,10 @@ class MessageReplySwipePolicyTest {
     }
 
     @Test
-    fun `drag feedback follows the reply direction and is capped`() {
-        assertEquals(50.4f, MessageReplySwipePolicy.dragOffset(deltaX = 90f, mine = false, baseThresholdPx = 36f), 0.01f)
-        assertEquals(-75.6f, MessageReplySwipePolicy.dragOffset(deltaX = -90f, mine = true, baseThresholdPx = 36f), 0.01f)
+    fun `drag feedback follows the reply direction and has the same cap on both sides`() {
+        assertEquals(70.56f, MessageReplySwipePolicy.dragOffset(deltaX = 90f, mine = false, baseThresholdPx = 36f), 0.01f)
+        assertEquals(-70.56f, MessageReplySwipePolicy.dragOffset(deltaX = -90f, mine = true, baseThresholdPx = 36f), 0.01f)
         assertEquals(0f, MessageReplySwipePolicy.dragOffset(deltaX = -40f, mine = false, baseThresholdPx = 36f), 0.01f)
+        assertEquals(0f, MessageReplySwipePolicy.dragOffset(deltaX = 40f, mine = true, baseThresholdPx = 36f), 0.01f)
     }
 }

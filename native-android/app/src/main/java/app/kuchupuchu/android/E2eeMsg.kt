@@ -54,8 +54,10 @@ import javax.crypto.spec.SecretKeySpec
  * r64 (owner: "e2e system implement kore daw" — calls already verify; now the
  * messages do too): 1:1 message bodies are sealed on the phone and only the
  * two phones can open them. The worker stores and forwards the opaque
- * envelope (the "KP1." prefix marks it) — it never sees plaintext and never
- * holds a private key.
+ * envelope (the "KP1." prefix marks it) — it never sees message plaintext.
+ * New private-key backups are uploaded only as passphrase-locked KP2 ciphertext.
+ * Legacy unencrypted KP1 backups already on the server remain readable there
+ * until the owner explicitly migrates or deletes them.
  *
  * Crypto is standard JCA only — P-256 ECDH, HKDF-SHA256 (RFC 5869),
  * AES-256-GCM — so it runs on minSdk 24 with no new dependency and on the
@@ -75,7 +77,7 @@ import javax.crypto.spec.SecretKeySpec
  */
 internal object E2eeMsg {
     const val PREFIX = "KP1."
-    private const val LOCK = "\uD83D\uDD12"
+    private const val UNREADABLE_MESSAGE = "Unable to decrypt message"
     private const val PREFS = "kp_e2ee"
     private const val KEY_PRIV = "msg_priv"
     private const val KEY_PUB = "msg_pub"
@@ -236,14 +238,14 @@ internal object E2eeMsg {
      * Open a row without destroying its envelope. A copy is returned only
      * when the displayed body changes; cached envelopes can be retried. A row
      * we cannot open (our key lost on a reinstall, the peer's new device)
-     * becomes a bare lock, never ciphertext.
+     * becomes a neutral failure label, never a lock marker or ciphertext.
      */
     fun unsealRow(ctx: Context, m: JSONObject, peerPub: String): JSONObject {
         // Keep the wire envelope locally so a late peer-key refresh can retry.
         // Never expose ciphertext, and never destroy the only decryptable copy.
         val b = m.optText("kpEnvelope").ifBlank { m.optText("body") }
         if (!isEnvelope(b)) return m
-        val plain = open(ctx, b, peerPub) ?: LOCK
+        val plain = open(ctx, b, peerPub) ?: UNREADABLE_MESSAGE
         if (m.optText("body") == plain && m.optText("kpEnvelope") == b) return m
         return JSONObject(m.toString()).put("body", plain).put("kpEnvelope", b)
     }
@@ -284,8 +286,9 @@ internal object E2eeMsg {
     private fun ensurePublished(ctx: Context): Boolean {
         val session = Api.token.orEmpty()
         return publication.ensure(session, { Api.token == session }) {
-            // r76-12: restore (or back up) the roaming identity BEFORE reading
-            // ours — a fresh install must not mint a key over its history.
+            // Restore any existing roaming identity BEFORE publishing ours —
+            // a fresh install must not mint over history. New backups are
+            // never uploaded automatically; only the passphrase flow may save one.
             restoreRoaming(ctx)
             val pub = identity(ctx).second
             // Do not use the offline GET cache as a server acknowledgement.
@@ -302,8 +305,11 @@ internal object E2eeMsg {
     // ---------- r76-12: roaming identity (owner: history on a new phone) ----------
 
 
-    /** Restore the backed-up pair when we have none; back ours up when the
-     *  server lacks one. Runs on the caller's IO thread (ensurePublished). */
+    /**
+     * Restore a saved identity if one exists. Existing legacy KP1 backups are
+     * import-only: never create or overwrite an unencrypted private-key backup
+     * automatically. Runs on the caller's IO thread (ensurePublished).
+     */
     private fun restoreRoaming(ctx: Context): Boolean =
         runCatching {
             val prefs = ctx.getSharedPreferences(PREFS, 0)
@@ -312,55 +318,38 @@ internal object E2eeMsg {
             val remote = Api.request("/api/e2ee/backup", "GET", null).optText("backup")
             if (priv.isBlank() || pub.isBlank()) {
                 if (remote.startsWith(V2)) {
-                    // r76-26 (owner: "logout kore app delete kore abar install
-                    // korle ... purono message gulate lock emoji dekhai"): the
-                    // backup is passphrase-locked, so it cannot open silently.
-                    // Hold it for the restore dialog; mint a working pair now
-                    // so sending keeps going, and NEVER overwrite the remote.
+                    // Passphrase-locked: hold it for the restore dialog, then
+                    // keep a local working identity while the dialog is pending.
+                    // The remote blob is never overwritten by this path.
                     pendingRestore = remote
                     identity(ctx)
                     return@runCatching false
                 }
-                if (remote.isNotBlank()) {
-                    val j = JSONObject(String(Base64.getDecoder().decode(remote), Charsets.UTF_8))
-                    val rp = j.optText("p")
-                    val ru = j.optText("u")
-                    if (parsePriv(rp) != null && parsePub(ru) != null) {
-                        prefs.edit().putString(KEY_PRIV, rp).putString(KEY_PUB, ru).apply()
-                        identityCache = rp to ru
-                        notifyRestoredNonceOnMain()
-                        return@runCatching true
-                    }
+                val legacy = decodeLegacyBackup(remote)
+                if (legacy != null) {
+                    prefs.edit().putString(KEY_PRIV, legacy.first).putString(KEY_PUB, legacy.second).apply()
+                    identityCache = legacy
+                    notifyRestoredNonceOnMain()
+                    return@runCatching true
                 }
-                // r76-29 (owner: "eita ki auto hobe naki amay kono key setup
-                // korte hobe?"): AUTO. The first device mints its pair and
-                // backs it up right away - nothing to set up, and a reinstall
-                // / new phone restores silently. Setting a passphrase in the
-                // privacy sheet UPGRADES the same backup to a locked KP2 blob
-                // (the server then holds ciphertext it cannot read).
+                // A first install keeps its generated identity on this device.
+                // The owner can opt into a KP2 backup from Privacy settings.
                 identity(ctx)
-                return@runCatching backupLocal(ctx)
+                return@runCatching false
             }
-            if (remote.isBlank()) return@runCatching backupLocal(ctx)
-            true
+            !remote.isBlank()
         }.getOrDefault(false)
 
-    /** The automatic (KP1) backup: the pair the server keeps for the next phone. */
-    private fun encodeBackup(priv: String, pub: String): String =
-        Base64.getEncoder()
-            .encodeToString(
-                JSONObject().put("p", priv).put("u", pub).toString().toByteArray(Charsets.UTF_8),
-            )
-
-    private fun backupLocal(ctx: Context): Boolean =
-        runCatching {
-            val prefs = ctx.getSharedPreferences(PREFS, 0)
-            val priv = prefs.getString(KEY_PRIV, null).orEmpty()
-            val pub = prefs.getString(KEY_PUB, null).orEmpty()
-            if (priv.isBlank() || pub.isBlank()) return@runCatching false
-            Api.request("/api/e2ee/backup", "PUT", JSONObject().put("backup", encodeBackup(priv, pub)))
-            true
-        }.getOrDefault(false)
+    /** Import-only decoder for existing base64 JSON {p,u} backups. */
+    internal fun decodeLegacyBackup(blob: String): Pair<String, String>? {
+        if (blob.isBlank() || blob.startsWith(V2)) return null
+        return runCatching {
+            val j = JSONObject(String(Base64.getDecoder().decode(blob), Charsets.UTF_8))
+            val priv = j.optText("p")
+            val pub = j.optText("u")
+            if (parsePriv(priv) != null && parsePub(pub) != null) priv to pub else null
+        }.getOrNull()
+    }
 
     // ---------- r76-26: passphrase-locked backup (owner chose WhatsApp-style) ----------
     //
@@ -432,12 +421,26 @@ internal object E2eeMsg {
             runCatching { Api.request("/api/e2ee/backup", "GET", null).optText("backup") }.getOrDefault("")
         }
 
-    /** The privacy sheet: (re)lock the CURRENT identity under a passphrase. */
+    /**
+     * The privacy sheet: (re)lock the CURRENT identity under a passphrase.
+     * A pending KP2 restore must finish first; a legacy backup is replaced only
+     * when its decoded pair matches this install's local identity.
+     */
     suspend fun uploadLockedBackup(ctx: Context, pass: String): Boolean =
         withContext(Dispatchers.IO) {
             runCatching {
-                val (p, u) = identity(ctx)
-                Api.request("/api/e2ee/backup", "PUT", JSONObject().put("backup", packBackup(p, u, pass)))
+                if (pendingRestore != null) return@runCatching false
+                val pair = identity(ctx)
+                val remote = Api.request("/api/e2ee/backup", "GET", null).optText("backup")
+                if (remote.isNotBlank() && !remote.startsWith(V2)) {
+                    val legacy = decodeLegacyBackup(remote) ?: return@runCatching false
+                    if (legacy != pair) return@runCatching false
+                }
+                Api.request(
+                    "/api/e2ee/backup",
+                    "PUT",
+                    JSONObject().put("backup", packBackup(pair.first, pair.second, pass)),
+                )
                 pendingRestore = null
                 true
             }.getOrDefault(false)

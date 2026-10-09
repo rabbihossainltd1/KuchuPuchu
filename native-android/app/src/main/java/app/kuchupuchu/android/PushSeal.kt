@@ -10,8 +10,8 @@ import org.json.JSONObject
  *
  * Before E2EE the worker's push carried the message text, so the tray card read
  * the message and Reply worked from the shade. With 1:1 bodies sealed the push
- * can only carry the envelope — the server cannot open it — so the card said
- * the lock ("🔒") and looked empty. The PHONE has the keys, so the fix belongs
+ * can only carry the envelope — the server cannot open it — so only the phone
+ * can build a readable preview. The PHONE has the keys, so the fix belongs
  * here: the moment the push lands, open the envelope and draw the card from the
  * plaintext. Two sources, cheapest first:
  *
@@ -38,12 +38,12 @@ internal object PushSeal {
      */
     fun isOnceLabel(s: String?): Boolean = s?.trim()?.endsWith("View once") == true
 
-    /** The worker's placeholder for a sealed body (mirrors the server's preview). */
-    const val LOCK = "\uD83D\uDD12"
+    /** Legacy worker placeholder. It is recognized only so it can never be displayed. */
+    const val LEGACY_SEALED_PREVIEW = "\uD83D\uDD12"
 
     /**
      * What the tray card says. The opened plaintext wins; otherwise a sealed
-     * body must never be printed as ciphertext or as the bare lock — the card
+     * body must never be printed as ciphertext or the legacy marker — the card
      * reads a neutral label, and the reply action below it still works.
      */
     fun cardText(plan: Plan, opened: String?, body: String?): String {
@@ -51,10 +51,16 @@ internal object PushSeal {
         // r72-20: a view-once label WINS over the plaintext this phone could
         // open — the card (and the list row it feeds) must not print the words
         // the row itself is hiding.
-        if (plan.once || isOnceLabel(raw)) return raw.ifBlank { "New message" }
+        if (plan.once || isOnceLabel(raw)) {
+            // The explicit kp_once bit is authoritative: even a malformed or
+            // older payload that pairs it with an envelope must stay masked.
+            return raw.takeIf { isOnceLabel(it) } ?: "Message · View once"
+        }
         if (!opened.isNullOrBlank()) return opened
         if (raw.isEmpty()) return "New message"
-        if (plan.sealed && (raw == LOCK || E2eeMsg.isEnvelope(raw))) return "New message"
+        if (raw == LEGACY_SEALED_PREVIEW || (plan.sealed && E2eeMsg.isEnvelope(raw))) {
+            return "New message"
+        }
         return raw
     }
 
@@ -65,13 +71,13 @@ internal object PushSeal {
      * envelope counts too, so an older worker (which only sent the preview)
      * still lands on the sealed path instead of printing ciphertext.
      */
-    fun plan(kpE2ee: String?, kpEnv: String?, body: String?): Plan {
+    fun plan(kpE2ee: String?, kpEnv: String?, body: String?, kpOnce: String? = null): Plan {
         val env = kpEnv?.trim()?.takeIf { E2eeMsg.isEnvelope(it) }
         val bodyEnv = body?.trim()?.takeIf { E2eeMsg.isEnvelope(it) }
         val sealed = kpE2ee == "1" || env != null || bodyEnv != null
-        // r72-20: a view-once push spends nothing here — there is nothing the
-        // card may print, so [open] / [openBounded] answer null for it.
-        return Plan(sealed, env ?: bodyEnv, isOnceLabel(body))
+        // r72-20: a view-once push spends nothing here — the explicit marker
+        // wins over any envelope, so [open] / [openBounded] always answer null.
+        return Plan(sealed, env ?: bodyEnv, kpOnce == "1" || isOnceLabel(body))
     }
 
     /** The plaintext for the card, or null when this payload is not sealed / cannot be opened. */

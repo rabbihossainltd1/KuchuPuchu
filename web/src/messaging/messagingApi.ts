@@ -211,14 +211,6 @@ export const messagingApi = {
     return typeof backup === "string" ? backup : "";
   },
 
-  async putBackup(api: ApiClient, backup: string): Promise<void> {
-    await api.request<unknown>("/api/e2ee/backup", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ backup }),
-    });
-  },
-
   /**
    * The shared-media gallery: one payload of four newest-first lists. There is
    * no cursor — the Worker caps it at 400 rows and has already applied the

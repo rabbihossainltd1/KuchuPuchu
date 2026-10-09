@@ -39,7 +39,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
@@ -8128,9 +8127,9 @@ private fun Modifier.messageStampTap(
     }
 }
 
-/** Photo/album swipe recognizer: claim a clear horizontal drag before child tile taps can win. */
+/** Shared message swipe recognizer: claim clear horizontal intent before child taps can win. */
 @Composable
-private fun Modifier.photoReplySwipe(
+private fun Modifier.messageReplySwipe(
     messageKey: String,
     mine: Boolean,
     baseThresholdPx: Float,
@@ -8548,9 +8547,9 @@ private fun MessageRow(
         return
     }
 
-    // Owner round 13: hold-drag a bubble RIGHT to quote-reply. The offset
-    // follows the finger up to ~65dp; past 36dp on release it arms the reply.
-    // Owner round 16: OWN messages arm the same way to the LEFT.
+    // One shared reply policy covers text/sticker/voice/file/document rows
+    // and the specialized media rows below: incoming swipes go RIGHT, own
+    // swipes go LEFT, with the same release distance and drag feedback.
     var replyDrag by remember { mutableStateOf(0f) }
     val replyOffset by animateFloatAsState(replyDrag, spring(stiffness = 1400f), label = "replydrag")
     val replyThreshold = with(LocalDensity.current) { 36.dp.toPx() }
@@ -8581,7 +8580,22 @@ private fun MessageRow(
             ),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
-        Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
+        Column(
+            modifier = Modifier.messageReplySwipe(
+                messageKey = m.optString("clientId").ifBlank { m.optString("id") },
+                mine = mine,
+                baseThresholdPx = replyThreshold,
+                onOffset = { replyDrag = it },
+                onArmed = { haptics.tap() },
+                onReply = {
+                    if (m.optString("kind") != "DELETED") {
+                        runCatching { KpSounds.replySwipe(ctx) }
+                        onReply(m)
+                    }
+                },
+            ),
+            horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
+        ) {
             // Owner round 2026-09-04: long bodies used to flatten at 280dp.
             // The bubble now stretches with the screen (82% of it, floored at
             // the old 280 and capped at 420 for tablets) so the right side
@@ -8659,47 +8673,6 @@ private fun MessageRow(
                     Modifier
                         .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), bubbleShape) }
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                    // Owner round 13b: the hand-rolled awaitEachGesture fought
-                    // the list's vertical scrolling (jank + crash on device).
-                    // detectHorizontalDragGestures waits for clear horizontal
-                    // intent (touch slop) before consuming, so chat scrolling
-                    // stays smooth and the reply swipe still works.
-                    .pointerInput(m.optString("id")) {
-                        detectHorizontalDragGestures(
-                            onHorizontalDrag = { change, dragAmount ->
-                                change.consume()
-                                // Owner round 16: own messages reply by dragging
-                                // LEFT; other people's by dragging right.
-                                // Owner round 17: the left swipe was touchy —
-                                // it now needs half again as much distance and
-                                // barely overshoots.
-                                val wasArmed = kotlin.math.abs(replyDrag) >= (if (mine) replyThreshold * 1.5f else replyThreshold)
-                                replyDrag =
-                                    if (mine) {
-                                        (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.5f, 0f)
-                                    } else {
-                                        (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.8f)
-                                    }
-                                // Owner round 32 (item 40): the finger feels the
-                                // reply point — one tap when the swipe arms.
-                                if (!wasArmed && kotlin.math.abs(replyDrag) >= (if (mine) replyThreshold * 1.5f else replyThreshold)) haptics.tap()
-                            },
-                            onDragEnd = {
-                                val need =
-                                    if (mine) replyThreshold * 1.5f else replyThreshold
-                                val armed = kotlin.math.abs(replyDrag) >= need
-                                replyDrag = 0f
-                                // Owner round 22: deleted/unsent messages can
-                                // no longer be replied to.
-                                if (armed && m.optString("kind") != "DELETED") {
-                                    // Owner round 21: his reply-swipe sound.
-                                    runCatching { KpSounds.replySwipe(ctx) }
-                                    onReply(m)
-                                }
-                            },
-                            onDragCancel = { replyDrag = 0f },
-                        )
-                    }
                     // v170 (owner: "short massage bubble onek bushi short
                     // hoye ... massage bubble body aro ektu boro hobe jodi
                     // time tick fill na kore"): a text bubble is never
@@ -9589,7 +9562,22 @@ private fun VideoMessageRow(
         // Owner round 42 (item 3): the caption stretches this column wider
         // than the frame — without the alignment the frame hugs the wrong
         // side for my own messages.
-        Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
+        Column(
+            modifier = Modifier.messageReplySwipe(
+                messageKey = m.optString("clientId").ifBlank { m.optString("id") },
+                mine = mine,
+                baseThresholdPx = replyThreshold,
+                onOffset = { replyDrag = it },
+                onArmed = { haptics.tap() },
+                onReply = {
+                    if (m.optString("kind") != "DELETED") {
+                        runCatching { KpSounds.replySwipe(ctx) }
+                        onReply(m)
+                    }
+                },
+            ),
+            horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
+        ) {
         Box(
             Modifier
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
@@ -9615,30 +9603,6 @@ private fun VideoMessageRow(
                 .graphicsLayer { alpha = PhotoHero.tileAlphaFor(vidId) }
                 .background(Color(0xFF0B1220))
                 .border(1.dp, if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444), RoundedCornerShape(12.dp))
-                .pointerInput(m.optString("id")) {
-                    detectHorizontalDragGestures(
-                        onHorizontalDrag = { change, dragAmount ->
-                            change.consume()
-                            val wasArmed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                            replyDrag =
-                                if (mine) {
-                                    (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.4f, 0f)
-                                } else {
-                                    (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.4f)
-                                }
-                            if (!wasArmed && kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f) haptics.tap()
-                        },
-                        onDragEnd = {
-                            val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                            replyDrag = 0f
-                            if (armed && m.optString("kind") != "DELETED") {
-                                runCatching { KpSounds.replySwipe(ctx) }
-                                onReply(m)
-                            }
-                        },
-                        onDragCancel = { replyDrag = 0f },
-                    )
-                }
                 .combinedClickable(
                     onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
                     onClick = {
@@ -9890,7 +9854,22 @@ private fun OnceTextRow(
     ) {
         // r72-20: the bubble and its stamp ride one column — the bubble on
         // top, the stamp under it — like every other message row.
-        Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
+        Column(
+            modifier = Modifier.messageReplySwipe(
+                messageKey = id,
+                mine = mine,
+                baseThresholdPx = replyThreshold,
+                onOffset = { replyDrag = it },
+                onArmed = { haptics.tap() },
+                onReply = {
+                    if (m.optString("kind") != "DELETED") {
+                        runCatching { KpSounds.replySwipe(ctx) }
+                        onReply(m)
+                    }
+                },
+            ),
+            horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
+        ) {
             Box(
                 Modifier
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
@@ -9900,27 +9879,6 @@ private fun OnceTextRow(
                     .requiredWidthIn(min = if (mine) 70.dp else 52.dp)
                     .clip(shape)
                     .background(if (mine) chatMineFill(theme) else chatOtherFill(theme))
-                    .pointerInput(id) {
-                        detectHorizontalDragGestures(
-                            onHorizontalDrag = { change, dragAmount ->
-                                change.consume()
-                                val wasArmed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                                replyDrag =
-                                    if (mine) (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.4f, 0f)
-                                    else (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.4f)
-                                if (!wasArmed && kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f) haptics.tap()
-                            },
-                            onDragEnd = {
-                                val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                                replyDrag = 0f
-                                if (armed) {
-                                    runCatching { KpSounds.replySwipe(ctx) }
-                                    onReply(m)
-                                }
-                            },
-                            onDragCancel = { replyDrag = 0f },
-                        )
-                    }
                     .combinedClickable(
                         onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
                         onClick = {
@@ -10214,7 +10172,22 @@ private fun ViewOnceRow(
             .padding(vertical = 3.dp),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
-        Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
+        Column(
+            modifier = Modifier.messageReplySwipe(
+                messageKey = m.optString("clientId").ifBlank { m.optString("id") },
+                mine = mine,
+                baseThresholdPx = replyThreshold,
+                onOffset = { replyDrag = it },
+                onArmed = { haptics.tap() },
+                onReply = {
+                    if (m.optString("kind") != "DELETED") {
+                        runCatching { KpSounds.replySwipe(ctx) }
+                        onReply(m)
+                    }
+                },
+            ),
+            horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
+        ) {
             Box(
                 Modifier
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
@@ -10261,30 +10234,6 @@ private fun ViewOnceRow(
                     // r76-9 (owner): a view-once VOICE bubble rides like a
                     // normal voice bubble — no border ring.
                     .then(if (voice) Modifier else Modifier.border(1.dp, Color(0xFF3B82F6), bubbleShape))
-                    .pointerInput(m.optString("id")) {
-                        detectHorizontalDragGestures(
-                            onHorizontalDrag = { change, dragAmount ->
-                                change.consume()
-                                val wasArmed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                                replyDrag =
-                                    if (mine) {
-                                        (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.4f, 0f)
-                                    } else {
-                                        (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.4f)
-                                    }
-                                if (!wasArmed && kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f) haptics.tap()
-                            },
-                            onDragEnd = {
-                                val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                                replyDrag = 0f
-                                if (armed) {
-                                    runCatching { KpSounds.replySwipe(ctx) }
-                                    onReply(m)
-                                }
-                            },
-                            onDragCancel = { replyDrag = 0f },
-                        )
-                    }
                     .combinedClickable(
                         onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
                         onClick = {
@@ -10600,7 +10549,7 @@ private fun ImageMessageRow(
         // — the photo must hug MY side, not the column's start.
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
             Box(
-                Modifier.photoReplySwipe(
+                Modifier.messageReplySwipe(
                     messageKey = m.optString("clientId").ifBlank { m.optString("id") },
                     mine = mine,
                     baseThresholdPx = replyThreshold,
@@ -10972,7 +10921,7 @@ private fun AlbumMessageRow(
     ) {
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
             Box(
-                Modifier.photoReplySwipe(
+                Modifier.messageReplySwipe(
                     messageKey = m.optString("clientId").ifBlank { m.optString("id") },
                     mine = mine,
                     baseThresholdPx = replyThreshold,
