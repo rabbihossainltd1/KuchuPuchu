@@ -1039,3 +1039,8 @@ Owner: "ager session ei kaj korte korte dead hoye geche … kota kaj hoyeche" �
 - WEB: wsTicket.ts + socketTicketUrl(); managed socket mints a fresh ticket per dial incl. reconnects; messaging/chat/call sockets switched. e2e helpers mint `e2e.ticket`.
 - TESTS: case 80 = 24 behavioral checks against the real worker (the plan's ship condition): mint/spend/replay/tamper/expire/REST-boundary/legacy-fallback/purge/no-key.
 - PROVISIONING: `WS_TICKET_KEY` AND `VAPID_PRIVATE_KEY` secrets uploaded to Cloudflare BEFORE merge (ticket key first so the new client never 503-loops).
+
+## Web slice P — production web-push on — 2026-10-10 (branch feat/web-p8-web-push-on, base main @ 892714d)
+- WHAT: push (slice H) was built+tested but dark because the server had no VAPID key. Provisioned `VAPID_PRIVATE_KEY` secret to Cloudflare (public key derived at runtime; fail-closed 503 if unset), then flipped `VITE_KP_WEB_PUSH=true` in `build:web:prod` so the settings card offers a real PushManager subscription.
+- PINS: case 79 recipe check now includes push. Docs: web-feature-flags.md push row, web-cutover.md recipe, roadmap slice P + VAPID open-question marked resolved, memory.
+- UNCHANGED: subscriptions account-scoped, payloads generic, phone FCM route never reused (plan §7.4).

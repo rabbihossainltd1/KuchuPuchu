@@ -56,7 +56,8 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 
 | **J** production cutover (React PWA at /) | ✅ merged | PR #92+#93 (parallel session), integration PR #94 → `main` @ `958dff9` |
 | **K** production statuses on | ✅ merged | PR #95 → `main` @ `41cfa971492be11750a0f356fb53572fc04df45b` |
-| **O** WS socket tickets (plan §7.2) | ✅ built | এই branch; নিচের হিসাব |
+| **O** WS socket tickets (plan §7.2) | ✅ merged | PR #96 → `main` @ `892714df4831ef3bcae0554292a720ce89254159` |
+| **P** production web-push on | ✅ built | এই branch; নিচের হিসাব |
 
 **Slice D-তে যা নামলো** (Worker বা Android-এ একটি লাইনও বদলায়নি):
 
@@ -210,6 +211,20 @@ The browser stopped putting its long-lived session token in socket URLs:
 - Provisioning: `WS_TICKET_KEY` secret uploaded BEFORE merge (otherwise the
   new client would 503-loop on every dial).
 
+## Slice P — Production web-push on ✅
+
+The doorbell goes live. The push feature (slice H) was fully built and tested
+but dark, because the server had no VAPID key; the settings card showed the
+honest "not configured" line instead of a real opt-in.
+
+- Provisioning: `VAPID_PRIVATE_KEY` secret uploaded to Cloudflare (the worker
+  derives the public key from it, so pair can never disagree; fail-closed 503
+  if unset).
+- Recipe: `build:web:prod` gains `VITE_KP_WEB_PUSH=true`, so the settings card
+  now offers a real PushManager subscription. Case 79 pins the flag.
+- Nothing else changes: subscriptions stay account-scoped, payloads stay
+  generic, and the phone's FCM route is never reused (parity plan §7.4).
+
 ## কাজের নিয়ম (আগের বার যে ভুলটা হয়েছিল)
 
 1. **প্রতিটি slice শেষ হলেই commit + push।** কোনো বড় কাজ কখনও শুধু sandbox-এ রাখা যাবে না।
@@ -226,6 +241,6 @@ The browser stopped putting its long-lived session token in socket URLs:
 ## খোলা প্রশ্ন (যেখানে পৌঁছালে সিদ্ধান্ত লাগবে)
 
 - Group video call-এর measured participant cap / SFU সিদ্ধান্ত (future work; Slice G-এর 1:1 scope-এর বাইরে)।
-- ~~Web Push-এর VAPID key + subscription schema (Slice H-এর আগে)।~~ সমাধান (Slice H): `VAPID_PRIVATE_KEY` secret থেকে পাবলিক key derive হয়; সাবস্ক্রিপশন `web_push_subs` টেবিলে; `docs/web-push.md`। বাকি শুধু লাইভ ডিপ্লয়-তে সিক্রেট বসানো — যেটা আলাদা অনুমতির কাজ।
+- ~~Web Push-এর VAPID key + subscription schema (Slice H-এর আগে)।~~ সমাধান (Slice H): `VAPID_PRIVATE_KEY` secret থেকে পাবলিক key derive হয়; সাবস্ক্রিপশন `web_push_subs` টেবিলে; `docs/web-push.md`। সিক্রেট লাইভ ডিপ্লয়-তে বসানো হয়েছে আর প্রোডাকশন রেসিপিতে `VITE_KP_WEB_PUSH=true` চালু (স্লাইস পি)।
 - ~~নতুন `web/` অ্যাপ কখন production cutover হবে — `public/` প্রতিস্থাপন নাকি আলাদা path-এ parallel।~~ সমাধান (Slice J): মালিক সরাসরি প্রতিস্থাপন অনুমোদন করেছেন; `docs/web-cutover.md`।
 - ~~Long-lived session token WS query-তে রাখা বনাম short-lived ticket route~~ — শিপড (স্লাইস ও): ব্রাউজার সকেট এখন ৬০-সেকেন্ডের একবার-ব্যবহারযোগ্য টিকিট নেয়; `?token=` ফলব্যাক অক্ষত।

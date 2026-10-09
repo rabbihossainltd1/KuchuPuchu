@@ -14,6 +14,7 @@ Since the slice J production cutover the production build is `npm run build:web:
 | `VITE_KP_WEB_STATUSES` | `statuses` | `false` | Status feed, composers, viewer and privacy (slice F). On in `build:web:prod` since slice K. |
 | `VITE_KP_WEB_MEDIA` | `media` | `false` | Reserved: the attachment/viewer/album features (slices D/E) ship inside the messaging surface and nothing reads this gate yet, so production leaves it unflipped. |
 | `VITE_KP_WEB_CALLS` | `calls` | `false` | Flag-gated 1:1 voice/video (slice G). Stays off in production per plan. |
+| `VITE_KP_WEB_PUSH` | `push` | `false` | Web Push settings card and subscription registry (slice H). On in `build:web:prod` since slice P — the server's VAPID secret is provisioned, so the card now offers a real doorbell instead of the honest "not configured" line. |
 
 Values accept `true` or `false` (case-insensitive, surrounding whitespace ignored). Any other value uses that flag's safe default. Example:
 
