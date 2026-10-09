@@ -53,7 +53,7 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 | **H** Web Push (VAPID doorbell) | ✅ merged | PR #89 → `main` @ `e5ee47a` |
 | hotfix — legacy web empty list (`{items}` + SW cache bump) | ✅ merged | PR #90 → `main` @ `eab68c3` |
 | **I** hardening (themes, motion, a11y, CSP, IDB) | ✅ merged | PR #91 → `main` @ `1af2694` |
-| **J** production cutover (React PWA at /) | ✅ built | এই branch; নিচের হিসাব |
+| **J** production cutover (React PWA at /) | ✅ merged | PR #92 → `main` @ `7acc0e1`; headers fix PR #93 → `main` @ `1d2f7f8` |
 
 **Slice D-তে যা নামলো** (Worker বা Android-এ একটি লাইনও বদলায়নি):
 
