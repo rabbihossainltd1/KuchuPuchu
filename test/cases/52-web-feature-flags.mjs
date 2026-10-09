@@ -15,13 +15,14 @@ check(
   defaults.serviceWorker === true && WEB_FEATURE_FLAG_DEFAULTS.serviceWorker === true,
 );
 check(
-  "unimplemented account, messaging, status, media, and call features default off",
+  "unimplemented account, messaging, status, media, call, and push features default off",
   [
     defaults.accountIntegration,
     defaults.messaging,
     defaults.statuses,
     defaults.media,
     defaults.calls,
+    defaults.push,
   ].every((enabled) => enabled === false),
 );
 
@@ -32,6 +33,7 @@ const configured = resolveWebFeatureFlags({
   [WEB_FEATURE_FLAG_ENV.statuses]: "false",
   [WEB_FEATURE_FLAG_ENV.media]: "true",
   [WEB_FEATURE_FLAG_ENV.calls]: "false",
+  [WEB_FEATURE_FLAG_ENV.push]: "true",
 });
 check(
   "explicit true/false values override each default",
@@ -42,6 +44,7 @@ check(
     statuses: false,
     media: true,
     calls: false,
+    push: true,
   }),
 );
 
@@ -69,6 +72,7 @@ check(
   "account flow environment name is stable",
   WEB_FEATURE_FLAG_ENV.accountIntegration === "VITE_KP_WEB_ACCOUNT_INTEGRATION",
 );
+check("push environment name is stable", WEB_FEATURE_FLAG_ENV.push === "VITE_KP_WEB_PUSH");
 
 console.log(lines.join("\n"));
 const broken = lines.filter((line) => line.includes("BROKEN")).length;

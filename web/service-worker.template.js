@@ -39,6 +39,56 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+/* Slice H: the browser doorbell. The payload arrives GENERIC by server
+   contract (a kind, nothing else — never message text, names or photos), so
+   the notification this worker shows can only knock; the signed-in app loads
+   the actual content after the click. The copy below is pinned against
+   web/src/push/pushModel.ts by contract case 77 and verify-web-sw. */
+self.addEventListener("push", (event) => {
+  if (!event.data) return;
+  let payload = {};
+  try {
+    payload = JSON.parse(event.data.text()) || {};
+  } catch {
+    payload = {};
+  }
+  const kind = payload.t === "kp.call" ? "kp.call" : "kp.msg";
+  const silent = payload.s === 1;
+  event.waitUntil(
+    self.registration.showNotification("KuchuPuchu", {
+      body:
+        kind === "kp.call"
+          ? "Call activity on KuchuPuchu — open the app to check."
+          : "New message activity on KuchuPuchu — open the app to check.",
+      tag: kind === "kp.call" ? "kp-call" : "kp-msg",
+      renotify: true,
+      silent: silent,
+      data: { t: kind },
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target =
+    event.notification.data && event.notification.data.t === "kp.call" ? "/calls" : "/chats";
+  event.waitUntil(
+    (async () => {
+      const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      const current = windows.find((client) => "focus" in client);
+      if (current) {
+        // The app owns the final navigation decision (the calls section only
+        // exists in a calls-enabled build); the worker only hands over the
+        // kind and the focus.
+        current.postMessage({ type: "kp-push-nav", path: target });
+        await current.focus();
+        return;
+      }
+      await self.clients.openWindow(target);
+    })(),
+  );
+});
+
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (request.method !== "GET") return;

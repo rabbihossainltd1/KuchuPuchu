@@ -58,6 +58,34 @@ assert.ok(
 assert.ok(worker.includes("url.origin !== self.location.origin"));
 assert.ok(worker.includes("API_OR_WS_PATH.test(url.pathname)"));
 assert.ok(worker.includes('request.headers.has("authorization")'));
+
+// Slice H doorbell: the push handler must stay GENERIC (no message content is
+// even available to it) and the click must route through the app's own
+// sections. The copy is pinned against web/src/push/pushModel.ts — contract
+// case 77 pins the same strings from the model side.
+assert.ok(worker.includes('self.addEventListener("push"'), "service worker must handle push");
+assert.ok(
+  worker.includes('self.addEventListener("notificationclick"'),
+  "service worker must route notification clicks",
+);
+assert.ok(
+  worker.includes("Call activity on KuchuPuchu — open the app to check."),
+  "the call doorbell copy must stay generic and exact",
+);
+assert.ok(
+  worker.includes("New message activity on KuchuPuchu — open the app to check."),
+  "the message doorbell copy must stay generic and exact",
+);
+assert.ok(worker.includes('tag: kind === "kp.call" ? "kp-call" : "kp-msg"'));
+assert.ok(worker.includes('{ type: "kp-push-nav", path: target }'));
+assert.ok(
+  worker.includes('self.registration.showNotification("KuchuPuchu"'),
+  "the knock is shown under the app name only",
+);
+assert.ok(
+  (worker.match(/showNotification/g) ?? []).length === 1,
+  "exactly one notification call: the doorbell, nowhere else",
+);
 assert.ok(worker.includes('credentials: "omit"'));
 assert.ok(worker.includes("key.startsWith(CACHE_PREFIX)"));
 assert.ok(!worker.includes("skipWaiting"), "updates must wait for existing clients to close");

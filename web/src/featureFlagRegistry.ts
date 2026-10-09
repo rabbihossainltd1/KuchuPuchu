@@ -5,6 +5,7 @@ export const WEB_FEATURE_FLAG_ENV = {
   statuses: "VITE_KP_WEB_STATUSES",
   media: "VITE_KP_WEB_MEDIA",
   calls: "VITE_KP_WEB_CALLS",
+  push: "VITE_KP_WEB_PUSH",
 } as const;
 
 export type WebFeatureFlag = keyof typeof WEB_FEATURE_FLAG_ENV;
@@ -21,6 +22,7 @@ export const WEB_FEATURE_FLAG_DEFAULTS: WebFeatureFlags = Object.freeze({
   statuses: false,
   media: false,
   calls: false,
+  push: false,
 });
 
 function parseFlag(value: string | undefined, fallback: boolean): boolean {
@@ -55,5 +57,6 @@ export function resolveWebFeatureFlags(environment: WebFeatureFlagEnvironment): 
     ),
     media: parseFlag(environment[WEB_FEATURE_FLAG_ENV.media], WEB_FEATURE_FLAG_DEFAULTS.media),
     calls: parseFlag(environment[WEB_FEATURE_FLAG_ENV.calls], WEB_FEATURE_FLAG_DEFAULTS.calls),
+    push: parseFlag(environment[WEB_FEATURE_FLAG_ENV.push], WEB_FEATURE_FLAG_DEFAULTS.push),
   });
 }
