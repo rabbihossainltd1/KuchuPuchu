@@ -215,4 +215,7 @@ dependencies {
     // other dependency here (§51).
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     testImplementation("junit:junit:4.13.2")
+    // The Android SDK's org.json classes are stubs under the plain JVM test
+    // runner; legacy-backup parsing needs the real JSON implementation here.
+    testImplementation("org.json:json:20240303")
 }
