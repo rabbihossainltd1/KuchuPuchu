@@ -52,7 +52,7 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 | **G** calls (flag-gated 1:1) | ✅ merged | PR #88 → `main` @ `375be10e` |
 | **H** Web Push (VAPID doorbell) | ✅ merged | PR #89 → `main` @ `e5ee47a` |
 | hotfix — legacy web empty list (`{items}` + SW cache bump) | ✅ merged | PR #90 → `main` @ `eab68c3` |
-| **I** hardening (themes, motion, a11y, CSP, IDB) | ✅ built | এই branch; নিচের হিসাব |
+| **I** hardening (themes, motion, a11y, CSP, IDB) | ✅ merged | PR #91 → `main` @ `1af2694` |
 
 **Slice D-তে যা নামলো** (Worker বা Android-এ একটি লাইনও বদলায়নি):
 
