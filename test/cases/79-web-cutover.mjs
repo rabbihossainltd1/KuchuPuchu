@@ -100,8 +100,8 @@ check(
     prodRecipe.includes("VITE_KP_WEB_MESSAGING=true"),
 );
 check(
-  "the production recipe enables the implemented parity surface (account, messaging, statuses)",
-  prodRecipe.includes("VITE_KP_WEB_STATUSES=true"),
+  "the production recipe enables the implemented parity surface (account, messaging, statuses, push)",
+  prodRecipe.includes("VITE_KP_WEB_STATUSES=true") && prodRecipe.includes("VITE_KP_WEB_PUSH=true"),
 );
 check(
   "calls stay default-off and the reserved media gate stays unflipped",
