@@ -173,37 +173,43 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     "r71-21: `heartReact` is a REAL reaction — it guards a sending echo (no id), then goes through the same `applyReaction` the sheet uses, so the chip, the server row and the other phone all agree",
     chat.includes("fun heartReact(m: JSONObject) {") &&
-      chat.includes(
-        'if (m.optString("id").startsWith("c_") || m.optString("id").isBlank()) return',
-      ) &&
+      chat.includes('if (mid.startsWith("c_") || mid.isBlank()) return') &&
       chat.includes('applyReaction(m, "❤️")') &&
+      chat.includes("lastHeartReactionAt = remember { HashMap<String, Long>() }") &&
+      chat.includes("now - previous < HEART_REACTION_COOLDOWN_MS") &&
       // exactly one heart call into applyReaction beyond the sheet's own
       (chat.match(/applyReaction\(m, "❤️"\)/g) || []).length === 1 &&
       (chat.match(/applyReaction\(it, e\)/g) || []).length === 1,
   );
   check(
-    "r71-21: EVERY bubble kind hearts on a double tap — the text/emoji bubble, the image, video, album, view-once, once-text (r71-20) and call/status rows all carry `onDoubleClick`, and MessageRow hands them the callback",
-    // r71-20 added the once-text bubble to the family — six rows now.
+    "r71-21: non-emoji-only bubble kinds still heart on double tap; emoji-only text deliberately opts out",
+    // Five child rows keep their callback; MessageRow gates only emoji-only TEXT.
     (chat.match(/onDoubleClick = \{ if \(!pendingEcho\) onDoubleTapHeart\(m\) \}/g) || [])
-      .length === 6 &&
+      .length === 5 &&
+      chat.includes("onDoubleClick = if (!pendingEcho && emojiOnly == 0)") &&
       chat.includes("onDoubleTapHeart: (JSONObject) -> Unit = {},") &&
       // five tiles + the r71-20 once-text bubble
       (chat.match(/onDoubleTapHeart: \(JSONObject\) -> Unit = \{\},/g) || []).length === 6 &&
       (chat.match(/onDoubleTapHeart = ::heartReact,/g) || []).length === 3,
   );
   check(
-    "r71-21: an emoji-only bubble keeps its INSTANT tap (the r67-4 replay is never delayed) and still hearts on the second tap — its own 320 ms counter, no combinedClickable deferral",
+    "r71-21: emoji glyphs keep instant replay; emoji-only text has no heart callback, while the sticker retains its double-tap callback",
     emo.includes("internal const val DOUBLE_TAP_HEART_MS = 320L") &&
       emo.includes("val lastTapAt = remember { longArrayOf(0L) }") &&
-      emo.includes(
-        "if (onDoubleTap != null && now - lastTapAt[0] in 1..DOUBLE_TAP_HEART_MS) onDoubleTap.invoke()",
-      ) &&
+      emo.includes("val doubleTapConsumed = remember { booleanArrayOf(false) }") &&
+      emo.includes("val isDoubleTap = lastTapAt[0] > 0L && gap in 1..DOUBLE_TAP_HEART_MS") &&
+      emo.includes("if (isDoubleTap && !doubleTapConsumed[0] && onDoubleTap != null)") &&
       emo.includes("onDoubleTap: (() -> Unit)? = null,") &&
       (
         chat.match(
-          /onDoubleTap = \{ if \(!pendingEcho\) onDoubleTapHeart\(m\) \}, danceKey = fxKey\)/g,
+          /onDoubleTap = \{ if \(!pendingEcho\) onDoubleTapHeart\(m\) \},\s*onTap = onRevealStamp,\s*danceKey = fxKey,/g,
         ) || []
-      ).length === 3,
+      ).length === 1 &&
+      chat.includes('EmojiGlyphRow(m.optText("body").trim(), 66f') &&
+      !chat
+        .split("\n")
+        .filter((line) => line.includes('EmojiGlyphRow(m.optText("body").trim(),'))
+        .some((line) => line.includes("onDoubleTap =")),
   );
 }
 
@@ -422,8 +428,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
     "r71-19b: a view-once VOICE renders as its own card — ViewOnceRow takes the voice player, routes a voice row to VoiceOnceTile instead of the blurred photo tile, and sizes it wide and short; r76-13 keeps the r76-11 picture and the wave subsamples to its canvas so the duration never overlaps it",
     chat.includes("player: VoicePlayer,") &&
       chat.includes("val voice = !sentAsDocument(m) && fileLooksVoice(m)") &&
-      chat.includes(
-        'VoiceOnceTile(m = m, mine = mine, pendingEcho = pendingEcho, player = player, playing = player.playingId == m.optString("id"), onSpent = { if (!mine) ViewOnce.spend(m.optString("id")) })',
+      /VoiceOnceTile\(\s*m = m,\s*mine = mine,\s*pendingEcho = pendingEcho,\s*player = player,\s*playing = player\.playingId == m\.optString\("id"\),\s*onSpent = \{ if \(!mine\) ViewOnce\.spend\(m\.optString\("id"\)\) \},\s*onRevealStamp = onRevealStamp,?\s*\)/.test(
+        chat,
       ) &&
       chat.includes(".widthIn(max = if (voice) 196.dp else 138.dp)") &&
       chat.includes("else -> List(fit) { bars[it * bars.size / fit] }") &&
@@ -437,8 +443,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
         "lineHeight = 20.sp,\n                                modifier = Modifier.padding(vertical = 6.dp),",
       ) &&
       chat.includes("Modifier.heightIn(min = 44.dp)") &&
-      chat.includes(
-        "ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme, onDoubleTapHeart)",
+      chat.includes("KpMessageFocusSlot(focusKey) { requestFocus ->") &&
+      /ViewOnceRow\(\s*m = m,\s*mine = mine,[\s\S]{0,700}?onDoubleTapHeart = onDoubleTapHeart,\s*onRevealStamp = onRevealStamp,?\s*\)/.test(
+        chat,
       ),
   );
   check(
@@ -460,6 +467,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
 {
   const chat = main("ChatScreen.kt");
   const list = main("ChatListScreen.kt");
+  const onceTextRow = chat.slice(
+    chat.indexOf("private fun OnceTextRow("),
+    chat.indexOf("private fun VoiceOnceTile("),
+  );
   check(
     "r71-20 + r76-17: the once-text lives in the SCHEDULE sheet now (owner: double tap remove, schedule er vetor once icon) — the sheet's View-once toggle rides scheduleText's once flag into the stored payload; the seat's tap is instant (no double-tap seat), and `sendText` still takes the flag through the meta, the payload and the optimistic echo",
     chat.includes(
@@ -484,13 +495,16 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     "r71-20: the once-text row is dispatched to its own bubble (never the blurred-photo tile), and that row keeps the reply swipe, the long press and the heart",
     chat.includes('if (kind == "TEXT" && m.optText("body").isNotBlank()) {') &&
-      chat.includes(
-        "OnceTextRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, theme, onDoubleTapHeart)",
+      chat.includes("KpMessageFocusSlot(focusKey) { requestFocus ->") &&
+      chat.includes("val onFocusedLongPress: (JSONObject) -> Unit = { pressed ->") &&
+      /OnceTextRow\(\s*m = m,\s*mine = mine,[\s\S]{0,500}?onDoubleTapHeart = onDoubleTapHeart,\s*onRevealStamp = onRevealStamp,?\s*\)/.test(
+        chat,
       ) &&
       chat.includes(
         "@Composable\n@OptIn(ExperimentalFoundationApi::class)\nprivate fun OnceTextRow(",
       ) &&
-      chat.includes("detectHorizontalDragGestures(") &&
+      onceTextRow.includes("Modifier.messageReplySwipe(") &&
+      onceTextRow.includes("onLongClick = {") &&
       chat.includes("if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)"),
   );
   check(
@@ -502,7 +516,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
       ) &&
       chat.includes("Modifier.blur(7.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)") &&
       chat.includes("val veil = !revealed") &&
-      chat.includes("!mine && !revealed -> {") &&
+      chat.includes("if (!mine && !revealed) {") &&
+      chat.includes("onRevealStamp()") &&
       chat.includes('Text("${((leftMs + 999) / 1000)}s", color = Red, fontSize = 10.sp)'),
   );
   check(
@@ -540,8 +555,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
         'theme == "darkblue" ->\n            if (KpThemeMode.darkBlue) Color(0xFFA9C4F2) else Color(0xFF5B7FC7)',
       ) &&
       chat.includes('Text("${((leftMs + 999) / 1000)}s", color = Red, fontSize = 10.sp)') &&
-      // and the bubble + its stamp share one column, so the stamp sits below it
-      chat.includes("Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {"),
+      // and the bubble + its stamp share a column with the common row swipe host
+      chat.includes("modifier = Modifier.messageReplySwipe(") &&
+      chat.includes("horizontalAlignment = if (mine) Alignment.End else Alignment.Start"),
   );
   check(
     'r74-2 (owner, r74: "kichui na icon o na kono text level o na just blur thakbe" and "ami send korbo amar kache + je receive korbe tar kacheo blur"): the once-text bubble is ONLY the blur — the 1 mark (r73-20, then 28 dp) and the "Tap to view" hint are both gone — and the veil covers both sides, with the below-API-31 placeholder marks as the platform-legal stand-in',
@@ -563,11 +579,13 @@ const main = (f) => read(`${ANDROID}/${f}`);
       seal.includes(
         "data class Plan(val sealed: Boolean, val envelope: String?, val once: Boolean = false)",
       ) &&
-      seal.includes("return Plan(sealed, env ?: bodyEnv, isOnceLabel(body))") &&
+      seal.includes('return Plan(sealed, env ?: bodyEnv, kpOnce == "1" || isOnceLabel(body))') &&
       seal.includes("if (!plan.sealed || plan.once) return null") &&
-      seal.includes('if (plan.once || isOnceLabel(raw)) return raw.ifBlank { "New message" }') &&
+      seal.includes('return raw.takeIf { isOnceLabel(it) } ?: "Message · View once"') &&
       push.includes('PushSeal.cardText(plan, opened, data["body"])') &&
-      push.includes('PushSeal.plan(data["kp_e2ee"], data["kp_env"], data["body"])'),
+      push.includes(
+        'PushSeal.plan(data["kp_e2ee"], data["kp_env"], data["body"], data["kp_once"])',
+      ),
   );
 }
 
@@ -709,7 +727,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
     "r71-18: the switches are the server's (read from the conversation, written back one at a time) and a capture alert lands as a red chip with one buzz",
     chat.includes('c?.optJSONObject("privacy")') &&
       chat.includes(
-        "fun setChatPrivacy(\n        shot: Boolean? = null,\n        rec: Boolean? = null,\n        save: Boolean? = null,\n        allowShot: Boolean? = null,\n        allowRec: Boolean? = null,\n    )",
+        "fun setChatPrivacy(\n        shot: Boolean? = null,\n        rec: Boolean? = null,\n        save: Boolean? = null,\n        allowShot: Boolean? = null,\n        allowRec: Boolean? = null,\n        readReceiptsOverride: Boolean? = null,\n        updateReadReceipts: Boolean = false,\n    )",
       ) &&
       chat.includes('"/api/conversations/$convId/privacy"') &&
       // r76-19 (owner item 3: rapid flips auto-reverted): pokes are ignored
@@ -756,7 +774,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       // the payload answers them — NULL rows come back as the member's
       // profile defaults (private: off; public: shot on, rec off, save on).
       worker.includes(
-        "UPDATE members SET priv_shot = ?, priv_rec = ?, priv_save = ?, priv_allow_shot = ?, priv_allow_rec = ? WHERE conv_id = ? AND user_id = ?",
+        "UPDATE members SET priv_shot = ?, priv_rec = ?, priv_save = ?, priv_allow_shot = ?, priv_allow_rec = ?, priv_read_receipts = ? WHERE conv_id = ? AND user_id = ?",
       ) &&
       worker.includes(
         "shot: meShot,\n      rec: meRec,\n      save: meSave,\n      allowShot: meAllowShot,\n      allowRec: meAllowRec,",
@@ -910,9 +928,13 @@ const main = (f) => read(`${ANDROID}/${f}`);
       e2.includes("fun tryRestore(ctx: Context, pass: String): Boolean") &&
       e2.includes("pendingRestore = remote") &&
       e2.includes("PBKDF2WithHmacSHA256") &&
-      // r76-29: the automatic (KP1) upload is back - the passphrase is now an
-      // UPGRADE on top of it, not a replacement.
-      e2.includes("private fun backupLocal(ctx: Context): Boolean =") &&
+      // New identities never upload KP1; a legacy blob is only replaced by
+      // the explicit passphrase flow after its decoded pair matches locally.
+      e2.includes("val legacy = decodeLegacyBackup(remote)") &&
+      e2.includes("if (legacy != pair) return@runCatching false") &&
+      !e2.includes("backupLocal(") &&
+      backup.includes("Legacy backup — not passphrase-locked") &&
+      backup.includes("Lock legacy backup") &&
       backup.includes("fun KeyBackupSheet(onClose: () -> Unit)") &&
       backup.includes("fun E2eeRestoreGate()") &&
       backup.includes("Wrong passphrase \u2014 try again") &&
@@ -1013,7 +1035,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
   const e2 = main("E2eeMsg.kt");
   const worker = read("src/worker/index.ts");
   check(
-    "r76-29: the ack arms the flight (deterministic 0.5 s, swap-proof), 150dp sub-switch column, my gifs render from the cached CDN url, hero starts on the tile with no platform dim and reverses on close, pill slimmer, backup auto by default",
+    "r76-29: the ack arms the flight (deterministic 0.5 s, swap-proof), 150dp sub-switch column, my gifs render from the cached CDN url, hero starts on the tile with no platform dim and reverses on close, pill slimmer, private-key backup is opt-in and passphrase-locked",
     flight.includes("f.goAt = android.os.SystemClock.uptimeMillis() + delayMs") &&
       flight.includes("if (f.goAt > android.os.SystemClock.uptimeMillis()) {") &&
       // r77-1/r77-6 superseded the ack-arm: the arm now lands at the echo's
@@ -1032,8 +1054,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
       viewer.includes("onDismissRequest = dismiss,") &&
       viewer.includes("alpha = dim * hero.value") &&
       status.includes(".padding(vertical = 4.dp)") &&
-      e2.includes("return@runCatching backupLocal(ctx)") &&
-      e2.includes("if (remote.isBlank()) return@runCatching backupLocal(ctx)"),
+      e2.includes("identity(ctx)") &&
+      e2.includes("packBackup(pair.first, pair.second, pass)") &&
+      !e2.includes("backupLocal(") &&
+      e2.includes("never uploaded automatically"),
   );
 }
 
@@ -1142,7 +1166,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
   const worker = read("src/worker/index.ts");
   check(
     'r77-10 (owner: "screenshot block on kori tobe opponent taw screenshot nite parche - app reopen na kora porjonto privacy apply hoi na, shob privacy tei same problem"): the messages poll carries the conversation\'s privacy truth (same rule/defaults as the detail payload), the freshness marker SEALS it (a flip busts `unchanged`), and the chat re-reads its detail the moment any field drifts - Guard and the save gates move within one tick instead of after a reopen. Behavior live-proven in 08-change-markers (baseline flags, unchanged tick, flip busts marker, new truth arrives)',
-    worker.includes("let priv: Record<string, boolean> = {};") &&
+    worker.includes("const readReceiptSettings = {") &&
+      worker.includes("let priv: Record<string, unknown> = { ...readReceiptSettings };") &&
       worker.includes("typingKind,\n        priv,\n      ]),") &&
       worker.includes("      marker,\n      priv,\n") &&
       chat.includes("val priv: JSONObject?,") &&
@@ -1520,8 +1545,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     'r82-3 (owner: "nav bar a unread number ta ekdom baje vabe show hocche ... massage button er right corner a rekhe daw ar double number hole double line jeno na hoi"): the count no longer sits inline after the tab label (pill crush = the ugly wrap) - it is an overlay pinned to the Chats icon\'s top-right corner with zero width pressure, and maxLines=1 + softWrap=false hard-lock one line so a two-digit count can never stack',
     list4.includes(".align(Alignment.TopEnd)") &&
-      list4.includes("offset(x = 9.dp, y = (-7).dp)") &&
-      list4.includes("lineHeight = 9.sp,"),
+      list4.includes("offset(x = 6.dp * sizeScale, y = (-8).dp * sizeScale)") &&
+      list4.includes("lineHeight = 11.sp * sizeScale,"),
   );
   check(
     'r84-1 (owner r84 #1: "emoji ekhono first time animates hoi na" - STILL dead after r78/r81/r82/r83): every prior round carried a 600 ms CAP on the entrance\'s visibility wait, and on the first send of a session the list is still settling (page fill, newest snap, keyboard glide) so the row could pass the cap OFF SCREEN - the fallback started the clock there and the whole window was spent before a visible frame. The wait is UNCAPPED now (cancelled on dispose), the layout callback only FLAGS visibility, and the clock starts only after the GLYPH is in hand (EmojiGlyphWarm - the warm cache marks readiness without a composition, so the entrance plays on the real glyph, never the system fallback + swap); the glyph wait itself is capped 1.2 s for a never-seen emoji',
@@ -1633,7 +1658,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
       anim4.includes(
         "liveDanceKey = if (active && isSingle && animScale > 0f) danceKey else null",
       ) &&
-      (chat4.match(/danceKey = fxKey\)/g) || []).length === 3,
+      [...chat4.matchAll(/EmojiGlyphRow\([\s\S]*?^\s*\)/gm)].length === 3 &&
+      [...chat4.matchAll(/EmojiGlyphRow\([\s\S]*?^\s*\)/gm)].every(
+        ([call]) => call.includes("danceKey = fxKey,") && call.includes("onTap = onRevealStamp,"),
+      ),
   );
 
   check(
@@ -1834,9 +1862,14 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
-    'r99-4 (owner r98 #1: "baad daw tumi regression kore felba" - leave the chat entrance alone, do not risk regressions): the r98-4 per-route fade is REVERTED, chat/{id} is back to the plain composable inheriting the NavHost default transitions. The r96 bornHere floor and the r97 armed-adoption guard stay in force (they suppress real re-flights), and the kpfx diagnostic logs stay for the adb hunt',
-    kpapp4.includes('composable("chat/{id}") { entry ->') &&
-      !kpapp4.includes("enterTransition = { fadeIn(tween(220)) },") &&
+    "chat entry uses a shorter NavHost-managed fade/quarter-width slide instead of a whole-screen graphics-layer animation; unrelated flight diagnostics stay unchanged",
+    kpapp4.includes('"chat/{id}"') &&
+      kpapp4.includes("fadeIn(tween(200, easing = FastOutSlowInEasing))") &&
+      kpapp4.includes("slideInHorizontally(tween(220, easing = FastOutSlowInEasing)) { it / 4 }") &&
+      !kpapp4.includes("ChatRouteEntryMotion(") &&
+      kpapp4.includes(
+        "popEnterTransition = { fadeIn(tween(240, easing = FastOutSlowInEasing)) }",
+      ) &&
       chat4.includes('android.util.Log.d("kpfx", "born key=$fxKey') &&
       flight4.includes('android.util.Log.d("kpfx", "flight key=$key'),
   );
@@ -1878,12 +1911,12 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
-    'r103-3 (owner: "ekhon prottekta massage bubble er niche time + double tick but eita halka change Hobe 2 ta user e jodi continues massage kore tobe last massage a just double tick+ time eshob dekhabe baki gulai na"): a run of consecutive messages from the same sender shows its time (+ ticks) ONLY on the last row of the run - WhatsApp-style, both directions. The marker (kpHideStamp) rides a COPY of the message so every row renderer honors it without a signature change: the thread block looks ahead to the next row (and past its end to the pending echoes), the echo block hides all but the last echo, and all six stamp renderers (two BubbleStamp sites + the four photo/video/file/album overlay Rows) gate on the marker',
-    chat4.includes("val nextSender =") &&
+    "r103-3: only the newest visible message keeps its timestamp and ticks by default; older rows retain kpHideStamp on a copy",
+    chat4.includes("val isLatestVisibleMessage =") &&
       chat4.includes("val rowM =") &&
       chat4.includes("val echoM =") &&
       chat4.includes("itemsIndexed(") &&
-      (chat4.match(/kpHideStamp/g) || []).length === 8 &&
+      chat4.includes("kpHideStamp") &&
       chat4.includes(
         'if (!m.optBoolean("kpHideStamp")) BubbleStamp(m, mine, pendingEcho, otherReadAt, if (kind == "STICKER") 1 else emojiOnly, stampInk)',
       ),
@@ -1978,7 +2011,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     "r83-3 (owner r83 #3: chat-list unread count \"border er middle a nai\"): Text's default includeFontPadding reserves blank space above the digits, so the count hung below the pill's middle; font padding off + a tight line box centers it (row badge and nav-tab badge both)",
     (list4.match(/PlatformTextStyle\(includeFontPadding = false\)/g) || []).length >= 2 &&
-      list4.includes("lineHeight = 11.sp,"),
+      list4.includes("lineHeight = 11.sp * sizeScale,"),
   );
 }
 

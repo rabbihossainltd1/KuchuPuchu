@@ -73,7 +73,11 @@ object Api {
         ctx.getSharedPreferences("kp", 0).edit().putString(TOKEN_KEY, value).apply()
     }
 
-    fun get(path: String, force: Boolean = false): JSONObject {
+    fun get(
+        path: String,
+        force: Boolean = false,
+        allowCachedFallback: Boolean = true,
+    ): JSONObject {
         // Freshness-marker polls differ only by `?marker=...`; they must map
         // to ONE cache key and never evict the last FULL response with a
         // tiny {marker, unchanged} shell (offline fallback still needs items).
@@ -84,7 +88,7 @@ object Api {
             if (!data.has("unchanged")) Cache.put(key, data)
             data
         } catch (e: Exception) {
-            Cache.peek(key)?.let { return it }
+            if (allowCachedFallback) Cache.peek(key)?.let { return it }
             throw e
         }
     }
@@ -434,6 +438,7 @@ object Api {
      */
     @Volatile private var cooldownUntil = 0L
     fun inCooldown(): Boolean = System.currentTimeMillis() < cooldownUntil
+    fun cooldownRemainingMs(): Long = (cooldownUntil - System.currentTimeMillis()).coerceAtLeast(0L)
 
     private fun noteBackpressure(resp: okhttp3.Response) {
         when (resp.code) {

@@ -668,7 +668,7 @@ check(
 check(
   "the ⋮ menu offers Delete for your own and Message / Hide / Report for somebody else's",
   statusSource.includes('StatusMenuRow(Icons.Filled.Delete, "Delete status", Red, onDelete)') &&
-    statusSource.includes('StatusMenuRow(Icons.Filled.Chat, "Message", Ink, onMessage)') &&
+    statusSource.includes('StatusMenuRow(KpChatMessageVector(), "Message", Ink, onMessage)') &&
     statusSource.includes('StatusMenuRow(Icons.Filled.HideSource, "Hide status", Ink, onHide)') &&
     statusSource.includes('StatusMenuRow(Icons.Filled.Flag, "Report", Ink, onReport)'),
 );

@@ -301,6 +301,33 @@ class CallEngine(private val app: Application) {
     private var localView: SurfaceViewRenderer? = null
     private var remoteView: SurfaceViewRenderer? = null
     private val seenIce = mutableSetOf<String>()
+    private val icePulling = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val iceCursorLock = Any()
+    private var iceCursorCallId = ""
+    private var iceCursorRowid = 0L
+
+    private fun iceCursorFor(callId: String): Long = synchronized(iceCursorLock) {
+        if (iceCursorCallId != callId) {
+            iceCursorCallId = callId
+            iceCursorRowid = 0L
+        }
+        iceCursorRowid
+    }
+
+    private fun advanceIceCursor(callId: String, rowid: Long) {
+        if (rowid <= 0L) return
+        synchronized(iceCursorLock) {
+            if (iceCursorCallId == callId && rowid > iceCursorRowid) iceCursorRowid = rowid
+        }
+    }
+
+    private fun clearIceCursor() {
+        synchronized(iceCursorLock) {
+            iceCursorCallId = ""
+            iceCursorRowid = 0L
+        }
+    }
+
     // Owner round 32 (item 5b): GROUP call mesh — one PeerConnection per
     // other JOINED member, all sending the same local audio track. Keyed by
     // the peer's user id. `groupOffered` = pairs we already posted an offer
@@ -612,10 +639,11 @@ class CallEngine(private val app: Application) {
                     while (isActive) {
                         // A throw out of tick() used to kill this coroutine, which
                         // meant no more call polling at all for the process.
-                        // Owner round 33 (item 13): a failed tick is retried by
-                        // the very next one — no toast for a single miss; a real
-                        // outage surfaces as "Reconnecting…" (netFailStreak).
-                        runCatching { tick() }
+                        // A normal missed tick keeps the existing fast retry;
+                        // explicit 429/503 Retry-After is the sole exception.
+                        // Do not turn a server backpressure response into a
+                        // 1.5s call-poll storm while the socket remains live.
+                        if (Api.cooldownRemainingMs() == 0L) runCatching { tick() }
                         // Once a second, ask the framework whether the call is
                         // still where the button says it is — and make it stop
                         // carrying the audio anywhere else. OEM stacks move
@@ -630,8 +658,10 @@ class CallEngine(private val app: Application) {
                         // socket — one lost ANSWER frame used to cost the caller
                         // a 5 s wait ("the caller connects 6–7 s later").
                         val mediaUp = active?.let { it.status == "ACTIVE" && !it.connecting } == true
+                        val cooldownDelay = Api.cooldownRemainingMs()
                         delay(
-                            when {
+                            if (cooldownDelay > 0L) cooldownDelay
+                            else when {
                                 // Signalling socket live: the timer is a
                                 // safety net, not the delivery path.
                                 // 5s, not 500ms: with live frames the net
@@ -1224,23 +1254,50 @@ class CallEngine(private val app: Application) {
                     }
                 }
             }
-            // Candidates addressed to us, routed by sender.
-            val ice =
-                withContext(Dispatchers.IO) { runCatching { Api.get("/api/calls/${ui.id}/ice") }.getOrNull() }
-                    ?.arr("items")?.objects().orEmpty()
+            // Candidates addressed to us, routed by sender. The opaque cursor is
+            // a monotonic rowid, not a timestamp (several ICE rows can share a ms).
+            val after = iceCursorFor(ui.id)
+            val icePath = "/api/calls/${ui.id}/ice" + if (after > 0L) "?after=$after" else ""
+            val iceData = withContext(Dispatchers.IO) { runCatching { Api.get(icePath, allowCachedFallback = false) }.getOrNull() }
+            val ice = iceData?.arr("items")?.objects().orEmpty()
+            var allItemsProcessed = true
             for (item in ice) {
+                val rowid = item.optLong("cursor", 0L)
                 val id = item.optString("id")
-                if (id.isNotBlank() && id in seenIce) continue
-                val peer = groupPeers[item.optString("from")] ?: continue
-                if (peer.remoteDescription == null) continue
-                val c = item.optJSONObject("candidate") ?: continue
-                val cand = c.optString("candidate")
-                if (cand.isBlank()) continue
-                runCatching {
-                    peer.addIceCandidate(IceCandidate(c.optString("sdpMid"), c.optInt("sdpMLineIndex"), cand))
-                    if (id.isNotBlank()) seenIce.add(id)
+                if (id.isNotBlank() && id in seenIce) {
+                    advanceIceCursor(ui.id, rowid)
+                    continue
                 }
+                // Do not advance past a candidate that cannot yet be handed to
+                // its peer connection. The next sync retries it after SDP lands.
+                val peer = groupPeers[item.optString("from")]
+                if (peer == null || peer.remoteDescription == null) {
+                    allItemsProcessed = false
+                    break
+                }
+                val c = item.optJSONObject("candidate")
+                if (c == null) {
+                    if (id.isNotBlank()) seenIce.add(id)
+                    advanceIceCursor(ui.id, rowid)
+                    continue
+                }
+                val cand = c.optString("candidate")
+                if (cand.isBlank()) {
+                    if (id.isNotBlank()) seenIce.add(id)
+                    advanceIceCursor(ui.id, rowid)
+                    continue
+                }
+                val applied = runCatching {
+                    peer.addIceCandidate(IceCandidate(c.optString("sdpMid"), c.optInt("sdpMLineIndex"), cand))
+                }.isSuccess
+                if (!applied) {
+                    allItemsProcessed = false
+                    break
+                }
+                if (id.isNotBlank()) seenIce.add(id)
+                advanceIceCursor(ui.id, rowid)
             }
+            if (allItemsProcessed) advanceIceCursor(ui.id, iceData?.optLong("cursor", 0L) ?: 0L)
         } finally {
             groupSyncing.set(false)
         }
@@ -2018,6 +2075,7 @@ class CallEngine(private val app: Application) {
         groupCameraOff.clear()
         groupVideoVersion++
         seenIce.clear()
+        clearIceCursor()
         iceWatchdog?.let { Handler(Looper.getMainLooper()).removeCallbacks(it) }
         iceWatchdog = null
         iceRestartCount = 0
@@ -2752,25 +2810,51 @@ override fun onRenegotiationNeeded() {
     private val currentFacingFront = true
 
     private suspend fun pullIce(callId: String) {
-        val pc = pc ?: return
-        if (pc.remoteDescription == null) return
-        val data = withContext(Dispatchers.IO) { runCatching { Api.get("/api/calls/$callId/ice") }.getOrNull() } ?: return
-        for (item in data.arr("items").objects()) {
-            val id = item.optString("id")
-            if (id.isNotBlank()) {
-                if (id in seenIce) continue
-            }
-            val c = item.optJSONObject("candidate") ?: continue
-            val cand = c.optString("candidate")
-            // Owner round 33 (item 15): a candidate the socket frame already
-            // applied is not added twice (seenIce holds ids AND candidates).
-            if (cand.isBlank() || cand in seenIce) continue
-            try {
-                pc.addIceCandidate(IceCandidate(c.optString("sdpMid"), c.optInt("sdpMLineIndex"), cand))
+        if (!icePulling.compareAndSet(false, true)) return
+        try {
+            val peer = pc ?: return
+            if (peer.remoteDescription == null) return
+            val after = iceCursorFor(callId)
+            val icePath = "/api/calls/$callId/ice" + if (after > 0L) "?after=$after" else ""
+            val data =
+                withContext(Dispatchers.IO) { runCatching { Api.get(icePath, allowCachedFallback = false) }.getOrNull() }
+                    ?: return
+            var allItemsProcessed = true
+            for (item in data.arr("items").objects()) {
+                val rowid = item.optLong("cursor", 0L)
+                val id = item.optString("id")
+                if (id.isNotBlank() && id in seenIce) {
+                    advanceIceCursor(callId, rowid)
+                    continue
+                }
+                val c = item.optJSONObject("candidate")
+                if (c == null) {
+                    if (id.isNotBlank()) seenIce.add(id)
+                    advanceIceCursor(callId, rowid)
+                    continue
+                }
+                val cand = c.optString("candidate")
+                // A socket frame may already have applied the same candidate;
+                // mark this row consumed so the next poll starts after it.
+                if (cand.isBlank() || cand in seenIce) {
+                    if (id.isNotBlank()) seenIce.add(id)
+                    advanceIceCursor(callId, rowid)
+                    continue
+                }
+                val applied = runCatching {
+                    peer.addIceCandidate(IceCandidate(c.optString("sdpMid"), c.optInt("sdpMLineIndex"), cand))
+                }.isSuccess
+                if (!applied) {
+                    allItemsProcessed = false
+                    break
+                }
                 if (id.isNotBlank()) seenIce.add(id)
                 seenIce.add(cand)
-            } catch (_: Exception) {
+                advanceIceCursor(callId, rowid)
             }
+            if (allItemsProcessed) advanceIceCursor(callId, data.optLong("cursor", 0L))
+        } finally {
+            icePulling.set(false)
         }
     }
 

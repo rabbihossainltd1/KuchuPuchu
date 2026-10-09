@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -38,7 +39,6 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.HideSource
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Flag
-import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.RemoveRedEye
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -86,18 +86,30 @@ import org.json.JSONObject
  * then Recent updates with segmented rings that gray out once viewed.
  */
 @Composable
-fun StatusScreen(nav: NavController) {
+fun StatusScreen(nav: NavController, fabBottom: androidx.compose.ui.unit.Dp = 74.dp) {
     val scope = rememberCoroutineScope()
     val groups = ScreenStore.statuses
     var composeText by remember { mutableStateOf(false) }
+    var refreshError by remember { mutableStateOf<String?>(null) }
     val haptics = rememberHaptics()
+    val listBottomPadding = with(LocalDensity.current) {
+        110.dp + WindowInsets.navigationBars.getBottom(this).toDp()
+    }
 
     fun refresh(force: Boolean = false) {
         scope.launch {
             try {
-                val data = withContext(Dispatchers.IO) { Api.get("/api/statuses", force) }
+                val data = withContext(Dispatchers.IO) {
+                    Api.get("/api/statuses", force)
+                }
                 ScreenStore.setStatuses(data.arr("items").objects())
-            } catch (_: Exception) {
+                refreshError = null
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                refreshError =
+                    (e as? ApiException)?.message?.takeIf { it.isNotBlank() }
+                        ?: "Check your connection and tap to retry."
             }
         }
     }
@@ -115,7 +127,7 @@ fun StatusScreen(nav: NavController) {
     LaunchedEffect(Unit) {
         while (true) {
             delay(12_000)
-            if (Store.foreground && !Api.inCooldown()) refresh(force = true)
+            if (Store.foreground && !Api.inCooldown()) refresh()
         }
     }
 
@@ -136,7 +148,7 @@ fun StatusScreen(nav: NavController) {
                 Modifier.fillMaxSize(),
                 state = statusList,
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    start = 8.dp, end = 8.dp, bottom = 24.dp,
+                    start = 8.dp, end = 8.dp, bottom = listBottomPadding,
                 ),
             ) {
                 /* ---- my status row ---- */
@@ -230,6 +242,29 @@ fun StatusScreen(nav: NavController) {
                     }
                 }
 
+                refreshError?.let { message ->
+                    item(key = "status_refresh_error") {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Card)
+                                .clickable { refresh(force = true) }
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "Status could not refresh · $message · Tap to retry",
+                                color = Muted,
+                                fontSize = 13.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+
                 /* ---- recent updates ---- */
                 if (others.isNotEmpty()) {
                     item(key = "recent_header") {
@@ -304,17 +339,28 @@ fun StatusScreen(nav: NavController) {
             }
         }
 
-        /* Owner round 31 (item 31): ONE media icon, bottom-centre, opening the
-           app's own gallery (the "choose photo" / video buttons are gone); the
-           small pencil beside it keeps the text status reachable. */
-        Row(
+        /* The reference keeps the text-status pencil above the media action,
+           both floating at the lower-right and moving with the home nav. */
+        Column(
             Modifier
-                .align(Alignment.BottomCenter)
+                .align(Alignment.BottomEnd)
                 .navigationBarsPadding()
-                .padding(bottom = 20.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .padding(end = 14.dp, bottom = fabBottom),
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Spacer(Modifier.width(40.dp))
+            androidx.compose.material3.SmallFloatingActionButton(
+                onClick = {
+                    haptics.tap()
+                    composeText = true
+                },
+                shape = CircleShape,
+                containerColor = if (KpThemeMode.darkBlue) Color(0xFF26304A) else Card,
+                contentColor = ActionBlueDeep,
+                modifier = Modifier.padding(end = 8.dp).size(42.dp),
+            ) {
+                Icon(Icons.Filled.Edit, contentDescription = "Text status", modifier = Modifier.size(20.dp))
+            }
             androidx.compose.material3.FloatingActionButton(
                 onClick = {
                     haptics.tap()
@@ -323,22 +369,9 @@ fun StatusScreen(nav: NavController) {
                 shape = CircleShape,
                 containerColor = ActionBlue,
                 contentColor = ActionBlueInk,
-                modifier = Modifier.size(56.dp),
+                modifier = Modifier.size(58.dp),
             ) {
                 Icon(Icons.Filled.PhotoLibrary, contentDescription = "Media status", modifier = Modifier.size(26.dp))
-            }
-            Spacer(Modifier.width(14.dp))
-            androidx.compose.material3.SmallFloatingActionButton(
-                onClick = {
-                    haptics.tap()
-                    composeText = true
-                },
-                shape = CircleShape,
-                containerColor = Card,
-                contentColor = ActionBlueDeep,
-                modifier = Modifier.size(26.dp),
-            ) {
-                Icon(Icons.Filled.Edit, contentDescription = "Text status", modifier = Modifier.size(14.dp))
             }
         }
     }
@@ -1342,10 +1375,13 @@ private fun StatusMenuSheet(
     onHide: () -> Unit,
     onReport: () -> Unit,
 ) {
+    val blurRegistration = KpRegisterModalBlur()
+    val sheetState = KpRememberModalBottomSheetState(blurRegistration)
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = Card,
-        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = GlassSheetSurface,
+        scrimColor = Color.Black.copy(alpha = 0.10f),
+        sheetState = sheetState,
     ) {
         Column(
             Modifier
@@ -1357,7 +1393,7 @@ private fun StatusMenuSheet(
             if (isMine) {
                 StatusMenuRow(Icons.Filled.Delete, "Delete status", Red, onDelete)
             } else {
-                StatusMenuRow(Icons.Filled.Chat, "Message", Ink, onMessage)
+                StatusMenuRow(KpChatMessageVector(), "Message", Ink, onMessage)
                 StatusMenuRow(Icons.Filled.HideSource, "Hide status", Ink, onHide)
                 StatusMenuRow(Icons.Filled.Flag, "Report", Ink, onReport)
             }
@@ -1399,18 +1435,41 @@ private fun ViewersSheet(
     onOpenChat: (String) -> Unit,
 ) {
     var shown by remember { mutableStateOf(false) }
+    var closing by remember { mutableStateOf(false) }
+    var openChatAfterClose by remember { mutableStateOf<String?>(null) }
     val progress by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (shown) 0f else 1f,
+        targetValue = if (shown && !closing) 0f else 1f,
         animationSpec = androidx.compose.animation.core.tween(220),
         label = "sheet",
     )
     LaunchedEffect(Unit) { shown = true }
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    val blurRegistration = KpRegisterModalBlur()
+    fun dismiss() {
+        if (closing) return
+        closing = true
+        // Release the shared backdrop at the beginning of the slide-out,
+        // not when the Dialog is finally removed from composition.
+        blurRegistration.release()
+    }
+    LaunchedEffect(closing) {
+        if (closing) {
+            delay(220)
+            onClose()
+            openChatAfterClose?.let(onOpenChat)
+        }
+    }
+    Dialog(onDismissRequest = ::dismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        val dialogView = androidx.compose.ui.platform.LocalView.current
+        val dialogWindow = (dialogView.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
+        androidx.compose.runtime.SideEffect {
+            dialogWindow?.setDimAmount(0f)
+            dialogWindow?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+        }
         Box(
             Modifier
                 .fillMaxSize()
-                .background(Color(0x52000000))
-                .clickable(onClick = onClose),
+                .background(Color(0x1F000000))
+                .clickable(onClick = ::dismiss),
         ) {
             Column(
                 Modifier
@@ -1418,7 +1477,7 @@ private fun ViewersSheet(
                     .fillMaxWidth()
                     .graphicsLayer { translationY = progress * 900f }
                     .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
-                    .background(Card)
+                    .background(GlassSheetSurface)
                     .clickable(onClick = {})  // don't close when touching the sheet
                     .navigationBarsPadding()
                     .padding(vertical = 10.dp),
@@ -1429,7 +1488,7 @@ private fun ViewersSheet(
                 ) {
                     Text("Viewed by", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Ink)
                     Spacer(Modifier.weight(1f))
-                    IconButton(onClick = onClose) {
+                    IconButton(onClick = ::dismiss) {
                         Icon(Icons.Filled.Close, "Close", tint = Muted)
                     }
                 }
@@ -1463,7 +1522,10 @@ private fun ViewersSheet(
                                 Row(
                                     Modifier
                                         .fillMaxWidth()
-                                        .clickable { onOpenChat(uid) }
+                                        .clickable {
+                                            openChatAfterClose = uid
+                                            dismiss()
+                                        }
                                         .padding(horizontal = 18.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {

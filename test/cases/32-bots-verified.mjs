@@ -488,6 +488,10 @@ const convBetween = (db, a, b) =>
     "native-android/app/src/main/java/app/kuchupuchu/android/ChatScreen.kt",
     "utf8",
   );
+  const replySwipe = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/MessageReplySwipePolicy.kt",
+    "utf8",
+  );
   check(
     "header shows the first name only (honorific MD skipped, bots/groups full)",
     chat.includes('w.equals("MD", true)') && chat.includes("if (botChat || isGroup) rawTitle"),
@@ -517,7 +521,7 @@ const convBetween = (db, a, b) =>
       // v169: the voice body is back to the shared frame; the stamp left the
       // bubble entirely (it rides under it now).
       chat.includes(
-        "bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp",
+        "bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else if (hasReactions) 8.dp else 15.dp",
       ) &&
       chat.includes('val textLike = kind == "TEXT" || kind == "STICKER" || kind == "DELETED"'),
   );
@@ -596,9 +600,9 @@ const convBetween = (db, a, b) =>
   );
   check("timestamp parsing memoized (scroll perf)", chat.includes("stampCache"));
   check(
-    "round 14 + M7: 3s poll when socket down, 8s net when active, 30s idle backoff + 10s rejoin",
+    "round 14 + M7: 3s poll when socket down, 15s net when active, 30s idle backoff + 10s rejoin",
     chat.includes("if (down) 3_000L else upCadence") &&
-      chat.includes("30_000L else 8_000L") &&
+      chat.includes("30_000L else 15_000L") &&
       chat.includes("120_000L") &&
       chat.includes("lastFrameAt") &&
       chat.includes("KpSocket.joinChat(convId)") &&
@@ -966,8 +970,13 @@ const convBetween = (db, a, b) =>
       ).includes("KpThemeMode.load(this)"),
   );
   check(
-    "13b hotfix: reply swipe uses the standard gesture detector (no scroll fight)",
-    chat.includes("detectHorizontalDragGestures(") && !chat.includes("var consumed = false"),
+    "13b hotfix: shared reply recognizer claims clear horizontal intent without a hand-rolled consume state",
+    chat.includes("private fun Modifier.messageReplySwipe(") &&
+      chat.includes(
+        "MessageReplySwipePolicy.isHorizontalIntent(dx, dy, viewConfiguration.touchSlop)",
+      ) &&
+      chat.includes("change.consume()") &&
+      !chat.includes("var consumed = false"),
   );
   check(
     "13b hotfix: archive pull-hold observes crossings (no per-pixel restarts)",
@@ -1104,7 +1113,7 @@ const convBetween = (db, a, b) =>
       ongoingxml.includes('android:textColor="#A9B4C9"'),
   );
   check(
-    "r17-6: archive pull is dual-path — list overscroll AND header/tabs drag share ArchivePullState",
+    "r17-6: archive pull is dual-path — list overscroll AND header drag share ArchivePullState",
     chatlist.includes("class ArchivePullState") &&
       chatlist.includes("val archivePull = remember { ArchivePullState() }") &&
       chatlist.includes("detectVerticalDragGestures") &&
@@ -1112,7 +1121,8 @@ const convBetween = (db, a, b) =>
   );
   check(
     "r17-8: half-open socket can't freeze the list — marker-gated safety refresh while foreground",
-    chatlist.includes("lastSafetyRefresh") && chatlist.includes("4_000"),
+    chatlist.includes("lastSafetyRefresh") &&
+      chatlist.includes("now - lastSafetyRefresh >= 12_000"),
   );
   check(
     "r17-8: EVERY AI text reply broadcasts + pokes + pushes (not just owner-card replies)",
@@ -1134,39 +1144,46 @@ const convBetween = (db, a, b) =>
     chat.includes("color = if (mine) Color(0xE6FFFFFF) else Ink"),
   );
   check(
-    "r17-12/18: reply swipes calmer — text own-swipe 1.5x, photo 1.4x (no more 1.8x hair-trigger)",
-    chat.includes("replyThreshold * 1.5f") &&
-      chat.includes("if (mine) replyThreshold * 1.5f else replyThreshold") &&
-      chat.includes("replyThreshold * 1.4f") &&
-      !chat.includes("replyThreshold * 1.8f, 0f)\n                                    } else {"),
+    "r17-12/18: the shared reply policy has one 1.4× release distance and rejects mostly-vertical drags for every message type",
+    replySwipe.includes(
+      "fun requiredDistance(baseThresholdPx: Float): Float = baseThresholdPx * 1.4f",
+    ) &&
+      replySwipe.includes("abs(deltaX) >= abs(deltaY) * 1.25f") &&
+      chat.includes("Modifier.messageReplySwipe("),
   );
   check(
-    "r17-13/r31-8 (r68-8): long-press opens ONE action sheet — reaction row on top ('+' = full emoji sheet), then Reply/Copy/Forward/Edit/Delete/Select — ONE Delete, its scope asked by the shared popup; reacting deselects; no floating bar",
+    "r17-13/r31-8: long-press keeps the focused action sheet; quick reactions float above the selected bubble, then Reply/Copy/Forward/Edit/Delete/Select remain in the sheet; one Delete popup and live-bubble return",
     !chat.includes("listState.layoutInfo.visibleItemsInfo.firstOrNull") &&
       chat.includes("if (mid in selected) selected.remove(mid)") &&
-      chat.includes("ModalBottomSheet(") &&
-      chat.includes("skipPartiallyExpanded = true") &&
+      chat.includes("KpFocusSheetState.open(") &&
+      chat.includes("KpFocusSheetRequest(") &&
+      chat.includes('key = "message-actions:$focusKey"') &&
+      chat.includes("focusKey = focusKey,") &&
+      !chat.includes("focusKey = focusKey.takeIf") &&
       chat.includes("var actionFor by remember { mutableStateOf<JSONObject?>(null) }") &&
       chat.includes("actionFor?.let { m ->") &&
-      chat.includes('listOf("👍", "❤️", "😂", "😮", "😢", "🙏").forEach { e ->') &&
+      chat.includes('val quickEmojis = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")') &&
+      chat.includes("MessageQuickReactionBar(") &&
+      chat.includes("floatingContent = hostedFloating") &&
+      chat.includes("onReact = { emoji -> close { applyReaction(m, emoji) } }") &&
+      chat.includes("showEmojiSheet = true") &&
+      chat.includes("KpMessageFocusSlot(focusKey) { requestFocus ->") &&
+      chat.includes("val onFocusedLongPress: (JSONObject) -> Unit = { pressed ->") &&
+      chat.includes('if (pressed.optString("kind") != "DELETED") requestFocus()') &&
+      chat.includes("onLongPress(pressed)") &&
       // r32-16: "Unsend" is "Delete for everyone" now.
       // r68-8 moved the scope question into the popup, so the sheet carries ONE
-      // Delete (and the selection bar one icon) for own AND the other side's
-      // messages alike.
+      // Delete for own AND the other side's messages alike.
       ['"Reply"', '"Copy"', '"Forward"', '"Edit"', '"Delete"', '"Select"'].every((l) =>
         chat.includes(
           `KpSheetRow(Icons.${l === '"Reply"' ? "AutoMirrored.Filled.Reply" : l === '"Forward"' ? "AutoMirrored.Filled.Send" : l === '"Copy"' ? "Filled.ContentCopy" : l === '"Edit"' ? "Filled.Edit" : l === '"Delete"' ? "Filled.Delete" : "Filled.CheckCircle"}, ${l}`,
         ),
       ) &&
-      // r31-29: text, photo, video AND the grouped photo bubble (4 sites);
-      // r32-17: + the view-once card (5); r33-17: + the tappable quote inside
-      // a bubble, whose long-press still opens the bubble's sheet (6).
-      // v206: + emoji single/multiple + sticker (9) - long-press shows actions for emoji too
-      (
-        chat.match(
-          /if \(selectedIds\.isNotEmpty\(\)\) onToggleSelect\(m\) else onLongPress\(m\)/g,
-        ) || []
-      ).length >= 6,
+      // A single live focus slot feeds the root host; the reaction strip is
+      // anchored above the same live bubble, while actions remain in the sheet.
+      chat.includes('actionFocusKey = "message:$rowKey"') &&
+      (chat.match(/KpSheetRow\(Icons\.Filled\.Delete, \"Delete\", tint = Red\)/g) || []).length ===
+        1,
   );
   check(
     "r17-14: restoreChrome follows the theme (dark-blue keeps light icons)",
@@ -1216,7 +1233,7 @@ const convBetween = (db, a, b) =>
       chatlist.includes("awaitFirstDown(requireUnconsumed = false)") &&
       chatlist.includes("archivePull.pull = pull") &&
       chatlist.includes("state = listState") &&
-      !chatlist.includes("NestedScrollConnection"),
+      chatlist.includes("private fun ArchivePullArea"),
   );
   check(
     "r18-6: PHOTOS render reaction chips too (MessageReactions wired into ImageMessageRow)",
@@ -1293,11 +1310,15 @@ const convBetween = (db, a, b) =>
       chat.includes("cursorBrush = androidx.compose.ui.graphics.SolidColor(accent)"),
   );
   check(
-    "r19-perf: cold-reopen lag — hydrate parses off-main + snapshot is capped",
+    "r19-perf: cold-reopen lag — hydrate parses off-main + expanded offline snapshot stays capped and excludes view-once rows",
     screenstore.includes("if (!convsLoaded && convs.isEmpty())") &&
-      screenstore.includes(".take(30)") &&
-      screenstore.includes(".takeLast(40)") &&
-      screenstore.includes("take(150)"),
+      screenstore.includes(".take(60)") &&
+      screenstore.includes(".takeLast(120)") &&
+      screenstore.includes("convs.toList().take(200)") &&
+      screenstore.includes("calls.toList().take(150)") &&
+      screenstore.includes("statuses.toList().take(200)") &&
+      screenstore.includes("rows.filterNot {") &&
+      screenstore.includes('it.optBoolean("viewOnce")'),
   );
   /* ---------------- round 20 (owner feedback) ---------------- */ check(
     "r20-2: Hang up button is SOLID red with white text",
@@ -1448,7 +1469,9 @@ const convBetween = (db, a, b) =>
   );
   check(
     "r21-colours: dark-blue sweep — tabs, ticks, search, profile, crash row, avatar rings",
-    chatlist.includes("val tint = if (selected) ActionBlueDeep else Muted") &&
+    chatlist.includes("val selectedTint = if (darkMode) Color.White else Ink") &&
+      chatlist.includes("val idleTint = if (darkMode) Color(0xFFD3DEF5) else Muted") &&
+      chatlist.includes("tint by animateColorAsState(if (selected) selectedTint else idleTint") &&
       chatlist.includes("tint = if (read) ActionBlueDeep else Muted") &&
       readFileSync(
         "native-android/app/src/main/java/app/kuchupuchu/android/SearchScreen.kt",
@@ -1500,7 +1523,8 @@ const convBetween = (db, a, b) =>
     "r21-sweep: avatar ring, empty states, nav tabs, ticks, mute pills — blue in dark mode",
     theme.includes("Brush.linearGradient(listOf(Color(0xFF60A5FA), Color(0xFF2F6FED)))") &&
       ui.includes("tint = ActionBlueDeep, modifier = Modifier.size(34.dp)") &&
-      chatlist.includes("val tint = if (selected) ActionBlueDeep else Muted") &&
+      chatlist.includes("val selectedTint = if (darkMode) Color.White else Ink") &&
+      chatlist.includes("val idleTint = if (darkMode) Color(0xFFD3DEF5) else Muted") &&
       chatlist.includes("background(ActionBlue)") &&
       chatlist.includes("tint = if (read) ActionBlueDeep else Muted") &&
       chatlist.split("ActionBlueDeep").length - 1 >= 4,
@@ -1602,7 +1626,7 @@ const convBetween = (db, a, b) =>
       chat.includes("fun chatOtherFill") &&
       chat.includes("chatMineFill(theme)") &&
       chat.includes("chatOtherFill(theme)") &&
-      chat.includes("containerColor = Card") &&
+      chat.includes("containerColor = securityBlue.copy(alpha = 0.12f)") &&
       !chat.includes('"default" to "Cream"') &&
       chat.includes("KpThemeMode.darkBlue) Color(0xFF0C1A15)"),
   );
@@ -1704,13 +1728,13 @@ const convBetween = (db, a, b) =>
     src.includes("user:${userId}"),
   );
   check(
-    "16: own-message LEFT-swipe reply + photo reply drag + theme-aware photo border (r17: calmer 1.5x)",
-    chat.includes("if (mine) {") &&
-      chat.includes("(replyDrag + dragAmount).coerceIn(-replyThreshold * 1.5f, 0f)") &&
-      chat.includes("if (mine) replyThreshold * 1.5f else replyThreshold") &&
+    "16: the shared reply policy sends own messages LEFT and incoming messages RIGHT across text and photo rows",
+    replySwipe.includes("if (mine) deltaX < 0f else deltaX > 0f") &&
+      chat.includes("modifier = Modifier.messageReplySwipe(") &&
+      chat.includes("Modifier.messageReplySwipe(") &&
       // v163: the row also hands the ✕ (cancel send) down.
       chat.includes(
-        "ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend, onDoubleTapHeart)",
+        'ImageMessageRow(\n                    m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect,\n                    onOpenImage, onReply,\n                    onLongPress = { pressed ->\n                        if (pressed.optString("kind") != "DELETED") requestFocus()\n                        onLongPress(pressed)\n                    },\n                    theme = theme,\n                    onCancelSend = onCancelSend,\n                    onDoubleTapHeart = onDoubleTapHeart,\n                    onRevealStamp = onRevealStamp,\n                )',
       ),
   );
   check(
@@ -1973,15 +1997,14 @@ const convBetween = (db, a, b) =>
       statusKt.includes("p?.setPaused(paused || bg)"),
   );
   check(
-    "r28-1: status ⋮ menu is a theme bottom sheet (no M3 DropdownMenu) + confirm dialog on the Card surface + clock pauses under the sheet",
+    "r28-1: status ⋮ menu is a theme bottom sheet (no M3 DropdownMenu) + glass confirm sheet + clock pauses under the sheet",
     !statusKt.includes("DropdownMenu(") &&
       !statusKt.includes("import androidx.compose.material3.DropdownMenu") &&
       statusKt.includes("private fun StatusMenuSheet(") &&
-      statusKt.includes(
-        "containerColor = Card,\n        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)",
-      ) &&
+      statusKt.includes("containerColor = GlassSheetSurface") &&
+      !statusKt.includes("kpGlassSheetModifier") &&
       statusKt.includes("paused = showViewers || menuOpen || replyFocused || holding,") &&
-      // r31-7: the confirm is a bottom sheet too (KpConfirmSheet on the Card surface).
+      // r31-7: the confirm is a bottom sheet too (KpConfirmSheet on the shared glass surface).
       /KpConfirmSheet\(\n\s+title = "Delete status\?",/.test(statusKt),
   );
   check(
@@ -2587,7 +2610,7 @@ const convBetween = (db, a, b) =>
     "utf8",
   );
   check(
-    "r28-5/r31/r32-3: the settings cog is gone; the home ⋮ menu is exactly My Profile, New contact, All contacts, New group, Settings — in that order, each a real route (r32-3: About Us removed; it stays under Settings › App) — bottom sheet (no DropdownMenu)",
+    "r28-5/r31/r32-3: the settings cog is gone; the home ⋮ menu is exactly My Profile, New contact, All contacts, New group, Settings — in that order; My Profile stays in the home shell, the others are routes (r32-3: About Us removed; it stays under Settings › App) — bottom sheet (no DropdownMenu)",
     !list.includes('Icon(Icons.Filled.Settings, "Settings"') &&
       (() => {
         const order = ["My Profile", "New contact", "All contacts", "New group", "Settings"];
@@ -2600,7 +2623,8 @@ const convBetween = (db, a, b) =>
         "native-android/app/src/main/java/app/kuchupuchu/android/SettingsScreen.kt",
         "utf8",
       ).includes('SettingRow(Icons.Filled.Favorite, "About us", "") { nav.navigate("about") }') &&
-      list.includes('nav.navigate("profile/${Store.myId()}")') &&
+      list.includes("onOpenProfile()") &&
+      list.includes("onOpenProfile = { tab = 3 }") &&
       ["about", "contacts", "settings"].every((r) => kpapp.includes(`composable("${r}")`)) &&
       // r30-1: the new-contact route takes optional prefill args (name, phone).
       kpapp.includes('"newcontact?name={name}&phone={phone}"') &&
@@ -2608,7 +2632,9 @@ const convBetween = (db, a, b) =>
       list.includes("fun HomeMenuSheet(") &&
       list.includes("KpSheet(onDismiss = onDismiss) {") &&
       list.includes("if (homeMenu) {") &&
-      list.includes("HomeMenuSheet(onDismiss = { homeMenu = false }, nav = nav)"),
+      list.includes(
+        "HomeMenuSheet(onDismiss = { homeMenu = false }, nav = nav, onOpenProfile = { tab = 3 })",
+      ),
   );
   const profile = readFileSync(
     "native-android/app/src/main/java/app/kuchupuchu/android/ProfileScreen.kt",
@@ -2843,9 +2869,8 @@ const convBetween = (db, a, b) =>
         ui.includes("fun KpSheet(") &&
         ui.includes("fun KpSheetRow(") &&
         ui.includes("fun KpConfirmSheet(") &&
-        ui.includes(
-          "containerColor = Card,\n        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)",
-        ),
+        ui.includes("containerColor = GlassSheetSurface") &&
+        !ui.includes("kpGlassSheetModifier"),
       JSON.stringify(withAlert),
     );
     const update = kt("KpUpdate.kt");
@@ -2995,8 +3020,8 @@ const convBetween = (db, a, b) =>
         chat.includes("if (isImage && !asDocument) {") &&
         // r31-27: the call site now also hands the chat theme down (voice bars).
         // v163: the doc row also hands the ✕ (cancel send) down.
-        chat.includes(
-          '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)',
+        /"FILE" -> FileBubble\(\s*m,\s*mine,\s*player,\s*pendingEcho,\s*onOpenImage,\s*onOpenVideo,\s*theme,\s*onOpenDoc,\s*onToggleSelect,\s*onFocusedLongPress,\s*selecting = selectedIds\.isNotEmpty\(\),\s*onCancelSend = onCancelSend,\s*fxGrow = fxFresh,\s*onRevealStamp = onRevealStamp,?\s*\)/.test(
+          chat,
         ) &&
         readFileSync("src/worker/index.ts", "utf8").includes(
           "...(incomingMeta.document === true ? { document: true } : {}),",
@@ -3687,7 +3712,7 @@ const convBetween = (db, a, b) =>
               w.includes("const MEMBER_COLS =") &&
               // r71-18: the list gained the three chat-privacy columns.
               w.includes(
-                '"conv_id, user_id, role, muted, unread, last_read_at, hidden, hidden_key, muted_call, muted_msg, priv_shot, priv_rec, priv_save, priv_allow_shot, priv_allow_rec";',
+                '"conv_id, user_id, role, muted, unread, last_read_at, hidden, hidden_key, muted_call, muted_msg, priv_shot, priv_rec, priv_save, priv_allow_shot, priv_allow_rec, priv_read_receipts";',
               ) &&
               w.includes(
                 '"UPDATE members SET hidden = ?, hidden_key = ? WHERE conv_id = ? AND user_id = ?",',
@@ -3723,7 +3748,10 @@ const convBetween = (db, a, b) =>
               'convs.filter { ScreenStore.isArchived(it.optString("id")) && !it.optBoolean("hidden") }',
             ) &&
             cl.includes(
-              'convs.filter { !it.optBoolean("hidden") }.sumOf { it.optInt("unread", 0) }',
+              'val unreadChats = ScreenStore.convs.count { !it.optBoolean("hidden") && it.optInt("unread", 0) > 0 }',
+            ) &&
+            !kt("KpApp.kt").includes(
+              'unreadChats = ScreenStore.convs.count { !it.optBoolean("hidden") && it.optInt("unread", 0) > 0 }',
             ),
         );
         // r33-6: the owner's new system. No gesture, no Hidden screen, no
@@ -4114,8 +4142,8 @@ const convBetween = (db, a, b) =>
           chat.includes(
             '.also { mm -> vm.optJSONArray("waveform")?.let { mm.put("waveform", it) } },',
           ) &&
-          chat.includes(
-            '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)',
+          /"FILE" -> FileBubble\(\s*m,\s*mine,\s*player,\s*pendingEcho,\s*onOpenImage,\s*onOpenVideo,\s*theme,\s*onOpenDoc,\s*onToggleSelect,\s*onFocusedLongPress,\s*selecting = selectedIds\.isNotEmpty\(\),\s*onCancelSend = onCancelSend,\s*fxGrow = fxFresh,\s*onRevealStamp = onRevealStamp,?\s*\)/.test(
+            chat,
           ),
       );
     }
@@ -4860,6 +4888,128 @@ const convBetween = (db, a, b) =>
         .get(cid, a.user.id).unread === 0,
     JSON.stringify({ readAt: peerPage.json.readAt, aRow }).slice(0, 160),
   );
+  // Per-chat override can contradict the account default, and NULL returns to the global value.
+  await k.call("PATCH", "/api/me", { readReceipts: false }, a.token);
+  const soloOn = await k.call(
+    "POST",
+    `/api/conversations/${cid}/privacy`,
+    { readReceiptsOverride: true },
+    a.token,
+  );
+  await k.call("POST", `/api/conversations/${cid}/read`, {}, a.token);
+  const soloDetail = (await k.call("GET", `/api/conversations/${cid}`, undefined, a.token)).json
+    .conversation;
+  const soloPageB = await k.call("GET", `/api/conversations/${cid}/messages`, undefined, b.token);
+  check(
+    "per-chat On overrides global Off in a 1:1 chat and remains visible to the peer",
+    soloOn.json.privacy?.globalReadReceipts === false &&
+      soloOn.json.privacy?.readReceipts === true &&
+      soloDetail?.privacy?.readReceiptsOverride === true &&
+      soloDetail?.privacy?.readReceipts === true &&
+      soloPageB.json.readAt != null,
+    JSON.stringify({ privacy: soloDetail?.privacy, readAt: soloPageB.json.readAt }),
+  );
+  await k.call(
+    "POST",
+    `/api/conversations/${cid}/privacy`,
+    { readReceiptsOverride: null },
+    a.token,
+  );
+  await k.call("POST", `/api/conversations/${cid}/read`, {}, a.token);
+  const soloReset = (await k.call("GET", `/api/conversations/${cid}`, undefined, a.token)).json
+    .conversation;
+  const soloPageBAfterReset = await k.call(
+    "GET",
+    `/api/conversations/${cid}/messages`,
+    undefined,
+    b.token,
+  );
+  check(
+    "Use global clears the 1:1 override and follows global Off on every server read",
+    soloReset?.privacy?.readReceiptsOverride == null &&
+      soloReset?.privacy?.globalReadReceipts === false &&
+      soloReset?.privacy?.readReceipts === false &&
+      soloPageBAfterReset.json.readAt == null,
+    JSON.stringify({ privacy: soloReset?.privacy, readAt: soloPageBAfterReset.json.readAt }),
+  );
+
+  // In a group only the opted-out member's own timestamp is hidden. Their own
+  // Off must not hide other members' timestamps, but disables the all-read aggregate.
+  await k.call("PATCH", "/api/me", { readReceipts: true }, a.token);
+  await k.call("POST", `/api/conversations/${gid}/read`, {}, a.token);
+  await k.call("POST", `/api/conversations/${gid}/read`, {}, b.token);
+  await k.call(
+    "POST",
+    `/api/conversations/${gid}/privacy`,
+    { readReceiptsOverride: false },
+    a.token,
+  );
+  await k.call("POST", `/api/conversations/${gid}/read`, {}, a.token);
+  const groupPageBOff = await k.call(
+    "GET",
+    `/api/conversations/${gid}/messages`,
+    undefined,
+    b.token,
+  );
+  const groupDetailBOff = (await k.call("GET", `/api/conversations/${gid}`, undefined, b.token))
+    .json.conversation;
+  const groupDetailAOff = (await k.call("GET", `/api/conversations/${gid}`, undefined, a.token))
+    .json.conversation;
+  const groupARowOff = groupDetailBOff?.members?.find((m) => m.user?.id === a.user.id);
+  const groupBRowVisibleToA = groupDetailAOff?.members?.find((m) => m.user?.id === b.user.id);
+  check(
+    "group Off hides only that member's own read time, keeps other members visible, and suppresses all-read",
+    groupARowOff?.lastReadAt == null &&
+      typeof groupBRowVisibleToA?.lastReadAt === "string" &&
+      groupPageBOff.json.readAt == null,
+    JSON.stringify({ groupARowOff, groupBRowVisibleToA, readAt: groupPageBOff.json.readAt }),
+  );
+  await k.call(
+    "POST",
+    `/api/conversations/${gid}/privacy`,
+    { readReceiptsOverride: true },
+    a.token,
+  );
+  await k.call("POST", `/api/conversations/${gid}/read`, {}, a.token);
+  const groupPageBOn = await k.call(
+    "GET",
+    `/api/conversations/${gid}/messages`,
+    undefined,
+    b.token,
+  );
+  const groupDetailBOn = (await k.call("GET", `/api/conversations/${gid}`, undefined, b.token)).json
+    .conversation;
+  const groupARowOn = groupDetailBOn?.members?.find((m) => m.user?.id === a.user.id);
+  check(
+    "group On restores the member's individual timestamp and the all-read aggregate",
+    typeof groupARowOn?.lastReadAt === "string" && typeof groupPageBOn.json.readAt === "string",
+    JSON.stringify({ groupARowOn, readAt: groupPageBOn.json.readAt }),
+  );
+
+  // Account-synced home-tab order is strict, validated, and returned by /api/me.
+  const savedHomeOrder = ["profile", "calls", "chats", "status"];
+  const orderWrite = await k.call("PATCH", "/api/me", { homeNavOrder: savedHomeOrder }, a.token);
+  const orderRead = await k.call("GET", "/api/me", undefined, a.token);
+  const badOrder = await k.call(
+    "PATCH",
+    "/api/me",
+    { homeNavOrder: ["profile", "calls", "chats", "chats"] },
+    a.token,
+  );
+  check(
+    "home-tab order saves on the account, reloads from /api/me, and rejects malformed permutations",
+    orderWrite.status === 200 &&
+      JSON.stringify(orderWrite.json.user?.homeNavOrder) === JSON.stringify(savedHomeOrder) &&
+      JSON.stringify(orderRead.json.user?.homeNavOrder) === JSON.stringify(savedHomeOrder) &&
+      badOrder.status === 400 &&
+      badOrder.json.error?.code === "BAD_HOME_NAV_ORDER",
+    JSON.stringify({
+      write: orderWrite.json.user?.homeNavOrder,
+      read: orderRead.json.user?.homeNavOrder,
+      bad: badOrder.status,
+    }),
+  );
+
   // devices list
   const devs = await k.call("GET", "/api/auth/devices", undefined, a.token);
   check(
@@ -5005,7 +5155,7 @@ const convBetween = (db, a, b) =>
   // anywhere past the Update tap names its phase in the report — and
   // the report keeps the whole stack (the sheet scrolls).
   check(
-    "release: crash-report solidity — update_ready / update_committed success marks, update_dl/install/session _failed marks with the exception name, the saved report keeps 4000 chars",
+    "release: crash-report solidity — update_ready / update_committed success marks, update_dl/install/session _failed marks with the exception name, the complete bounded report is scrollable/copyable",
     (() => {
       const crash = kt("KpCrash.kt");
       return (
@@ -5014,7 +5164,8 @@ const convBetween = (db, a, b) =>
         upd.includes('KpCrash.mark("update_dl_failed:${e.javaClass.simpleName}")') &&
         upd.includes('KpCrash.mark("update_install_failed:${it.javaClass.simpleName}")') &&
         upd.includes('KpCrash.mark("update_session_failed:${e.javaClass.simpleName}")') &&
-        crash.includes("?.readText()?.take(4000)")
+        crash.includes("?.readText()") &&
+        crash.includes("MAX_REPORT_CHARS = 24_000")
       );
     })(),
   );
@@ -5891,6 +6042,10 @@ const convBetween = (db, a, b) =>
       src.indexOf("function previewOf(row: MsgRow): string {"),
       src.indexOf("async function fanOutProfileChange("),
     );
+    const cardStyle = notify.slice(
+      notify.indexOf("// A just-arrived photo always takes precedence"),
+      notify.indexOf("// The official notification account is one-way"),
+    );
     check(
       "r32-35: worker — send preview comes from previewOf (no 'photo.jpg'), image/video/audio media files read as words (r33-12: Documents read 'Document'), push data carries kp_media only for a picture",
       src.includes("const preview = previewOf({") &&
@@ -5900,10 +6055,16 @@ const convBetween = (db, a, b) =>
         previewOf.includes('if (type.startsWith("video/")) return `Video${once}`;') &&
         previewOf.includes("if (meta.document !== true) {") &&
         src.includes("const pictureUrl =\n      message.hasImage && !message.viewOnce") &&
-        src.includes("...(pictureUrl ? { kp_media: pictureUrl } : {}),"),
+        src.includes("...(pictureUrl ? { kp_media: pictureUrl } : {}),") &&
+        src.includes(
+          "const needsDeviceRendering = (!!sealedBody && !message.viewOnce) || !!pictureUrl;",
+        ) &&
+        src.includes(
+          'data.type === "message" && (data.kp_e2ee === "1" || !!data.kp_media?.startsWith("/api/"));',
+        ),
     );
     check(
-      "r32-35: app — bounded fetch (Api.downloadWithin via Bitmaps.fetchWithin, cache-first, stored for the chat), only an /api/ path is fetched, the card sets the large icon + BigPictureStyle and keeps Reply / Like / Mark-as-read",
+      "r32-35: app — bounded fetch (Api.downloadWithin via Bitmaps.fetchWithin, cache-first, stored for the chat), only an /api/ path is fetched, the actual image takes BigPictureStyle precedence over stacked-thread style, and Reply / Like / Mark-as-read remain",
       api.includes("fun downloadWithin(pathOrKey: String, millis: Long): ByteArray? {") &&
         api.includes("http.newBuilder().callTimeout(millis, TimeUnit.MILLISECONDS).build()") &&
         ui.includes("fun fetchWithin(url: String, millis: Long, maxSide: Int = 720): Bitmap? {") &&
@@ -5913,9 +6074,12 @@ const convBetween = (db, a, b) =>
         push.includes("Bitmaps.ensureInit(this)") &&
         push.includes("picture = picture,") &&
         notify.includes("picture: android.graphics.Bitmap? = null,") &&
-        notify.includes("NotificationCompat.BigPictureStyle()") &&
-        notify.includes(".bigPicture(picture)") &&
-        notify.includes("setLargeIcon(picture)") &&
+        cardStyle.includes("if (picture != null) {") &&
+        cardStyle.indexOf("if (picture != null) {") <
+          cardStyle.indexOf("else if (stacked != null && stacked.size >= 2)") &&
+        cardStyle.includes("NotificationCompat.BigPictureStyle()") &&
+        cardStyle.includes(".bigPicture(picture)") &&
+        cardStyle.includes("setLargeIcon(picture)") &&
         notify.indexOf("NotificationCompat.BigPictureStyle()") <
           notify.indexOf('if (!convoId.contains("kp_official_bot")) addAction(replyAction)') &&
         notify.includes(".addAction(readAction)"),
@@ -6152,9 +6316,13 @@ const convBetween = (db, a, b) =>
     );
     check(
       "r32-32: the TEXT bubble annotates its body (plain Text again in select mode so taps go to the bubble) and shows LinkPreviewCard for the first link above the text",
-      chat.includes("else Links.annotate(full, bodyInk) { u -> Links.open(ctx, u) }") &&
+      /else Links\.annotate\(full, bodyInk\) \{ u ->\s*revealStamp\.value\(\)\s*Links\.open\(ctx, u\)\s*\}/.test(
+        chat,
+      ) &&
         chat.includes("val firstLink = remember(full) { Links.first(full) }") &&
-        chat.includes("onOpen = if (selecting) null else ({ Links.open(ctx, firstLink) }),") &&
+        /onOpen\s*=\s*if \(selecting\)\s*\{\s*null\s*\}\s*else\s*\{\s*\{\s*revealStamp\.value\(\)\s*Links\.open\(ctx, firstLink\)\s*\}\s*\}/.test(
+          chat,
+        ) &&
         chat.includes("linked,\n                                        fontSize = 14.5.sp,") &&
         chat.includes("maxLines = if (capped) BODY_COLLAPSE_LINES else Int.MAX_VALUE,") &&
         chat.indexOf("LinkPreviewCard(") < chat.indexOf("linked,"),
@@ -6525,24 +6693,34 @@ const convBetween = (db, a, b) =>
       chat.indexOf("internal fun sentAsDocument(m: JSONObject): Boolean ="),
     );
     check(
-      "r34-16a: app — a view-once message renders ViewOnceRow: the photo at its original ratio (ImageRatios-cached) blurred past recognition via ViewOnceBlur, the ViewOnceOneIcon mark in the middle, a dark tile for video / uploads; the recipient opens it (sender's tap does nothing), reply-drag + long-press intact, no 'Opened' state anywhere; the album fold, resend and the media grid never take it",
+      "r34-16a: app — a view-once message renders ViewOnceRow: the photo at its original ratio (ImageRatios-cached) blurred past recognition via ViewOnceBlur, the ViewOnceOneIcon mark in the middle, a dark tile for video / uploads; the recipient opens it (sender's tap does nothing), the shared reply swipe + long-press stay intact, no 'Opened' state anywhere; the album fold, resend and the media grid never take it",
       // r71-20: the once-TEXT bubble sits in front of the tile.
       chat.includes(
-        'if (isViewOnce(m)) {\n        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {\n            // r71-20: a view-once TEXT is its own bubble (veiled, one tap to\n            // reveal, five seconds, then gone for both) — the photo / video /\n            // voice flavours keep the tile.\n            if (kind == "TEXT" && m.optText("body").isNotBlank()) {\n                OnceTextRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, theme, onDoubleTapHeart)\n            } else {\n                ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme, onDoubleTapHeart)\n            }',
+        "if (isViewOnce(m)) {\n        KpMessageFocusSlot(focusKey, rowMine = mine) { requestFocus ->\n            Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {",
       ) &&
+        chat.includes('if (pressed.optString("kind") != "DELETED") requestFocus()') &&
+        /OnceTextRow\(\s*m = m,\s*mine = mine,[\s\S]{0,500}?onDoubleTapHeart = onDoubleTapHeart,\s*onRevealStamp = onRevealStamp,?\s*\)/.test(
+          chat,
+        ) &&
+        /ViewOnceRow\(\s*m = m,\s*mine = mine,[\s\S]{0,700}?onDoubleTapHeart = onDoubleTapHeart,\s*onRevealStamp = onRevealStamp,?\s*\)/.test(
+          chat,
+        ) &&
         chat.indexOf("if (isViewOnce(m)) {") <
           chat.indexOf(
             'if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {',
           ) &&
         onceRow.includes("val openable = !mine && !pendingEcho") &&
-        onceRow.includes("openable -> if (video) onOpenVideo(m) else onOpenImage(m)") &&
-        onceRow.includes("detectHorizontalDragGestures(") &&
+        onceRow.includes("canOpen -> if (video) onOpenVideo(m) else onOpenImage(m)") &&
+        onceRow.includes("modifier = Modifier.messageReplySwipe(") &&
+        onceRow.includes("onLongClick = {") &&
         onceRow.includes("if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)") &&
         onceRow.includes(".transformations(ViewOnceBlur)") &&
         onceRow.includes("coil.compose.AsyncImage(") &&
         onceRow.includes("ViewOnceOneIcon(56.dp)") &&
         onceRow.includes("ImageRatios.put(photoUrl,") &&
-        onceRow.includes("DeleteGeoms.put(m, it.boundsInWindow())") &&
+        onceRow.includes(
+          "DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), bubbleShape)",
+        ) &&
         !onceRow.includes("viewOnceSpent") &&
         !chat.includes('"Opened"') &&
         chat.includes("internal fun isViewOnce(m: JSONObject): Boolean =") &&
@@ -7168,9 +7346,8 @@ const convBetween = (db, a, b) =>
         // Owner round 42 (item 3): every media column hugs MY side — r72-20
         // gives the once-view text row the same wrapper (bubble + its stamp).
         (
-          chat.match(
-            /Column\(horizontalAlignment = if \(mine\) Alignment\.End else Alignment\.Start\) \{/g,
-          ) || []
+          chat.match(/horizontalAlignment = if \(mine\) Alignment\.End else Alignment\.Start/g) ||
+          []
         ).length === 6 &&
         // r64 E2EE: the four forwards carry bodyOut (re-sealed per target
         // key); the ImageBubble copy still reads the opened row body as-is.
@@ -7232,9 +7409,13 @@ const convBetween = (db, a, b) =>
         settings.includes("if (available == true) haptics.tap() else haptics.reject()"),
     );
     check(
-      "r32-40: chat — the reply swipe taps once when it ARMS (all five bubble kinds), the select bar's actions buzz (copy confirms; r68-8: the single Delete taps, and the popup's own Delete thuds), the ⋮ taps, an error line rejects once when it appears, schedule-sheet chips / steppers / theme swatches tap, a parked message's X thuds, voice play taps",
-      // r71-20: the once-text bubble is the sixth kind with the same arming tap.
-      (chat.match(/if \(!wasArmed && kotlin\.math\.abs\(replyDrag\) >= /g) || []).length === 6 &&
+      "r32-40: chat — text and media reply swipes buzz once when armed, the select bar's actions buzz (copy confirms; r68-8: the single Delete taps, and the popup's own Delete thuds), the ⋮ taps, an error line rejects once when it appears, schedule-sheet chips / steppers / theme swatches tap, a parked message's X thuds, voice play taps",
+      // Every message row now shares the same arming callback and policy.
+      (chat.match(/onArmed = \{ haptics\.tap\(\) \}/g) || []).length === 6 &&
+        chat.includes(
+          "if (!armed && MessageReplySwipePolicy.shouldReply(dx, dy, mine, baseThresholdPx))",
+        ) &&
+        chat.includes("armedCallback.value()") &&
         chat.includes(
           'cm.setPrimaryClip(android.content.ClipData.newPlainText("KuchuPuchu", text))\n                        haptics.confirm()',
         ) &&
@@ -7713,14 +7894,14 @@ const convBetween = (db, a, b) =>
         !tab.includes("LaunchedEffect(Unit) {"),
     );
     check(
-      "r33-2: status tab wiring",
+      "r33-2: status tab uses offline cache-aware safety refreshes with immediate forced inbox-poke sync",
       status.includes("fun refresh(force: Boolean = false) {") &&
         status.includes('Api.get("/api/statuses", force)') &&
         status.includes(
           "LaunchedEffect(ScreenStore.poke) {\n        if (ScreenStore.poke > 0 && Store.foreground) refresh(force = true)",
         ) &&
         status.includes(
-          "delay(12_000)\n            if (Store.foreground && !Api.inCooldown()) refresh(force = true)",
+          "delay(12_000)\n            if (Store.foreground && !Api.inCooldown()) refresh()",
         ) &&
         status.includes(
           '.sortedByDescending { g -> g.arr("statuses").objects().maxOfOrNull { it.optString("createdAt") } ?: "" }',
@@ -7835,7 +8016,7 @@ const convBetween = (db, a, b) =>
         !src.includes('"📷 Photo"'),
     );
     check(
-      "r33-12: app — friendlyPreview is shared (internal), returns Photo / Voice message / Video / Document with no emoji, treats links and multi-line text as text, and is applied to the list row, both Search chat rows, the push card and the poll fallback card",
+      "r33-12: app — friendlyPreview is shared (internal), returns Photo / Voice message / Video / Document with no emoji, treats links and multi-line text as text, and is applied directly or through the E2EE-safe conversationSearchPreview to the list, both Search rows, the push card and the poll fallback card",
       fp.length > 0 &&
         fp.includes('lower == "video" || lower == "🎬 video" -> "Video"') &&
         fp.includes('lower == "document" || lower == "📄 document" -> "Document"') &&
@@ -7853,7 +8034,7 @@ const convBetween = (db, a, b) =>
         // else a neutral label) and still passes through friendlyPreview.
         kt("KpPush.kt").includes('PushSeal.cardText(plan, opened, data["body"])') &&
         kt("KpPush.kt").includes("friendlyPreview(cardText),") &&
-        (kt("SearchScreen.kt").match(/friendlyPreview\(/g) || []).length === 2,
+        (kt("SearchScreen.kt").match(/conversationSearchPreview\(/g) || []).length === 2,
     );
   }
   // r33 items 13 + 15: "Call update failed" toasts, calls stuck on
@@ -8068,7 +8249,7 @@ const convBetween = (db, a, b) =>
       "r33-19: video bubble — VideoMessageRow takes pendingEcho + otherReadAt, reads UploadProgress for its clientId, decodes the pending frame from the local copy (docPath), swaps the play circle for a determinate ring + percentage while sending (indeterminate during the POST), ignores taps on the echo, and draws a scrim with the time and TickIcon (sending / sent / delivered / seen) like a photo; the duration moves to the top-start corner",
       // v163: the row also hands the ✕ (cancel send) down.
       chat.includes(
-        "VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend, onDoubleTapHeart)",
+        'VideoMessageRow(\n                    m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect,\n                    onReply,\n                    onLongPress = { pressed ->\n                        if (pressed.optString("kind") != "DELETED") requestFocus()\n                        onLongPress(pressed)\n                    },\n                    onOpen = onOpenVideo,\n                    theme = theme,\n                    onCancelSend = onCancelSend,\n                    onDoubleTapHeart = onDoubleTapHeart,\n                    onRevealStamp = onRevealStamp,\n                )',
       ) &&
         vid.includes(
           "    pendingEcho: Boolean,\n    otherReadAt: String?,\n    selectedIds: List<String>,",
@@ -8178,8 +8359,8 @@ const convBetween = (db, a, b) =>
       chat14.includes("if (selecting) onToggleSelect(m) else onLongPress(m)") &&
         chat14.includes("onClick = {\n                        if (selecting && !pendingEcho) {") &&
         chat14.includes("selecting: Boolean = false,") &&
-        chat14.includes(
-          "theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)",
+        /"FILE" -> FileBubble\(\s*m,\s*mine,\s*player,\s*pendingEcho,\s*onOpenImage,\s*onOpenVideo,\s*theme,\s*onOpenDoc,\s*onToggleSelect,\s*onFocusedLongPress,\s*selecting = selectedIds\.isNotEmpty\(\),\s*onCancelSend = onCancelSend,\s*fxGrow = fxFresh,\s*onRevealStamp = onRevealStamp,?\s*\)/.test(
+          chat14,
         ),
     );
   }
@@ -8850,7 +9031,9 @@ const convBetween = (db, a, b) =>
         ) &&
         card.includes('else -> nav.navigate("chat/$id")') &&
         card.includes("val longPress = {") &&
-        card.includes("ListSelect.sheetFor = conv"),
+        card.includes("onFocusRequest()") &&
+        cl.includes("onFocusRequest = {") &&
+        cl.includes("ListSelect.sheetFor = conv"),
     );
     check(
       "r33-9: ProfilePeekSheet — KpSheet (no dialog) with an 84 dp avatar, name + badges, @handle or member count, about (2 lines), and icon-only raised actions Message / Voice call / Video call / Profile-or-Group info; calls hidden for bots and open message requests; a group gets group calls + group/<id>",
@@ -9107,7 +9290,8 @@ const convBetween = (db, a, b) =>
         src.includes("if (!pictureTurn && OWNER_INTENT.test(asked)) {") &&
         ai.includes("Never say you cannot see images.") &&
         ai.includes("if (caption && (IMAGE_EDIT_HINT.test(caption) || wantsPicture(caption))) {") &&
-        ai.includes("VALUES (?, ?, ?, 'IMAGE', NULL, ?, ?)`") &&
+        ai.includes("VALUES (?, ?, ?, 'IMAGE', ?, ?, ?)`") &&
+        ai.includes("await sendBotImage(drawn.image, firstReplyIntro)") &&
         ai.includes("kp_media: `/api/messages/${imgMid}/media`,") &&
         // v166: the photo leg calls the HF vision model, and the text-only
         // apology behind it, through the hedged helper.
@@ -9651,7 +9835,11 @@ const convBetween = (db, a, b) =>
         ui.includes("t.snapTo(1f)") &&
         // Owner round 44 (item 6): frames carry their own capture again
         // (r71-20: 6 — text + video + photo + album + view-once + once-text).
-        (chat.match(/DeleteGeoms\.put\(m, it\.boundsInWindow\(\)\)/g) || []).length === 6 &&
+        (
+          chat.match(
+            /DeleteGeoms\.put\(m, it\.boundsInWindow\(\), it\.boundsInRoot\(\), (?:bubbleShape|shape|RoundedCornerShape\(12\.dp\))\)/g,
+          ) || []
+        ).length === 6 &&
         kt("DeleteAnim.kt").includes("const val SWEEP_MS = 1200") &&
         kt("DeleteAnim.kt").includes("const val GRACE_MS = 3200L") &&
         kt("DeleteAnim.kt").includes("const val COLLAPSE_MS = 220") &&
@@ -9665,7 +9853,8 @@ const convBetween = (db, a, b) =>
     check(
       "r35-1: deletes play to the end on every content — PixelCopy capture on API 26+ (drawToBitmap throws on coil hardware photos, which silently shrank every solo photo delete), grace sized past the worst-case show (PRE + capture + SAFETY + COLLAPSE) — and surviving rows glide into the gap (animateItem on thread rows)",
       kt("DeleteAnim.kt").includes("const val GRACE_MS = 3200L") &&
-        kt("DeleteAnim.kt").includes("suspend fun capture(bubble: Rect)") &&
+        kt("DeleteAnim.kt").includes("suspend fun capture(") &&
+        kt("DeleteAnim.kt").includes("maxWidthPx: Int = MAX_W") &&
         kt("DeleteAnim.kt").includes("PixelCopy.request(") &&
         kt("DeleteAnim.kt").includes("drawToBitmap()") &&
         // r76-27 (audit #15): rows still glide into the gap, and a leaving
@@ -10267,7 +10456,7 @@ const convBetween = (db, a, b) =>
         .prepare("SELECT body FROM messages WHERE client_id = ?")
         .get("e2ee_1")?.body;
       check(
-        "r64-e2ee: the account publishes its public key via PATCH /api/me (bad shape refused), the key rides /api/me AND the peer's conversation detail (the phone seals with it), and a sealed envelope stores verbatim while the chat-list preview + push read only the lock — at the SAME four-wave / six-trip send cost",
+        "r64-e2ee: the account publishes its public key via PATCH /api/me (bad shape refused), the key rides /api/me AND the peer's conversation detail (the phone seals with it), and a sealed envelope stores verbatim while the server preview stays neutral — at the SAME four-wave / six-trip send cost",
         badKey.status === 400 &&
           badKey.json.error?.code === "BAD_E2EE_KEY" &&
           upA.status === 200 &&
@@ -10277,7 +10466,7 @@ const convBetween = (db, a, b) =>
           sealed.r.status === 201 &&
           sealed.r.json.message?.body === envBody &&
           storedBody === envBody &&
-          convRow()?.last_message === "🔒" &&
+          convRow()?.last_message === "New message" &&
           sealed.waves === 4 &&
           sealed.trips === 6 &&
           sealed.concurrent === 3,
@@ -10420,7 +10609,7 @@ const convBetween = (db, a, b) =>
       );
       // Edit path: an edited sealed message is re-sealed on the phone. The
       // edited row is the CONVERSATION'S newest, so the chat-list preview must
-      // follow the new envelope and still read only the lock.
+      // follow the new envelope while the server-side list marker stays neutral.
       const lastEnv = "KP1." + Buffer.from("final sealed").toString("base64");
       const lastMsg = await send({ kind: "TEXT", body: lastEnv, clientId: "e2ee_5" });
       const reSealed = "KP1." + Buffer.from("edited plain").toString("base64");
@@ -10431,10 +10620,10 @@ const convBetween = (db, a, b) =>
         a.token,
       );
       check(
-        "r64-e2ee: editing the newest sealed message stores the NEW envelope and the chat-list preview stays the lock",
+        "r64-e2ee: editing the newest sealed message stores the NEW envelope and the chat-list preview stays neutral",
         edit.status === 200 &&
           edit.json.message?.body === reSealed &&
-          convRow()?.last_message === "🔒",
+          convRow()?.last_message === "New message",
         JSON.stringify({
           s: edit.status,
           body: edit.json.message?.body?.slice(0, 12),
@@ -10475,7 +10664,7 @@ const convBetween = (db, a, b) =>
         k.db._db.prepare("SELECT body FROM messages WHERE id = ?").get(sent.json.message.id)
           ?.body === envelope &&
         k.db._db.prepare("SELECT last_message FROM conversations WHERE id = ?").get(cid)
-          ?.last_message === "🔒",
+          ?.last_message === "New message",
     );
     const detail = await k.call("GET", `/api/conversations/${cid}`, undefined, a.token);
     const denied = await k.call("GET", `/api/conversations/${cid}`, undefined, outsider.token);
@@ -10496,7 +10685,7 @@ const convBetween = (db, a, b) =>
     );
     const edited = await getList(a.token, stable.json.marker);
     check(
-      "r66-3: editing ciphertext moves the list marker even though stored last_message is the same lock",
+      "r66-3: editing ciphertext moves the list marker even though stored last_message stays neutral",
       !edited.json.unchanged &&
         edited.json.items?.find((c) => c.id === cid)?.lastMessagePreview?.body === editedEnvelope,
     );
@@ -10780,11 +10969,11 @@ const convBetween = (db, a, b) =>
 
   // r64-e2ee: end-to-end encrypted messages (worker half) — the worker is a
   // faithful CARRIER: it stores and forwards the sealed envelope, serves the
-  // public key, and shows the lock in every surface that used to show text.
+  // public key, and keeps server-side previews neutral until the device opens them.
   {
     const src = readFileSync(new URL("../../src/worker/index.ts", import.meta.url), "utf8");
     check(
-      "r64-e2ee: worker — KP1. prefix + full UTF-8 envelope headroom on the send AND edit paths, the e2ee_public_key column migration, the key in every user shape (userFrom) + PATCH /api/me shape check, the lock preview for sealed rows, and the key in the list freshness marker",
+      "r64-e2ee: worker — KP1. prefix + full UTF-8 envelope headroom on the send AND edit paths, the e2ee_public_key column migration, the key in every user shape (userFrom) + PATCH /api/me shape check, the neutral preview for sealed rows, and the key in the list freshness marker",
       src.includes('const E2EE_PREFIX = "KP1.";') &&
         src.includes("3 * MESSAGE_MAX_LENGTH + 28") &&
         src.includes("`ALTER TABLE users ADD COLUMN e2ee_public_key TEXT`") &&
@@ -10797,8 +10986,8 @@ const convBetween = (db, a, b) =>
         src.includes("const text = checkedMessageBody(rawBody);") &&
         src.includes("const text = checkedMessageBody(rawEdit);") &&
         src.includes("const e2ee = !!row.body && row.body.startsWith(E2EE_PREFIX);") &&
-        src.includes('const E2EE_PREVIEW = "\\uD83D\\uDD12";') &&
-        // r67-2: the same lock, now named once and reused by the push fallback.
+        src.includes('const E2EE_PREVIEW = "New message";') &&
+        // r67-2: the neutral label is reused by chat-list and fallback previews.
         src.includes('return e2ee ? E2EE_PREVIEW : (row.body || "Message").slice(0, 120);') &&
         src.includes("(c.other as Record<string, unknown>).e2eePublicKey ?? null,") &&
         // the worker never learns to open an envelope — no crypto in the file
@@ -10878,7 +11067,11 @@ const convBetween = (db, a, b) =>
     const url = typeof input === "string" ? input : input.url;
     if (url.startsWith("https://generativelanguage.googleapis.com/")) {
       geminiAsked.push(url);
-      const pieces = ["Bhalo ", "acho? ", "Ami ", "KuchuPuchu AI."];
+      const request = JSON.parse(init.body);
+      const promptText = request.contents?.[0]?.parts?.[0]?.text ?? "";
+      const pieces = promptText.includes("Who created KuchuPuchu?")
+        ? ["KuchuPuchu was created by MD Rabbi Hossain (@rabbihossainltd)."]
+        : ["Bhalo ", "acho? ", "Ami ", "KuchuPuchu AI."];
       const enc = new TextEncoder();
       const body = new ReadableStream({
         async start(ctrl) {
@@ -10961,11 +11154,51 @@ const convBetween = (db, a, b) =>
         growing &&
         deltas.every((f) => body.startsWith(f.text.trimEnd())) &&
         body.includes("KuchuPuchu AI.") &&
+        body.includes("এই অ্যাপটি তৈরি করেছেন MD Rabbi Hossain (@rabbihossainltd)।") &&
+        (body.match(/MD Rabbi Hossain/g) ?? []).length === 1 &&
         finals.some((f) => f.message.senderId === "kp_ai_bot" && f.message.kind === "TEXT"),
       JSON.stringify({ asked: geminiAsked.length, deltas: deltas.map((f) => f.text), body }).slice(
         0,
         600,
       ),
+    );
+
+    seenFrames.length = 0;
+    await call(
+      "POST",
+      `/api/conversations/${conv.id}/messages`,
+      { kind: "TEXT", body: "Are you available?", clientId: "live-2" },
+      a.token,
+    );
+    const laterBot = seenFrames.filter(
+      (f) =>
+        f.type === "message" && f.message.senderId === "kp_ai_bot" && f.message.kind === "TEXT",
+    );
+    const laterBody = laterBot.at(-1)?.message.body ?? "";
+    check(
+      "AI does not volunteer or repeat the owner introduction on later unrelated replies",
+      laterBody.includes("Bhalo") && !laterBody.includes("MD Rabbi Hossain"),
+      laterBody,
+    );
+
+    seenFrames.length = 0;
+    await call(
+      "POST",
+      `/api/conversations/${conv.id}/messages`,
+      { kind: "TEXT", body: "Who created KuchuPuchu?", clientId: "live-3" },
+      a.token,
+    );
+    const directOwnerBot = seenFrames.filter(
+      (f) =>
+        f.type === "message" && f.message.senderId === "kp_ai_bot" && f.message.kind === "TEXT",
+    );
+    const directOwnerBody = directOwnerBot.at(-1)?.message.body ?? "";
+    check(
+      "later owner details appear when directly asked, without another generic intro",
+      directOwnerBody.includes("KuchuPuchu was created by MD Rabbi Hossain") &&
+        (directOwnerBody.match(/MD Rabbi Hossain/g) ?? []).length === 1 &&
+        !directOwnerBody.includes("I'm KuchuPuchu AI, created by"),
+      directOwnerBody,
     );
   } finally {
     globalThis.fetch = realFetch;

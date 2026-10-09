@@ -72,7 +72,12 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 @Composable
-fun ProfileScreen(nav: NavController, userId: String) {
+fun ProfileScreen(
+    nav: NavController,
+    userId: String,
+    onBack: (() -> Unit)? = null,
+    showHomeNav: Boolean = false,
+) {
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
     // Paint INSTANTLY from the cached conversation data (name/avatar/username/
@@ -119,8 +124,9 @@ fun ProfileScreen(nav: NavController, userId: String) {
         Modifier
             .fillMaxSize()
             .background(Cream)
-            .statusBarsPadding()
-            .navigationBarsPadding(),
+            .then(if (showHomeNav) Modifier else Modifier.statusBarsPadding())
+            .navigationBarsPadding()
+            .then(if (showHomeNav) Modifier.padding(bottom = 72.dp) else Modifier),
     ) {
         // Owner round 32 (items 6/7/25): the peer actions live in ONE ⋮ sheet
         // — Add contact (only when not in the phone book) / Block / Hide /
@@ -172,7 +178,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
             Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = { nav.popBackStack() }) {
+            IconButton(onClick = { if (onBack != null) onBack() else nav.popBackStack() }) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink)
             }
             Text(

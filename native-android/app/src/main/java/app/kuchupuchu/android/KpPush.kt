@@ -464,7 +464,7 @@ class KpPushService : FirebaseMessagingService() {
             // row can carry the real text — but the foreground path never
             // spends a request on it (the open chat fetches the thread itself):
             // only the envelope that rode the push is worth opening here.
-            val fgPlan = PushSeal.plan(data["kp_e2ee"], data["kp_env"], data["body"])
+            val fgPlan = PushSeal.plan(data["kp_e2ee"], data["kp_env"], data["body"], data["kp_once"])
             val fgPlain = if (fgPlan.envelope != null) PushSeal.open(this, convoId, mid, fgPlan) else null
             // Badge jumps instantly; the next list refresh confirms the same number.
             // r67-2: the preview handed to the list is the opened text or a neutral
@@ -484,7 +484,7 @@ class KpPushService : FirebaseMessagingService() {
         // The token is already loaded by onMessageReceived. openBounded caps the
         // one fetch it may make (a short message needs none) so the card is
         // always posted inside the push handler's own time budget.
-        val plan = PushSeal.plan(data["kp_e2ee"], data["kp_env"], data["body"])
+        val plan = PushSeal.plan(data["kp_e2ee"], data["kp_env"], data["body"], data["kp_once"])
         val opened =
             if (plan.sealed) PushSeal.openBounded(this, convoId, mid, plan, 3_500L) else null
         // r67-2: the opened plaintext, else a neutral label — a sealed body is

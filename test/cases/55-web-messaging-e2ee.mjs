@@ -12,6 +12,7 @@
  * never leave plaintext, and a missing peer key must refuse rather than send.
  */
 
+import { readFileSync } from "node:fs";
 import {
   createCipheriv,
   createDecipheriv,
@@ -38,7 +39,6 @@ import {
   bytesToBase64,
   decodePlaintextBackup,
   decryptMessageBody,
-  encodePlaintextBackup,
   generateIdentity,
   isEnvelope,
   isPassphraseBackup,
@@ -222,11 +222,12 @@ check(
   (await decryptMessageBody(sealed, alice.u, bob)).text === sample,
 );
 
-// 7. KP2 passphrase backup
+// 7. KP2 passphrase backup and a read-only legacy fixture
 const kp2 = await buildKp2Blob(alice, "correct horse battery staple");
+const legacyBackupBlob = Buffer.from(JSON.stringify({ p: alice.p, u: alice.u })).toString("base64");
 check(
   "a KP2 blob is recognised as passphrase-locked",
-  isPassphraseBackup(kp2) && !isPassphraseBackup(encodePlaintextBackup(alice)),
+  isPassphraseBackup(kp2) && !isPassphraseBackup(legacyBackupBlob),
 );
 check(
   "the right passphrase unlocks the identity byte-for-byte",
@@ -244,13 +245,13 @@ check(
 );
 check(
   "a KP1 blob is not treated as passphrase-locked",
-  (await unlockPassphraseBackup(encodePlaintextBackup(alice), "x")) === null,
+  (await unlockPassphraseBackup(legacyBackupBlob, "x")) === null,
 );
 
-// 8. KP1 plaintext backup + stored identity
-const blob = encodePlaintextBackup(alice);
+// 8. Legacy KP1 plaintext backup is import-only + stored identity
+const blob = legacyBackupBlob;
 check(
-  "plaintext backup round-trips",
+  "a legacy backup still round-trips locally for explicit migration",
   JSON.stringify(decodePlaintextBackup(blob)) === JSON.stringify(alice),
 );
 check("a corrupt backup decodes to null", decodePlaintextBackup("!!!not-base64!!!") === null);
@@ -264,6 +265,18 @@ check(
     parseStoredIdentity(JSON.stringify({ p: "short" })) === null &&
     parseStoredIdentity("nonsense") === null &&
     parseStoredIdentity("") === null,
+);
+const identityHook = readFileSync(
+  new URL("../../web/src/messaging/useE2eeIdentity.ts", import.meta.url),
+  "utf8",
+);
+const legacyWebApp = readFileSync(new URL("../../public/app.js", import.meta.url), "utf8");
+check(
+  "web identity setup publishes only public keys and never auto-uploads a private-key backup",
+  !identityHook.includes("encodePlaintextBackup") &&
+    !identityHook.includes("messagingApi.putBackup") &&
+    !legacyWebApp.includes('api("/api/e2ee/backup", { method: "PUT"') &&
+    !legacyWebApp.includes("body: { backup: blob }"),
 );
 
 // 9. send policy

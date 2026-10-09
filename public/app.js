@@ -9,10 +9,11 @@
  *
  * E2EE (full parity with the app, owner round 64): 1:1 message bodies are
  * sealed on the device — P-256 ECDH → HKDF-SHA256 → AES-256-GCM, envelope
- * "KP1." + base64(nonce ‖ ciphertext). The web client adopts the account's
- * roaming identity from GET /api/e2ee/backup (the same plaintext KP1 blob a
- * reinstall phone restores, or the KP2 passphrase-locked one), so the phone
- * and the web share ONE keypair and every envelope opens on both.
+ * "KP1." + base64(nonce ‖ ciphertext). The web client can adopt an existing
+ * legacy or KP2 roaming identity from GET /api/e2ee/backup. Newly created
+ * identities stay in browser storage; the web never uploads an unencrypted
+ * private key. A passphrase-locked KP2 backup can still share one identity
+ * across the phone and browser.
  */
 "use strict";
 
@@ -30,7 +31,8 @@ import { buildE164, validOtp } from "./login-utils.mjs";
   const KP2 = "KP2.";
   const HKDF_INFO = "kp-msg-e2ee-v1";
   const KP_BOTS = new Set(["kp_official_bot", "kp_ai_bot"]);
-  const LOCK = "\uD83D\uDD12";
+  const E2EE_PREVIEW = "এনক্রিপ্ট করা মেসেজ";
+  const E2EE_OPEN_FAILED = "এই ডিভাইসে মেসেজটি খোলা যায়নি";
 
   const state = {
     token: localStorage.getItem(LS.token) || "",
@@ -318,8 +320,9 @@ import { buildE164, validOtp } from "./login-utils.mjs";
       }
     }
     if (!pair) {
-      // No backup anywhere (an account that never ran the app since r64):
-      // mint one and publish it — the same first-device behavior as the app.
+      // No backup anywhere: mint a browser-local identity and publish only
+      // its public half. A private-key backup requires the native KP2
+      // passphrase flow; never upload a plaintext keypair here.
       const kp = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
         "deriveBits",
       ]);
@@ -327,9 +330,9 @@ import { buildE164, validOtp } from "./login-utils.mjs";
       const spki = await crypto.subtle.exportKey("spki", kp.publicKey);
       pair = { p: b64e(pkcs8), u: b64e(spki) };
     }
-    adoptIdentity(pair, remote);
+    adoptIdentity(pair);
   }
-  async function adoptIdentity(pair, remoteWasEmpty) {
+  async function adoptIdentity(pair) {
     state.e2ee = pair;
     localStorage.setItem(LS.e2ee, JSON.stringify(pair));
     try {
@@ -340,12 +343,8 @@ import { buildE164, validOtp } from "./login-utils.mjs";
       if (user.e2eePublicKey !== pair.u) {
         await api("/api/me", { method: "PATCH", body: { e2eePublicKey: pair.u } });
       }
-      if (remoteWasEmpty) {
-        const blob = b64e(new TextEncoder().encode(JSON.stringify({ p: pair.p, u: pair.u })));
-        await api("/api/e2ee/backup", { method: "PUT", body: { backup: blob } });
-      }
     } catch {
-      /* publication retries on the next boot */
+      /* public-key publication retries on the next boot */
     }
     state.pendingRestore = null;
     renderUnlockBar();
@@ -359,7 +358,7 @@ import { buildE164, validOtp } from "./login-utils.mjs";
       $("unlockMsg").textContent = "ভুল পাসফ্রেজ / wrong passphrase";
       return;
     }
-    await adoptIdentity(pair, false);
+    await adoptIdentity(pair);
   }
   function renderUnlockBar() {
     const bar = $("unlock");
@@ -380,7 +379,7 @@ import { buildE164, validOtp } from "./login-utils.mjs";
       if (e2ee.isEnvelope(m.body)) {
         m._sealed = true;
         const plain = await e2ee.open(m.body, peerPub);
-        m.body = plain == null ? LOCK + " অ্যাপে খুলুন" : plain;
+        m.body = plain == null ? E2EE_OPEN_FAILED : plain;
         changed = true;
       } else {
         m._sealed = false;
@@ -939,7 +938,7 @@ import { buildE164, validOtp } from "./login-utils.mjs";
       location: "📍 Location",
     }[cat];
     if (tag && cat !== "message") return tag;
-    if (e2ee.isEnvelope(p.body)) return LOCK + " এনক্রিপ্টেড মেসেজ";
+    if (e2ee.isEnvelope(p.body)) return E2EE_PREVIEW;
     return (p.body || "").slice(0, 120);
   }
   async function loadConvs() {
@@ -1115,7 +1114,7 @@ import { buildE164, validOtp } from "./login-utils.mjs";
           ? `<img class="pic" data-src="${esc(mediaSrc(m))}" alt="photo" style="min-height:90px;min-width:90px;background:rgba(255,255,255,.06)${
               m.mediaW && m.mediaH ? `;aspect-ratio:${m.mediaW}/${m.mediaH}` : ""
             }"/>`
-          : "") + (m.body && m.body !== LOCK ? `<div>${esc(m.body)}</div>` : "");
+          : "") + (m.body && m.body !== E2EE_OPEN_FAILED ? `<div>${esc(m.body)}</div>` : "");
     } else if (kind === "FILE") {
       const t = m.fileType || "";
       const ico = t.startsWith("audio") ? "🎤" : t.startsWith("video") ? "🎬" : "📎";

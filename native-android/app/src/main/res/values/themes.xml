@@ -5,4 +5,21 @@
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowBackground">@color/kp_window_bg</item>
     </style>
+
+    <!-- The floating nav's dialog must use a translucent floating-window theme;
+         setting only PixelFormat.TRANSLUCENT is not enough for Android's real
+         cross-window background blur surface. -->
+    <style name="KpNavDialogTheme" parent="@android:style/Theme.Material.Light.Dialog.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
+    <!-- WindowManager moves the floating nav as a single surface, avoiding
+         per-frame Compose -> WindowManager relayouts and keeping blur attached. -->
+    <style name="KpNavWindowAnimations">
+        <item name="android:windowEnterAnimation">@anim/kp_nav_enter</item>
+        <item name="android:windowExitAnimation">@anim/kp_nav_exit</item>
+    </style>
 </resources>

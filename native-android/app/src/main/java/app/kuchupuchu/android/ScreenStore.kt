@@ -583,10 +583,16 @@ object ScreenStore {
                 }
                 if (calls.isEmpty()) o.optJSONArray("calls")?.objects()?.let { setCalls(it) }
                 if (statuses.isEmpty()) o.optJSONArray("statuses")?.objects()?.let { setStatuses(it) }
+                var scrubbedViewOnce = false
                 synchronized(this) {
                     val msgsObj = o.optJSONObject("msgs") ?: JSONObject()
                     msgsObj.keys().forEach { k ->
-                        if (msgs[k] == null) msgs[k] = msgsObj.arr(k).objects().toMutableList()
+                        val cached = msgsObj.arr(k).objects()
+                        val safe = cached.filterNot {
+                            it.optBoolean("viewOnce") || it.optJSONObject("meta")?.optBoolean("viewOnce") == true
+                        }
+                        if (safe.size != cached.size) scrubbedViewOnce = true
+                        if (msgs[k] == null) msgs[k] = safe.toMutableList()
                     }
                     // Chat headers survive a restart too — every chat the user
                     // had open paints its title/avatar instantly on frame one.
@@ -596,6 +602,7 @@ object ScreenStore {
                         }
                     }
                 }
+                if (scrubbedViewOnce) persist()
             }
         }.start()
     }
@@ -617,21 +624,27 @@ object ScreenStore {
      */
     /** Builds the cache snapshot. Callers must hold the ScreenStore lock. */
     private fun snapshotLocked(): JSONObject {
-        // Owner round 19: the snapshot is CAPPED — the last 40 messages of
-        // the 30 most recent chats, 150 rows for the lists. Without caps the
-        // file grew with every chat ever opened, and the cold-reopen parse
-        // cost grew with it.
+        // Keep a useful offline window without letting the snapshot grow with
+        // every chat ever opened. View-once rows are deliberately excluded from
+        // disk; their live in-memory behavior and server lifecycle are unchanged.
         val msgsObj = JSONObject()
-        msgs.entries.sortedByDescending { (_, v) -> v.lastOrNull()?.optString("createdAt") ?: "" }
-            .take(30)
-            .forEach { (k, v) ->
-                val arr = JSONArray()
-                v.toList().takeLast(40).forEach { arr.put(it) }
-                msgsObj.put(k, arr)
+        msgs.entries
+            .mapNotNull { (key, rows) ->
+                val safeRows = rows.filterNot {
+                    it.optBoolean("viewOnce") || it.optJSONObject("meta")?.optBoolean("viewOnce") == true
+                }.takeLast(120)
+                if (safeRows.isEmpty()) null else key to safeRows
             }
-        val convArr = JSONArray(); convs.toList().take(150).forEach { convArr.put(it) }
-        val callArr = JSONArray(); calls.toList().take(100).forEach { callArr.put(it) }
-        val stArr = JSONArray(); statuses.toList().take(100).forEach { stArr.put(it) }
+            .sortedByDescending { (_, rows) -> rows.lastOrNull()?.optString("createdAt") ?: "" }
+            .take(60)
+            .forEach { (key, rows) ->
+                val arr = JSONArray()
+                rows.forEach { arr.put(it) }
+                msgsObj.put(key, arr)
+            }
+        val convArr = JSONArray(); convs.toList().take(200).forEach { convArr.put(it) }
+        val callArr = JSONArray(); calls.toList().take(150).forEach { callArr.put(it) }
+        val stArr = JSONArray(); statuses.toList().take(200).forEach { stArr.put(it) }
         val detObj = JSONObject(); convDetail.forEach { (k, v) -> detObj.put(k, v) }
         return JSONObject()
             .put("convs", convArr)
@@ -783,9 +796,9 @@ object ScreenStore {
             val uid = row.optJSONObject("other")?.optString("id").orEmpty()
             if (uid.isNotBlank()) convIdForUser[uid] = row.optString("id")
         }
-        // The chat list polls every 2.5s. Rewriting the whole cache on every
-        // one of those polls, when almost none of them change anything, was
-        // most of the cost; only a real change needs to reach disk.
+        // The chat list also receives marker-gated safety polls. Rewriting
+        // the whole cache when the list is unchanged is unnecessary; only a
+        // real change needs to reach disk.
         if (changed) persist()
     }
 
@@ -871,7 +884,8 @@ object ScreenStore {
             append(m.optString("body")).append(':')
             append(m.optIso("deliveredAt")).append(':')
             append(m.optString("mediaUrl")).append(':')
-            append(m.optString("fileKey"))
+            append(m.optString("fileKey")).append(':')
+            append(m.optJSONObject("meta")?.optJSONObject("reactions")?.toString().orEmpty())
         }
     }
 

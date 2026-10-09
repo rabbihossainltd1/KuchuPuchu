@@ -122,4 +122,13 @@ jobs:
           path: |
             native-android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
+      # Keep the private, build-matched R8 map so obfuscated Compose crashes can
+      # be retraced to the exact source callsite. The APK artifact remains separate.
+      - name: Upload release R8 mapping
+        uses: actions/upload-artifact@v4
+        with:
+          name: kuchupuchu-r8-mapping
+          path: native-android/app/build/outputs/mapping/release/mapping.txt
+          if-no-files-found: error
+          retention-days: 30
 

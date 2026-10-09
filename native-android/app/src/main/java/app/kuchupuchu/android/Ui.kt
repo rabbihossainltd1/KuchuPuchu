@@ -11,6 +11,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -54,12 +55,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -85,6 +89,122 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.json.JSONObject
+
+/** Returns the supplied outlined chat/message glyph as a tintable vector. */
+@Composable
+internal fun KpChatMessageVector(): ImageVector = ImageVector.vectorResource(R.drawable.ic_nav_chat)
+
+/**
+ * A reference-counted modal signal. KpApp blurs the entire live screen while
+ * any sheet/popup is open; the translucent sheet above it reveals that blurred
+ * content like frosted glass. Counting keeps overlapping modals from briefly
+ * un-blurring the screen when only one of them is dismissed.
+ */
+internal object KpModalBlurState {
+    private var activeCount by mutableIntStateOf(0)
+    private var visibleWindowCount by mutableIntStateOf(0)
+
+    /** Drives the app's RenderEffect blur. */
+    val isActive: Boolean
+        get() = activeCount > 0
+
+    /** Keeps the home nav suppressed until the modal surface leaves composition. */
+    val hasVisibleWindow: Boolean
+        get() = visibleWindowCount > 0
+
+    fun register() {
+        activeCount += 1
+        visibleWindowCount += 1
+    }
+
+    /** Reopen a sheet that reversed a hide gesture without discarding its focus crop. */
+    fun retain() {
+        activeCount += 1
+    }
+
+    /** Release just the backdrop blur when a sheet first targets Hidden. */
+    fun unregister() {
+        activeCount = (activeCount - 1).coerceAtLeast(0)
+    }
+
+    fun unregisterWindow() {
+        visibleWindowCount = (visibleWindowCount - 1).coerceAtLeast(0)
+    }
+}
+
+/** Idempotent owner token: blur may release before its modal window is disposed. */
+internal class KpModalBlurRegistration {
+    private var blurRegistered = false
+    private var windowRegistered = false
+
+    fun acquire() {
+        if (windowRegistered) return
+        windowRegistered = true
+        blurRegistered = true
+        KpModalBlurState.register()
+    }
+
+    fun release() {
+        if (!blurRegistered) return
+        blurRegistered = false
+        KpModalBlurState.unregister()
+    }
+
+    fun retain() {
+        if (!windowRegistered || blurRegistered) return
+        blurRegistered = true
+        KpModalBlurState.retain()
+    }
+
+    fun dispose() {
+        release()
+        if (!windowRegistered) return
+        windowRegistered = false
+        KpModalBlurState.unregisterWindow()
+    }
+}
+
+@Composable
+internal fun KpRegisterModalBlur(): KpModalBlurRegistration {
+    val registration = remember { KpModalBlurRegistration() }
+    DisposableEffect(registration) {
+        registration.acquire()
+        onDispose { registration.dispose() }
+    }
+    return registration
+}
+
+/**
+ * Sheet blur tracks the sheet's actual target, not its later onDismiss callback.
+ * Hidden releases as the exit begins; reversing the gesture reacquires the blur.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+internal fun KpRememberModalBottomSheetState(
+    registration: KpModalBlurRegistration,
+): androidx.compose.material3.SheetState {
+    val sheetState =
+        androidx.compose.material3.rememberModalBottomSheetState(
+            skipPartiallyExpanded = true,
+            confirmValueChange = { target ->
+                if (target == androidx.compose.material3.SheetValue.Hidden) registration.release()
+                else registration.retain()
+                true
+            },
+        )
+    var hasOpened by remember(sheetState) { mutableStateOf(false) }
+    LaunchedEffect(sheetState, registration) {
+        snapshotFlow { sheetState.targetValue }.collect { target ->
+            if (target == androidx.compose.material3.SheetValue.Hidden) {
+                if (hasOpened) registration.release()
+            } else {
+                hasOpened = true
+                registration.retain()
+            }
+        }
+    }
+    return sheetState
+}
 
 /**
  * Shared image helpers. Avatars are data-URLs the worker stores inline, so
@@ -872,6 +992,7 @@ fun KpDeleteDialog(
 ) {
     val haptics = rememberHaptics()
     var also by remember { mutableStateOf(alsoDefault) }
+    KpRegisterModalBlur()
     // r69 (owner: "popup box ta mota hoye geche left right a jaiga rekhe mota
     // keno korla screenshot a dekhcho koto sundor"): the box was fatter than his
     // reference and its width came from the PLATFORM dialog default, which
@@ -896,7 +1017,7 @@ fun KpDeleteDialog(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
                 .clip(RoundedCornerShape(10.dp))
-                .background(Card)
+                .background(GlassSheetSurface)
                 .padding(start = 24.dp, end = 24.dp, top = 14.dp, bottom = 12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1080,10 +1201,16 @@ fun KpSheet(
     title: String? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    // Own the blur registration at the same composition boundary as this
+    // sheet. Its target-Hidden callback releases blur at exit start, not after
+    // ModalBottomSheet's animated onDismissRequest callback.
+    val blurRegistration = KpRegisterModalBlur()
+    val sheetState = KpRememberModalBottomSheetState(blurRegistration)
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = Card,
-        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = GlassSheetSurface,
+        scrimColor = Color.Black.copy(alpha = 0.10f),
+        sheetState = sheetState,
     ) {
         Column(
             Modifier

@@ -957,7 +957,7 @@ const AI_BOT_ID = "kp_ai_bot";
 // message body. The worker stores and forwards the envelope OPAQUE — it
 // never decrypts and never holds a private key; only the two phones can.
 /** The chat-list / push preview of a sealed body (owner round 64). */
-const E2EE_PREVIEW = "\uD83D\uDD12";
+const E2EE_PREVIEW = "New message";
 const E2EE_PREFIX = "KP1.";
 // r66: a UTF-16 character can require THREE UTF-8 bytes (e.g. Bengali).
 // KP1 carries a 12-byte nonce and 16-byte GCM tag, then base64. Cutting any
@@ -1700,6 +1700,33 @@ const IMAGE_REF =
 // every "ekta chobi banao".
 const OWNER_PHOTO_ASK =
   /((owner|malik|rabbi|hossain|developer|creator|founder|মালিক|রবি|রাব্বি|ডেভেলপার|প্রতিষ্ঠাতা)[^।.!?]{0,30}(ছবি|ফটো|প্রোফাইল|photo|pic\b|picture|avatar|selfie|chobi|chhobi)|\b(tomar|tor|apnar|your)\s+(own\s+|ekta\s+|nijer\s+|ei\s+)?(ছবি|ফটো|প্রোফাইল|photo|pic\b|picture|avatar|selfie|chobi|chhobi|face)|(তোমার|আপনার|তোর)\s*(নিজের\s*)?(ছবি|ফটো|প্রোফাইল|সেলফি))/i;
+const asksAboutOwner = (text: string) => {
+  const question = text.trim();
+  if (!question || OWNER_PHOTO_ASK.test(question)) return false;
+  const ownerReference =
+    OWNER_INTENT.test(question) ||
+    /\b(made|created|built|developed|owns?|runs?)\b[^.!?]{0,55}\b(app|kuchupuchu|you)\b/i.test(
+      question,
+    );
+  const asksForInformation =
+    /\b(who|what|which|about|tell\s+me|name|details?|info(?:rmation)?|email|website|socials?|contact|where|from)\b|\b(ke|kar|kake|ki|kiser|nam|kotha|kothay)\b|(?:কে|কার|কাকে|কী|কি|নাম|বলেন|বল|জানতে|কোথায়|কোথায়|তৈরি|বানিয়েছে|মালিক|ডেভেলপার|প্রতিষ্ঠাতা)|[?？！]$/i.test(
+      question,
+    );
+  const directCreationQuestion =
+    /\b(who|what|which)\b[^.!?]{0,55}\b(made|created|built|developed|owns?|runs?)\b|\b(made|created|built|developed)\b[^.!?]{0,55}\b(app|kuchupuchu|you)\b/i.test(
+      question,
+    );
+  return (ownerReference && asksForInformation) || directCreationQuestion;
+};
+const isBengaliOrBanglish = (text: string) =>
+  /[\u0980-\u09FF]/.test(text) ||
+  /\b(ami|amar|amr|tumi|tomar|tmr|apni|apnar|ki|kemon|kothay|kothai|koro|korbo|korte|bhalo|valo|hobe|ache|ase|nai|keno|kivabe|bol|bolo|bolen|chai|lagbe|dao|daw|den|diye|jano|janen)\b/i.test(
+    text,
+  );
+const ownerIntroFor = (text: string) =>
+  isBengaliOrBanglish(text)
+    ? "আমি KuchuPuchu AI। এই অ্যাপটি তৈরি করেছেন MD Rabbi Hossain (@rabbihossainltd)।"
+    : "I'm KuchuPuchu AI, created by MD Rabbi Hossain (@rabbihossainltd).";
 // A picture noun that reads as a NEW picture ("ekta chobi", "a logo") — with a
 // photo nearby and no reference to it, such a request creates instead of edits.
 const FRESH_NOUN =
@@ -2060,18 +2087,37 @@ async function sendAiReply(
     // Owner round 33 (item 11a): photos (and voice notes) are part of the
     // conversation now, so the transcript names them — "[sent a photo]" —
     // and the model knows what "this one" / "the photo above" refers to.
-    const rows = await all<{
-      sender_id: string;
-      kind: string;
-      body: string | null;
-      media: string | null;
-      meta_json: string | null;
-    }>(
-      db,
-      `SELECT sender_id, kind, body, media, meta_json FROM messages
-        WHERE conv_id = ? AND kind IN ('TEXT', 'IMAGE', 'FILE') ORDER BY rowid DESC LIMIT 12`,
-      convId,
-    );
+    const [rows, priorAiReply] = await Promise.all([
+      all<{
+        sender_id: string;
+        kind: string;
+        body: string | null;
+        media: string | null;
+        meta_json: string | null;
+      }>(
+        db,
+        `SELECT sender_id, kind, body, media, meta_json FROM messages
+          WHERE conv_id = ? AND kind IN ('TEXT', 'IMAGE', 'FILE') ORDER BY rowid DESC LIMIT 12`,
+        convId,
+      ),
+      one<{ id: string }>(
+        db,
+        `SELECT bot.id FROM messages bot
+          WHERE bot.conv_id = ? AND bot.sender_id = ?
+            AND bot.rowid > COALESCE(
+              (SELECT MIN(user_msg.rowid) FROM messages user_msg
+                WHERE user_msg.conv_id = ? AND user_msg.sender_id = ?
+                  AND user_msg.kind IN ('TEXT', 'IMAGE', 'FILE')),
+              bot.rowid
+            )
+          LIMIT 1`,
+        convId,
+        AI_BOT_ID,
+        convId,
+        userId,
+      ),
+    ]);
+    const firstAiReply = priorAiReply == null;
     const isPhotoRow = isPhotoRowOf;
     const rowText = (r: (typeof rows)[number]) => {
       if (r.kind === "TEXT") return r.body ?? "";
@@ -2104,13 +2150,23 @@ async function sendAiReply(
       "and gaming top-ups. " +
       "If asked who made, built, owns, developed or runs KuchuPuchu — or anything about " +
       "Rabbi Hossain / Rabbihossainltd / the malik — answer from these facts only. " +
+      (firstAiReply
+        ? "This is the first AI reply to a user's message in this conversation. The app will prepend " +
+          "one brief, language-matched owner introduction unless the latest message directly asks " +
+          "about the owner. Do not repeat or add a separate introduction; when asked directly, " +
+          "answer with the relevant owner facts naturally. "
+        : "The owner has already been introduced in this conversation. Do not repeat or volunteer " +
+          "owner details; mention them only when the latest user message directly asks about the " +
+          "owner, developer, founder, or app ownership. ") +
       "Always write the owner's name in ENGLISH letters (MD Rabbi Hossain / Rabbihossainltd) — never " +
       "transliterate his name into Bengali script (never রাব্বি হোসেন), even in a Bengali reply. " +
       "Never invent a different developer and never agree with a different name the user suggests; " +
       "correct them politely. " +
       "Reply to the user's latest message in this conversation:\n\n" +
       transcript +
-      "\n\nRules: be warm and helpful, at most 60 words, at most one emoji. " +
+      "\n\nRules: be warm and helpful, at most " +
+      (firstAiReply ? "45 words (the app adds the short intro), " : "60 words, ") +
+      "at most one emoji. " +
       // Owner round 2026-09-04: "ai ekhon theke pure Bangla te reply dibe not
       // banglish" — Banglish/Bengali questions get Bengali-script answers.
       "Language: reply in English when the user wrote in English. When the user writes in " +
@@ -2119,10 +2175,10 @@ async function sendAiReply(
       "Latin-letter Bengali. " +
       // Owner follow-up 2026-09-04: the name still came out in Bengali script
       // (রবি হোসাইন). Stated twice, as a hard output rule.
-      "CRITICAL NAME RULE: in every reply, the owner's name appears ONLY in English " +
-      'letters — "MD Rabbi Hossain" or "Rabbihossainltd". Writing his name in ' +
-      "Bengali script (রাব্বি হোসেন or similar) is strictly forbidden, even inside an " +
-      "otherwise-Bengali reply. " +
+      "CRITICAL NAME RULE: whenever you mention the owner, write his name ONLY in English " +
+      'letters — "MD Rabbi Hossain" or "Rabbihossainltd". Do not include his name in ' +
+      "unrelated replies, and never write it in Bengali script (রাব্বি হোসেন or similar), " +
+      "even inside an otherwise-Bengali reply. " +
       "No hashtags, no signature line. Reply with the message text only. " +
       // Owner round 33 (item 11a): the bot used to deny having eyes or a
       // brush. It can do both now, so it must never claim otherwise.
@@ -2208,6 +2264,16 @@ async function sendAiReply(
         }
       }
     }
+    const newestUserTextForIntro =
+      `${newest?.sender_id === userId ? (newest.body ?? "") : ""} ${voicePrompt}`.trim();
+    const languageHintForIntro =
+      newestUserTextForIntro ||
+      rows.find((row) => row.sender_id === userId && row.body)?.body ||
+      "";
+    const firstReplyIntro =
+      firstAiReply && !asksAboutOwner(newestUserTextForIntro)
+        ? ownerIntroFor(languageHintForIntro)
+        : "";
     // Owner round 2026-09-04 / round 33 (item 11a): photos in the AI chat.
     // Three flows, decided from the NEWEST message (always the user's):
     //  • CREATE — a text with a creation verb + a picture noun ("ekta chobi
@@ -2253,7 +2319,7 @@ async function sendAiReply(
     let pictureTurn = false;
     const bucket = env.MEDIA;
     if (newest && newest.sender_id === userId && bucket) {
-      const sendBotImage = async (img: AiImage) => {
+      const sendBotImage = async (img: AiImage, caption: string = "") => {
         const ext = img.mime.includes("jpeg") ? "jpg" : img.mime.includes("webp") ? "webp" : "png";
         const key = `f/${id()}.${ext}`;
         await bucket.put(key, img.bytes, { httpMetadata: { contentType: img.mime } });
@@ -2271,10 +2337,11 @@ async function sendAiReply(
         await run(
           db,
           `INSERT INTO messages (id, conv_id, sender_id, kind, body, media, created_at)
-           VALUES (?, ?, ?, 'IMAGE', NULL, ?, ?)`,
+           VALUES (?, ?, ?, 'IMAGE', ?, ?, ?)`,
           imgMid,
           convId,
           imgBotId,
+          caption || null,
           key,
           imgCreated,
         );
@@ -2300,7 +2367,7 @@ async function sendAiReply(
               conv_id: convId,
               sender_id: imgBotId,
               kind: "IMAGE",
-              body: null,
+              body: caption || null,
               media: key,
               meta_json: null,
               created_at: imgCreated,
@@ -2440,7 +2507,7 @@ async function sendAiReply(
         }
         const drawn = await hfImage(env, parts, scene, clean);
         if (drawn.image) {
-          await sendBotImage(drawn.image);
+          await sendBotImage(drawn.image, firstReplyIntro);
           return;
         }
         // Persist the HF cause (quota/outage/auth) — tail is too flaky to
@@ -2489,8 +2556,13 @@ async function sendAiReply(
       const now = Date.now();
       if (now - lastDelta < AI_DELTA_MS) return;
       lastDelta = now;
+      const liveText = firstReplyIntro ? `${firstReplyIntro} ${text}` : text;
       ctx.waitUntil(
-        broadcastRoomEvent(env, convId, { type: "ai_delta", conversationId: convId, text }),
+        broadcastRoomEvent(env, convId, {
+          type: "ai_delta",
+          conversationId: convId,
+          text: liveText,
+        }),
       );
     };
     // A photo turn goes to the HF vision model; when the vision call fails
@@ -2561,8 +2633,9 @@ async function sendAiReply(
     }
     // v165: with Gemini as the primary brain, "the service is off" is only
     // true when NO brain is configured — a spent Gemini key still has HF + CF.
-    const body =
+    const answerBody =
       answer ?? (!env.GEMINI_API_KEY && !env.HF_TOKEN ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);
+    const body = firstReplyIntro ? `${firstReplyIntro} ${answerBody}` : answerBody;
     const botId = await ensureAiBot(db);
     const mid = id();
     const created = nowIso();
@@ -3477,6 +3550,10 @@ async function ensureSchema(db: D1Database) {
     // call (the only other participant); the peer's id on a group call.
     `ALTER TABLE call_ice ADD COLUMN target_id TEXT`,
     `CREATE INDEX IF NOT EXISTS idx_call_ice_target ON call_ice(call_id, target_id, created_at)`,
+    // Incremental /ice polling uses monotonic rowid cursors. These prefix indexes
+    // let both the 1:1 and addressed group query resume without rereading history.
+    `CREATE INDEX IF NOT EXISTS idx_call_ice_cursor ON call_ice(call_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_call_ice_target_cursor ON call_ice(call_id, target_id)`,
     `ALTER TABLE conversations ADD COLUMN disappear_seconds INTEGER`,
     `ALTER TABLE conversations ADD COLUMN theme TEXT`,
     // Owner round 31 (item 26): "Hide chat" — per-member, like `muted`.
@@ -3573,6 +3650,7 @@ async function ensureSchema(db: D1Database) {
     // 'nobody' = the author alone.
     `ALTER TABLE users ADD COLUMN priv_status TEXT`,
     `ALTER TABLE users ADD COLUMN read_receipts INTEGER`,
+    `ALTER TABLE users ADD COLUMN home_nav_order TEXT`,
     `ALTER TABLE users ADD COLUMN private_profile INTEGER`,
     `ALTER TABLE sessions ADD COLUMN device_id TEXT`,
     `ALTER TABLE login_requests ADD COLUMN new_device_name TEXT`,
@@ -3617,6 +3695,8 @@ async function ensureSchema(db: D1Database) {
     // profile's defaults" (private: off; public: shot on, rec off).
     `ALTER TABLE members ADD COLUMN priv_allow_shot`,
     `ALTER TABLE members ADD COLUMN priv_allow_rec`,
+    // NULL means this chat follows the account-wide read-receipt setting.
+    `ALTER TABLE members ADD COLUMN priv_read_receipts INTEGER`,
   ];
   const fingerprint = await sha256Hex(
     [...statements, ...migrations, CLIENT_ID_BACKFILL].join("\n"),
@@ -3701,6 +3781,7 @@ type UserRow = {
   verified: number | null;
   moderator: number | null;
   badge?: string | null;
+  home_nav_order?: string | null;
   priv_phone: string | null;
   priv_avatar: string | null;
   priv_messages: string | null;
@@ -3754,6 +3835,46 @@ function privacyOf(row: UserRow) {
 
 const receiptsOn = (row: { read_receipts?: number | null } | undefined) =>
   Number(row?.read_receipts ?? 1) !== 0;
+
+/** Per-chat override (NULL) inherits the account-wide setting. */
+export function readReceiptsOnForChat(
+  member: { priv_read_receipts?: number | null } | null | undefined,
+  user: { read_receipts?: number | null } | null | undefined,
+): boolean {
+  return member?.priv_read_receipts == null
+    ? receiptsOn(user ?? undefined)
+    : Number(member.priv_read_receipts) !== 0;
+}
+
+const HOME_NAV_ITEMS = ["chats", "status", "calls", "profile"] as const;
+const HOME_NAV_SET = new Set<string>(HOME_NAV_ITEMS);
+
+/** Accept only an exact permutation of the four stable home-tab ids. */
+export function normalizeHomeNavOrder(value: unknown): string[] | null {
+  if (
+    !Array.isArray(value) ||
+    value.length !== HOME_NAV_ITEMS.length ||
+    value.some((item) => typeof item !== "string")
+  )
+    return null;
+  const order = value as string[];
+  if (
+    new Set(order).size !== HOME_NAV_ITEMS.length ||
+    order.some((item) => !HOME_NAV_SET.has(item))
+  )
+    return null;
+  return [...order];
+}
+
+function homeNavOrderOf(raw: string | null | undefined): string[] {
+  let parsed: unknown = null;
+  try {
+    parsed = raw ? JSON.parse(raw) : null;
+  } catch {
+    parsed = null;
+  }
+  return normalizeHomeNavOrder(parsed) ?? [...HOME_NAV_ITEMS];
+}
 
 /** "Contact" for privacy purposes: the two share a 1:1 conversation. One
  *  primary-key lookup — the pair id is deterministic. */
@@ -3888,6 +4009,7 @@ function userSelf(row: UserRow, online = false) {
   const legacyEmail = row.email && !row.email.endsWith(PHONE_EMAIL_SUFFIX) ? row.email : null;
   return {
     ...userFrom(row, online, false, SELF_VIEW),
+    homeNavOrder: homeNavOrderOf(row.home_nav_order),
     email: legacyEmail,
     phone: row.phone_e164,
     googleEmail: row.google_email,
@@ -4111,9 +4233,8 @@ function recipientAlert(
 ): { title: string; body: string; channel: string } | undefined {
   const sysCard = () => ({
     title: fromName || "KuchuPuchu",
-    // r67-2: the system draws this card without our process, so nothing can be
-    // decrypted here — never ink the lock as if it were the message. The app's
-    // own (data-only) card carries the opened text instead.
+    // The system draws this card without our process, so it cannot decrypt;
+    // sealed pushes bypass this fallback and the app builds their card locally.
     body: preview === E2EE_PREVIEW ? "New message" : preview.slice(0, 120),
     channel: "kp_messages_v2",
   });
@@ -4185,11 +4306,13 @@ async function requireMember(db: D1Database, convId: string, userId: string) {
     disappear_since: string | null;
     request_from: string | null;
     private_group: number | null;
+    priv_read_receipts: number | null;
     role: string | null;
   }>(
     db,
     `SELECT c.id, c.kind, c.title, c.owner_id, c.hidden_json,
-            c.disappear_seconds, c.disappear_since, c.request_from, c.private_group, m.role
+            c.disappear_seconds, c.disappear_since, c.request_from, c.private_group,
+            m.priv_read_receipts, m.role
        FROM conversations c
        LEFT JOIN members m ON m.conv_id = c.id AND m.user_id = ?
       WHERE c.id = ?`,
@@ -4208,6 +4331,7 @@ async function requireMember(db: D1Database, convId: string, userId: string) {
     disappear_since: row.disappear_since,
     request_from: row.request_from,
     private_group: Number(row.private_group ?? 0) === 1,
+    priv_read_receipts: row.priv_read_receipts ?? null,
   };
   const member = { user_id: userId, role: row.role };
   return { conv, member };
@@ -4405,8 +4529,8 @@ async function broadcastRoomEvent(env: Env, roomKey: string, event: Record<strin
  * record lives in each socket's attachment so it survives the object's
  * hibernation — an in-memory map made a woken object answer 0 for a socket
  * that had heartbeated seconds earlier, i.e. bare payload card, no rich card)
- * the app process is demonstrably running. Senders use that number to decide
- * whether a push may be data-only — see recipientAlert().
+ * the app process is demonstrably running. Senders use that number when
+ * deciding whether a safe system-card fallback is available.
  */
 async function pokeUserConversation(
   env: Env,
@@ -4566,7 +4690,12 @@ async function pushMessageUnlessHidden(
     userId,
   );
   if (Number(m?.hidden ?? 0) === 1) return false;
-  return pushToUser(env, db, userId, data, note);
+  // Bot-generated photos and any explicitly sealed payload also need the app
+  // process so it can fetch/decrypt locally; never let Play services draw a
+  // placeholder card that bypasses that work.
+  const needsDeviceRendering =
+    data.type === "message" && (data.kp_e2ee === "1" || !!data.kp_media?.startsWith("/api/"));
+  return pushToUser(env, db, userId, data, needsDeviceRendering ? undefined : note);
 }
 
 /**
@@ -5035,6 +5164,24 @@ export async function rollupMetrics(db: D1Database, now = new Date()): Promise<n
 
   await db.batch(writes);
   return touched;
+}
+
+// `/api/calls/active` is polled on sub-second to 1.5s safety ticks, but stale
+// calls only need reaping once per cron interval. Gate the request path per
+// isolate so healthy call-list polling stays unchanged while repeated scans
+// disappear; the independent one-minute cron remains the no-client guarantee.
+const CALL_REAPER_INTERVAL_MS = 60_000;
+let nextCallReaperAt = 0;
+async function reapStaleCallsIfDue(
+  env: Env,
+  db: D1Database,
+  ctx: ExecutionContext,
+): Promise<number> {
+  const now = Date.now();
+  if (now < nextCallReaperAt) return 0;
+  // Set before awaiting so overlapping polls in the same isolate coalesce.
+  nextCallReaperAt = now + CALL_REAPER_INTERVAL_MS;
+  return reapStaleCalls(env, db, ctx);
 }
 
 async function reapStaleCalls(env: Env, db: D1Database, ctx: ExecutionContext): Promise<number> {
@@ -6923,6 +7070,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       sets.push("read_receipts = ?");
       values.push(body.readReceipts ? 1 : 0);
     }
+    if (body.homeNavOrder !== undefined) {
+      const order = normalizeHomeNavOrder(body.homeNavOrder);
+      if (!order) fail(400, "Bad home-tab order.", "BAD_HOME_NAV_ORDER");
+      sets.push("home_nav_order = ?");
+      values.push(JSON.stringify(order));
+    }
     if (body.privateProfile !== undefined) {
       sets.push("private_profile = ?");
       values.push(body.privateProfile ? 1 : 0);
@@ -6964,6 +7117,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       // their saved copy of the user — and their safety code — refresh.
       body.e2eePublicKey !== undefined;
     if (identityChanged) ctx.waitUntil(fanOutProfileChange(env, db, uid));
+    else if (body.readReceipts !== undefined || body.homeNavOrder !== undefined)
+      ctx.waitUntil(
+        broadcastRoomEvent(env, `user:${uid}`, {
+          type: "profile",
+          userId: uid,
+          self: true,
+          at: nowIso(),
+        }),
+      );
     return json({ user: userSelf(row, true) });
   }
 
@@ -6977,8 +7139,21 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     return json({ backup: (row?.e2ee_backup as string) ?? null });
   }
   if (path === "/api/e2ee/backup" && method === "PUT") {
-    const b = String(body.backup ?? "").slice(0, 4096);
-    if (b && !/^[A-Za-z0-9+/=]{16,4096}$/.test(b)) fail(400, "Bad backup.", "BAD_E2EE_BACKUP");
+    const b = String(body.backup ?? "");
+    const parts = b.startsWith("KP2.") ? b.slice(4).split(".") : [];
+    const [salt = "", iv = "", ciphertext = ""] = parts;
+    const isKp2Blob =
+      b.length <= 4096 &&
+      parts.length === 3 &&
+      /^[A-Za-z0-9+/]{22}==$/.test(salt) &&
+      /^[A-Za-z0-9+/]{16}$/.test(iv) &&
+      ciphertext.length >= 32 &&
+      ciphertext.length % 4 === 0 &&
+      /^[A-Za-z0-9+/]+={0,2}$/.test(ciphertext);
+    // Never accept the legacy base64 {private, public} blob on a write. Old
+    // rows remain readable for explicit client-side migration, but all new
+    // backups must be AES-GCM ciphertext under a user passphrase.
+    if (b && !isKp2Blob) fail(400, "Backup must be passphrase-locked.", "BAD_E2EE_BACKUP");
     await run(db, "UPDATE users SET e2ee_backup = ? WHERE id = ?", b || null, uid);
     return json({ ok: true });
   }
@@ -7804,15 +7979,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (ids.length) {
       for (const r of await all<ConvPreviewRow>(
         db,
-        `SELECT ${CONV_PREVIEW_COLS}, ${UNREAD_PREVIEW_SAMPLE} AS unread_sample
-           FROM json_each(?) j
-           JOIN messages m ON m.rowid = (
-             SELECT rowid FROM messages
-             WHERE conv_id = json_extract(j.value, '$.id')
-               AND created_at = json_extract(j.value, '$.at') AND kind != 'DELETED'
-             ORDER BY rowid DESC LIMIT 1
-           )
-           JOIN members viewer_member ON viewer_member.conv_id = m.conv_id AND viewer_member.user_id = ?`,
+        CONV_LIST_PREVIEW_QUERY,
         JSON.stringify(ids.map((id) => ({ id, at: convs.get(id)?.last_message_at ?? null }))),
         uid,
       )) {
@@ -8214,18 +8381,29 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       readMatch[1]!,
       uid,
     );
-    // Owner round 30: read receipts off (mine, or the other side's — whoever
-    // switches them off loses them both ways, so they cannot be abused) means
-    // no live "read" frame in a 1:1 chat; the poll path hides readAt too.
+    // The member's per-chat setting overrides the account default. In groups,
+    // each member controls only their own receipt; direct chats keep the
+    // existing mutual-privacy rule (either side Off hides receipts both ways).
+    const myReceiptsOn = readReceiptsOnForChat(readConv, me);
+    if (!myReceiptsOn) return json({ ok: true });
     if (readConv.kind === "SOLO") {
-      const peer = await one<{ read_receipts: number | null }>(
+      const peer = await one<{
+        priv_read_receipts: number | null;
+        read_receipts: number | null;
+      }>(
         db,
-        `SELECT u.read_receipts FROM members m JOIN users u ON u.id = m.user_id
+        `SELECT m.priv_read_receipts, u.read_receipts FROM members m JOIN users u ON u.id = m.user_id
           WHERE m.conv_id = ? AND m.user_id != ? LIMIT 1`,
         readMatch[1]!,
         uid,
       );
-      if (!receiptsOn(me) || !receiptsOn(peer ?? undefined)) return json({ ok: true });
+      if (
+        !readReceiptsOnForChat(
+          { priv_read_receipts: peer?.priv_read_receipts },
+          { read_receipts: peer?.read_receipts },
+        )
+      )
+        return json({ ok: true });
     }
     // Realtime: the sender's ticks flip blue the moment this lands, not on
     // their next poll. (WS only — the poll fallback still reads it from the
@@ -8356,9 +8534,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       priv_save: number | null;
       priv_allow_shot: number | null;
       priv_allow_rec: number | null;
+      priv_read_receipts: number | null;
     }>(
       db,
-      "SELECT priv_shot, priv_rec, priv_save, priv_allow_shot, priv_allow_rec FROM members WHERE conv_id = ? AND user_id = ?",
+      "SELECT priv_shot, priv_rec, priv_save, priv_allow_shot, priv_allow_rec, priv_read_receipts FROM members WHERE conv_id = ? AND user_id = ?",
       convId,
       uid,
     );
@@ -8379,14 +8558,23 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         : before?.priv_allow_rec != null
           ? Number(before.priv_allow_rec) === 1
           : null;
+    let readReceiptsOverride: boolean | null =
+      before?.priv_read_receipts == null ? null : Number(before.priv_read_receipts) === 1;
+    if (Object.prototype.hasOwnProperty.call(body, "readReceiptsOverride")) {
+      if (body.readReceiptsOverride !== null && typeof body.readReceiptsOverride !== "boolean")
+        fail(400, "Bad read-receipts value.", "BAD_PRIVACY");
+      readReceiptsOverride = body.readReceiptsOverride as boolean | null;
+    }
+    const readReceipts = readReceiptsOverride ?? receiptsOn(me);
     await run(
       db,
-      "UPDATE members SET priv_shot = ?, priv_rec = ?, priv_save = ?, priv_allow_shot = ?, priv_allow_rec = ? WHERE conv_id = ? AND user_id = ?",
+      "UPDATE members SET priv_shot = ?, priv_rec = ?, priv_save = ?, priv_allow_shot = ?, priv_allow_rec = ?, priv_read_receipts = ? WHERE conv_id = ? AND user_id = ?",
       shot ? 1 : 0,
       rec ? 1 : 0,
       save ? 1 : 0,
       allowShot == null ? null : allowShot ? 1 : 0,
       allowRec == null ? null : allowRec ? 1 : 0,
+      readReceiptsOverride == null ? null : readReceiptsOverride ? 1 : 0,
       convId,
       uid,
     );
@@ -8396,7 +8584,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     ctx.waitUntil(fanOutConversationChange(env, db, convId));
     return json({
       ok: true,
-      privacy: { shot, rec, save, allowShot: allowShot ?? true, allowRec: allowRec ?? false },
+      privacy: {
+        shot,
+        rec,
+        save,
+        allowShot: allowShot ?? true,
+        allowRec: allowRec ?? false,
+        readReceipts,
+        readReceiptsOverride,
+        globalReadReceipts: receiptsOn(me),
+      },
     });
   }
 
@@ -9074,24 +9271,23 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         ctx.waitUntil(pokeUserReceipt(env, senderId, convId, deliveredAt));
       }
     }
-    // Read receipts for the sender. In a group this is the *oldest* read time
-    // and only when every other member has read something — MAX() used to flip
-    // everyone's ticks blue as soon as one person out of five opened the chat.
-    // Owner round 30: `receipts` rides along in the same statement — 0 when
-    // the (1:1) peer switched read receipts off; then readAt stays null, as
-    // it does when the requester themself has them off.
+    // Group `readAt` is an all-members aggregate, so it is withheld whenever
+    // any participant (including the requester) has receipts disabled. The
+    // detailed member list still shows each opted-in member independently.
     const readRow = await one<{ r: string | null; unreadMembers: number; receipts: number }>(
       db,
       `SELECT MIN(m.last_read_at) AS r,
               SUM(CASE WHEN m.last_read_at IS NULL THEN 1 ELSE 0 END) AS unreadMembers,
-              MIN(COALESCE(u.read_receipts, 1)) AS receipts
+              MIN(CASE WHEN m.priv_read_receipts IS NULL THEN COALESCE(u.read_receipts, 1)
+                       ELSE m.priv_read_receipts END) AS receipts
        FROM members m JOIN users u ON u.id = m.user_id
        WHERE m.conv_id = ? AND m.user_id != ?`,
       convId,
       uid,
     );
     const receiptsHidden =
-      conv.kind === "SOLO" && (!receiptsOn(me) || Number(readRow?.receipts ?? 1) === 0);
+      !readReceiptsOnForChat({ priv_read_receipts: conv.priv_read_receipts }, me) ||
+      Number(readRow?.receipts ?? 1) === 0;
     const readAt =
       readRow && !receiptsHidden && Number(readRow.unreadMembers || 0) === 0 ? readRow.r : null;
     // Typing indicator: the OTHER members' freshest ping, if any. The client
@@ -9125,9 +9321,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // now ALSO carries the same privacy truth convFrom computes (identical
     // NULL/profile defaults), and the marker seals it: a flip busts
     // `unchanged` and lands within a tick, socket or no socket.
-    let priv: Record<string, boolean> = {};
+    const readReceiptOverride =
+      conv.priv_read_receipts == null ? null : Number(conv.priv_read_receipts) === 1;
+    const readReceiptSettings = {
+      readReceipts: readReceiptsOnForChat({ priv_read_receipts: conv.priv_read_receipts }, me),
+      readReceiptsOverride: readReceiptOverride,
+      globalReadReceipts: receiptsOn(me),
+    };
+    let priv: Record<string, unknown> = { ...readReceiptSettings };
     if (conv.kind === "GROUP") {
-      priv = { privateGroup: Number(conv.private_group ?? 0) === 1 };
+      priv = { ...priv, privateGroup: Number(conv.private_group ?? 0) === 1 };
     } else {
       const privRows = await all<{
         user_id: string;
@@ -9149,6 +9352,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       const myPrivate = Number(meRow?.private_profile ?? 0) === 1;
       const peerPrivate = Number(otherRow?.private_profile ?? 0) === 1;
       priv = {
+        ...priv,
         peerSave: otherRow ? Number(otherRow.priv_save ?? (peerPrivate ? 0 : 1)) === 1 : true,
         peerShotOk: otherRow
           ? Number(otherRow.priv_allow_shot ?? (peerPrivate ? 0 : 1)) === 1
@@ -9599,10 +9803,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           ? `/api/files/${message.fileKey}`
           : message.mediaUrl
         : undefined;
-    // Push: every other member gets a high-priority message. The chat-list poke
-    // doubles as a live-connectivity probe, and its answer decides whether the
-    // push is data-only (app connected -> our rich card with actions) or
-    // carries a system payload (app not connected -> only the tray can show it).
+    // Push: every other member gets a high-priority message. Sealed bodies and
+    // photos must be handled by the receiving app (local decrypt / authorized
+    // thumbnail fetch), so those pushes are data-only even when no socket is
+    // open. Plain previews and view-once labels may use the safe system fallback.
     for (const memberId of members) {
       if (memberId.user_id === uid) continue;
       ctx.waitUntil(
@@ -9618,17 +9822,13 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
     // Hoisted below so the poke + the push stay one fire-and-forget unit.
     async function pushMessageToMember(memberId: (typeof members)[number], live: number) {
-      // Shape is decided per recipient, by the socket count above, not globally:
-      // data-only routes through onMessageReceived -> KpNotify.message() and so
-      // carries our rich card (Reply / Like / Mark-as-read); a combined
-      // notification+data payload is instead drawn straight into the tray by
-      // Google Play services while the app is backgrounded, and onMessageReceived
-      // never runs — rich actions would be lost on exactly the device that needs
-      // them. So: connected recipient => data-only; disconnected recipient =>
-      // recipientAlert() attaches the system payload, because a tray card beats
-      // silence. (Before this, the payload was dropped for everyone, which is
-      // when "background e message ashe na" started: ac3ffbf had it, 6ab562a
-      // removed it, and the idle-only fallback in 8e66af4 almost never fired.)
+      // E2EE and photo messages must be data-only: if a system notification
+      // payload is present while the app is backgrounded, Play services draws
+      // it without calling onMessageReceived, so the phone cannot decrypt the
+      // text or fetch the authorized picture. The high-priority data handler
+      // does both locally, then posts the rich card with Reply / Like / Read.
+      // Plain messages and view-once labels keep the safe idle fallback because
+      // they need no hidden content or media to be rendered on-device.
       // ("from" is a reserved FCM key — hence fromName.)
       // `muted`: the recipient's per-conversation mute. The push still goes
       // out (the badge/list must update) but the client routes it to a
@@ -9689,6 +9889,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         await stampDelivered();
         stamped = true;
       }
+      const needsDeviceRendering = (!!sealedBody && !message.viewOnce) || !!pictureUrl;
+      const fallbackNote = needsDeviceRendering
+        ? undefined
+        : recipientAlert(memberId, preview, me.display_name, live);
       const pushed = await pushToUser(
         env,
         db,
@@ -9724,7 +9928,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             : {}),
           ...(message.viewOnce ? { kp_once: "1" } : {}),
         },
-        recipientAlert(memberId, preview, me.display_name, live),
+        fallbackNote,
       );
       // N4 -> r84-4 (owner r84 #4: "massage delivered double tick er system a
       // problem ache opponent all open na korle double tick hoi na mane user
@@ -10215,21 +10419,31 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       uid,
       uid,
     );
-    // Every view row for every live status, in one go. The primary key is
-    // (status_id, viewer_id), so the per-contact `WHERE viewer_id = ?` scan that
-    // used to repeat for each contact is gone.
-    const views = await all<{ status_id: string; viewer_id: string }>(
-      db,
-      `SELECT status_id, viewer_id FROM status_views
-        WHERE status_id IN (SELECT id FROM statuses WHERE expires_at > ? OR user_id = ?)`,
-      now,
-      uid,
-    );
+    // Only the current user's own statuses need total viewer counts. For
+    // contact statuses we need just this viewer's seen bit. Scanning views for
+    // every active status in the whole service made each 12s feed poll pay for
+    // unrelated users' traffic; bound both reads to IDs already in this feed.
     const viewersByStatus = new Map<string, number>();
     const iViewed = new Set<string>();
-    for (const view of views) {
-      if (view.viewer_id === uid) iViewed.add(view.status_id);
-      viewersByStatus.set(view.status_id, (viewersByStatus.get(view.status_id) ?? 0) + 1);
+    for (const group of chunked(mine.map((row) => row.id))) {
+      for (const view of await all<{ status_id: string; viewer_id: string }>(
+        db,
+        `SELECT status_id, viewer_id FROM status_views WHERE status_id IN (${inSql(group.length)})`,
+        ...group,
+      )) {
+        viewersByStatus.set(view.status_id, (viewersByStatus.get(view.status_id) ?? 0) + 1);
+      }
+    }
+    for (const group of chunked(others.map((row) => row.id))) {
+      for (const view of await all<{ status_id: string }>(
+        db,
+        `SELECT status_id FROM status_views
+          WHERE viewer_id = ? AND status_id IN (${inSql(group.length)})`,
+        uid,
+        ...group,
+      )) {
+        iViewed.add(view.status_id);
+      }
     }
     const shape = (row: StatusRow) => ({
       id: row.id,
@@ -10978,7 +11192,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // one-minute cron (see the `scheduled` handler) so the transition happens
     // even when BOTH phones are backgrounded and nobody polls — the stuck
     // "X is calling" card bug.
-    await reapStaleCalls(env, db, ctx);
+    await reapStaleCallsIfDue(env, db, ctx);
     const rows = await all<CallRow>(
       db,
       "SELECT * FROM calls WHERE (caller_id = ? OR callee_id = ?) AND status IN ('RINGING', 'ACTIVE') ORDER BY created_at DESC",
@@ -11260,43 +11474,51 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
     if (method === "GET") {
       const since = url.searchParams.get("since") || "";
+      const afterRaw = url.searchParams.get("after");
+      const afterRowid = afterRaw === null ? null : Number(afterRaw);
+      if (afterRaw !== null && !/^\d+$/.test(afterRaw)) fail(400, "Invalid ICE cursor.");
+      if (afterRowid !== null && (!Number.isSafeInteger(afterRowid) || afterRowid < 0)) {
+        fail(400, "Invalid ICE cursor.");
+      }
       // A group member reads only the candidates addressed to them; the 1:1
-      // shape (everything the other side sent) is unchanged.
+      // shape (everything the other side sent) is unchanged. `after` is the
+      // stable, monotonic rowid; unlike a timestamp it cannot skip candidates
+      // created in the same millisecond.
       const forMe = isGroupCall(row) ? " AND target_id = ?" : "";
       const forMeBind = isGroupCall(row) ? [uid] : [];
-      const rows = since
-        ? await all<{
-            rowid: number;
-            sender_id: string;
-            candidate_json: string;
-            created_at: string;
-          }>(
-            db,
-            `SELECT rowid AS rowid, sender_id, candidate_json, created_at FROM call_ice WHERE call_id = ? AND sender_id != ?${forMe} AND created_at > ? ORDER BY created_at ASC, rowid ASC`,
-            callId,
-            uid,
-            ...forMeBind,
-            since,
-          )
-        : await all<{
-            rowid: number;
-            sender_id: string;
-            candidate_json: string;
-            created_at: string;
-          }>(
-            db,
-            `SELECT rowid AS rowid, sender_id, candidate_json, created_at FROM call_ice WHERE call_id = ? AND sender_id != ?${forMe} ORDER BY created_at ASC, rowid ASC`,
-            callId,
-            uid,
-            ...forMeBind,
-          );
+      // Return a call-wide high-water mark as well as visible rows. A 1:1
+      // receiver does not see its own outgoing rows, and group peers do not see
+      // rows for other recipients; the high-water mark lets them skip those
+      // safely instead of re-reading the filtered rowids on every poll.
+      const watermark = await one<{ cursor: number | null }>(
+        db,
+        "SELECT MAX(rowid) AS cursor FROM call_ice WHERE call_id = ?",
+        callId,
+      );
+      const cursorClause =
+        afterRowid !== null ? " AND rowid > ?" : since ? " AND created_at > ?" : "";
+      const cursorBind = afterRowid !== null ? [afterRowid] : since ? [since] : [];
+      const rows = await all<{
+        rowid: number;
+        sender_id: string;
+        candidate_json: string;
+        created_at: string;
+      }>(
+        db,
+        `SELECT rowid AS rowid, sender_id, candidate_json, created_at FROM call_ice WHERE call_id = ? AND sender_id != ?${forMe}${cursorClause} ORDER BY rowid ASC`,
+        callId,
+        uid,
+        ...forMeBind,
+        ...cursorBind,
+      );
       const items = rows.map((r) => ({
         id: `${r.created_at}:${r.rowid}`,
+        cursor: r.rowid,
         from: r.sender_id,
         candidate: parseJson<Record<string, unknown>>(r.candidate_json, {}),
         createdAt: r.created_at,
       }));
-      return json({ items, now: nowIso() });
+      return json({ items, cursor: watermark?.cursor ?? 0, now: nowIso() });
     }
   }
 
@@ -12167,12 +12389,13 @@ type ConvMemberRow = {
   // the member's profile defaults).
   priv_allow_shot?: number | null;
   priv_allow_rec?: number | null;
+  priv_read_receipts?: number | null;
 };
 
 const CONV_COLS =
   "id, kind, title, owner_id, created_at, last_message_at, last_message, disappear_seconds, theme, hidden_json, avatar_url, avatar_version, request_from, private_group";
 const MEMBER_COLS =
-  "conv_id, user_id, role, muted, unread, last_read_at, hidden, hidden_key, muted_call, muted_msg, priv_shot, priv_rec, priv_save, priv_allow_shot, priv_allow_rec";
+  "conv_id, user_id, role, muted, unread, last_read_at, hidden, hidden_key, muted_call, muted_msg, priv_shot, priv_rec, priv_save, priv_allow_shot, priv_allow_rec, priv_read_receipts";
 
 /** r66: preview uses the existing newest-row query, never one fetch per chat. */
 type ConvPreviewRow = Pick<
@@ -12187,15 +12410,34 @@ const CONV_PREVIEW_COLS =
 // Only unread chats sample metadata, at most the newest 32 rows. Never walk
 // an entire history to label a backlog: incomplete/mixed samples say messages.
 // Both list and realtime detail use this in their ALREADY-existing statement.
-const UNREAD_PREVIEW_SAMPLE = `CASE WHEN viewer_member.unread BETWEEN 1 AND 32 THEN (
+export const UNREAD_PREVIEW_SAMPLE = `CASE WHEN viewer_member.unread BETWEEN 1 AND 32 THEN (
   SELECT json_group_array(json_object('kind', recent.kind, 'meta_json', recent.meta_json))
   FROM (
-    SELECT kind, meta_json, sender_id, created_at FROM messages
-    WHERE conv_id = m.conv_id ORDER BY created_at DESC, rowid DESC LIMIT 32
+    SELECT kind, meta_json FROM messages
+    WHERE conv_id = m.conv_id
+      AND sender_id != viewer_member.user_id
+      AND kind != 'DELETED'
+      AND created_at > COALESCE(viewer_member.last_read_at, '')
+    ORDER BY created_at DESC, rowid DESC LIMIT 32
   ) recent
-  WHERE recent.sender_id != viewer_member.user_id AND recent.kind != 'DELETED'
-    AND (viewer_member.last_read_at IS NULL OR recent.created_at > viewer_member.last_read_at)
 ) ELSE NULL END`;
+
+/**
+ * The list route supplies at most 44 conversation ids through json_each. Keep
+ * that virtual table as the outer loop: a plain JOIN lets SQLite reorder to
+ * members → messages by conv_id and scan every message in each chat just to
+ * test one rowid. CROSS JOIN is a deliberate optimizer barrier; D1's plan must
+ * be `SEARCH m USING INTEGER PRIMARY KEY (rowid=?)` for each requested preview.
+ */
+export const CONV_LIST_PREVIEW_QUERY = `SELECT ${CONV_PREVIEW_COLS}, ${UNREAD_PREVIEW_SAMPLE} AS unread_sample
+  FROM json_each(?) j
+  CROSS JOIN messages m ON m.rowid = (
+    SELECT rowid FROM messages
+    WHERE conv_id = json_extract(j.value, '$.id')
+      AND created_at = json_extract(j.value, '$.at') AND kind != 'DELETED'
+    ORDER BY rowid DESC LIMIT 1
+  )
+  JOIN members viewer_member ON viewer_member.conv_id = m.conv_id AND viewer_member.user_id = ?`;
 
 function previewCategory(row: Pick<MsgRow, "kind" | "meta_json">): string {
   const meta = parseJson<Record<string, unknown>>(row.meta_json, {});
@@ -12301,8 +12543,8 @@ async function syncPreviewAfterEdit(db: D1Database, msg: MsgRow, body: string) {
     "UPDATE conversations SET last_message = ? WHERE id = ?",
     // The NEW text — the caller still holds the pre-edit row, so reading
     // `msg.body` here would rewrite the preview with exactly what was there.
-    // E2EE (owner round 64): a re-sealed body previews as the lock, never a
-    // byte of the envelope.
+    // E2EE (owner round 64): a re-sealed body keeps the neutral preview label,
+    // never a byte of the envelope.
     previewOf({ ...msg, body }),
     msg.conv_id,
   );
@@ -12470,8 +12712,8 @@ async function sweepExpiredStatuses(env: Env, db: D1Database): Promise<number> {
 
 /** Chat-list preview text for a stored row — mirrors what the send path writes. */
 function previewOf(row: MsgRow): string {
-  // E2EE (owner round 64): a sealed body is an opaque envelope — the chat
-  // list and the push say the lock, never a byte of ciphertext.
+  // E2EE (owner round 64): a sealed body is an opaque envelope — server-side
+  // previews stay neutral; only the receiving device can open it.
   const e2ee = !!row.body && row.body.startsWith(E2EE_PREFIX);
   const meta = parseJson<{
     name?: string;
@@ -12657,10 +12899,16 @@ function buildConvDetail(
   let otherAllowShot = true;
   let otherAllowRec = true;
   let unread = 0;
-  // Owner round 30: in a 1:1 chat the two ARE contacts (privacy view), and a
-  // switched-off read receipt (either side) hides the peer's read mark.
+  // Direct-chat receipts retain mutual privacy. Groups expose read times per
+  // member: a member who opted out has their own timestamp hidden, while other
+  // opted-in members remain visible to everyone.
   const solo = conv.kind === "SOLO";
-  const meReceipts = receiptsOn(users.get(uid));
+  const meMember = memberRows.find((row) => row.user_id === uid);
+  const meUser = users.get(uid);
+  const meReceipts = readReceiptsOnForChat(meMember, meUser);
+  const globalMeReceipts = receiptsOn(meUser);
+  const meReceiptOverride =
+    meMember?.priv_read_receipts == null ? null : Number(meMember.priv_read_receipts) === 1;
   for (const row of memberRows) {
     const user = users.get(row.user_id);
     if (!user) continue;
@@ -12694,11 +12942,14 @@ function buildConvDetail(
           blocked: true,
         }
       : shaped;
+    const memberReceipts = readReceiptsOnForChat(row, user);
     members.push({
       user: memberUser,
       role: row.role,
       lastReadAt:
-        solo && row.user_id !== uid && (!meReceipts || !receiptsOn(user)) ? null : row.last_read_at,
+        row.user_id !== uid && (solo ? !meReceipts || !memberReceipts : !memberReceipts)
+          ? null
+          : row.last_read_at,
     });
     if (row.user_id !== uid && solo) other = memberUser;
     if (row.user_id !== uid && solo) {
@@ -12770,6 +13021,9 @@ function buildConvDetail(
       save: meSave,
       allowShot: meAllowShot,
       allowRec: meAllowRec,
+      readReceipts: meReceipts,
+      readReceiptsOverride: meReceiptOverride,
+      globalReadReceipts: globalMeReceipts,
     },
     peerSave: solo ? (otherSave ?? true) : true,
     // r76-18: the peer's Allow switches — my phone sets FLAG_SECURE on

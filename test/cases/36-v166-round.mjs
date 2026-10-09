@@ -90,8 +90,8 @@ const pkg = readFileSync(
 
 /* the round's own bookkeeping */
 check(
-  "r104: versionCode 274 / versionName 3.9.197 (release latch advanced from r103's 273/3.9.196; policy stays: every ship raises it)",
-  /versionCode\s*=\s*274\b/.test(pkg) && /versionName\s*=\s*"3\.9\.197"/.test(pkg),
+  "r107: versionCode 279 / versionName 3.9.202 (Android cache, nav-alignment and reaction-animation update; reuse of the v274 debug signer still needs explicit approval)",
+  /versionCode\s*=\s*279\b/.test(pkg) && /versionName\s*=\s*"3\.9\.202"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */
@@ -415,7 +415,9 @@ check(
     src.includes("async function hedgeStream(") &&
     src.includes("async function aiBrainStream(") &&
     src.includes("const AI_DELTA_MS = 140;") &&
-    src.includes('{ type: "ai_delta", conversationId: convId, text }') &&
+    src.includes("const liveText = firstReplyIntro ? `${firstReplyIntro} ${text}` : text;") &&
+    src.includes('type: "ai_delta",') &&
+    src.includes("text: liveText,") &&
     src.includes(
       'answer = await aiBrainStream(env, [{ role: "user", content: fullPrompt }], 900, push);',
     ) &&

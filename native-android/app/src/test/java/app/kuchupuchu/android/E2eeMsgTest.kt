@@ -14,7 +14,7 @@ import org.junit.Test
  * crypto is JCA only, so a phone build and a unit test exercise the SAME
  * functions. What a meddler can and cannot do:
  *  - A and B each seal for the other; both directions open;
- *  - a stranger's key opens nothing (null — the UI shows a lock, never bytes);
+ *  - a stranger's key opens nothing (null — the UI shows a neutral failure label, never bytes);
  *  - a tampered envelope fails the GCM tag (null);
  *  - the safety code is order-independent and differs per key pair.
  */
@@ -179,5 +179,20 @@ class E2eeMsgTest {
         val two = E2eeMsg.packBackup(priv, pub, "same-pass")
         assertNotEquals(one, two)
         assertEquals(priv, E2eeMsg.unpackBackup(two, "same-pass")!!.first)
+    }
+
+    @Test
+    fun `legacy backup is import-only and validates both keys before migration`() {
+        val kp = E2eeMsg.newKeyPair()
+        val priv = E2eeMsg.privB64(kp.private)
+        val pub = E2eeMsg.pubB64(kp.public)
+        val legacy = java.util.Base64.getEncoder().encodeToString(
+            org.json.JSONObject().put("p", priv).put("u", pub).toString().toByteArray(),
+        )
+        val decoded = E2eeMsg.decodeLegacyBackup(legacy)
+        assertEquals(priv, decoded?.first)
+        assertEquals(pub, decoded?.second)
+        assertNull(E2eeMsg.decodeLegacyBackup("not-base64"))
+        assertNull(E2eeMsg.decodeLegacyBackup("KP2.a.b.c"))
     }
 }

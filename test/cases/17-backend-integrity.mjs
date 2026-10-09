@@ -7,8 +7,9 @@
 // status poll that costs hundreds of D1 statements, and an append-only debug table
 // nobody prunes.
 //
-// The statuses case asserts on STATEMENT COUNT, not timing — the free-tier
-// row-read limit does not care how fast each query is, and D1 counts round trips.
+// The sqlite shim does not expose Cloudflare D1's `rows_read` metric. The
+// statuses case therefore checks statement budget AND the SQL predicates, so it
+// can prove the view query is scoped without pretending statement count is rows_read.
 
 import { readFile } from "node:fs/promises";
 import { makeD1, makeR2, makeCtx } from "../d1shim.mjs";
@@ -638,14 +639,41 @@ async function main() {
     // statuses — the shape that used to blow the D1 row-read budget.
     const A = await h.reg("s1a");
     const ids = [];
+    const statusIds = [];
+    let firstContactToken = "";
     for (let i = 0; i < 12; i++) {
       const B = await h.reg(`s1b${i}`);
       ids.push(B.user.id);
+      if (i === 0) firstContactToken = B.token;
       await h.call("POST", "/api/conversations", { userId: B.user.id }, A.token);
-      await h.call("POST", "/api/statuses", { kind: "TEXT", text: `status number ${i}` }, B.token);
+      const posted = await h.call(
+        "POST",
+        "/api/statuses",
+        { kind: "TEXT", text: `status number ${i}` },
+        B.token,
+      );
+      statusIds.push(posted.json.status?.id);
     }
-    await h.call("POST", "/api/statuses", { kind: "TEXT", text: "mine" }, A.token);
-    // a view row, so the viewers/allViewed paths are exercised
+    const ownPost = await h.call("POST", "/api/statuses", { kind: "TEXT", text: "mine" }, A.token);
+    const ownStatusId = ownPost.json.status?.id;
+    // Exercise both feed semantics: a contact viewed my status, and I viewed
+    // one contact's status. Other viewers of an unrelated user's live status
+    // must not participate in my feed query at all.
+    await h.call("POST", `/api/statuses/${ownStatusId}/view`, {}, firstContactToken);
+    await h.call("POST", `/api/statuses/${statusIds[0]}/view`, {}, A.token);
+    const unrelated = await h.reg("s1outside");
+    const unrelatedPost = await h.call(
+      "POST",
+      "/api/statuses",
+      { kind: "TEXT", text: "unrelated" },
+      unrelated.token,
+    );
+    for (const viewerId of ids) {
+      await h
+        .q("INSERT OR IGNORE INTO status_views (status_id, viewer_id, viewed_at) VALUES (?, ?, ?)")
+        .bind(unrelatedPost.json.status?.id, viewerId, new Date().toISOString())
+        .run();
+    }
     const otherConvs = await h.call("GET", "/api/conversations", undefined, A.token);
     const cid0 = otherConvs.json.items[0].id;
     const msgOfB = await h.call(
@@ -656,9 +684,28 @@ async function main() {
     );
     void msgOfB;
 
+    const sqlMark = h.traced.length;
+    let statusViewRowsReturned = 0;
+    const originalPrepare = h.env.DB.prepare.bind(h.env.DB);
+    h.env.DB.prepare = (sql) => {
+      const stmt = originalPrepare(sql);
+      if (/\bFROM status_views\b/i.test(sql)) {
+        const all = stmt.all.bind(stmt);
+        stmt.all = async (...args) => {
+          const result = await all(...args);
+          statusViewRowsReturned += result.results?.length ?? 0;
+          return result;
+        };
+      }
+      return stmt;
+    };
     h.env.DB._stats.reset();
     const res = await h.call("GET", "/api/statuses", undefined, A.token);
     const reads = h.env.DB._stats.reads;
+    const viewReads = h
+      .since(sqlMark)
+      .filter((sql) => /\bFROM status_views\b/i.test(sql))
+      .map((sql) => sql.replace(/\s+/g, " ").trim().toLowerCase());
     check(
       "statuses ring is populated for all contacts",
       (res.json.items ?? []).length >= 12,
@@ -669,14 +716,39 @@ async function main() {
       reads <= 8,
       `statements=${reads}`,
     );
+    check(
+      "status_views reads are feed-scoped (own IDs for counts; my viewer ID for contacts), never a global live-status sweep",
+      viewReads.length === 2 &&
+        viewReads.some((sql) =>
+          sql.startsWith("select status_id, viewer_id from status_views where status_id in ("),
+        ) &&
+        viewReads.some((sql) =>
+          sql.startsWith(
+            "select status_id from status_views where viewer_id = ? and status_id in (",
+          ),
+        ) &&
+        viewReads.every((sql) => !sql.includes("select id from statuses where expires_at")),
+      JSON.stringify(viewReads),
+    );
+    check(
+      "SQLite returns only the two relevant view rows; the 12 unrelated viewers stay out of the feed reads",
+      statusViewRowsReturned === 2,
+      `sqlite result rows=${statusViewRowsReturned} (not a Cloudflare D1 rows_read metric)`,
+    );
     const mineGroup = (res.json.items ?? []).find((x) => x.mine);
     check(
-      "own status still present with its viewer count",
-      mineGroup?.statuses?.[0]?.text === "mine" &&
-        typeof mineGroup.statuses[0].viewers === "number",
+      "own status keeps the exact viewer count without a global views sweep",
+      mineGroup?.statuses?.[0]?.text === "mine" && mineGroup.statuses[0].viewers === 1,
       JSON.stringify(mineGroup?.statuses?.[0] ?? {}).slice(0, 90),
     );
     const otherGroup = (res.json.items ?? []).find((x) => !x.mine);
+    const viewedGroup = (res.json.items ?? []).find((x) => x.user?.id === ids[0]);
+    const unseenGroup = (res.json.items ?? []).find((x) => x.user?.id === ids[1]);
+    check(
+      "allViewed stays true only for the contact status I actually viewed",
+      viewedGroup?.allViewed === true && unseenGroup?.allViewed === false,
+      JSON.stringify({ viewed: viewedGroup?.allViewed, unseen: unseenGroup?.allViewed }),
+    );
     check(
       "a contact group keeps its fields (shape unchanged)",
       !!otherGroup && !!otherGroup.user?.id && typeof otherGroup.allViewed === "boolean",
@@ -1081,6 +1153,31 @@ async function main() {
     );
     const mediaAfter = await h.call("GET", `/api/conversations/${cid}/media`, undefined, B.token);
     const profileAfter = await h.call("GET", `/api/users/${A.user.id}`, undefined, B.token);
+    const personalCallId = callAfter.json.call?.id;
+    const personalIcePost = await h.call(
+      "POST",
+      `/api/calls/${personalCallId}/ice`,
+      { candidate: { candidate: "candidate:5 1 UDP b-self", sdpMid: "0", sdpMLineIndex: 0 } },
+      B.token,
+    );
+    const personalIceB = await h.call(
+      "GET",
+      `/api/calls/${personalCallId}/ice`,
+      undefined,
+      B.token,
+    );
+    const personalIceA = await h.call(
+      "GET",
+      `/api/calls/${personalCallId}/ice`,
+      undefined,
+      A.token,
+    );
+    const personalIceAfter = await h.call(
+      "GET",
+      `/api/calls/${personalCallId}/ice?after=${personalIceB.json.cursor}`,
+      undefined,
+      B.token,
+    );
     check(
       "r32-38: only the recipient can accept (opener → 403); after Accept the row is a normal chat and calls / media / last seen / the number (contacts-only default) open up",
       wrongSide.status === 403 &&
@@ -1092,6 +1189,22 @@ async function main() {
         typeof profileAfter.json.user?.lastActiveAt === "string" &&
         profileAfter.json.user?.phone === A.user.phone,
       `${wrongSide.status}/${accepted.status}/${callAfter.status}/${mediaAfter.status}`,
+    );
+    check(
+      "1:1 ICE cursor advances past the caller's own filtered row and still delivers that candidate to the peer",
+      personalIcePost.status === 201 &&
+        personalIceB.json.items?.length === 0 &&
+        personalIceB.json.cursor > 0 &&
+        personalIceA.json.items?.length === 1 &&
+        personalIceA.json.items[0].candidate.candidate === "candidate:5 1 UDP b-self" &&
+        personalIceA.json.cursor === personalIceB.json.cursor &&
+        personalIceAfter.json.items?.length === 0,
+      JSON.stringify({
+        post: personalIcePost.status,
+        selfItems: personalIceB.json.items?.length,
+        peerItems: personalIceA.json.items?.length,
+        cursor: personalIceB.json.cursor,
+      }),
     );
     // A reply from the recipient accepts by itself; a plain open (phone-book
     // match, or an old client) is never a request; the bots never are.
@@ -1598,22 +1711,82 @@ async function main() {
       { candidate: { candidate: "candidate:2 1 UDP no-target", sdpMid: "0", sdpMLineIndex: 0 } },
       A.token,
     );
+    const iceToB2 = await h.call(
+      "POST",
+      `/api/calls/${call.id}/ice`,
+      {
+        to: B.user.id,
+        candidate: { candidate: "candidate:3 1 UDP a-to-b-second", sdpMid: "0", sdpMLineIndex: 0 },
+      },
+      A.token,
+    );
+    // Force a same-millisecond pair: a timestamp-only strict `since` cursor
+    // would return an empty page and lose the second candidate.
+    const firstIceRow = await h
+      .q(
+        "SELECT rowid, created_at FROM call_ice WHERE call_id = ? ORDER BY rowid ASC LIMIT 1",
+        call.id,
+      )
+      .first();
+    const lastIceRow = await h
+      .q("SELECT rowid FROM call_ice WHERE call_id = ? ORDER BY rowid DESC LIMIT 1", call.id)
+      .first();
+    await h
+      .q(
+        "UPDATE call_ice SET created_at = ? WHERE rowid = ?",
+        firstIceRow.created_at,
+        lastIceRow.rowid,
+      )
+      .run();
+    const iceFromB = await h.call(
+      "POST",
+      `/api/calls/${call.id}/ice`,
+      {
+        to: A.user.id,
+        candidate: { candidate: "candidate:4 1 UDP b-to-a", sdpMid: "0", sdpMLineIndex: 0 },
+      },
+      B.token,
+    );
     const iceB = await h.call("GET", `/api/calls/${call.id}/ice`, undefined, B.token);
+    const iceAfterSameMs = await h.call(
+      "GET",
+      `/api/calls/${call.id}/ice?after=${iceB.json.items?.[0]?.cursor}`,
+      undefined,
+      B.token,
+    );
+    const iceAfterWatermark = await h.call(
+      "GET",
+      `/api/calls/${call.id}/ice?after=${iceB.json.cursor}`,
+      undefined,
+      B.token,
+    );
+    const iceA = await h.call("GET", `/api/calls/${call.id}/ice`, undefined, A.token);
     const iceC = await h.call("GET", `/api/calls/${call.id}/ice`, undefined, C.token);
     const iceD = await h.call("GET", `/api/calls/${call.id}/ice`, undefined, D.token);
     check(
-      "r32-5b: group ICE needs a peer (`to`); GET /ice hands a member only the candidates addressed to them (with `from`), and a non-member is refused",
+      "r32-5b: group ICE is peer-addressed; the rowid cursor returns same-millisecond candidates without leaking them to other members",
       iceToB.status === 201 &&
         iceNoTarget.status === 400 &&
-        iceB.json.items?.length === 1 &&
+        iceToB2.status === 201 &&
+        iceFromB.status === 201 &&
+        iceB.json.items?.length === 2 &&
         iceB.json.items[0].from === A.user.id &&
         iceB.json.items[0].candidate.candidate === "candidate:1 1 UDP a-to-b" &&
+        iceB.json.items[0].createdAt === iceB.json.items[1].createdAt &&
+        iceAfterSameMs.json.items?.length === 1 &&
+        iceAfterSameMs.json.items[0].candidate.candidate === "candidate:3 1 UDP a-to-b-second" &&
+        iceB.json.cursor > iceB.json.items[1].cursor &&
+        iceAfterWatermark.json.items?.length === 0 &&
+        iceA.json.items?.length === 1 &&
+        iceA.json.items[0].candidate.candidate === "candidate:4 1 UDP b-to-a" &&
         (iceC.json.items ?? []).length === 0 &&
         iceD.status === 403,
       JSON.stringify({
         ice: iceToB.status,
+        second: iceToB2.status,
         none: iceNoTarget.status,
         b: iceB.json.items?.length,
+        after: iceAfterSameMs.json.items?.length,
         c: iceC.json.items?.length,
         d: iceD.status,
       }),

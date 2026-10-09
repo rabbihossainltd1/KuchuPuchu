@@ -167,7 +167,7 @@ check(
     // bubble instead, which is what actually shrinks the card's footprint.
     !chat.includes("val voiceNote") &&
     chat.includes(
-      ".padding(start = if (voiceRow) 0.dp else 10.dp, top = if (voiceRow) 0.dp else 4.dp, end = if (voiceRow) 0.dp else 8.dp, bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp)",
+      ".padding(start = if (voiceRow) 0.dp else 10.dp, top = if (voiceRow) 0.dp else 4.dp, end = if (voiceRow) 0.dp else 8.dp, bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else if (hasReactions) 8.dp else 15.dp)",
     ) &&
     chat.includes("horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,") &&
     // r33's scrub-to-seek and the spinner survive verbatim
@@ -318,7 +318,7 @@ check(
 check(
   "r55 item 1: See less works both ways - the fold toggle collapses an expanded long body, the bubble animates its size change (animateContentSize before combinedClickable), and the state write happens before the haptic",
   chat.includes(
-    ".pointerInput(Unit) {\n                                    detectTapGestures {\n                                        msgExpanded = !msgExpanded\n                                        runCatching { haptics.tap() }",
+    ".pointerInput(Unit) {\n                                    detectTapGestures {\n                                        revealStamp.value()\n                                        msgExpanded = !msgExpanded\n                                        runCatching { haptics.tap() }",
   ) &&
     chat.includes(".animateContentSize(") &&
     chat.includes(".combinedClickable("),
@@ -344,7 +344,7 @@ check(
   "r56 item 1: See more/See less uses Color.White, collapses on exact toggle click (not body tap), and has smooth spring animation",
   chat.includes("color = Color.White,") &&
     chat.includes(
-      ".pointerInput(Unit) {\n                                    detectTapGestures {\n                                        msgExpanded = !msgExpanded\n                                        runCatching { haptics.tap() }",
+      ".pointerInput(Unit) {\n                                    detectTapGestures {\n                                        revealStamp.value()\n                                        msgExpanded = !msgExpanded\n                                        runCatching { haptics.tap() }",
     ) &&
     chat.includes(
       ".animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f))",

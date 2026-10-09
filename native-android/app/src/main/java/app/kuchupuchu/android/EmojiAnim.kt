@@ -10,6 +10,7 @@ package app.kuchupuchu.android
  */
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -28,6 +30,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.airbnb.lottie.compose.LottieAnimation
@@ -291,6 +296,12 @@ internal fun NotoAnimatedEmoji(
     }
     val animatable = rememberLottieAnimatable()
     var isPlaying by remember(emoji) { mutableStateOf(false) }
+    // The box is measured in dp; keep the fallback's physical glyph size
+    // independent of font scale, but let its actual font metrics overdraw the
+    // fixed box. The extra line-height slack prevents bottom clipping.
+    val fallbackFontSize =
+        EmojiFallbackSizingPolicy.fontSizeSp(sizeSp, LocalDensity.current.fontScale).sp
+    val fallbackLineHeight = EmojiFallbackSizingPolicy.lineHeightSp(fallbackFontSize.value).sp
     LaunchedEffect(composition, replayKey) {
         val comp = composition ?: return@LaunchedEffect
         // r88-1 (owner r88 #1: "first time animates hoi na ... tap korleo
@@ -348,8 +359,12 @@ internal fun NotoAnimatedEmoji(
         } else {
             Text(
                 text = emoji,
-                fontSize = sizeSp.sp,
-                modifier = Modifier.align(Alignment.Center),
+                fontSize = fallbackFontSize,
+                lineHeight = fallbackLineHeight,
+                maxLines = 1,
+                softWrap = false,
+                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)),
+                modifier = Modifier.align(Alignment.Center).wrapContentSize(unbounded = true),
             )
         }
     }
@@ -368,6 +383,7 @@ internal fun EmojiGlyphRow(
     // r87-1: the row's stable fxKey (clientId-first) - the birth dance clock
     // is keyed on it so the echo->server swap resumes the same frame.
     danceKey: String = mid,
+    onTap: (() -> Unit)? = null,
 ) {
     val clusters = remember(body) { splitEmojiClusters(body) }
     val isSingle = clusters.size == 1
@@ -384,7 +400,18 @@ internal fun EmojiGlyphRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         clusters.forEachIndexed { i, ch ->
-            NotoEmojiGlyph(ch, sizeSp, active && shouldAnimate, mid, i, isSingle, onLongPress, onDoubleTap, danceKey)
+            NotoEmojiGlyph(
+                ch,
+                sizeSp,
+                active && shouldAnimate,
+                mid,
+                i,
+                isSingle,
+                onLongPress,
+                onDoubleTap,
+                danceKey,
+                onTap,
+            )
         }
     }
 }
@@ -399,21 +426,23 @@ private fun NotoEmojiGlyph(
     idx: Int,
     isSingle: Boolean,
     onLongPress: (() -> Unit)?,
-    // r71-21: handed down from EmojiGlyphRow — a double tap on an emoji-only
-    // bubble drops the heart without deferring the instant replay.
+    // r71-21: handed down from EmojiGlyphRow — one double tap in a rapid
+    // sequence drops the heart without deferring the instant replay.
     onDoubleTap: (() -> Unit)?,
     // r87-1: the row's stable key for the global birth-dance clock.
     danceKey: String = mid,
+    onTap: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
     val animScale = fxAnimatorScale()
-    // r71-21 (owner: "kono massage a double tap korle auto reaction Hobe ♥️"):
-    // on an emoji-only bubble the tap already means "replay the dance", and
-    // r67-4 made that INSTANT on purpose. So the heart is counted HERE, without
-    // deferring anything: a second tap inside [DOUBLE_TAP_HEART_MS] also runs
-    // [onDoubleTap] while the replay it already triggered plays on.
+    // r71-21: an emoji-only bubble replays immediately on every tap. A fast
+    // double tap adds one heart; further taps in the same burst keep replaying
+    // but cannot toggle the server reaction repeatedly.
     val lastTapAt = remember { longArrayOf(0L) }
+    // One rapid tap burst may contain several taps, but it spends at most one
+    // double-tap reaction until the user pauses longer than the gesture window.
+    val doubleTapConsumed = remember { booleanArrayOf(false) }
     // r87-1: the birth dance moved OFF the per-composition replayKey (the
     // swap restarted it) - it rides the global EmojiDance clock now, so the
     // seed stays 0 and only a TAP bumps replayKey.
@@ -488,13 +517,22 @@ private fun NotoEmojiGlyph(
 
     Box(
         modifier = Modifier.combinedClickable(
+            indication = null,
+            interactionSource = remember { MutableInteractionSource() },
             onClick = {
+                onTap?.invoke()
                 // r67-4: replay() owns the buzz now (haptics.reaction()) — the
                 // tap and the replay from the other phone must feel the same.
                 // r71-21: count the taps first, so a double tap drops the heart
                 // WITHOUT holding the instant replay back.
                 val now = android.os.SystemClock.uptimeMillis()
-                if (onDoubleTap != null && now - lastTapAt[0] in 1..DOUBLE_TAP_HEART_MS) onDoubleTap.invoke()
+                val gap = now - lastTapAt[0]
+                val isDoubleTap = lastTapAt[0] > 0L && gap in 1..DOUBLE_TAP_HEART_MS
+                if (!isDoubleTap) doubleTapConsumed[0] = false
+                if (isDoubleTap && !doubleTapConsumed[0] && onDoubleTap != null) {
+                    doubleTapConsumed[0] = true
+                    onDoubleTap.invoke()
+                }
                 lastTapAt[0] = now
                 if (isSingle) replay(local = true) else haptics.tap()
             },

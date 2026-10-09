@@ -39,7 +39,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
@@ -61,7 +60,6 @@ import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.Reply
@@ -106,6 +104,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PermMedia
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -138,6 +137,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -353,10 +353,11 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Owner round 33 (item 17): the row a quote tap just jumped to (it
     // flashes once in the chat accent); "" = nothing flashing.
     var flashId by remember { mutableStateOf("") }
-    // Owner round 16: message reactions. Long-press still selects (unchanged)
-    // AND raises the quick-emoji bar; "+" opens the full emoji sheet.
+    // Message reactions: long-press keeps the focused action sheet and raises
+    // a separate quick-emoji strip above the selected live bubble; "+" opens all emojis.
     var reactionFor by remember { mutableStateOf<JSONObject?>(null) }
     var showEmojiSheet by remember { mutableStateOf(false) }
+    val lastHeartReactionAt = remember { HashMap<String, Long>() }
     // r68-8 (owner: "ekhon theke delete option just ektai hobe 2 ta na ... ei
     // popup"): ONE delete step in this chat. It serves the long-press sheet,
     // the multi-select bar, the viewers (through ScreenStore.viewerDelete below)
@@ -366,10 +367,11 @@ fun ChatScreen(nav: NavController, convId: String) {
     // r69: the mute chooser (call mute / message mute) — see the ⋮ menu.
     var showMuteSheet by remember { mutableStateOf(false) }
     var confirmDeleteChat by remember { mutableStateOf(false) }
-    // Owner round 31: long-press opens ONE bottom sheet — the reaction emoji
-    // row on top, every message action under it. (No floating bar, no
-    // system-style icon strip.) Multi-select is the sheet's "Select" action.
+    // Long-press opens one focused action sheet. Its quick reaction strip is
+    // now a root overlay above the selected live message; all actions stay in
+    // the sheet, and multi-select remains the sheet's "Select" action.
     var actionFor by remember { mutableStateOf<JSONObject?>(null) }
+    var actionFocusKey by remember { mutableStateOf<String?>(null) }
 
     // r103-4 (owner: "massage tap hold korle je sheet ta ashe okahne arekta
     // options add Hobe ''Info'' - eita click korle massage sent Time
@@ -417,7 +419,16 @@ fun ChatScreen(nav: NavController, convId: String) {
      */
     fun heartReact(m: JSONObject) {
         // A sending echo has no id: there is nothing to react to yet.
-        if (m.optString("id").startsWith("c_") || m.optString("id").isBlank()) return
+        val mid = m.optString("id")
+        if (mid.startsWith("c_") || mid.isBlank()) return
+        // Treat a sustained rapid-tap burst as one reaction gesture. The emoji
+        // replay still happens on every tap; this only prevents repeated server
+        // toggles from immediately turning the heart back off/on.
+        val now = android.os.SystemClock.uptimeMillis()
+        val previous = lastHeartReactionAt[mid] ?: 0L
+        if (previous > 0L && now - previous < HEART_REACTION_COOLDOWN_MS) return
+        if (lastHeartReactionAt.size > 128) lastHeartReactionAt.clear()
+        lastHeartReactionAt[mid] = now
         applyReaction(m, "❤️")
     }
 
@@ -494,6 +505,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     // the profile-defaulted value (private: off; public: shot on, rec off).
     var privAllowShot by remember(convId) { mutableStateOf(true) }
     var privAllowRec by remember(convId) { mutableStateOf(false) }
+    var privReadReceipts by remember(convId) { mutableStateOf(true) }
+    var privReadReceiptsOverride by remember(convId) { mutableStateOf<Boolean?>(null) }
+    var globalReadReceipts by remember(convId) { mutableStateOf(true) }
     // r76-19 (owner item 3: "options gula rapidly on off korle majhe majhe
     // auto off hochhe"): while a privacy write is on its way, the pokes of
     // the OLDER writes must not repaint the sheet - the switch flipped back
@@ -763,7 +777,7 @@ fun ChatScreen(nav: NavController, convId: String) {
     fun refreshMeta() {
         scope.launch {
             runCatching {
-                val data = withContext(Dispatchers.IO) { Api.get("/api/conversations/$convId", force = true) }
+                val data = withContext(Dispatchers.IO) { Api.get("/api/conversations/$convId") }
                 val c = data.optJSONObject("conversation")
                 if (c != null) {
                     if (muteInFlight) {
@@ -775,7 +789,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                     c.arr("members").objects().forEach { m ->
                         val u = m.optJSONObject("user")
                         if (u != null && u.optString("id") != Store.myId()) {
-                            otherReadAt = m.optIso("lastReadAt")
+                            // A group tick is the server's all-members aggregate,
+                            // never one arbitrary member's individual timestamp.
+                            otherReadAt = if (c.optBoolean("isGroup")) null else m.optIso("lastReadAt")
                         }
                     }
                 }
@@ -898,7 +914,11 @@ fun ChatScreen(nav: NavController, convId: String) {
                                         pv.optBoolean("meRec", false) != pr.optBoolean("rec", false) ||
                                         pv.optBoolean("meSave", true) != pr.optBoolean("save", true) ||
                                         pv.optBoolean("meAllowShot", true) != pr.optBoolean("allowShot", true) ||
-                                        pv.optBoolean("meAllowRec", false) != pr.optBoolean("allowRec", false))))
+                                        pv.optBoolean("meAllowRec", false) != pr.optBoolean("allowRec", false))) ||
+                                (pr != null && pv.has("readReceipts") &&
+                                    (pv.optBoolean("readReceipts", true) != pr.optBoolean("readReceipts", true) ||
+                                        pv.optBoolean("globalReadReceipts", true) != pr.optBoolean("globalReadReceipts", true) ||
+                                        pv.opt("readReceiptsOverride")?.toString() != pr.opt("readReceiptsOverride")?.toString())))
                     if (drifted) {
                         Cache.bust("/api/conversations/$convId")
                         refreshMeta()
@@ -1462,8 +1482,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                 if (!fg) continue
                 val onScreen = Store.route == "chat/$convId"
                 if (justReturned && onScreen) {
-                    refreshMessages(forceNetwork = true)
-                    refreshMeta()
+                    // Healthy foreground returns still fetch immediately. When
+                    // the server has explicitly sent 429/503 Retry-After, let
+                    // the live socket carry events instead of retrying REST.
+                    if (!Api.inCooldown()) {
+                        refreshMessages(forceNetwork = true)
+                        refreshMeta()
+                    }
                 } else if (onScreen) {
                     // Owner round 6: socket down used to mean messages up to
                     // 10s late ("realtime update late"). Two changes: the
@@ -1476,20 +1501,22 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // no close frame ever arrives, live stays true, and the
                     // open chat silently stops updating ("reply arrives but
                     // the chat doesn't move"). Now a marker-gated poll also
-                    // runs while the socket LOOKS connected (every 8s) as a
-                    // safety net; it is near-free when nothing changed.
+                    // runs while the socket LOOKS connected (every 15s) as a
+                    // safety net; marker responses stay small when unchanged.
                     val now = System.currentTimeMillis()
                     val down = !KpSocket.chatLive(convId)
                     // M7 (audit): adaptive backoff when idle. An active chat
-                    // keeps the r14 8s net exactly; with no socket frame and
-                    // no in-flight send for 2 minutes the net backs off to
-                    // 30s. Worst case for an idle chat that goes
-                    // half-open-asymmetric is a 30s-late first bubble instead
-                    // of 8s; any frame, send or typing snaps it back to 8s.
-                    val upCadence = if (now - lastFrameAt > 120_000L && pending.isEmpty()) 30_000L else 8_000L
-                    if (now - lastFallbackRefresh >= (if (down) 3_000L else upCadence)) {
+                    // uses a 15s safety net; with no socket frame and no
+                    // in-flight send for 2 minutes the net backs off to 30s.
+                    // Any frame, send or typing snaps the safety cadence back
+                    // to 15s, while socket events still paint immediately.
+                    val upCadence = if (now - lastFrameAt > 120_000L && pending.isEmpty()) 30_000L else 15_000L
+                    // Do not burn the backend's Retry-After window with
+                    // marker polls. A down socket keeps a 3s retry cadence;
+                    // a healthy one uses the 15s/30s safety net above.
+                    if (!Api.inCooldown() && now - lastFallbackRefresh >= (if (down) 3_000L else upCadence)) {
                         lastFallbackRefresh = now
-                        refreshMessages(forceNetwork = true)
+                        refreshMessages(forceNetwork = down)
                         refreshMeta()
                     }
                     if (now - lastRejoin >= 10_000) {
@@ -1729,6 +1756,8 @@ fun ChatScreen(nav: NavController, convId: String) {
         save: Boolean? = null,
         allowShot: Boolean? = null,
         allowRec: Boolean? = null,
+        readReceiptsOverride: Boolean? = null,
+        updateReadReceipts: Boolean = false,
     ) {
         if (shot != null) privShot = shot
         if (rec != null) privRec = rec
@@ -1736,6 +1765,10 @@ fun ChatScreen(nav: NavController, convId: String) {
         // r76-18 (owner item 3): the Allow switches ride the same POST.
         if (allowShot != null) privAllowShot = allowShot
         if (allowRec != null) privAllowRec = allowRec
+        if (updateReadReceipts) {
+            privReadReceiptsOverride = readReceiptsOverride
+            privReadReceipts = readReceiptsOverride ?: globalReadReceipts
+        }
         privWrites++
         scope.launch {
             try {
@@ -1751,6 +1784,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 save?.let { put("save", it) }
                                 allowShot?.let { put("allowShot", it) }
                                 allowRec?.let { put("allowRec", it) }
+                                if (updateReadReceipts)
+                                    put("readReceiptsOverride", readReceiptsOverride ?: JSONObject.NULL)
                             },
                         )
                     }
@@ -3099,6 +3134,12 @@ fun ChatScreen(nav: NavController, convId: String) {
         // off; public: shot on, rec off, save on).
         privAllowShot = pr.optBoolean("allowShot", true)
         privAllowRec = pr.optBoolean("allowRec")
+        globalReadReceipts = pr.optBoolean("globalReadReceipts", true)
+        privReadReceipts = pr.optBoolean("readReceipts", globalReadReceipts)
+        privReadReceiptsOverride =
+            if (pr.has("readReceiptsOverride") && !pr.isNull("readReceiptsOverride"))
+                pr.optBoolean("readReceiptsOverride")
+            else null
     }
     val peerSaveOk = c?.optBoolean("peerSave", true) != false
     // r76-18 (owner item 4): the peer's Allow switches — when either is off my
@@ -3846,7 +3887,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             KpSheetRow(Icons.Filled.Schedule, "Scheduled messages") { menuOpen = false; showScheduled = true }
                         }
                         KpSheetRow(Icons.Filled.Schedule, "History") { menuOpen = false; nav.navigate("aihistory") }
-                        KpSheetRow(Icons.AutoMirrored.Filled.Chat, "New chat") { menuOpen = false; resetAiSession() }
+                        KpSheetRow(KpChatMessageVector(), "New chat") { menuOpen = false; resetAiSession() }
                         KpSheetRow(Icons.Filled.NotificationsOff, if (muted) "Unmute…" else "Mute…", onClick = openMuteChooser)
                         KpSheetRow(Icons.Filled.Palette, "Chat theme") { menuOpen = false; showTheme = true }
                         KpSheetRow(Icons.Filled.VisibilityOff, if (aiIncognito) "Close incognito mode" else "Incognito mode") {
@@ -4047,6 +4088,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             val groupedMsgs by remember {
                 androidx.compose.runtime.derivedStateOf { foldAlbums(visibleMsgs) }
             }
+            // One row can override the default stamp policy at a time; repeated taps toggle it.
+            var stampOverrideKey by remember(convId) { mutableStateOf("") }
+            var stampOverrideVisible by remember(convId) { mutableStateOf(false) }
             // Owner round 33 (item 17): tap a quote → scroll to the original
             // (paging back through history when it is not loaded yet, bounded)
             // and flash its row once. A deleted / hidden original is left alone.
@@ -4183,21 +4227,32 @@ fun ChatScreen(nav: NavController, convId: String) {
                         tween(if (flashing) 180 else 700),
                         label = "quoteflash",
                     )
-                    // r103-3 (owner: "2 ta user e jodi continues massage
-                    // kore tobe last massage a just double tick+ time eshob
-                    // dekhabe baki gulai na"): a run of consecutive messages
-                    // from the same sender carries its time (+ ticks) only on
-                    // the LAST row - WhatsApp-style. The marker rides a COPY
-                    // of the message so every row renderer can honor it.
-                    val nextSender =
-                        groupedMsgs.getOrNull(idx + 1)?.optString("senderId")
-                            ?: if (echoRows.isNotEmpty()) Store.myId() else null
-                    val rowM =
-                        if (nextSender != null && nextSender == m.optString("senderId")) {
-                            JSONObject(m.toString()).put("kpHideStamp", true)
-                        } else {
-                            m
+                    // The newest message shows its status by default. A tap
+                    // immediately toggles one row (including the newest) while
+                    // copied JSON keeps server/cache messages unmodified.
+                    val hasPendingAfterHistory = echoRows.isNotEmpty()
+                    val isLatestVisibleMessage = !hasPendingAfterHistory && idx == groupedMsgs.lastIndex
+                    val rowOriginInRoot = remember(rowKey) { mutableStateOf(Offset.Zero) }
+                    val onStampTap = rememberUpdatedState {
+                        if (selected.isEmpty() && rowKey.isNotBlank()) {
+                            stampOverrideVisible =
+                                MessageStampPolicy.toggleOverrideVisible(
+                                    currentKey = stampOverrideKey,
+                                    currentVisible = stampOverrideVisible,
+                                    tappedKey = rowKey,
+                                    tappedIsLatest = isLatestVisibleMessage,
+                                )
+                            stampOverrideKey = rowKey
                         }
+                    }
+                    val stampVisible = MessageStampPolicy.isVisible(
+                        isLatestVisible = isLatestVisibleMessage,
+                        rowKey = rowKey,
+                        overrideKey = stampOverrideKey,
+                        overrideVisible = stampOverrideVisible,
+                    )
+                    val rowM =
+                        if (stampVisible) m else JSONObject(m.toString()).put("kpHideStamp", true)
                     // r76-27 (audit #15): a VANISHED / deleted row fades away
                     // on its way out (fadeInSpec stays null - arrivals belong
                     // to the flight system, untouched).
@@ -4216,6 +4271,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                     Box(
                         Modifier
                             .fillMaxWidth()
+                            .onGloballyPositioned { rowOriginInRoot.value = it.boundsInRoot().topLeft }
+                            .messageStampTap(
+                                rowKey = rowKey,
+                                rowOriginInRoot = rowOriginInRoot,
+                                enabled = { selected.isEmpty() },
+                                onTap = { onStampTap.value() },
+                            )
                             // E7: loadOlder rows unfurl once (live rows use MessageRow fx instead).
                             .fxHistoryUnfurl(rowKey in historyFxKeys)
                     ) {
@@ -4243,6 +4305,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             Store.myId(),
                             otherReadAt,
                             player,
+                            focusKey = "message:$rowKey",
                             selectedIds = selected.toList(),
                             onToggleSelect = { msg ->
                                 // Deleted tombstones are not selectable: they
@@ -4309,10 +4372,11 @@ fun ChatScreen(nav: NavController, convId: String) {
                             revealChars = if (m.optString("id") == aiRevealId) aiRevealChars else null,
                             onReply = { requestAttachExit { haptics.tap(); replyTo = it; replyFocusNonce++ } },
                             onLongPress = { msg ->
-                                // Owner round 31: the action sheet (reactions on
-                                // top). In multi-select mode a long-press just
-                                // toggles, like a tap.
+                                // Long-press opens the focused action sheet;
+                                // its quick reaction strip floats above the
+                                // selected message. Multi-select still toggles.
                                 if (msg.optString("kind") != "DELETED" && selected.isEmpty()) {
+                                    actionFocusKey = "message:$rowKey"
                                     actionFor = msg
                                     reactionFor = msg
                                 }
@@ -4325,6 +4389,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             onCancelSend = ::cancelSend,
                             // r71-21: double tap = ❤️ (every row kind).
                             onDoubleTapHeart = ::heartReact,
+                            onRevealStamp = {},
                             onUnblockAsk = { msg ->
                                 scope.launch {
                                     val ok = runCatching {
@@ -4385,12 +4450,40 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // E7: consume the history-unfurl key the same way (one shot, no replay).
                     historyFxKeys.remove(rowKey)
                     // r103-3: a burst of echoes shows the stamp on the last
-                    // one only (the run's newest row).
+                    // one only by default; a tap toggles that row immediately.
+                    val echoIsLatest = m === echoRows.lastOrNull()
+                    val rowOriginInRoot = remember(rowKey) { mutableStateOf(Offset.Zero) }
+                    val onStampTap = rememberUpdatedState {
+                        if (selected.isEmpty() && rowKey.isNotBlank()) {
+                            stampOverrideVisible =
+                                MessageStampPolicy.toggleOverrideVisible(
+                                    currentKey = stampOverrideKey,
+                                    currentVisible = stampOverrideVisible,
+                                    tappedKey = rowKey,
+                                    tappedIsLatest = echoIsLatest,
+                                )
+                            stampOverrideKey = rowKey
+                        }
+                    }
+                    val echoStampVisible =
+                        MessageStampPolicy.isVisible(
+                            isLatestVisible = echoIsLatest,
+                            rowKey = rowKey,
+                            overrideKey = stampOverrideKey,
+                            overrideVisible = stampOverrideVisible,
+                        )
                     val echoM =
-                        if (m !== echoRows.lastOrNull()) JSONObject(m.toString()).put("kpHideStamp", true) else m
+                        if (echoStampVisible) m else JSONObject(m.toString()).put("kpHideStamp", true)
                     Box(
                         Modifier
                             .fillMaxWidth()
+                            .onGloballyPositioned { rowOriginInRoot.value = it.boundsInRoot().topLeft }
+                            .messageStampTap(
+                                rowKey = rowKey,
+                                rowOriginInRoot = rowOriginInRoot,
+                                enabled = { selected.isEmpty() },
+                                onTap = { onStampTap.value() },
+                            )
                             // E7: loadOlder rows unfurl once (live rows use MessageRow fx instead).
                             .fxHistoryUnfurl(rowKey in historyFxKeys)
                     ) {
@@ -4408,6 +4501,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             onCancelSend = ::cancelSend,
                             // r71-21: double tap = ❤️ (every row kind).
                             onDoubleTapHeart = ::heartReact,
+                            onRevealStamp = {},
                         )
                     }
                 }
@@ -4594,16 +4688,16 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
 
 
-        /* ---------------- reaction quick bar (Owner round 16) ----------------
-           Long-press selects the message (unchanged) and raises this bar:
-           five quick emojis + "+" for the full sheet. */
+        /* ---------------- full emoji picker (Owner round 16) ----------------
+           The six quick choices live above the focused message; "+" opens
+           this full list while the action sheet remains beneath it. */
         if (showEmojiSheet && reactionFor != null) {
             EmojiSheetDialog { e -> reactionFor?.let { applyReaction(it, e) } }
         }
 
-        /* ---------------- message action sheet (Owner round 31) ----------------
-           Long-press → this sheet: quick reactions on top ("+" = full emoji
-           sheet), then Reply / Copy / Forward / Edit / Unsend / Delete / Select. */
+        /* ---------------- message action sheet ------------------------------
+           Long-press → this sheet: Reply / Copy / Forward / Edit / Unsend /
+           Delete / Select. Quick reactions float above the focused message. */
         actionFor?.let { m ->
             // Owner round 31 (item 29): Forward / Unsend / Delete / Select on
             // a grouped photo bubble act on every photo of the album.
@@ -4612,98 +4706,102 @@ fun ChatScreen(nav: NavController, convId: String) {
             val kindM = m.optString("kind")
             val isText = kindM == "TEXT" && m.optText("body").isNotBlank()
             val echo = pendingEchoOf(m)
-            fun close() {
-                actionFor = null
-                reactionFor = null
-            }
-            KpSheet(onDismiss = { close() }) {
-                if (!showEmojiSheet) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                    ) {
-                        val myReaction = m.optJSONObject("meta")?.optJSONObject("reactions")?.optString(Store.myId()).orEmpty()
-                        listOf("👍", "❤️", "😂", "😮", "😢", "🙏").forEach { e ->
-                            Text(
-                                e,
-                                fontSize = 26.sp,
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .background(if (myReaction == e) ActionBlue.copy(alpha = 0.18f) else Color.Transparent)
-                                    .clickable {
-                                        applyReaction(m, e)
-                                        actionFor = null
-                                    }
-                                    .padding(7.dp),
-                            )
-                        }
-                        Box(
-                            Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(ActionBlue.copy(alpha = 0.14f))
-                                .clickable { showEmojiSheet = true },
-                            contentAlignment = Alignment.Center,
-                        ) { Icon(Icons.Filled.Add, "More emojis", tint = ActionBlueDeep, modifier = Modifier.size(22.dp)) }
-                    }
-                    Spacer(Modifier.height(4.dp))
+            val focusKey = actionFocusKey ?: ("message:" + m.optString("clientId").ifBlank { m.optString("id") })
+            fun close(after: () -> Unit = {}) {
+                KpFocusSheetState.close {
+                    actionFor = null
+                    reactionFor = null
+                    actionFocusKey = null
+                    after()
                 }
+            }
+            val myReaction = m.optJSONObject("meta")?.optJSONObject("reactions")?.optString(Store.myId()).orEmpty()
+            val floatingReactionBar: @Composable () -> Unit = {
+                if (!showEmojiSheet) {
+                    MessageQuickReactionBar(
+                        myReaction = myReaction,
+                        onReact = { emoji -> close { applyReaction(m, emoji) } },
+                        onMore = { showEmojiSheet = true },
+                    )
+                }
+            }
+            val body: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
                 KpSheetRow(Icons.AutoMirrored.Filled.Reply, "Reply") {
-                    close()
-                    requestAttachExit {
-                        haptics.tap()
-                        replyTo = m
-                        replyFocusNonce++
+                    close {
+                        requestAttachExit {
+                            haptics.tap()
+                            replyTo = m
+                            replyFocusNonce++
+                        }
                     }
                 }
                 if (isText) {
                     KpSheetRow(Icons.Filled.ContentCopy, "Copy") {
-                        close()
-                        val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                        cm.setPrimaryClip(android.content.ClipData.newPlainText("KuchuPuchu", m.optText("body")))
-                        android.widget.Toast.makeText(ctx, "Copied", android.widget.Toast.LENGTH_SHORT).show()
+                        close {
+                            val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            cm.setPrimaryClip(android.content.ClipData.newPlainText("KuchuPuchu", m.optText("body")))
+                            android.widget.Toast.makeText(ctx, "Copied", android.widget.Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
                 // r103-4: the message's own timeline - sent / delivered /
                 // seen, straight from the long-press sheet.
                 KpSheetRow(Icons.Filled.Info, "Info") {
-                    close()
-                    infoFor = m
+                    close { infoFor = m }
                 }
                 // Owner round 31 item 21: no forwarding out of a private chat.
                 // Owner round 32 (item 17): nor of a view-once photo / video.
                 if (!echo && !privateChat && !isViewOnce(m)) {
                     KpSheetRow(Icons.AutoMirrored.Filled.Send, "Forward") {
-                        close()
-                        selected.clear()
-                        selected.addAll(albumIds)
-                        forwarding = true
+                        close {
+                            selected.clear()
+                            selected.addAll(albumIds)
+                            forwarding = true
+                        }
                     }
                 }
                 if (canEdit(m)) {
                     KpSheetRow(Icons.Filled.Edit, "Edit") {
-                        close()
-                        editing = m
+                        close { editing = m }
                     }
                 }
-                // Owner round 32 (item 16) had two rows here — delete for
-                // everyone, delete for me; r68-8 (owner: "delete option just
-                // ektai hobe 2 ta na") merged them: ONE Delete, and the popup
-                // asks the scope with the checkbox — which is also what makes
-                // deleting the OTHER person's message possible at all.
+                // r68-8: ONE Delete row; the popup asks whose copy to remove.
                 KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red) {
-                    close()
-                    selected.clear()
-                    selected.addAll(albumIds)
-                    confirmDelete = true
+                    close {
+                        selected.clear()
+                        selected.addAll(albumIds)
+                        confirmDelete = true
+                    }
                 }
                 KpSheetRow(Icons.Filled.CheckCircle, "Select") {
-                    close()
-                    albumIds.forEach { if (it !in selected) selected.add(it) }
+                    close { albumIds.forEach { if (it !in selected) selected.add(it) } }
                 }
+            }
+            val latestBody = rememberUpdatedState(body)
+            val hostedBody: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = remember(focusKey) {
+                { latestBody.value.invoke(this) }
+            }
+            val latestFloating = rememberUpdatedState(floatingReactionBar)
+            val hostedFloating: @Composable () -> Unit = remember(focusKey) {
+                { latestFloating.value.invoke() }
+            }
+            LaunchedEffect(focusKey) {
+                KpFocusSheetState.open(
+                    KpFocusSheetRequest(
+                        key = "message-actions:$focusKey",
+                        ownerRoute = "chat/$convId",
+                        // Pass the stable source key unconditionally. The root host waits
+                        // for its live layer/target, avoiding a one-shot null snapshot.
+                        focusKey = focusKey,
+                        onDismiss = {
+                            actionFor = null
+                            reactionFor = null
+                            actionFocusKey = null
+                        },
+                        content = hostedBody,
+                        floatingContent = hostedFloating,
+                    ),
+                )
             }
         }
 
@@ -5586,6 +5684,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             shot = privShot,
             rec = privRec,
             save = privSave,
+            readReceipts = privReadReceipts,
+            readReceiptsOverride = privReadReceiptsOverride,
+            globalReadReceipts = globalReadReceipts,
             // r76-18 (owner item 3): the two Allow switches — the alert rows
             // only exist while their Allow switch is on.
             allowShot = privAllowShot,
@@ -5619,6 +5720,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                 }
             },
             onSave = { setChatPrivacy(save = it) },
+            onReadReceiptsOverride = {
+                setChatPrivacy(readReceiptsOverride = it, updateReadReceipts = true)
+            },
             onAllowShot = { setChatPrivacy(allowShot = it) },
             onAllowRec = { setChatPrivacy(allowRec = it) },
         )
@@ -7156,7 +7260,7 @@ internal fun ForwardDialog(onClose: () -> Unit, onSend: (List<String>) -> Unit, 
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .background(Card)
+                        .background(GlassSheetSurface)
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -7265,39 +7369,39 @@ private fun LoginApprovalMessage(m: JSONObject) {
             if (z.hour >= 12) "PM" else "AM",
         )
     }.getOrDefault("")
+    val securityBlue = Color(0xFF2563EB)
+    val securityBlueText = if (KpThemeMode.darkBlue) Color(0xFFBFDBFE) else Color(0xFF1D4ED8)
+    val securitySurface = if (KpThemeMode.darkBlue) Color(0xFF172A4A) else Color(0xFFEAF2FF)
+    val codeSurface = if (KpThemeMode.darkBlue) Color(0xFF21395F) else Color(0xFFD8E8FF)
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(GoldSoft)
-            .border(
-                androidx.compose.foundation.BorderStroke(1.dp, Color(0x33F59E0B)),
-                RoundedCornerShape(14.dp),
-            )
-            .padding(12.dp),
+            .padding(vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(securitySurface)
+            .padding(10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier
-                    .size(26.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Gold),
+                    .size(23.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(securityBlue),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("K", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text("K", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(7.dp))
             Column {
-                Text("KuchuPuchu · Security", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = GoldDeep)
-                Text(time + " · Bangladesh time", fontSize = 10.sp, color = Muted, maxLines = 1)
+                Text("KuchuPuchu · Security", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = securityBlueText)
+                Text(time + " · Bangladesh time", fontSize = 9.5.sp, color = Muted, maxLines = 1)
             }
         }
-        Spacer(Modifier.height(8.dp))
-        Text("New sign-in attempt", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+        Spacer(Modifier.height(5.dp))
+        Text("New sign-in attempt", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = Ink)
         Text(
-            "Device: $device wants to sign in to your account with your phone number.",
-            fontSize = 12.sp,
+            "Device: $device wants to sign in to your account.",
+            fontSize = 11.sp,
             color = Ink,
         )
         // Full origin details (owner rule): where the attempt came from.
@@ -7306,44 +7410,71 @@ private fun LoginApprovalMessage(m: JSONObject) {
         val country = meta.optString("country").takeIf { it.isNotBlank() }
         val place = listOfNotNull(city, country).joinToString(", ")
         if (place.isNotBlank()) {
-            Text("Location: $place", fontSize = 12.sp, color = Ink)
+            Text("Location: $place", fontSize = 10.5.sp, color = Ink, maxLines = 1)
         }
         if (ip != null) {
-            Text("IP: $ip", fontSize = 12.sp, color = Ink)
+            Text("IP: $ip", fontSize = 10.5.sp, color = Ink, maxLines = 1)
         }
         if (status == "PENDING" || status == "OTP_LOCKED") {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(5.dp))
             when {
                 otpCode != null -> {
-                    Text("Sign-in code · enter on the new device", fontSize = 11.sp, color = Muted)
-                    Spacer(Modifier.height(5.dp))
-                    Box(
+                    Text("Sign-in code · enter on the new device", fontSize = 10.sp, color = Muted)
+                    Spacer(Modifier.height(3.dp))
+                    Row(
                         Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Color(0x22F59E0B))
-                            .border(1.dp, Color(0x66F59E0B), RoundedCornerShape(10.dp))
-                            .padding(vertical = 9.dp),
-                        contentAlignment = Alignment.Center,
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(codeSurface)
+                            .padding(start = 10.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
                             otpCode,
-                            fontSize = 26.sp,
+                            modifier = Modifier.weight(1f),
+                            fontSize = 21.sp,
                             fontWeight = FontWeight.Bold,
-                            letterSpacing = 5.sp,
-                            color = GoldDeep,
+                            letterSpacing = 4.sp,
+                            color = securityBlueText,
                             maxLines = 1,
                         )
+                        androidx.compose.material3.TextButton(
+                            onClick = {
+                                runCatching {
+                                    val clipboard =
+                                        ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                            as android.content.ClipboardManager
+                                    clipboard.setPrimaryClip(
+                                        android.content.ClipData.newPlainText("Login approval code", otpCode),
+                                    )
+                                    android.widget.Toast.makeText(
+                                        ctx,
+                                        "Code copied",
+                                        android.widget.Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.ContentCopy,
+                                contentDescription = "Copy sign-in code",
+                                tint = securityBlueText,
+                                modifier = Modifier.size(15.dp),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text("Copy", color = securityBlueText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
                 otpLocked -> Text(
                     "Five incorrect codes used. The code is cleared, but approval is still available.",
-                    fontSize = 11.sp,
+                    fontSize = 10.sp,
                     color = Muted,
                 )
                 else -> Text(
                     "No code is available. You can still approve this sign-in.",
-                    fontSize = 11.sp,
+                    fontSize = 10.sp,
                     color = Muted,
                 )
             }
@@ -7370,11 +7501,15 @@ private fun LoginApprovalMessage(m: JSONObject) {
                         }.start()
                     },
                     enabled = !busy,
-                    shape = RoundedCornerShape(10.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = ActionBlueInk),
+                    shape = RoundedCornerShape(9.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = securityBlue,
+                        contentColor = Color.White,
+                    ),
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text("Accept", maxLines = 1, fontWeight = FontWeight.SemiBold)
+                    Text("Accept", maxLines = 1, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Spacer(Modifier.width(8.dp))
                 androidx.compose.material3.Button(
@@ -7396,11 +7531,15 @@ private fun LoginApprovalMessage(m: JSONObject) {
                         }.start()
                     },
                     enabled = !busy,
-                    shape = RoundedCornerShape(10.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Card, contentColor = Red),
+                    shape = RoundedCornerShape(9.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = securityBlue.copy(alpha = 0.12f),
+                        contentColor = securityBlueText,
+                    ),
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text("Decline", maxLines = 1, fontWeight = FontWeight.SemiBold)
+                    Text("Decline", maxLines = 1, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         } else {
@@ -8002,6 +8141,148 @@ private fun UnblockAskCard(
 
 /** Owner round 34 (item 19): bodies longer than this fold with See more. */
 private const val BODY_COLLAPSE_LINES = 10
+private const val HEART_REACTION_COOLDOWN_MS = 650L
+
+/** Observe a completed bubble tap without waiting for combinedClickable's double-tap window. */
+@Composable
+private fun Modifier.messageStampTap(
+    rowKey: String,
+    rowOriginInRoot: androidx.compose.runtime.State<Offset>,
+    enabled: () -> Boolean,
+    onTap: () -> Unit,
+): Modifier {
+    val isEnabled = rememberUpdatedState(enabled)
+    val tap = rememberUpdatedState(onTap)
+    return pointerInput(rowKey) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            var consumedMovement = false
+            var cancelled = false
+            var releasedPosition: Offset? = null
+            var releasedAt = down.uptimeMillis
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Final)
+                if (event.changes.any { it.id != down.id && it.pressed }) {
+                    cancelled = true
+                    break
+                }
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                if (change.position != change.previousPosition && change.isConsumed) consumedMovement = true
+                if (!change.pressed) {
+                    releasedPosition = change.position
+                    releasedAt = change.uptimeMillis
+                    break
+                }
+            }
+            val up = releasedPosition ?: return@awaitEachGesture
+            val dx = up.x - down.position.x
+            val dy = up.y - down.position.y
+            val slop = viewConfiguration.touchSlop
+            val isTap =
+                !cancelled &&
+                    !consumedMovement &&
+                    dx * dx + dy * dy <= slop * slop &&
+                    releasedAt - down.uptimeMillis < viewConfiguration.longPressTimeoutMillis
+            val rootTap = rowOriginInRoot.value + down.position
+            val insideBubble = DeleteGeoms.bubblesInRoot[rowKey]?.contains(rootTap) == true
+            if (isTap && insideBubble && isEnabled.value()) tap.value()
+        }
+    }
+}
+
+/** Shared message swipe recognizer: claim clear horizontal intent before child taps can win. */
+@Composable
+private fun Modifier.messageReplySwipe(
+    messageKey: String,
+    mine: Boolean,
+    baseThresholdPx: Float,
+    onOffset: (Float) -> Unit,
+    onArmed: () -> Unit,
+    onReply: () -> Unit,
+): Modifier {
+    val offset = rememberUpdatedState(onOffset)
+    val armedCallback = rememberUpdatedState(onArmed)
+    val reply = rememberUpdatedState(onReply)
+    return pointerInput(messageKey, mine, baseThresholdPx) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            var claimed = false
+            var armed = false
+            var cancelled = false
+            var releasedPosition: Offset? = null
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                if (event.changes.any { it.id != down.id && it.pressed }) {
+                    cancelled = true
+                    break
+                }
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                if (change.uptimeMillis - down.uptimeMillis >= viewConfiguration.longPressTimeoutMillis) {
+                    cancelled = true
+                    break
+                }
+                val dx = change.position.x - down.position.x
+                val dy = change.position.y - down.position.y
+                if (MessageReplySwipePolicy.isHorizontalIntent(dx, dy, viewConfiguration.touchSlop)) claimed = true
+                if (claimed) {
+                    change.consume()
+                    offset.value(MessageReplySwipePolicy.dragOffset(dx, mine, baseThresholdPx))
+                    if (!armed && MessageReplySwipePolicy.shouldReply(dx, dy, mine, baseThresholdPx)) {
+                        armed = true
+                        armedCallback.value()
+                    }
+                }
+                if (!change.pressed) {
+                    releasedPosition = change.position
+                    break
+                }
+            }
+            offset.value(0f)
+            val up = releasedPosition ?: return@awaitEachGesture
+            val dx = up.x - down.position.x
+            val dy = up.y - down.position.y
+            if (!cancelled && armed && MessageReplySwipePolicy.shouldReply(dx, dy, mine, baseThresholdPx)) reply.value()
+        }
+    }
+}
+
+/** Lift only the visual message content, not the full-width chat-list row. */
+@Composable
+private fun KpMessageFocusSlot(
+    focusKey: String?,
+    rowMine: Boolean? = null,
+    content: @Composable (requestFocus: () -> Unit) -> Unit,
+) {
+    // Keep the live focus layer bubble-sized. Media rows contain their own
+    // fillMaxWidth/Arrangement.End row; because the focus layer measures its
+    // child with an unbounded width, that inner row otherwise has no spare
+    // width to arrange into and an outgoing photo lands at the left edge.
+    val focusSlot: @Composable () -> Unit = {
+        if (focusKey == null) {
+            content {}
+        } else {
+            KpLiveFocusItem(
+                key = focusKey,
+                modifier = Modifier.wrapContentSize(unbounded = true),
+                targetScale = 1f,
+                content = content,
+            )
+        }
+    }
+    if (rowMine == null) {
+        focusSlot()
+    } else {
+        // Bound the alignment row OUTSIDE the unbounded focus slot. The slot
+        // still captures only the bubble, while sent media gets its existing
+        // end alignment without changing bubble size or swipe geometry.
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = if (rowMine) Arrangement.End else Arrangement.Start,
+        ) {
+            focusSlot()
+        }
+    }
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -8012,6 +8293,7 @@ private fun MessageRow(
     otherReadAt: String?,
     player: VoicePlayer,
     pendingEcho: Boolean = false,
+    focusKey: String? = null,
     selectedIds: List<String> = emptyList(),
     onToggleSelect: (JSONObject) -> Unit = {},
     onOpenImage: (JSONObject) -> Unit = {},
@@ -8034,9 +8316,11 @@ private fun MessageRow(
     // emoji ta"): a DOUBLE TAP on a bubble drops the heart reaction — a real
     // reaction (same server route, same chip, mirrored like a picked one).
     onDoubleTapHeart: (JSONObject) -> Unit = {},
+    onRevealStamp: () -> Unit = {},
 ) {
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
+    val revealStamp = rememberUpdatedState(onRevealStamp)
     // Owner round 21: event sounds (reply swipe) play from the row itself.
     val ctx = LocalContext.current
     // r67-3 (owner: "massage send hole agei chat a place hoye abar animate hoye
@@ -8234,8 +8518,20 @@ private fun MessageRow(
     // image uploads (picked as documents) get the same treatment.
     // Owner round 31 (item 29): photos sent together = one grouped bubble.
     if (m.has("kpAlbum")) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
-            AlbumMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenAlbum, onReply, onLongPress, theme, onDoubleTapHeart)
+        KpMessageFocusSlot(focusKey, rowMine = mine) { requestFocus ->
+            Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
+                AlbumMessageRow(
+                    m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect,
+                    onOpenImage, onOpenAlbum, onReply,
+                    onLongPress = { pressed ->
+                        if (pressed.optString("kind") != "DELETED") requestFocus()
+                        onLongPress(pressed)
+                    },
+                    theme = theme,
+                    onDoubleTapHeart = onDoubleTapHeart,
+                    onRevealStamp = onRevealStamp,
+                )
+            }
         }
         return
     }
@@ -8244,36 +8540,96 @@ private fun MessageRow(
     // opens the media ONCE for the recipient; the opening deletes the row
     // for everyone, so there is no opened state left to render.
     if (isViewOnce(m)) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
-            // r71-20: a view-once TEXT is its own bubble (veiled, one tap to
-            // reveal, five seconds, then gone for both) — the photo / video /
-            // voice flavours keep the tile.
-            if (kind == "TEXT" && m.optText("body").isNotBlank()) {
-                OnceTextRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, theme, onDoubleTapHeart)
-            } else {
-                ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme, onDoubleTapHeart)
+        KpMessageFocusSlot(focusKey, rowMine = mine) { requestFocus ->
+            Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
+                // r71-20: a view-once TEXT is its own bubble (veiled, one tap to
+                // reveal, five seconds, then gone for both) — the photo / video /
+                // voice flavours keep the tile.
+                val onFocusedLongPress: (JSONObject) -> Unit = { pressed ->
+                    if (pressed.optString("kind") != "DELETED") requestFocus()
+                    onLongPress(pressed)
+                }
+                if (kind == "TEXT" && m.optText("body").isNotBlank()) {
+                    OnceTextRow(
+                        m = m,
+                        mine = mine,
+                        pendingEcho = pendingEcho,
+                        otherReadAt = otherReadAt,
+                        selectedIds = selectedIds,
+                        onToggleSelect = onToggleSelect,
+                        onReply = onReply,
+                        onLongPress = onFocusedLongPress,
+                        theme = theme,
+                        onDoubleTapHeart = onDoubleTapHeart,
+                        onRevealStamp = onRevealStamp,
+                    )
+                } else {
+                    ViewOnceRow(
+                        m = m,
+                        mine = mine,
+                        pendingEcho = pendingEcho,
+                        otherReadAt = otherReadAt,
+                        player = player,
+                        selectedIds = selectedIds,
+                        onToggleSelect = onToggleSelect,
+                        onOpenImage = onOpenImage,
+                        onOpenVideo = onOpenVideo,
+                        onReply = onReply,
+                        onLongPress = onFocusedLongPress,
+                        theme = theme,
+                        onDoubleTapHeart = onDoubleTapHeart,
+                        onRevealStamp = onRevealStamp,
+                    )
+                }
             }
         }
         return
     }
     if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
-            ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend, onDoubleTapHeart)
+        KpMessageFocusSlot(focusKey, rowMine = mine) { requestFocus ->
+            Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
+                ImageMessageRow(
+                    m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect,
+                    onOpenImage, onReply,
+                    onLongPress = { pressed ->
+                        if (pressed.optString("kind") != "DELETED") requestFocus()
+                        onLongPress(pressed)
+                    },
+                    theme = theme,
+                    onCancelSend = onCancelSend,
+                    onDoubleTapHeart = onDoubleTapHeart,
+                    onRevealStamp = onRevealStamp,
+                )
+            }
         }
         return
     }
     // Owner round 20: videos render as a tappable video bubble and play
     // IN-APP (the system player could never stream these auth-only files).
     if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
-            VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend, onDoubleTapHeart)
+        KpMessageFocusSlot(focusKey, rowMine = mine) { requestFocus ->
+            Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
+                VideoMessageRow(
+                    m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect,
+                    onReply,
+                    onLongPress = { pressed ->
+                        if (pressed.optString("kind") != "DELETED") requestFocus()
+                        onLongPress(pressed)
+                    },
+                    onOpen = onOpenVideo,
+                    theme = theme,
+                    onCancelSend = onCancelSend,
+                    onDoubleTapHeart = onDoubleTapHeart,
+                    onRevealStamp = onRevealStamp,
+                )
+            }
         }
         return
     }
 
-    // Owner round 13: hold-drag a bubble RIGHT to quote-reply. The offset
-    // follows the finger up to ~65dp; past 36dp on release it arms the reply.
-    // Owner round 16: OWN messages arm the same way to the LEFT.
+    // One shared reply policy covers text/sticker/voice/file/document rows
+    // and the specialized media rows below: incoming swipes go RIGHT, own
+    // swipes go LEFT, with the same release distance and drag feedback.
     var replyDrag by remember { mutableStateOf(0f) }
     val replyOffset by animateFloatAsState(replyDrag, spring(stiffness = 1400f), label = "replydrag")
     val replyThreshold = with(LocalDensity.current) { 36.dp.toPx() }
@@ -8304,7 +8660,22 @@ private fun MessageRow(
             ),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
-        Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
+        Column(
+            modifier = Modifier.messageReplySwipe(
+                messageKey = m.optString("clientId").ifBlank { m.optString("id") },
+                mine = mine,
+                baseThresholdPx = replyThreshold,
+                onOffset = { replyDrag = it },
+                onArmed = { haptics.tap() },
+                onReply = {
+                    if (m.optString("kind") != "DELETED") {
+                        runCatching { KpSounds.replySwipe(ctx) }
+                        onReply(m)
+                    }
+                },
+            ),
+            horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
+        ) {
             // Owner round 2026-09-04: long bodies used to flatten at 280dp.
             // The bubble now stretches with the screen (82% of it, floored at
             // the old 280 and capped at 420 for tablets) so the right side
@@ -8325,6 +8696,7 @@ private fun MessageRow(
             // Owner round 32 (item 15): no "edited" marker anywhere — an edited
             // text is just the text (so an emoji-only edit stays emoji-only too).
             val emojiOnly = if (kind == "TEXT") emojiOnlyCount(m.optText("body")) else 0
+            val hasReactions = m.optJSONObject("meta")?.optJSONObject("reactions")?.length()?.let { it > 0 } == true
             // N3a: stickers are emoji too — no bubble behind them either, both sides.
             val noBubble = emojiOnly > 0 || kind == "STICKER"
             // Owner round 32 (items 45 / 34): a voice note's duration line —
@@ -8372,51 +8744,15 @@ private fun MessageRow(
                 report(r)
                 if (r.lineCount > bodyLines) bodyLines = r.lineCount
             }
-            Box(
-                Modifier
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
+            KpMessageFocusSlot(focusKey) { requestFocus ->
+                val onFocusedLongPress: (JSONObject) -> Unit = { pressed ->
+                    if (pressed.optString("kind") != "DELETED") requestFocus()
+                    onLongPress(pressed)
+                }
+                Box(
+                    Modifier
+                        .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), bubbleShape) }
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                    // Owner round 13b: the hand-rolled awaitEachGesture fought
-                    // the list's vertical scrolling (jank + crash on device).
-                    // detectHorizontalDragGestures waits for clear horizontal
-                    // intent (touch slop) before consuming, so chat scrolling
-                    // stays smooth and the reply swipe still works.
-                    .pointerInput(m.optString("id")) {
-                        detectHorizontalDragGestures(
-                            onHorizontalDrag = { change, dragAmount ->
-                                change.consume()
-                                // Owner round 16: own messages reply by dragging
-                                // LEFT; other people's by dragging right.
-                                // Owner round 17: the left swipe was touchy —
-                                // it now needs half again as much distance and
-                                // barely overshoots.
-                                val wasArmed = kotlin.math.abs(replyDrag) >= (if (mine) replyThreshold * 1.5f else replyThreshold)
-                                replyDrag =
-                                    if (mine) {
-                                        (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.5f, 0f)
-                                    } else {
-                                        (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.8f)
-                                    }
-                                // Owner round 32 (item 40): the finger feels the
-                                // reply point — one tap when the swipe arms.
-                                if (!wasArmed && kotlin.math.abs(replyDrag) >= (if (mine) replyThreshold * 1.5f else replyThreshold)) haptics.tap()
-                            },
-                            onDragEnd = {
-                                val need =
-                                    if (mine) replyThreshold * 1.5f else replyThreshold
-                                val armed = kotlin.math.abs(replyDrag) >= need
-                                replyDrag = 0f
-                                // Owner round 22: deleted/unsent messages can
-                                // no longer be replied to.
-                                if (armed && m.optString("kind") != "DELETED") {
-                                    // Owner round 21: his reply-swipe sound.
-                                    runCatching { KpSounds.replySwipe(ctx) }
-                                    onReply(m)
-                                }
-                            },
-                            onDragCancel = { replyDrag = 0f },
-                        )
-                    }
                     // v170 (owner: "short massage bubble onek bushi short
                     // hoye ... massage bubble body aro ektu boro hobe jodi
                     // time tick fill na kore"): a text bubble is never
@@ -8454,18 +8790,22 @@ private fun MessageRow(
                     // r62: animateContentSize only on collapsible text bodies; voice notes keep exact original body dimensions with no resize.
                     .then(if (textLike && longBody) Modifier.animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f)) else Modifier)
                     .combinedClickable(
-                        // r71-21: double tap = ❤️. combinedClickable holds the
-                        // single tap back until it knows this was not a double
-                        // one, so a heart never also collapses / selects.
-                        onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
+                        // r71-21: double tap = ❤️. Emoji-only bubbles keep the
+                        // same taps for their glyph treatment, but do not react.
+                        onDoubleClick = if (!pendingEcho && emojiOnly == 0) {
+                            { onDoubleTapHeart(m) }
+                        } else null,
                         onClick = {
                             if (selectedIds.isNotEmpty() && !pendingEcho) {
                                 onToggleSelect(m)
-                            } else if (!pendingEcho && longBody && !typing && msgExpanded) {
-                                // r57 (owner: "see more a click korle expand hobe massage body te click korle collapse hobe"):
-                                // clicking message body collapses an expanded long message with smooth spring animation.
-                                msgExpanded = false
-                                runCatching { haptics.tap() }
+                            } else {
+                                revealStamp.value()
+                                if (!pendingEcho && longBody && !typing && msgExpanded) {
+                                    // r57 (owner: "see more a click korle expand hobe massage body te click korle collapse hobe"):
+                                    // clicking message body collapses an expanded long message with smooth spring animation.
+                                    msgExpanded = false
+                                    runCatching { haptics.tap() }
+                                }
                             }
                         },
                         onLongClick = {
@@ -8473,7 +8813,7 @@ private fun MessageRow(
                                 haptics.tap()
                                 // Owner round 31: selection only while selecting;
                                 // otherwise the action sheet takes over.
-                                if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)
+                                if (selectedIds.isNotEmpty()) onToggleSelect(m) else onFocusedLongPress(m)
                             }
                         },
                     )
@@ -8484,7 +8824,7 @@ private fun MessageRow(
                     // the text. Other kinds keep the small bottom band —
                     // except FILE rows (items 45 / 34), whose second line
                     // already leaves the stamp its corner.
-                    .padding(start = if (voiceRow) 0.dp else 10.dp, top = if (voiceRow) 0.dp else 4.dp, end = if (voiceRow) 0.dp else 8.dp, bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp)
+                    .padding(start = if (voiceRow) 0.dp else 10.dp, top = if (voiceRow) 0.dp else 4.dp, end = if (voiceRow) 0.dp else 8.dp, bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else if (hasReactions) 8.dp else 15.dp)
                     // r58: live sent messages animate from right, received from left; history stays quiet
                     // r62: voice notes fly via fxFlyIn directly with original body; no duplicate box translation.
                     .then(if (voiceRow) Modifier else Modifier.fxSideSlide(active = fxFresh, isSent = mine))
@@ -8532,13 +8872,14 @@ private fun MessageRow(
                                     onLongClick = {
                                         if (!pendingEcho) {
                                             haptics.tap()
-                                            if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)
+                                            if (selectedIds.isNotEmpty()) onToggleSelect(m) else onFocusedLongPress(m)
                                         }
                                     },
                                 ) {
                                     if (selectedIds.isNotEmpty()) {
                                         if (!pendingEcho) onToggleSelect(m)
                                     } else {
+                                        revealStamp.value()
                                         haptics.tap()
                                         onJumpTo(rid)
                                     }
@@ -8575,9 +8916,35 @@ private fun MessageRow(
                         "STICKER" -> {
                             val st = m.optString("body")
                             if (EmojiRepo.isCustomId(st)) CustomEmojiOrFallback(st)
-                            else EmojiGlyphRow(st, 56f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } }, onDoubleTap = { if (!pendingEcho) onDoubleTapHeart(m) }, danceKey = fxKey)
+                            else {
+                                EmojiGlyphRow(st, 56f, fxEmoji, m.optString("id"),
+                                    onLongPress = {
+                                        if (!pendingEcho) {
+                                            if (selectedIds.isNotEmpty()) onToggleSelect(m) else onFocusedLongPress(m)
+                                        }
+                                    },
+                                    onDoubleTap = { if (!pendingEcho) onDoubleTapHeart(m) },
+                                    onTap = onRevealStamp,
+                                    danceKey = fxKey,
+                                )
+                            }
                         }
-                        "FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)
+                        "FILE" -> FileBubble(
+                            m,
+                            mine,
+                            player,
+                            pendingEcho,
+                            onOpenImage,
+                            onOpenVideo,
+                            theme,
+                            onOpenDoc,
+                            onToggleSelect,
+                            onFocusedLongPress,
+                            selecting = selectedIds.isNotEmpty(),
+                            onCancelSend = onCancelSend,
+                            fxGrow = fxFresh,
+                            onRevealStamp = onRevealStamp,
+                        )
                         // Owner round 33 (item 5): the stamp is placed by
                         // measurement after the last line (KpStamped) — the
                         // old no-break-space reserve is gone from every text
@@ -8596,12 +8963,28 @@ private fun MessageRow(
                             // bubble (outside) for every kind now.
                             // v206: single only animates, long-press shows actions
                             if (emojiOnly == 1) {
-                                EmojiGlyphRow(m.optText("body").trim(), 66f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } }, onDoubleTap = { if (!pendingEcho) onDoubleTapHeart(m) }, danceKey = fxKey)
+                                EmojiGlyphRow(m.optText("body").trim(), 66f, fxEmoji, m.optString("id"),
+                                    onLongPress = {
+                                        if (!pendingEcho) {
+                                            if (selectedIds.isNotEmpty()) onToggleSelect(m) else onFocusedLongPress(m)
+                                        }
+                                    },
+                                    onTap = onRevealStamp,
+                                    danceKey = fxKey,
+                                )
                             } else {
                                 // N3r: every glyph dances its own 3D move for
                                 // 3 s (arrival / tap / the other side's tap).
                                 // v206: multiple emojis don't animate, but long-press still works
-                                EmojiGlyphRow(m.optText("body").trim(), 40f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } }, onDoubleTap = { if (!pendingEcho) onDoubleTapHeart(m) }, danceKey = fxKey)
+                                EmojiGlyphRow(m.optText("body").trim(), 40f, fxEmoji, m.optString("id"),
+                                    onLongPress = {
+                                        if (!pendingEcho) {
+                                            if (selectedIds.isNotEmpty()) onToggleSelect(m) else onFocusedLongPress(m)
+                                        }
+                                    },
+                                    onTap = onRevealStamp,
+                                    danceKey = fxKey,
+                                )
                             }
                         } else {
                             val full = m.optText("body")
@@ -8613,7 +8996,10 @@ private fun MessageRow(
                             val linked =
                                 remember(full, bodyInk, selecting) {
                                     if (selecting) null
-                                    else Links.annotate(full, bodyInk) { u -> Links.open(ctx, u) }
+                                    else Links.annotate(full, bodyInk) { u ->
+                                        revealStamp.value()
+                                        Links.open(ctx, u)
+                                    }
                                 }
                             val firstLink = remember(full) { Links.first(full) }
                             if (firstLink != null) {
@@ -8621,7 +9007,15 @@ private fun MessageRow(
                                     url = firstLink,
                                     mine = mine,
                                     ink = bodyInk,
-                                    onOpen = if (selecting) null else ({ Links.open(ctx, firstLink) }),
+                                    onOpen =
+                                        if (selecting) {
+                                            null
+                                        } else {
+                                            {
+                                                revealStamp.value()
+                                                Links.open(ctx, firstLink)
+                                            }
+                                        },
                                 )
                             }
                             if (revealChars != null && revealChars < full.length) {
@@ -8682,6 +9076,7 @@ private fun MessageRow(
                                 .heightIn(min = 40.dp)
                                 .pointerInput(Unit) {
                                     detectTapGestures {
+                                        revealStamp.value()
                                         msgExpanded = !msgExpanded
                                         runCatching { haptics.tap() }
                                     }
@@ -8698,7 +9093,11 @@ private fun MessageRow(
                         }
                     }
                 }
+                }
             }
+            // Anchor chips directly to the bubble corner before the small
+            // outside stamp row, so reactions stay attached to their message.
+            MessageReactions(m)
             // v169 (owner: "single tick double tick seen tick send time eshob
             // message body te na message er niche thakbe" + the example
             // image): the stamp lives OUTSIDE the bubble now - right under
@@ -8713,40 +9112,134 @@ private fun MessageRow(
             ) {
                 if (!m.optBoolean("kpHideStamp")) BubbleStamp(m, mine, pendingEcho, otherReadAt, if (kind == "STICKER") 1 else emojiOnly, stampInk)
             }
-            // Owner round 16: reaction chips under the bubble.
-            MessageReactions(m)
         }
     }
 }
 
-/** Owner round 16: the reaction chips under a bubble — emoji + count, own
- *  reaction highlighted gold. reactions live in message meta.reactions. */
+@Composable
+private fun MessageQuickReactionBar(
+    myReaction: String,
+    onReact: (String) -> Unit,
+    onMore: () -> Unit,
+) {
+    val quickEmojis = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
+    val shape = RoundedCornerShape(28.dp)
+    Row(
+        Modifier
+            .fillMaxSize()
+            .clip(shape)
+            .background(Card)
+            .padding(horizontal = 5.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        quickEmojis.forEach { emoji ->
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(CircleShape)
+                    .background(if (myReaction == emoji) ActionBlue.copy(alpha = 0.18f) else Color.Transparent)
+                    .clickable { onReact(emoji) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(emoji, fontSize = 24.sp, maxLines = 1)
+            }
+        }
+        // A dedicated fixed-width seat keeps the final '+' visible on narrow
+        // screens instead of letting the emoji labels push it outside the bar.
+        Box(
+            Modifier
+                .width(38.dp)
+                .fillMaxHeight()
+                .clip(CircleShape)
+                .background(ActionBlue.copy(alpha = 0.14f))
+                .clickable(onClick = onMore),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Add, "More emojis", tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+/** Owner round 16: reaction chips under a bubble. New live reactions pop into
+ *  place on both devices when the local edit or room broadcast updates meta. */
 @Composable
 private fun MessageReactions(m: JSONObject) {
-    val reactions = m.optJSONObject("meta")?.optJSONObject("reactions") ?: return
-    val myId = Store.myId()
-    val grouped = LinkedHashMap<String, Int>()
-    var iHave = false
-    val ks = reactions.keys()
-    while (ks.hasNext()) {
-        val k = ks.next()
-        val e = reactions.optString(k)
-        if (e.isBlank()) continue
-        grouped[e] = (grouped[e] ?: 0) + 1
-        if (k == myId) iHave = true
+    val reactionObject = m.optJSONObject("meta")?.optJSONObject("reactions") ?: JSONObject()
+    val byUser = LinkedHashMap<String, String>()
+    val keys = reactionObject.keys()
+    while (keys.hasNext()) {
+        val userId = keys.next()
+        val emoji = reactionObject.optString(userId)
+        if (emoji.isNotBlank()) byUser[userId] = emoji
     }
+    val messageKey = m.optString("id").ifBlank { m.optString("clientId") }
+    val snapshotKey = byUser.toSortedMap().entries.joinToString("|") { "${it.key}:${it.value}" }
+    val previousByUser = remember(messageKey) { mutableStateOf(byUser.toMap()) }
+    val animationNonces = remember(messageKey) { androidx.compose.runtime.mutableStateMapOf<String, Int>() }
+    LaunchedEffect(snapshotKey) {
+        val previous = previousByUser.value
+        byUser.forEach { (userId, emoji) ->
+            if (previous[userId] != emoji) {
+                animationNonces[emoji] = (animationNonces[emoji] ?: 0) + 1
+            }
+        }
+        previousByUser.value = byUser.toMap()
+    }
+
+    val grouped = LinkedHashMap<String, Int>()
+    byUser.values.forEach { emoji -> grouped[emoji] = (grouped[emoji] ?: 0) + 1 }
     if (grouped.isEmpty()) return
+    val dark = KpThemeMode.darkBlue
+    val chipFill = if (dark) Color(0xE61D3151) else Color(0xF7FFFFFF)
+    val chipLine = if (dark) Color.White.copy(alpha = 0.14f) else Color(0x1F273247)
+    val popStartOffsetPx = with(LocalDensity.current) { (-10).dp.toPx() }
     Row(
-        Modifier.padding(start = 6.dp, top = 2.dp),
+        Modifier.offset(y = (-4).dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        // Owner round 22: bare emojis — no chip background, no border.
         grouped.forEach { (emoji, count) ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(emoji, fontSize = 17.sp)
-                if (count > 1) {
-                    Spacer(Modifier.width(2.dp))
-                    Text("$count", fontSize = 10.sp, color = Muted)
+            val popScale = remember(messageKey, emoji) { Animatable(1f) }
+            val popAlpha = remember(messageKey, emoji) { Animatable(1f) }
+            val popOffsetY = remember(messageKey, emoji) { Animatable(0f) }
+            val animationNonce = animationNonces[emoji] ?: 0
+            LaunchedEffect(animationNonce) {
+                if (animationNonce > 0) {
+                    // New reactions arrive oversized and just above the chip,
+                    // then drop into the corner and spring to their resting size.
+                    popScale.snapTo(1.7f)
+                    popAlpha.snapTo(0.25f)
+                    popOffsetY.snapTo(popStartOffsetPx)
+                    launch {
+                        popScale.animateTo(0.94f, spring(dampingRatio = 0.68f, stiffness = 520f))
+                        popScale.animateTo(1f, spring(dampingRatio = 0.84f, stiffness = 720f))
+                    }
+                    launch {
+                        popOffsetY.animateTo(0f, spring(dampingRatio = 0.78f, stiffness = 620f))
+                    }
+                    popAlpha.animateTo(1f, tween(durationMillis = 180, easing = FastOutSlowInEasing))
+                }
+            }
+            val chipShape = RoundedCornerShape(12.dp)
+            Box(
+                Modifier
+                    .graphicsLayer {
+                        scaleX = popScale.value
+                        scaleY = popScale.value
+                        alpha = popAlpha.value
+                        translationY = popOffsetY.value
+                    }
+                    .clip(chipShape)
+                    .background(chipFill)
+                    .border(1.dp, chipLine, chipShape)
+                    .padding(horizontal = 6.dp, vertical = 1.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(emoji, fontSize = 16.sp)
+                    if (count > 1) {
+                        Spacer(Modifier.width(2.dp))
+                        Text("$count", fontSize = 10.sp, color = if (dark) Color(0xFFE2E9F5) else Muted)
+                    }
                 }
             }
         }
@@ -8758,6 +9251,10 @@ private fun MessageReactions(m: JSONObject) {
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun EmojiSheetDialog(onPick: (String) -> Unit) {
+    // Register in this parent composition and release when the sheet targets
+    // Hidden, before Material's animated exit reaches onDismissRequest.
+    val blurRegistration = KpRegisterModalBlur()
+    val sheetState = KpRememberModalBottomSheetState(blurRegistration)
     val emojis = listOf(
         "👍", "👎", "❤️", "🩷", "😂", "🥰", "😮", "😢", "😡", "🙏",
         "🔥", "🎉", "😍", "😭", "😅", "🤔", "💯", "👏", "🤝", "😎",
@@ -8766,8 +9263,9 @@ private fun EmojiSheetDialog(onPick: (String) -> Unit) {
     )
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = { onPick("") },
-        containerColor = Card,
-        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = GlassSheetSurface,
+        scrimColor = Color.Black.copy(alpha = 0.10f),
+        sheetState = sheetState,
     ) {
         Column(
             Modifier
@@ -9001,6 +9499,7 @@ private fun VideoMessageRow(
     onCancelSend: (String) -> Unit = {},
     // r71-21: a double tap on this bubble drops the heart reaction.
     onDoubleTapHeart: (JSONObject) -> Unit = {},
+    onRevealStamp: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -9142,12 +9641,27 @@ private fun VideoMessageRow(
         // Owner round 42 (item 3): the caption stretches this column wider
         // than the frame — without the alignment the frame hugs the wrong
         // side for my own messages.
-        Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
+        Column(
+            modifier = Modifier.messageReplySwipe(
+                messageKey = m.optString("clientId").ifBlank { m.optString("id") },
+                mine = mine,
+                baseThresholdPx = replyThreshold,
+                onOffset = { replyDrag = it },
+                onArmed = { haptics.tap() },
+                onReply = {
+                    if (m.optString("kind") != "DELETED") {
+                        runCatching { KpSounds.replySwipe(ctx) }
+                        onReply(m)
+                    }
+                },
+            ),
+            horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
+        ) {
         Box(
             Modifier
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
                 .clip(RoundedCornerShape(12.dp))
-                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
+                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), RoundedCornerShape(12.dp)) }
                 .onGloballyPositioned { c ->
                     // r81-3: this tile is the player's hero seat (same screen-
                     // pixel formula as the photo tile), and it honours the
@@ -9168,35 +9682,14 @@ private fun VideoMessageRow(
                 .graphicsLayer { alpha = PhotoHero.tileAlphaFor(vidId) }
                 .background(Color(0xFF0B1220))
                 .border(1.dp, if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444), RoundedCornerShape(12.dp))
-                .pointerInput(m.optString("id")) {
-                    detectHorizontalDragGestures(
-                        onHorizontalDrag = { change, dragAmount ->
-                            change.consume()
-                            val wasArmed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                            replyDrag =
-                                if (mine) {
-                                    (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.4f, 0f)
-                                } else {
-                                    (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.4f)
-                                }
-                            if (!wasArmed && kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f) haptics.tap()
-                        },
-                        onDragEnd = {
-                            val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                            replyDrag = 0f
-                            if (armed && m.optString("kind") != "DELETED") {
-                                runCatching { KpSounds.replySwipe(ctx) }
-                                onReply(m)
-                            }
-                        },
-                        onDragCancel = { replyDrag = 0f },
-                    )
-                }
                 .combinedClickable(
                     onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
                     onClick = {
                         if (pendingEcho) return@combinedClickable
-                        if (selectedIds.isNotEmpty()) onToggleSelect(m) else onOpen(m)
+                        if (selectedIds.isNotEmpty()) onToggleSelect(m) else {
+                            onRevealStamp()
+                            onOpen(m)
+                        }
                     },
                     onLongClick = {
                         if (pendingEcho) return@combinedClickable
@@ -9380,6 +9873,7 @@ private fun OnceTextRow(
     onLongPress: (JSONObject) -> Unit,
     theme: String,
     onDoubleTapHeart: (JSONObject) -> Unit = {},
+    onRevealStamp: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -9439,50 +9933,45 @@ private fun OnceTextRow(
     ) {
         // r72-20: the bubble and its stamp ride one column — the bubble on
         // top, the stamp under it — like every other message row.
-        Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
+        Column(
+            modifier = Modifier.messageReplySwipe(
+                messageKey = id,
+                mine = mine,
+                baseThresholdPx = replyThreshold,
+                onOffset = { replyDrag = it },
+                onArmed = { haptics.tap() },
+                onReply = {
+                    if (m.optString("kind") != "DELETED") {
+                        runCatching { KpSounds.replySwipe(ctx) }
+                        onReply(m)
+                    }
+                },
+            ),
+            horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
+        ) {
             Box(
                 Modifier
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
+                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), shape) }
                     .widthIn(max = bubbleMax)
                     .wrapContentWidth()
                     .requiredWidthIn(min = if (mine) 70.dp else 52.dp)
                     .clip(shape)
                     .background(if (mine) chatMineFill(theme) else chatOtherFill(theme))
-                    .pointerInput(id) {
-                        detectHorizontalDragGestures(
-                            onHorizontalDrag = { change, dragAmount ->
-                                change.consume()
-                                val wasArmed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                                replyDrag =
-                                    if (mine) (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.4f, 0f)
-                                    else (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.4f)
-                                if (!wasArmed && kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f) haptics.tap()
-                            },
-                            onDragEnd = {
-                                val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                                replyDrag = 0f
-                                if (armed) {
-                                    runCatching { KpSounds.replySwipe(ctx) }
-                                    onReply(m)
-                                }
-                            },
-                            onDragCancel = { replyDrag = 0f },
-                        )
-                    }
                     .combinedClickable(
                         onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
                         onClick = {
-                            when {
-                                pendingEcho -> {}
-                                selectedIds.isNotEmpty() -> onToggleSelect(m)
+                            if (pendingEcho) return@combinedClickable
+                            if (selectedIds.isNotEmpty()) {
+                                onToggleSelect(m)
+                            } else {
+                                onRevealStamp()
                                 // The far side's tap IS the opening (and starts the
                                 // five seconds); mine just reads what I wrote.
-                                !mine && !revealed -> {
+                                if (!mine && !revealed) {
                                     haptics.tap()
                                     revealed = true
                                 }
-                                else -> {}
                             }
                         },
                         onLongClick = {
@@ -9555,6 +10044,7 @@ private fun VoiceOnceTile(
     player: VoicePlayer,
     playing: Boolean,
     onSpent: () -> Unit,
+    onRevealStamp: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -9584,6 +10074,7 @@ private fun VoiceOnceTile(
                 .clip(CircleShape)
                 .background(Color(0x33FFFFFF))
                 .clickable(enabled = ready) {
+                    onRevealStamp()
                     haptics.tap()
                     // r71-19b: playing it once IS the opening.
                     player.toggle(ctx, id, source) { onSpent() }
@@ -9606,6 +10097,7 @@ private fun VoiceOnceTile(
             // no seeking on a once-only note: it is heard once, from the top
             onSeek = {},
             onScrub = {},
+            onTap = onRevealStamp,
             modifier = Modifier.weight(1f).height(20.dp),
         )
         // r76-10 (owner): the duration rides the RIGHT side, vertically
@@ -9654,6 +10146,7 @@ private fun ViewOnceRow(
     theme: String,
     // r71-21: a double tap on this bubble drops the heart reaction.
     onDoubleTapHeart: (JSONObject) -> Unit = {},
+    onRevealStamp: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -9758,11 +10251,26 @@ private fun ViewOnceRow(
             .padding(vertical = 3.dp),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
-        Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
+        Column(
+            modifier = Modifier.messageReplySwipe(
+                messageKey = m.optString("clientId").ifBlank { m.optString("id") },
+                mine = mine,
+                baseThresholdPx = replyThreshold,
+                onOffset = { replyDrag = it },
+                onArmed = { haptics.tap() },
+                onReply = {
+                    if (m.optString("kind") != "DELETED") {
+                        runCatching { KpSounds.replySwipe(ctx) }
+                        onReply(m)
+                    }
+                },
+            ),
+            horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
+        ) {
             Box(
                 Modifier
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
+                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), bubbleShape) }
                     .onGloballyPositioned { c ->
                         if (!voice) {
                             val b = c.boundsInWindow()
@@ -9805,42 +10313,22 @@ private fun ViewOnceRow(
                     // r76-9 (owner): a view-once VOICE bubble rides like a
                     // normal voice bubble — no border ring.
                     .then(if (voice) Modifier else Modifier.border(1.dp, Color(0xFF3B82F6), bubbleShape))
-                    .pointerInput(m.optString("id")) {
-                        detectHorizontalDragGestures(
-                            onHorizontalDrag = { change, dragAmount ->
-                                change.consume()
-                                val wasArmed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                                replyDrag =
-                                    if (mine) {
-                                        (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.4f, 0f)
-                                    } else {
-                                        (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.4f)
-                                    }
-                                if (!wasArmed && kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f) haptics.tap()
-                            },
-                            onDragEnd = {
-                                val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                                replyDrag = 0f
-                                if (armed) {
-                                    runCatching { KpSounds.replySwipe(ctx) }
-                                    onReply(m)
-                                }
-                            },
-                            onDragCancel = { replyDrag = 0f },
-                        )
-                    }
                     .combinedClickable(
                         onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
                         onClick = {
-                            when {
-                                pendingEcho -> {}
-                                selectedIds.isNotEmpty() -> onToggleSelect(m)
-                                // r71-19b: the voice card owns its own play
-                                // target (and its own spend), so a tap on the
-                                // card body only selects / replies.
-                                voice -> {}
-                                canOpen -> if (video) onOpenVideo(m) else onOpenImage(m) // openable -> if (video) onOpenVideo(m) else onOpenImage(m)
-                                else -> {}
+                            if (pendingEcho) return@combinedClickable
+                            if (selectedIds.isNotEmpty()) {
+                                onToggleSelect(m)
+                            } else {
+                                onRevealStamp()
+                                when {
+                                    // r71-19b: the voice card owns its own play
+                                    // target (and its own spend), so a tap on the
+                                    // card body only selects / replies.
+                                    voice -> {}
+                                    canOpen -> if (video) onOpenVideo(m) else onOpenImage(m)
+                                    else -> {}
+                                }
                             }
                         },
                         onLongClick = {
@@ -9853,7 +10341,15 @@ private fun ViewOnceRow(
                 contentAlignment = Alignment.Center,
             ) {
                 if (voice) {
-                    VoiceOnceTile(m = m, mine = mine, pendingEcho = pendingEcho, player = player, playing = player.playingId == m.optString("id"), onSpent = { if (!mine) ViewOnce.spend(m.optString("id")) })
+                    VoiceOnceTile(
+                        m = m,
+                        mine = mine,
+                        pendingEcho = pendingEcho,
+                        player = player,
+                        playing = player.playingId == m.optString("id"),
+                        onSpent = { if (!mine) ViewOnce.spend(m.optString("id")) },
+                        onRevealStamp = onRevealStamp,
+                    )
                 } else {
                 if (photoUrl != null) {
                     val imageRequest = remember(photoUrl) {
@@ -10105,6 +10601,7 @@ private fun ImageMessageRow(
     onCancelSend: ((String) -> Unit)? = null,
     // r71-21: a double tap on this bubble drops the heart reaction.
     onDoubleTapHeart: (JSONObject) -> Unit = {},
+    onRevealStamp: () -> Unit = {},
 ) {
     // r76-29: the viewer is its OWN fullscreen window - the tile's seat is
     // stored in SCREEN pixels so the hero starts exactly on the tile.
@@ -10130,117 +10627,116 @@ private fun ImageMessageRow(
         // Owner round 42 (item 3): a captioned photo's column is caption-wide
         // — the photo must hug MY side, not the column's start.
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
-        Box(
-            Modifier
-                .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
-                .widthIn(max = 120.dp) // Owner round 25 / 32 item 29 / 33 item 18: smaller inline preview
-                // r71-16: photos keep the round-8 frame with NO drop shadow.
-                // thin border.
-                .clip(RoundedCornerShape(12.dp))
-                // Owner round 8/16: thin photo border — gray-BLUE on dark-blue,
-                // gray-BLACK on cream, so the frame matches the app theme.
-                .border(
-                    1.dp,
-                    if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444),
-                    RoundedCornerShape(12.dp),
-                )
-                .pointerInput(m.optString("id")) {
-                    detectHorizontalDragGestures(
-                        onHorizontalDrag = { change, dragAmount ->
-                            change.consume()
-                            // Owner round 17: calmer — needs a longer, more
-                            // deliberate drag and barely overshoots.
-                            val wasArmed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                            replyDrag =
-                                if (mine) {
-                                    (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.4f, 0f)
-                                } else {
-                                    (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.4f)
-                                }
-                            if (!wasArmed && kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f) haptics.tap()
-                        },
-                        onDragEnd = {
-                            val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                            replyDrag = 0f
-                            if (armed && m.optString("kind") != "DELETED") {
-                                // Owner round 21: his reply-swipe sound.
-                                runCatching { KpSounds.replySwipe(ctx) }
-                                onReply(m)
-                            }
-                        },
-                        onDragCancel = { replyDrag = 0f },
-                    )
-                }
-                .onGloballyPositioned { c ->
-                    // r76-28/29: remember this tile's seat in SCREEN pixels -
-                    // the viewer window starts at the screen's top-left, so a
-                    // window-relative seat landed a status bar too high and
-                    // the hero read as "fullscreen first, animate after".
-                    val b = c.boundsInWindow()
-                    val loc = IntArray(2)
-                    hostView.getLocationOnScreen(loc)
-                    PhotoHero.set(
-                        m.optString("id").ifBlank { m.optString("clientId") },
-                        androidx.compose.ui.geometry.Rect(b.left + loc[0], b.top + loc[1], b.right + loc[0], b.bottom + loc[1]),
-                    )
-                }
-                .graphicsLayer {
-                    // r77-3 (owner: "fake doublicate na"): while the viewer
-                    // flies this tile's hero, the tile itself is NOT a second
-                    // copy - the hero is the only render of this photo. The
-                    // seat keeps updating above, so the exit lands on it.
-                    // r79-3: the handoff is a cross-fade now (the last 45% of
-                    // the close), so a hair of seat mismatch blends instead of
-                    // flashing a second photo.
-                    alpha = PhotoHero.tileAlphaFor(m.optString("id").ifBlank { m.optString("clientId") })
-                }
-                .combinedClickable(
-                    onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
-                    onClick = {
-                        if (pendingEcho) return@combinedClickable
-                        if (selectedIds.isNotEmpty()) onToggleSelect(m) else onOpenImage(m)
-                    },
-                    onLongClick = {
-                        if (!pendingEcho) {
-                            haptics.tap()
-                            if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)
+            Box(
+                Modifier.messageReplySwipe(
+                    messageKey = m.optString("clientId").ifBlank { m.optString("id") },
+                    mine = mine,
+                    baseThresholdPx = replyThreshold,
+                    onOffset = { replyDrag = it },
+                    onArmed = { haptics.tap() },
+                    onReply = {
+                        if (m.optString("kind") != "DELETED") {
+                            runCatching { KpSounds.replySwipe(ctx) }
+                            onReply(m)
                         }
                     },
                 ),
-        ) {
-            ImageBubble(m, mine, isPending = pendingEcho, onCancelSend = onCancelSend)
-            // scrim so the stamp never drowns in a bright photo
-            Box(
-                Modifier
-                    .matchParentSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color.Transparent, Color.Transparent, Color(0x66000000)),
-                        ),
-                    ),
-            )
-            if (!m.optBoolean("kpHideStamp")) {
-                Row(
+            ) {
+                Box(
                     Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(horizontal = 8.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                        .offset { IntOffset(replyOffset.roundToInt(), 0) }
+                        .onGloballyPositioned {
+                            DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), RoundedCornerShape(12.dp))
+                        }
+                        .widthIn(max = 120.dp) // Owner round 25 / 32 item 29 / 33 item 18: smaller inline preview
+                        // r71-16: photos keep the round-8 frame with NO drop shadow.
+                        // thin border.
+                        .clip(RoundedCornerShape(12.dp))
+                        // Owner round 8/16: thin photo border — gray-BLUE on dark-blue,
+                        // gray-BLACK on cream, so the frame matches the app theme.
+                        .border(
+                            1.dp,
+                            if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444),
+                            RoundedCornerShape(12.dp),
+                        )
+                        .onGloballyPositioned { c ->
+                            // r76-28/29: remember this tile's seat in SCREEN pixels -
+                            // the viewer window starts at the screen's top-left, so a
+                            // window-relative seat landed a status bar too high and
+                            // the hero read as "fullscreen first, animate after".
+                            val b = c.boundsInWindow()
+                            val loc = IntArray(2)
+                            hostView.getLocationOnScreen(loc)
+                            PhotoHero.set(
+                                m.optString("id").ifBlank { m.optString("clientId") },
+                                androidx.compose.ui.geometry.Rect(
+                                    b.left + loc[0],
+                                    b.top + loc[1],
+                                    b.right + loc[0],
+                                    b.bottom + loc[1],
+                                ),
+                            )
+                        }
+                        .graphicsLayer {
+                            // r77-3 (owner: "fake doublicate na"): while the viewer
+                            // flies this tile's hero, the tile itself is NOT a second
+                            // copy - the hero is the only render of this photo. The
+                            // seat keeps updating above, so the exit lands on it.
+                            // r79-3: the handoff is a cross-fade now (the last 45% of
+                            // the close), so a hair of seat mismatch blends instead of
+                            // flashing a second photo.
+                            alpha = PhotoHero.tileAlphaFor(m.optString("id").ifBlank { m.optString("clientId") })
+                        }
+                        .combinedClickable(
+                            onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
+                            onClick = {
+                                if (pendingEcho) return@combinedClickable
+                                if (selectedIds.isNotEmpty()) onToggleSelect(m) else {
+                                    onRevealStamp()
+                                    onOpenImage(m)
+                                }
+                            },
+                            onLongClick = {
+                                if (!pendingEcho) {
+                                    haptics.tap()
+                                    if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)
+                                }
+                            },
+                        ),
                 ) {
-                    Text(
-                        msgStamp(m.optString("createdAt")),
-                        fontSize = 10.sp,
-                        color = Color.White,
+                    ImageBubble(m, mine, isPending = pendingEcho, onCancelSend = onCancelSend)
+                    // scrim so the stamp never drowns in a bright photo
+                    Box(
+                        Modifier
+                            .matchParentSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color.Transparent, Color.Transparent, Color(0x66000000)),
+                                ),
+                            ),
                     )
-                    if (mine) {
-                        Spacer(Modifier.width(3.dp))
-                        TickIcon(m, pendingEcho, otherReadAt)
+                    if (!m.optBoolean("kpHideStamp")) {
+                        Row(
+                            Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(horizontal = 8.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                msgStamp(m.optString("createdAt")),
+                                fontSize = 10.sp,
+                                color = Color.White,
+                            )
+                            if (mine) {
+                                Spacer(Modifier.width(3.dp))
+                                TickIcon(m, pendingEcho, otherReadAt)
+                            }
+                        }
                     }
                 }
             }
-        }
-        MediaCaption(m.optText("body"), mine, theme)
-        MessageReactions(m)
+            MediaCaption(m.optText("body"), mine, theme)
+            MessageReactions(m)
         }
     }
 }
@@ -10465,6 +10961,7 @@ private fun AlbumMessageRow(
     theme: String,
     // r71-21: a double tap on this bubble drops the heart reaction.
     onDoubleTapHeart: (JSONObject) -> Unit = {},
+    onRevealStamp: () -> Unit = {},
 ) {
     val photos = albumPhotos(m)
     val haptics = rememberHaptics()
@@ -10488,7 +10985,10 @@ private fun AlbumMessageRow(
             onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
             onClick = {
                 if (pendingEcho) return@combinedClickable
-                if (selectedIds.isNotEmpty()) onToggleSelect(m) else onTap()
+                if (selectedIds.isNotEmpty()) onToggleSelect(m) else {
+                    onRevealStamp()
+                    onTap()
+                }
             },
             onLongClick = { longPress() },
         )
@@ -10500,104 +11000,122 @@ private fun AlbumMessageRow(
     ) {
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
             Box(
-                Modifier
-                    .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
-                    .width(albumW)
-                    .clip(shape)
-                    .border(
-                        1.dp,
-                        if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444),
-                        shape,
-                    )
-                    .pointerInput(m.optString("id")) {
-                        detectHorizontalDragGestures(
-                            onHorizontalDrag = { change, dragAmount ->
-                                change.consume()
-                                val wasArmed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                                replyDrag =
-                                    if (mine) {
-                                        (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.4f, 0f)
-                                    } else {
-                                        (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.4f)
-                                    }
-                                if (!wasArmed && kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f) haptics.tap()
-                            },
-                            onDragEnd = {
-                                val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                                replyDrag = 0f
-                                if (armed) {
-                                    runCatching { KpSounds.replySwipe(ctx) }
-                                    onReply(m)
-                                }
-                            },
-                            onDragCancel = { replyDrag = 0f },
-                        )
+                Modifier.messageReplySwipe(
+                    messageKey = m.optString("clientId").ifBlank { m.optString("id") },
+                    mine = mine,
+                    baseThresholdPx = replyThreshold,
+                    onOffset = { replyDrag = it },
+                    onArmed = { haptics.tap() },
+                    onReply = {
+                        if (m.optString("kind") != "DELETED") {
+                            runCatching { KpSounds.replySwipe(ctx) }
+                            onReply(m)
+                        }
                     },
+                ),
             ) {
-                when {
-                    photos.size == 2 -> Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        photos.forEach { p ->
-                            AlbumTile(p, tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenImage(p) }, isPending = pendingEcho)
+                Box(
+                    Modifier
+                        .offset { IntOffset(replyOffset.roundToInt(), 0) }
+                        .onGloballyPositioned {
+                            DeleteGeoms.put(m, it.boundsInWindow(), it.boundsInRoot(), shape)
                         }
-                    }
-                    photos.size == 3 -> Row(
-                        Modifier.height((albumW - gap) * 2 / 3),
-                        horizontalArrangement = Arrangement.spacedBy(gap),
-                    ) {
-                        AlbumTile(photos[0], tileModifier(Modifier.weight(2f).fillMaxHeight()) { onOpenImage(photos[0]) }, isPending = pendingEcho)
-                        Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(gap)) {
-                            AlbumTile(photos[1], tileModifier(Modifier.weight(1f).fillMaxWidth()) { onOpenImage(photos[1]) }, isPending = pendingEcho)
-                            AlbumTile(photos[2], tileModifier(Modifier.weight(1f).fillMaxWidth()) { onOpenImage(photos[2]) }, isPending = pendingEcho)
+                        .width(albumW)
+                        .clip(shape)
+                        .border(
+                            1.dp,
+                            if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444),
+                            shape,
+                        ),
+                ) {
+                    when {
+                        photos.size == 2 -> Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                            photos.forEach { p ->
+                                AlbumTile(
+                                    p,
+                                    tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenImage(p) },
+                                    isPending = pendingEcho,
+                                )
+                            }
                         }
-                    }
-                    photos.size == 4 -> Column(verticalArrangement = Arrangement.spacedBy(gap)) {
-                        photos.chunked(2).forEach { pair ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
-                                pair.forEach { p ->
-                                    AlbumTile(p, tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenImage(p) }, isPending = pendingEcho)
+                        photos.size == 3 -> Row(
+                            Modifier.height((albumW - gap) * 2 / 3),
+                            horizontalArrangement = Arrangement.spacedBy(gap),
+                        ) {
+                            AlbumTile(
+                                photos[0],
+                                tileModifier(Modifier.weight(2f).fillMaxHeight()) { onOpenImage(photos[0]) },
+                                isPending = pendingEcho,
+                            )
+                            Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(gap)) {
+                                AlbumTile(
+                                    photos[1],
+                                    tileModifier(Modifier.weight(1f).fillMaxWidth()) { onOpenImage(photos[1]) },
+                                    isPending = pendingEcho,
+                                )
+                                AlbumTile(
+                                    photos[2],
+                                    tileModifier(Modifier.weight(1f).fillMaxWidth()) { onOpenImage(photos[2]) },
+                                    isPending = pendingEcho,
+                                )
+                            }
+                        }
+                        photos.size == 4 -> Column(verticalArrangement = Arrangement.spacedBy(gap)) {
+                            photos.chunked(2).forEach { pair ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                                    pair.forEach { p ->
+                                        AlbumTile(
+                                            p,
+                                            tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenImage(p) },
+                                            isPending = pendingEcho,
+                                        )
+                                    }
                                 }
                             }
                         }
-                    }
-                    else -> Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        photos.take(3).forEach { p ->
-                            AlbumTile(p, tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenImage(p) }, isPending = pendingEcho)
+                        else -> Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                            photos.take(3).forEach { p ->
+                                AlbumTile(
+                                    p,
+                                    tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenImage(p) },
+                                    isPending = pendingEcho,
+                                )
+                            }
+                            AlbumTile(
+                                photos[3],
+                                tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenAlbum(m) },
+                                dim = true,
+                                label = "See all",
+                                isPending = pendingEcho,
+                            )
                         }
-                        AlbumTile(
-                            photos[3],
-                            tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenAlbum(m) },
-                            dim = true,
-                            label = "See all",
-                            isPending = pendingEcho,
-                        )
                     }
-                }
-                // scrim so the stamp never drowns in a bright photo
-                Box(
-                    Modifier
-                        .matchParentSize()
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color.Transparent, Color.Transparent, Color(0x66000000)),
-                            ),
-                        ),
-                )
-                if (!m.optBoolean("kpHideStamp")) {
-                    Row(
+                    // scrim so the stamp never drowns in a bright photo
+                    Box(
                         Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(horizontal = 8.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            msgStamp(m.optString("createdAt")),
-                            fontSize = 10.sp,
-                            color = Color.White,
-                        )
-                        if (mine) {
-                            Spacer(Modifier.width(3.dp))
-                            TickIcon(m, pendingEcho, otherReadAt)
+                            .matchParentSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color.Transparent, Color.Transparent, Color(0x66000000)),
+                                ),
+                            ),
+                    )
+                    if (!m.optBoolean("kpHideStamp")) {
+                        Row(
+                            Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(horizontal = 8.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                msgStamp(m.optString("createdAt")),
+                                fontSize = 10.sp,
+                                color = Color.White,
+                            )
+                            if (mine) {
+                                Spacer(Modifier.width(3.dp))
+                                TickIcon(m, pendingEcho, otherReadAt)
+                            }
                         }
                     }
                 }
@@ -10763,6 +11281,7 @@ internal fun VoiceWave(
     onScrub: ((Float?) -> Unit)? = null,
     // r44 (pack): a live arrival grows the bars one by one (60 + i·22 ms).
     grow: Boolean = false,
+    onTap: (() -> Unit)? = null,
 ) {
     var growAt by remember(grow) { mutableStateOf(-1L) }
     LaunchedEffect(grow) {
@@ -10779,6 +11298,7 @@ internal fun VoiceWave(
     // (12x a second while playing) never restart a drag in flight.
     val seek by rememberUpdatedState(onSeek)
     val scrub by rememberUpdatedState(onScrub)
+    val revealStamp by rememberUpdatedState(onTap)
     Canvas(
         // A quick tap seeks; the down is NOT consumed, so the bubble's own
         // long-press (action sheet) keeps working on the bars — only the
@@ -10825,6 +11345,7 @@ internal fun VoiceWave(
                 val up = currentEvent.changes.firstOrNull { it.id == down.id }
                 if (!dragged && up != null && up.changedToUp()) {
                     up.consume()
+                    revealStamp?.invoke()
                     seek((up.position.x / size.width).coerceIn(0f, 1f))
                 }
             }
@@ -11189,6 +11710,7 @@ private fun FileBubble(
     onCancelSend: (String) -> Unit = {},
     // r44 (pack): a live arrival grows the voice bars / pops the document.
     fxGrow: Boolean = false,
+    onRevealStamp: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -11297,6 +11819,7 @@ private fun FileBubble(
                     .clip(CircleShape)
                     .background(if (mine) Color(0x33FFFFFF) else chatAccent(theme).copy(alpha = 0.18f))
                     .clickable(interactionSource = interaction, indication = null) {
+                        onRevealStamp()
                         if (pendingEcho || fileKey.isBlank()) return@clickable // still uploading
                         haptics.tap()
                         player.toggle(ctx, id, fileKey)
@@ -11338,6 +11861,7 @@ private fun FileBubble(
                 onScrub = { frac ->
                     scrubAt = if (!pendingEcho && fileKey.isNotBlank()) frac else null
                 },
+                onTap = onRevealStamp,
             )
             Spacer(Modifier.width(8.dp))
             Text(
@@ -11360,6 +11884,7 @@ private fun FileBubble(
             // playback speed instead: 1x -> 2x -> 3x -> 4x -> 1x.
             Box(
                 Modifier.size(34.dp).clickable {
+                    onRevealStamp()
                     haptics.tap()
                     player.cycleSpeed(id)
                 },
@@ -11406,6 +11931,7 @@ private fun FileBubble(
                             onToggleSelect(m)
                             return@combinedClickable
                         }
+                    onRevealStamp()
                     if (!ready) {
                         android.widget.Toast.makeText(ctx, "This file is no longer available.", android.widget.Toast.LENGTH_SHORT).show()
                         return@combinedClickable
@@ -11644,8 +12170,8 @@ private fun ChatSearchSheet(
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(24.dp))
-                .background(Card)
-                .border(1.dp, ActionBlue, RoundedCornerShape(24.dp))
+                .background(GlassSheetSurface)
+                .border(1.dp, ActionBlue.copy(alpha = 0.72f), RoundedCornerShape(24.dp))
                 .padding(horizontal = 16.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -11684,8 +12210,7 @@ private fun ChatSearchSheet(
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(18.dp))
-                .background(Card)
-                .border(1.dp, Line, RoundedCornerShape(18.dp))
+                .background(GlassSheetSurface)
                 .padding(horizontal = 14.dp, vertical = 6.dp),
         ) {
             hits.take(12).forEachIndexed { i, m ->
@@ -11736,6 +12261,9 @@ private fun ChatPrivacySheet(
     shot: Boolean,
     rec: Boolean,
     save: Boolean,
+    readReceipts: Boolean,
+    readReceiptsOverride: Boolean?,
+    globalReadReceipts: Boolean,
     // r76-18 (owner item 3): the two Allow switches. Profile defaults come
     // from the server (private: off; public: shot on, rec off, save on); the
     // alert rows below only show while their Allow switch is on.
@@ -11749,6 +12277,7 @@ private fun ChatPrivacySheet(
     onShot: (Boolean) -> Unit,
     onRec: (Boolean) -> Unit,
     onSave: (Boolean) -> Unit,
+    onReadReceiptsOverride: (Boolean?) -> Unit,
     onAllowShot: (Boolean) -> Unit,
     onAllowRec: (Boolean) -> Unit,
 ) {
@@ -11759,6 +12288,12 @@ private fun ChatPrivacySheet(
     // The screen-recording row stays Android 15+ — a recording leaves no file
     // to read, so claiming it below that would be a lie.
     KpSheet(onDismiss = onClose, title = "Chat privacy") {
+        ReadReceiptsChoice(
+            selectedOverride = readReceiptsOverride,
+            globalEnabled = globalReadReceipts,
+            effectiveEnabled = readReceipts,
+            onSelect = onReadReceiptsOverride,
+        )
         // r76-18 (owner item 3): "allow screenshot" first, its alert second —
         // and the alert row only EXISTS while the Allow switch is on. The
         // block itself (FLAG_SECURE on the other phone) works everywhere;
@@ -11820,6 +12355,61 @@ private fun ChatPrivacySheet(
             enabled = true,
             onChange = onSave,
         )
+    }
+}
+
+/** Account-default / per-chat read-receipt choice. */
+@Composable
+private fun ReadReceiptsChoice(
+    selectedOverride: Boolean?,
+    globalEnabled: Boolean,
+    effectiveEnabled: Boolean,
+    onSelect: (Boolean?) -> Unit,
+) {
+    val haptics = rememberHaptics()
+    val choices = listOf(null to "Use global", true to "On", false to "Off")
+    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.DoneAll, "Read receipts", tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Text("Read receipts", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    "${if (selectedOverride == null) "Using global" else if (effectiveEnabled) "On for this chat" else "Off for this chat"} · global ${if (globalEnabled) "On" else "Off"}",
+                    color = Muted,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            choices.forEach { (choice, label) ->
+                val selected = choice == selectedOverride
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(11.dp))
+                        .background(if (selected) ActionBlue.copy(alpha = 0.14f) else Color.Transparent)
+                        .border(1.dp, if (selected) ActionBlue else Line, RoundedCornerShape(11.dp))
+                        .clickable {
+                            haptics.tap()
+                            onSelect(choice)
+                        }
+                        .padding(vertical = 9.dp, horizontal = 2.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label,
+                        color = if (selected) ActionBlueDeep else Ink,
+                        fontSize = 11.sp,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -12354,7 +12944,7 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
-                        Icons.AutoMirrored.Filled.Chat,
+                        KpChatMessageVector(),
                         contentDescription = null,
                         tint = Color.White,
                         modifier = Modifier.size(16.dp),

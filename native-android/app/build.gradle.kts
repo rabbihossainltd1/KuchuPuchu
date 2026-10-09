@@ -7,7 +7,12 @@ import java.util.Base64
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
+
+// Include the CI source revision in crash diagnostics without changing the app version.
+val kpBuildSha = System.getenv("GITHUB_SHA")?.take(12)?.takeIf { it.matches(Regex("[0-9a-fA-F]{7,12}")) } ?: "local"
+val kpComposeBomVersion = "2026.06.00"
 
 // §51 / Play policy: `release` must not be signed with the repository's debug key —
 // that key is in git, so anyone with read access could publish an update that every
@@ -68,8 +73,10 @@ android {
         applicationId = "app.kuchupuchu.android"
         minSdk = 24
         targetSdk = 35
-        versionCode = 274
-        versionName = "3.9.197"
+        versionCode = 279
+        versionName = "3.9.202"
+        buildConfigField("String", "BUILD_SHA", "\"$kpBuildSha\"")
+        buildConfigField("String", "COMPOSE_BOM_VERSION", "\"$kpComposeBomVersion\"")
     }
     signingConfigs {
         getByName("debug") {
@@ -134,8 +141,10 @@ android {
     // Unit tests are pure-JVM on purpose: no Robolectric, no android.jar stubs to
     // paper over — if a rule needs a Context it belongs in the device checklist.
     testOptions { unitTests.isIncludeAndroidResources = false }
-    buildFeatures { compose = true }
-    composeOptions { kotlinCompilerExtensionVersion = "1.5.15" }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     // Owner round 32 (item 41): libkp_voice — RNNoise voice isolation for
     // calls, built from src/main/cpp for the two shipped ABIs. CMake 3.22.1
     // ships with the SDK's cmake package on the CI image.
@@ -163,7 +172,9 @@ android {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.10.01")
+    // Keep the previous Compose 1.11.3 baseline while the #1101 runtime/toolchain
+    // cause is still unproven. The #1100 focus path no longer transfers movable content.
+    val composeBom = platform("androidx.compose:compose-bom:$kpComposeBomVersion")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
@@ -175,7 +186,7 @@ dependencies {
     // InvalidFragmentVersionForActivityResult said so. Named explicitly so it is a
     // decision, not an accident of what compose-bom happens to resolve.
     implementation("androidx.fragment:fragment-ktx:1.8.9")
-    implementation("androidx.navigation:navigation-compose:2.8.3")
+    implementation("androidx.navigation:navigation-compose:2.9.8")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
@@ -204,4 +215,7 @@ dependencies {
     // other dependency here (§51).
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     testImplementation("junit:junit:4.13.2")
+    // The Android SDK's org.json classes are stubs under the plain JVM test
+    // runner; legacy-backup parsing needs the real JSON implementation here.
+    testImplementation("org.json:json:20240303")
 }

@@ -229,13 +229,15 @@ check(
 // ---------------------------------------------------------------- §51 dependency rule
 const telecomRaw = readFileSync(`${SRC}/KpTelecom.kt`, "utf8");
 check(
-  "androidx.core:core-telecom was evaluated and rejected on evidence, not taste",
+  "androidx.core:core-telecom remains rejected for duplicate lifecycle/UI ownership and API split",
   !gradle.includes("core-telecom") &&
-    readFileSync("native-android/build.gradle.kts", "utf8").includes("1.9.25") &&
-    // The reason is written down where the next reader will look for it: the bridge's own
-    // doc comment, naming the library and the Kotlin-metadata reason it is not used.
+    // The reason is written beside the bridge: the library duplicates foreground and
+    // notification ownership, and its newer call-entry API leaves older devices behind.
     telecomRaw.includes("core-telecom") &&
-    telecomRaw.includes("kotlin.Metadata"),
+    telecomRaw.includes("foreground") &&
+    telecomRaw.includes("call notification") &&
+    telecomRaw.includes("API 34-only") &&
+    !telecomRaw.includes("kotlin.Metadata"),
 );
 
 // ---------------------------------------------------------------- the real tree is clean

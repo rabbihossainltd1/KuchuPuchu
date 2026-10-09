@@ -1,6 +1,27 @@
 package app.kuchupuchu.android
 
+import android.graphics.PixelFormat
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.InsetDrawable
+import android.os.Build
+import android.view.Gravity
+import android.view.Window
+import android.view.WindowManager
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.tween
@@ -11,22 +32,27 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -44,9 +70,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Done
-import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Unarchive
@@ -72,15 +96,18 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -89,20 +116,39 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.navigation.NavController
+import androidx.navigation.compose.currentBackStackEntryAsState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -113,19 +159,38 @@ import kotlin.math.roundToInt
 /**
  * Chat List — locked design #7 "Gradient Rings".
  * Cream background, white 16dp cards, amber gradient
- * ring avatars, big top tabs (Chats / Status / Calls), gold FAB,
+ * ring avatars, floating bottom tabs (Chats / Status / Calls / Profile), gold FAB,
  * swipe actions for mute + delete.
  */
+internal object HomeNavState {
+    val visible = mutableStateOf(true)
+}
+
+private fun setNavPillWindowBlur(window: Window, enabled: Boolean, radiusPx: Int) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        // Background blur is clipped to the pill's rounded window drawable;
+        // unlike FLAG_BLUR_BEHIND it does not blur the rest of the screen.
+        window.setBackgroundBlurRadius(if (enabled) radiusPx else 0)
+    }
+}
+
 @Composable
-fun ChatListScreen(nav: NavController) {
+fun ChatListScreen(nav: NavController, selectedTab: MutableIntState) {
+    val currentEntry by nav.currentBackStackEntryAsState()
+    val homeRouteActive = currentEntry?.destination?.route == "main"
+    LaunchedEffect(homeRouteActive) {
+        // Returning from any pushed destination restores the home pill from
+        // below the screen, even if list scrolling had hidden it before push.
+        if (homeRouteActive) HomeNavState.visible.value = true
+    }
     val scope = rememberCoroutineScope()
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val convs = ScreenStore.convs
     var loading by remember { mutableStateOf(!ScreenStore.convsLoaded) }
-    // Saveable: coming back from a chat / status viewer returns to the SAME
-    // tab instead of jumping to Chats every time.
+    // Shared with KpApp's root-level nav pill so route transitions do not
+    // carry the bar along with the outgoing home screen.
     var homeMenu by remember { mutableStateOf(false) }
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+    var tab by selectedTab
     val haptics = rememberHaptics()
     // Owner round 17: the archive pull has TWO triggers — the list overscroll
     // (as before) AND a plain vertical drag on the header/tabs area, so a ROM
@@ -296,14 +361,14 @@ fun ChatListScreen(nav: NavController) {
                 // forever) meant NO refresh AND NO fallback — the list froze
                 // until a chat was reopened (the AI-reply visibility bug that
                 // survived round 16). While foreground, a cheap marker-gated
-                // refresh runs every 8s no matter what the socket says; the
+                // refresh runs every 12s no matter what the socket says; the
                 // events still do the instant updates.
                 if (fg) {
                     val now = System.currentTimeMillis()
                     if (justReturned || !KpSocket.userLive()) {
                         refresh()
                         lastSafetyRefresh = now
-                    } else if (now - lastSafetyRefresh >= 4_000) {
+                    } else if (now - lastSafetyRefresh >= 12_000) {
                         lastSafetyRefresh = now
                         refresh()
                     }
@@ -320,6 +385,68 @@ fun ChatListScreen(nav: NavController) {
     // onResume pokes this — the list syncs the moment the app comes forward.
     LaunchedEffect(ScreenStore.poke) {
         if (Store.foreground) refresh()
+    }
+
+    // Owner round 83: the home destinations live in a compact,
+    // icon-only floating pill. Visibility is shared with KpApp so route
+    // changes animate independently of the NavHost's screen transition.
+    var navVisible by HomeNavState.visible
+    val navHidePx = with(density) { 14.dp.toPx() }
+    val navShowPx = with(density) { 10.dp.toPx() }
+    // Observe the amount the child list actually scrolled, not the raw finger
+    // delta. This avoids hiding the pill on overscroll / when a list has no
+    // more content. A downward pull at the top always restores it.
+    val navScrollProbe = remember(navHidePx, navShowPx, tab) {
+        object : NestedScrollConnection {
+            var acc = 0f
+
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset = Offset.Zero
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                if (tab == 3) {
+                    navVisible = true
+                    acc = 0f
+                    return Offset.Zero
+                }
+                if (available.y > 0f) {
+                    navVisible = true
+                    acc = 0f
+                    return Offset.Zero
+                }
+                if (available.y < 0f) {
+                    // At the bottom edge (or with a short list), don't count
+                    // unconsumed motion toward hiding the navigation.
+                    acc = 0f
+                    return Offset.Zero
+                }
+                val dy = consumed.y
+                if (dy != 0f) {
+                    if ((dy < 0f && acc > 0f) || (dy > 0f && acc < 0f)) acc = 0f
+                    acc += dy
+                    if (acc < -navHidePx) navVisible = false
+                    else if (acc > navShowPx) navVisible = true
+                }
+                return Offset.Zero
+            }
+        }
+    }
+    LaunchedEffect(tab) { navVisible = true }
+    val fabBottom by animateDpAsState(
+        if (navVisible) 84.dp else 2.dp,
+        tween(450, easing = FastOutSlowInEasing),
+        label = "fabBottom",
+    )
+    fun selectHomeTab(index: Int) {
+        haptics.tap()
+        if (index != 0) {
+            ListSelect.clear()
+            ListSelect.muteFor = null
+        }
+        tab = index
     }
 
     Box(Modifier.fillMaxSize().background(Cream)) {
@@ -353,7 +480,8 @@ fun ChatListScreen(nav: NavController) {
             // set of ticks.
             androidx.compose.runtime.DisposableEffect(Unit) { onDispose { ListSelect.clear() } }
             // r76-27 (audit #8): the bar swaps through a fade, not a hard cut.
-            androidx.compose.animation.Crossfade(
+            if (tab != 3) {
+                androidx.compose.animation.Crossfade(
                 targetState = selecting,
                 animationSpec = androidx.compose.animation.core.tween(180),
                 label = "chattopbar",
@@ -407,8 +535,9 @@ fun ChatListScreen(nav: NavController) {
                     Icon(Icons.Filled.MoreVert, "Menu", tint = Ink, modifier = Modifier.size(26.dp))
                 }
                 if (homeMenu) {
-                    HomeMenuSheet(onDismiss = { homeMenu = false }, nav = nav)
+                    HomeMenuSheet(onDismiss = { homeMenu = false }, nav = nav, onOpenProfile = { tab = 3 })
                 }
+            }
             }
             }
             }
@@ -442,40 +571,54 @@ fun ChatListScreen(nav: NavController) {
                 )
             }
 
-            /* ---------- big top tabs ---------- */
-            // Owner round 31 (item 26): hidden chats do not count — a badge
-            // nobody can trace to a visible row is just confusing.
-            val unreadTotal = convs.filter { !it.optBoolean("hidden") }.sumOf { it.optInt("unread", 0) }
-            val unseenStatus = ScreenStore.statuses.any { !it.optBoolean("mine") && !it.optBoolean("allViewed") }
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 6.dp, vertical = 4.dp)
-                    .then(archiveDrag),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TopTab(Icons.Filled.Chat, "Chats", tab == 0, unreadTotal, modifier = Modifier.weight(1f)) { haptics.tap(); tab = 0 }
-                TopTab(Icons.Filled.Circle, "Status", tab == 1, dot = unseenStatus, modifier = Modifier.weight(1f)) { haptics.tap(); ListSelect.clear(); tab = 1 }
-                TopTab(Icons.Filled.Call, "Calls", tab == 2, modifier = Modifier.weight(1f)) { haptics.tap(); ListSelect.clear(); tab = 2 }
-            }
+            /* ---------- tab bodies ---------- */
+            // Owner round 83: tabs switch with a direction-aware slide — a tab
+            // to the right enters from the right, a tab to the left from the
+            // left, and the old one drifts out and fades.
             Box(
                 Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .height(1.dp)
-                    .background(Line),
-            )
-
-            /* ---------- tab bodies ---------- */
-            when (tab) {
-                0 -> ArchivePullArea(nav, archivePull) { ChatListBody(convs, loading, nav, ::refresh, chatsListState, archivePull) }
-                1 -> StatusScreen(nav)
-                2 -> CallsScreen(nav)
+                    .fillMaxSize()
+                    .nestedScroll(navScrollProbe)
+                    .homeTabSwipe(tab, with(density) { 70.dp.toPx() }) { next ->
+                        haptics.tap()
+                        tab = next
+                    },
+            ) {
+                AnimatedContent(
+                    targetState = tab,
+                    modifier = Modifier.fillMaxSize(),
+                    transitionSpec = {
+                        val forward = targetState > initialState
+                        (slideInHorizontally(tween(420, easing = FastOutSlowInEasing)) { w -> if (forward) w else -w } +
+                            fadeIn(tween(300))).togetherWith(
+                            slideOutHorizontally(tween(420, easing = FastOutSlowInEasing)) { w -> if (forward) -w / 3 else w / 3 } +
+                                fadeOut(tween(250)),
+                        )
+                    },
+                    label = "hometabs",
+                ) { t ->
+                    when (t) {
+                        0 -> ArchivePullArea(nav, archivePull) { ChatListBody(convs, loading, nav, ::refresh, chatsListState, archivePull) }
+                        1 -> StatusScreen(nav, fabBottom = fabBottom)
+                        2 -> CallsScreen(nav)
+                        else -> ProfileScreen(
+                            nav = nav,
+                            userId = Store.myId(),
+                            onBack = { tab = 0 },
+                            showHomeNav = true,
+                        )
+                    }
+                }
             }
         }
 
         /* ---------- gold FAB (chats tab only — no overlap with status FABs) ---------- */
-        if (tab == 0) {
+        AnimatedVisibility(
+            visible = tab == 0,
+            enter = scaleIn(tween(250)) + fadeIn(tween(250)),
+            exit = scaleOut(tween(180)) + fadeOut(tween(180)),
+            modifier = Modifier.align(Alignment.BottomEnd),
+        ) {
             FloatingActionButton(
                 onClick = { haptics.tap(); nav.navigate("newchat") },
                 shape = CircleShape,
@@ -483,9 +626,8 @@ fun ChatListScreen(nav: NavController) {
                 containerColor = ActionBlue,
                 contentColor = ActionBlueInk,
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
                     .navigationBarsPadding()
-                    .padding(20.dp)
+                    .padding(end = 20.dp, bottom = fabBottom)
                     .size(52.dp)
             ) {
                 Icon(
@@ -495,6 +637,7 @@ fun ChatListScreen(nav: NavController) {
                 )
             }
         }
+
     }
 }
 
@@ -843,95 +986,519 @@ private fun ListTicks(read: Boolean, delivered: Boolean = read) {
     }
 }
 
-/** Big friendly tab pill with optional unread badge / new-status dot. */
+/**
+ * Owner round 83: compact icon-only floating navigation, styled to the
+ * standalone reference while retaining the app palette in light mode.
+ */
 @Composable
-private fun TopTab(
-    icon: ImageVector,
+internal fun HomeBottomNavigation(
+    selectedTab: MutableIntState,
+    visible: Boolean,
+    modalOpen: Boolean,
+    userId: String,
+    initialOrder: List<String>,
+    onSelect: (Int) -> Unit,
+    onOrderChanged: (List<String>) -> Unit,
+) {
+    // Read fast-changing tab and badge state in the pill's own restart scope.
+    // Reading these in KpApp used to invalidate the entire NavHost on every
+    // tab/badge update, even though only this independent window needs them.
+    val tab = selectedTab.intValue
+    var navOrder by remember(userId) {
+        mutableStateOf(HomeNavOrderPolicy.normalize(initialOrder))
+    }
+    var draggingId by remember(userId) { mutableStateOf<String?>(null) }
+    var dragStartOrder by remember(userId) { mutableStateOf(HomeNavOrderPolicy.defaultOrder) }
+    var dragStartIndex by remember(userId) { mutableStateOf(0) }
+    var dragDistancePx by remember(userId) { mutableStateOf(0f) }
+    var dragOffsetPx by remember(userId) { mutableStateOf(0f) }
+    var dragChanged by remember(userId) { mutableStateOf(false) }
+    val reorderHaptics = rememberHaptics()
+    LaunchedEffect(userId, initialOrder) {
+        if (draggingId == null) navOrder = HomeNavOrderPolicy.normalize(initialOrder)
+    }
+    val unreadChats = ScreenStore.convs.count { !it.optBoolean("hidden") && it.optInt("unread", 0) > 0 }
+    val unseenStatus = ScreenStore.statuses.any { !it.optBoolean("mine") && !it.optBoolean("allViewed") }
+    val density = LocalDensity.current
+    val darkMode = KpThemeMode.darkBlue
+    val idleTint = if (darkMode) Color(0xFFD3DEF5) else Muted
+    val selectedTint = if (darkMode) Color.White else Ink
+    val indicatorColor = if (darkMode) Color(0xB32B5BD7) else ActionBlue.copy(alpha = 0.16f)
+    // Keep the glass card translucent even when cross-window blur is unavailable.
+    val pillFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.82f) else Card.copy(alpha = 0.82f)
+    // Enlarge the complete capsule and its slots while keeping the glyphs at 27dp.
+    val navScale = 1.2f
+    val navContentYOffset = 3.dp
+    // The reference screenshot shows the glass card about 4 px above the
+    // icon row; offset only the card (and its native blur mask) another 1.5 dp.
+    val backgroundCardYOffset = navContentYOffset + 1.5.dp
+    val itemH = 44.dp * navScale
+    val gap = 4.dp * navScale
+    val capsulePadding = 6.dp * navScale
+    val navWindowWidth = 248.dp * navScale
+    val navWindowHeight = 56.dp * navScale
+    val backgroundCardWidth = 224.dp * navScale
+    val backgroundCardHeight = 46.dp * navScale
+    val navIconSize = 27.dp
+    val navWindowWidthPx = with(density) { navWindowWidth.roundToPx() }
+    val navWindowHeightPx = with(density) { navWindowHeight.roundToPx() }
+    val backgroundCardWidthPx = with(density) { backgroundCardWidth.roundToPx() }
+    val backgroundCardHeightPx = with(density) { backgroundCardHeight.roundToPx() }
+    val backgroundCardYOffsetPx = with(density) { backgroundCardYOffset.roundToPx() }
+    val navBlurRadiusPx = with(density) { 24.dp.roundToPx() }
+    val bottomOffsetPx = WindowInsets.navigationBars.getBottom(density) + with(density) { 16.dp.roundToPx() }
+    val indicatorSize = 40.dp * navScale
+    val indicatorEasing = remember { CubicBezierEasing(0.34f, 1.45f, 0.5f, 1f) }
+    val windowInteractive = visible && !modalOpen
+    val dialogWindowRef = remember { arrayOfNulls<android.view.Window>(1) }
+    var dialogAttached by remember { mutableStateOf(visible && !modalOpen) }
+    val baseContext = LocalContext.current
+    val navDialogContext = remember(baseContext) {
+        android.view.ContextThemeWrapper(baseContext, R.style.KpNavDialogTheme)
+    }
+    // Use a transparent rounded inset drawable so Android clips its native
+    // background blur to the same capsule bounds as the painted card.
+    val pillWindowBackground = remember(
+        navWindowWidthPx,
+        navWindowHeightPx,
+        backgroundCardWidthPx,
+        backgroundCardHeightPx,
+        backgroundCardYOffsetPx,
+    ) {
+        val insetX = ((navWindowWidthPx - backgroundCardWidthPx) / 2).coerceAtLeast(0)
+        val insetY =
+            ((navWindowHeightPx - backgroundCardHeightPx) / 2 + backgroundCardYOffsetPx).coerceAtLeast(0)
+        val insetBottom = (navWindowHeightPx - backgroundCardHeightPx - insetY).coerceAtLeast(0)
+        val rounded =
+            GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                setColor(android.graphics.Color.TRANSPARENT)
+                cornerRadius = backgroundCardHeightPx / 2f
+            }
+        InsetDrawable(
+            rounded,
+            insetX,
+            insetY,
+            (navWindowWidthPx - backgroundCardWidthPx - insetX).coerceAtLeast(0),
+            insetBottom,
+        )
+    }
+
+    LaunchedEffect(visible, modalOpen) {
+        if (modalOpen) {
+            // Preserve the old immediate hide while a sheet owns the screen.
+            dialogWindowRef[0]?.setWindowAnimations(0)
+            dialogAttached = false
+        } else {
+            dialogAttached = visible
+        }
+    }
+
+    if (dialogAttached) {
+        HomeNavPillDialog(navDialogContext) {
+            val dialogView = LocalView.current
+            val dialogWindow = (dialogView.parent as? DialogWindowProvider)?.window
+            DisposableEffect(
+                dialogWindow,
+                navWindowWidthPx,
+                navWindowHeightPx,
+                bottomOffsetPx,
+                navBlurRadiusPx,
+                pillWindowBackground,
+            ) {
+                var blurWindowManager: WindowManager? = null
+                var blurListener: java.util.function.Consumer<Boolean>? = null
+                if (dialogWindow != null) {
+                    dialogWindowRef[0] = dialogWindow
+                    // Let WindowManager animate the whole translucent surface.
+                    // Updating LayoutParams.y from Compose every frame forced a
+                    // relayout on each frame, causing the reported stutter.
+                    dialogWindow.setWindowAnimations(R.style.KpNavWindowAnimations)
+                    dialogWindow.setBackgroundDrawable(pillWindowBackground)
+                    dialogView.elevation = 0f
+                    dialogView.translationZ = 0f
+                    dialogWindow.decorView.elevation = 0f
+                    dialogWindow.decorView.translationZ = 0f
+                    dialogWindow.setDimAmount(0f)
+                    val params = dialogWindow.attributes
+                    params.format = PixelFormat.TRANSLUCENT
+                    params.width = navWindowWidthPx
+                    params.height = navWindowHeightPx
+                    params.windowAnimations = R.style.KpNavWindowAnimations
+                    params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                    params.x = 0
+                    params.y = bottomOffsetPx
+                    params.flags =
+                        (params.flags or
+                            WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or
+                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL) and
+                            WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv() and
+                            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        // The window y is the bottom inset; don't apply it twice.
+                        params.setFitInsetsSides(0)
+                        params.setFitInsetsTypes(0)
+                    }
+                    dialogWindow.attributes = params
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        blurWindowManager = dialogView.context.getSystemService(WindowManager::class.java)
+                        blurWindowManager?.let { manager ->
+                            val listener = java.util.function.Consumer<Boolean> { enabled ->
+                                setNavPillWindowBlur(dialogWindow, enabled, navBlurRadiusPx)
+                            }
+                            blurListener = listener
+                            setNavPillWindowBlur(dialogWindow, manager.isCrossWindowBlurEnabled, navBlurRadiusPx)
+                            val mainExecutor = java.util.concurrent.Executor { command ->
+                                dialogView.post { command.run() }
+                                Unit
+                            }
+                            manager.addCrossWindowBlurEnabledListener(mainExecutor, listener)
+                        }
+                    }
+                }
+                onDispose {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        blurListener?.let { listener ->
+                            blurWindowManager?.removeCrossWindowBlurEnabledListener(listener)
+                        }
+                    }
+                    if (dialogWindow != null) {
+                        setNavPillWindowBlur(dialogWindow, enabled = false, radiusPx = 0)
+                    }
+                    if (dialogWindowRef[0] === dialogWindow) dialogWindowRef[0] = null
+                }
+            }
+            BoxWithConstraints(
+                Modifier
+                    .size(navWindowWidth, navWindowHeight)
+                    .then(if (windowInteractive) Modifier else Modifier.clearAndSetSemantics {})
+                    .clip(CircleShape),
+            ) {
+                Box(
+                    Modifier
+                        .align(Alignment.Center)
+                        .offset(y = backgroundCardYOffset)
+                        .size(backgroundCardWidth, backgroundCardHeight)
+                        .clip(CircleShape)
+                        .background(pillFill),
+                )
+                val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4
+                val reorderStepPx = with(density) { (slotWidth + gap).toPx() }
+                val selectedId = HomeNavOrderPolicy.defaultOrder.getOrElse(tab.coerceIn(0, 3)) { "chats" }
+                val selectedPosition = navOrder.indexOf(selectedId).coerceIn(0, 3)
+                val indicatorX by animateDpAsState(
+                    targetValue = capsulePadding + (slotWidth - indicatorSize) * 0.5f +
+                        (slotWidth + gap) * selectedPosition.toFloat(),
+                    animationSpec = tween(450, easing = indicatorEasing),
+                    label = "navIndicatorX",
+                )
+                val indicatorY = capsulePadding + (itemH - indicatorSize) * 0.5f + navContentYOffset
+                Box(
+                    Modifier
+                        .offset(x = indicatorX, y = indicatorY)
+                        .size(indicatorSize)
+                        .clip(CircleShape)
+                        .background(indicatorColor),
+                )
+                Row(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = capsulePadding, vertical = capsulePadding)
+                        .offset(y = navContentYOffset),
+                    horizontalArrangement = Arrangement.spacedBy(gap),
+                ) {
+                    navOrder.forEach { itemId ->
+                        key(itemId) {
+                            val pageIndex = HomeNavOrderPolicy.defaultOrder.indexOf(itemId)
+                            val label = when (itemId) {
+                                "status" -> "Status"
+                                "calls" -> "Calls"
+                                "profile" -> "Profile"
+                                else -> "Chats"
+                            }
+                            NavItem(
+                                label = label,
+                                selected = tab == pageIndex,
+                                modifier = Modifier.weight(1f),
+                                height = itemH,
+                                iconSize = navIconSize,
+                                sizeScale = navScale,
+                                badge = if (itemId == "chats") unreadChats else 0,
+                                newStatus = itemId == "status" && unseenStatus,
+                                enabled = windowInteractive,
+                                idleTint = idleTint,
+                                selectedTint = selectedTint,
+                                reorderable = true,
+                                isDragging = draggingId == itemId,
+                                reorderOffsetPx = if (draggingId == itemId) dragOffsetPx else 0f,
+                                onClick = { onSelect(pageIndex) },
+                                onReorderStart = {
+                                    draggingId = itemId
+                                    dragStartOrder = navOrder
+                                    dragStartIndex = navOrder.indexOf(itemId).coerceAtLeast(0)
+                                    dragDistancePx = 0f
+                                    dragOffsetPx = 0f
+                                    dragChanged = false
+                                    reorderHaptics.tap()
+                                },
+                                onReorderDrag = { deltaX ->
+                                    if (draggingId == itemId && reorderStepPx > 0f) {
+                                        dragDistancePx += deltaX
+                                        val target =
+                                            (dragStartIndex + (dragDistancePx / reorderStepPx).roundToInt())
+                                                .coerceIn(0, HomeNavOrderPolicy.defaultOrder.lastIndex)
+                                        val next = HomeNavOrderPolicy.move(navOrder, itemId, target)
+                                        if (next != navOrder) {
+                                            navOrder = next
+                                            dragChanged = true
+                                            reorderHaptics.tap()
+                                        }
+                                        dragOffsetPx =
+                                            dragDistancePx - (target - dragStartIndex) * reorderStepPx
+                                    }
+                                },
+                                onReorderEnd = { cancelled ->
+                                    if (draggingId == itemId) {
+                                        if (cancelled && dragChanged) navOrder = dragStartOrder
+                                        val saveOrder = !cancelled && dragChanged
+                                        draggingId = null
+                                        dragOffsetPx = 0f
+                                        dragChanged = false
+                                        if (saveOrder) onOrderChanged(navOrder)
+                                    }
+                                },
+                            ) { tint ->
+                                when (itemId) {
+                                    "status" -> StatusGlyphIcon(tint, navIconSize)
+                                    "calls" -> Icon(
+                                        Icons.Filled.Call,
+                                        contentDescription = null,
+                                        tint = tint,
+                                        modifier = Modifier.size(navIconSize),
+                                    )
+                                    "profile" -> Icon(
+                                        Icons.Filled.Person,
+                                        contentDescription = null,
+                                        tint = tint,
+                                        modifier = Modifier.size(navIconSize),
+                                    )
+                                    else -> Icon(
+                                        painter = painterResource(R.drawable.ic_nav_chat),
+                                        contentDescription = null,
+                                        tint = tint,
+                                        modifier = Modifier.size(navIconSize),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun HomeNavPillDialog(
+    themedContext: android.content.Context,
+    content: @Composable () -> Unit,
+) {
+    CompositionLocalProvider(LocalContext provides themedContext) {
+        Dialog(
+            onDismissRequest = {},
+            properties = DialogProperties(
+                dismissOnBackPress = false,
+                dismissOnClickOutside = false,
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = true,
+            ),
+            content = content,
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun NavItem(
     label: String,
     selected: Boolean,
-    badge: Int = 0,
-    dot: Boolean = false,
     modifier: Modifier = Modifier,
+    height: androidx.compose.ui.unit.Dp,
+    iconSize: androidx.compose.ui.unit.Dp,
+    sizeScale: Float,
+    badge: Int = 0,
+    newStatus: Boolean = false,
+    enabled: Boolean = true,
+    idleTint: Color,
+    selectedTint: Color,
+    reorderable: Boolean,
+    isDragging: Boolean,
+    reorderOffsetPx: Float,
     onClick: () -> Unit,
+    onReorderStart: () -> Unit,
+    onReorderDrag: (Float) -> Unit,
+    onReorderEnd: (cancelled: Boolean) -> Unit,
+    icon: @Composable (Color) -> Unit,
 ) {
-    // Owner round 21: the tabs ride the blue action accent in dark-blue mode.
-    val tint = if (selected) ActionBlueDeep else Muted
-    val bg =
-        if (selected) Modifier.background(ActionBlue.copy(alpha = 0.16f), RoundedCornerShape(14.dp))
-        else Modifier
-    Row(
-        modifier
-            .padding(3.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .then(bg)
-            .clickable { onClick() }
-            .padding(horizontal = 6.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
-    ) {
-        Box {
-            if (label == "Status") {
-                // WhatsApp-style status glyph (ring + dot), not a plain circle.
-                StatusGlyphIcon(tint, 19.dp)
-            } else {
-                Icon(
-                    icon,
-                    contentDescription = label,
-                    tint = tint,
-                    modifier = Modifier.size(19.dp),
+    val tint by animateColorAsState(if (selected) selectedTint else idleTint, tween(250), label = "navTint")
+    val pop = remember { Animatable(1f) }
+    val firstRun = remember { booleanArrayOf(true) }
+    val popEasing = remember { CubicBezierEasing(0.34f, 1.56f, 0.64f, 1f) }
+    val badgeScale = remember { Animatable(1f) }
+    val badgeLabel = when {
+        badge <= 0 -> ""
+        badge > 99 -> "99+"
+        else -> badge.toString()
+    }
+    LaunchedEffect(selected) {
+        if (firstRun[0]) {
+            firstRun[0] = false
+            return@LaunchedEffect
+        }
+        if (selected) {
+            pop.snapTo(0.7f)
+            pop.animateTo(1.2f, tween(270, easing = popEasing))
+            pop.animateTo(1f, tween(180, easing = popEasing))
+        }
+    }
+    LaunchedEffect(badgeLabel) {
+        if (badgeLabel.isNotEmpty()) {
+            badgeScale.snapTo(0.7f)
+            badgeScale.animateTo(1.2f, tween(140, easing = FastOutSlowInEasing))
+            badgeScale.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = 500f))
+        } else {
+            badgeScale.snapTo(1f)
+        }
+    }
+    val accessibilityLabel = buildString {
+        append(label)
+        if (badge > 0) append(", $badge unread chats")
+        if (newStatus) append(", new updates")
+    }
+    val reorderGesture =
+        if (enabled && reorderable) {
+            Modifier.pointerInput(label, enabled) {
+                var started = false
+                detectDragGesturesAfterLongPress(
+                    onDragStart = {
+                        started = true
+                        onReorderStart()
+                    },
+                    onDragEnd = { if (started) onReorderEnd(false) },
+                    onDragCancel = { if (started) onReorderEnd(true) },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        if (started) onReorderDrag(dragAmount.x)
+                    },
                 )
             }
-            // r82-3 (owner: "nav bar a unread number ta ekdom baje vabe show
-            // hocche ... massage button er right corner a rekhe daw ar double
-            // number hole double line jeno na hoi"): the count used to sit
-            // INLINE after the label, stretching the pill and getting crushed
-            // into a two-line digit stack when the four tabs squeezed. It is
-            // an overlay pinned to the message icon's top-right corner now -
-            // zero width pressure, so a two-digit count can never wrap, and
-            // maxLines/softWrap hard-lock one line regardless.
-            if (badge > 0) {
+        } else Modifier
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(height)
+            // Do not clip this hit target: the unread badge intentionally
+            // overhangs the icon's corner and must remain completely visible.
+            .graphicsLayer {
+                translationX = if (isDragging) reorderOffsetPx else 0f
+                scaleX = if (isDragging) 1.08f else 1f
+                scaleY = if (isDragging) 1.08f else 1f
+            }
+            .then(reorderGesture)
+            .semantics(mergeDescendants = true) {
+                contentDescription = accessibilityLabel
+                role = Role.Tab
+                this.selected = selected
+            }
+            .clickable(
+                enabled = enabled,
+                role = Role.Tab,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.size(iconSize)) {
+            Box(
+                Modifier
+                    .align(Alignment.Center)
+                    .graphicsLayer { scaleX = pop.value; scaleY = pop.value },
+            ) {
+                icon(tint)
+            }
+            // The reference shows a single-line, capped unread-chat badge at
+            // the chat icon's top-right; red remains distinct from the tab tint.
+            if (badgeLabel.isNotEmpty()) {
                 Box(
                     Modifier
                         .align(Alignment.TopEnd)
-                        .offset(x = 9.dp, y = (-7).dp)
-                        .defaultMinSize(minWidth = 16.dp, minHeight = 16.dp)
+                        .offset(x = 6.dp * sizeScale, y = (-8).dp * sizeScale)
+                        .defaultMinSize(
+                            minWidth = 18.dp * sizeScale,
+                            minHeight = 18.dp * sizeScale,
+                        )
                         .clip(CircleShape)
-                        .background(ActionBlue)
-                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                        .background(Color(0xFFE24B4A))
+                        .border(1.5.dp * sizeScale, if (KpThemeMode.darkBlue) Color(0xFF14203D) else Card, CircleShape)
+                        .graphicsLayer { scaleX = badgeScale.value; scaleY = badgeScale.value }
+                        .padding(horizontal = 4.dp * sizeScale, vertical = 1.dp * sizeScale),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        if (badge > 99) "99+" else "$badge",
-                        color = ActionBlueInk,
-                        fontSize = 9.sp,
+                        badgeLabel,
+                        color = Color.White,
+                        fontSize = 11.sp * sizeScale,
                         fontWeight = FontWeight.Bold,
-                        lineHeight = 9.sp,
+                        lineHeight = 11.sp * sizeScale,
                         maxLines = 1,
                         softWrap = false,
                         style = androidx.compose.ui.text.TextStyle(platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)),
                     )
                 }
-            } else if (dot) {
-                Box(
-                    Modifier
-                        .align(Alignment.TopEnd)
-                        .offset(x = 6.dp, y = (-5).dp)
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(Green),
-                )
             }
         }
-        Spacer(Modifier.width(6.dp))
-        Text(
-            label,
-            color = tint,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            fontSize = 14.sp,
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Clip,
-        )
+    }
+}
+
+/**
+ * Page swipe uses the final pointer pass so a child chat-row swipe or list
+ * scroll gets first refusal. Horizontal movement of 70dp or more, with at
+ * least a 2:1 horizontal/vertical ratio, switches one adjacent home tab.
+ */
+private fun Modifier.homeTabSwipe(
+    activeTab: Int,
+    thresholdPx: Float,
+    onSwipe: (Int) -> Unit,
+): Modifier = pointerInput(activeTab, thresholdPx) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        var childConsumedMovement = false
+        var endPosition: Offset? = null
+        while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Final)
+            if (event.changes.any { it.id != down.id && it.pressed }) {
+                childConsumedMovement = true
+                break
+            }
+            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+            if (change.position != change.previousPosition && change.isConsumed) {
+                childConsumedMovement = true
+            }
+            if (!change.pressed) {
+                endPosition = change.position
+                break
+            }
+        }
+        val end = endPosition ?: return@awaitEachGesture
+        val dx = end.x - down.position.x
+        val dy = end.y - down.position.y
+        if (!childConsumedMovement && kotlin.math.abs(dx) >= thresholdPx && kotlin.math.abs(dx) >= 2f * kotlin.math.abs(dy)) {
+            val next = (activeTab + if (dx < 0f) 1 else -1).coerceIn(0, 3)
+            if (next != activeTab) onSwipe(next)
+        }
     }
 }
 
@@ -960,7 +1527,7 @@ private fun ChatListBody(
                 CircularProgressIndicator(color = ActionBlue)
             } else {
                 EmptyState(
-                    icon = Icons.Filled.Chat,
+                    icon = KpChatMessageVector(),
                     title = "No chats yet",
                     note = "Tap the gold button to message someone",
                 )
@@ -969,6 +1536,9 @@ private fun ChatListBody(
         return
     }
     CloseSwipeOnScroll(listState)
+    val listBottomPadding = with(LocalDensity.current) {
+        110.dp + WindowInsets.navigationBars.getBottom(this).toDp()
+    }
     // Owner round 33 (item 2): a chat that just moved to the top is shown,
     // not hidden above the fold (see KpKeepTop).
     KpKeepTop(listState, visible.firstOrNull()?.optString("id"))
@@ -1006,7 +1576,7 @@ private fun ChatListBody(
                 }
             },
         state = listState,
-        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 96.dp),
+        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = listBottomPadding),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(visible, key = { it.optString("id") }) { conv ->
@@ -1245,14 +1815,24 @@ private fun SwipeConvRow(
             }
         }
 
+        // Keep the source slot opaque while the live card is lifted. Without
+        // this blank card backing, the hidden swipe actions show through the
+        // now-empty slot behind the overlay for the whole sheet transition.
+        if (KpModalFocusState.focusedItem?.key == "chat:$convId") {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Card),
+            )
+        }
+
         /* the card itself, slid by the swipe (either direction) */
         var buzzedSide by remember { mutableStateOf(0) }
         Box(
             Modifier
                 .offset { IntOffset(-offset.roundToInt(), 0) }
                 .fillMaxSize()
-                .clip(RoundedCornerShape(16.dp))
-                .background(Card)
                 .pointerInput(conv.optString("id")) {
                     detectHorizontalDragGestures(
                         onDragEnd = {
@@ -1279,9 +1859,36 @@ private fun SwipeConvRow(
                     }
                 },
         ) {
-            ConvCard(conv, nav, revealedLeft || revealedRight) {
-                dragged = 0f
-                if (SwipeOpen.id == convId) SwipeOpen.id = null
+            KpLiveFocusItem(
+                key = "chat:$convId",
+                modifier = Modifier.fillMaxSize(),
+                targetScale = 1.035f,
+            ) { requestFocus ->
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Card),
+                ) {
+                    ConvCard(
+                        conv = conv,
+                        nav = nav,
+                        revealed = revealedLeft || revealedRight,
+                        onCollapse = {
+                            dragged = 0f
+                            if (SwipeOpen.id == convId) SwipeOpen.id = null
+                        },
+                        onFocusRequest = {
+                            // Close partial swipe reveal before lifting the row;
+                            // the existing 160ms return animation remains intact.
+                            dragged = 0f
+                            SwipeOpen.id = null
+                            requestFocus()
+                            // r103-5: long-press opens the sheet; Select remains an explicit action.
+                            ListSelect.sheetFor = conv
+                        },
+                    )
+                }
             }
         }
     }
@@ -1355,9 +1962,24 @@ internal fun friendlyPreview(raw: String): String {
     }
 }
 
+/** Search results do not open E2EE content; never surface a stale server placeholder. */
+internal fun conversationSearchPreview(conv: JSONObject): String {
+    val raw = conv.optText("lastMessage")
+    val wire = conv.optJSONObject("lastMessagePreview")?.optText("body").orEmpty()
+    val legacySealedMarker = raw == PushSeal.LEGACY_SEALED_PREVIEW &&
+        (wire.isBlank() || E2eeMsg.isEnvelope(wire))
+    return if (legacySealedMarker) "Message" else friendlyPreview(raw)
+}
+
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
-private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = false, onCollapse: () -> Unit = {}) {
+private fun ConvCard(
+    conv: JSONObject,
+    nav: NavController,
+    revealed: Boolean = false,
+    onCollapse: () -> Unit = {},
+    onFocusRequest: () -> Unit,
+) {
     val id = conv.optString("id")
     val haptics = rememberHaptics()
     // Owner round 32 (item 12): long-press = tick this row + open the sheet;
@@ -1411,12 +2033,7 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
     if (peek) ProfilePeekSheet(conv, nav) { peek = false }
     val longPress = {
         haptics.heavy()
-        // r103-5 (owner: "jekono chat item a tap hold korlei select Hobe na
-        // ... user jodi select a click kore tobei click Hobe"): long-press
-        // only OPENS the sheet now - it no longer activates select mode or
-        // ticks the row. Selection happens exclusively through the sheet's
-        // Select action.
-        ListSelect.sheetFor = conv
+        onFocusRequest()
     }
 
     Row(
@@ -1775,21 +2392,28 @@ private fun ChatRowSheet(
     val otherId = other?.optString("id").orEmpty()
     val handle = other?.optText("username").orEmpty().ifBlank { other?.optText("displayName").orEmpty() }
     val canGroup = !target.optBoolean("isGroup") && otherId.isNotBlank() && !isKpBot(otherId)
-    var confirmDelete by remember { mutableStateOf(false) }
+    val targetId = target.optString("id")
+    val sheetKey = "chat-actions:$targetId:${ids.joinToString(",")}"
+    val focusKey =
+        KpModalFocusState.focusedItem?.takeIf { it.key == "chat:$targetId" }?.key
+            ?: KpModalFocusState.pendingFocusKey?.takeIf { it == "chat:$targetId" }
+    var confirmDelete by remember(targetId) { mutableStateOf(false) }
+
     if (confirmDelete) {
-        // r68-7: the checkbox is the whole question ("tick korle duijoner thekei
-        // chat delete hoye jabe shob permanently, tick na korle just tar kache
-        // theke delete Hobe je koreche"); r69: the popup and the DELETE are the
-        // screen's shared pair (see ChatDeleteDialog above) — the swipe slots
-        // raise the very same dialog now.
+        // Keep the selected live row moving home before the destructive
+        // confirmation opens; the checkbox dialog remains the existing flow.
         val rowsToDelete =
             ids.mapNotNull { id -> ScreenStore.convs.firstOrNull { it.optString("id") == id } }
                 .ifEmpty { listOf(target) }
         ChatDeleteDialog(
             convs = rowsToDelete,
-            onDismiss = { confirmDelete = false },
+            onDismiss = {
+                confirmDelete = false
+                ListSelect.sheetFor = null
+            },
             onConfirm = { also ->
                 confirmDelete = false
+                ListSelect.sheetFor = null
                 haptics.heavy()
                 deleteChatsNow(scope, ids, also) {
                     android.widget.Toast.makeText(ctx, if (ids.size > 1) "Chats deleted" else "Chat deleted", android.widget.Toast.LENGTH_SHORT).show()
@@ -1798,46 +2422,69 @@ private fun ChatRowSheet(
                 }
             },
         )
-        return
-    }
-    KpSheet(onDismiss = onDismiss) {
-        KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red) { confirmDelete = true }
-        KpSheetRow(
-            if (allMuted) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
-            if (allMuted) "Unmute…" else "Mute…",
-        ) {
-            // r69: never one blind flag — the two-row chooser (call / messages)
-            // decides which half of every ticked chat is muted. It is hosted by
-            // the LIST (through ListSelect.muteFor), because this sheet is gone
-            // by the time the answer arrives.
-            haptics.tap()
-            ListSelect.muteFor = target
-            onDismiss()
-        }
-        KpSheetRow(Icons.Filled.PushPin, if (allPinned) "Unpin" else "Pin") {
-            haptics.confirm()
-            ids.forEach { ScreenStore.setPinned(it, !allPinned) }
-            ListSelect.clear()
-        }
-        if (canGroup) {
-            KpSheetRow(Icons.Filled.GroupAdd, "Create group with $handle") {
-                haptics.tap()
-                // Every ticked 1:1 peer rides along as a pre-picked member.
-                val peers =
-                    rows.filter { !it.optBoolean("isGroup") }
-                        .mapNotNull { it.optJSONObject("other")?.optString("id") }
-                        .filter { it.isNotBlank() && !isKpBot(it) }
-                        .ifEmpty { listOf(otherId) }
-                        .distinct()
-                ListSelect.clear()
-                nav.navigate("newgroup?with=${peers.joinToString(",")}")
+    } else {
+        val body: @Composable ColumnScope.() -> Unit = {
+            KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red) {
+                KpFocusSheetState.close { confirmDelete = true }
+            }
+            KpSheetRow(
+                if (allMuted) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
+                if (allMuted) "Unmute…" else "Mute…",
+            ) {
+                KpFocusSheetState.close {
+                    // r69: the two-row chooser decides which half of every
+                    // ticked chat is muted; never flip one blind flag.
+                    haptics.tap()
+                    ListSelect.muteFor = target
+                    onDismiss()
+                }
+            }
+            KpSheetRow(Icons.Filled.PushPin, if (allPinned) "Unpin" else "Pin") {
+                KpFocusSheetState.close {
+                    haptics.confirm()
+                    ids.forEach { ScreenStore.setPinned(it, !allPinned) }
+                    ListSelect.clear()
+                }
+            }
+            if (canGroup) {
+                KpSheetRow(Icons.Filled.GroupAdd, "Create group with $handle") {
+                    KpFocusSheetState.close {
+                        haptics.tap()
+                        // Every ticked 1:1 peer rides along as a pre-picked member.
+                        val peers =
+                            rows.filter { !it.optBoolean("isGroup") }
+                                .mapNotNull { it.optJSONObject("other")?.optString("id") }
+                                .filter { it.isNotBlank() && !isKpBot(it) }
+                                .ifEmpty { listOf(otherId) }
+                                .distinct()
+                        ListSelect.clear()
+                        nav.navigate("newgroup?with=${peers.joinToString(",")}")
+                    }
+                }
+            }
+            KpSheetRow(Icons.Filled.CheckCircle, "Select") {
+                KpFocusSheetState.close {
+                    haptics.tap()
+                    ListSelect.active = true
+                    if (targetId !in ListSelect.ids) ListSelect.ids.add(targetId)
+                    onDismiss()
+                }
             }
         }
-        KpSheetRow(Icons.Filled.CheckCircle, "Select") {
-            haptics.tap()
-            ListSelect.active = true
-            if (target.optString("id") !in ListSelect.ids) ListSelect.ids.add(target.optString("id"))
-            onDismiss()
+        val latestBody = rememberUpdatedState(body)
+        val hostedBody: @Composable ColumnScope.() -> Unit = remember(sheetKey) {
+            { latestBody.value.invoke(this) }
+        }
+        LaunchedEffect(sheetKey, focusKey) {
+            KpFocusSheetState.open(
+                KpFocusSheetRequest(
+                    key = sheetKey,
+                    ownerRoute = "main",
+                    focusKey = focusKey,
+                    onDismiss = onDismiss,
+                    content = hostedBody,
+                ),
+            )
         }
     }
 }
@@ -1849,9 +2496,9 @@ private fun HomeMenuItem(icon: ImageVector, label: String, onClick: () -> Unit) 
 }
 
 @Composable
-private fun HomeMenuSheet(onDismiss: () -> Unit, nav: NavController) {
+private fun HomeMenuSheet(onDismiss: () -> Unit, nav: NavController, onOpenProfile: () -> Unit) {
     KpSheet(onDismiss = onDismiss) {
-        HomeMenuItem(Icons.Filled.Person, "My Profile") { onDismiss(); nav.navigate("profile/${Store.myId()}") }
+        HomeMenuItem(Icons.Filled.Person, "My Profile") { onDismiss(); onOpenProfile() }
         HomeMenuItem(Icons.Filled.PersonAdd, "New contact") { onDismiss(); nav.navigate("newcontact") }
         HomeMenuItem(Icons.Filled.Contacts, "All contacts") { onDismiss(); nav.navigate("contacts") }
         HomeMenuItem(Icons.Filled.GroupAdd, "New group") { onDismiss(); nav.navigate("newgroup") }
@@ -1913,7 +2560,7 @@ private fun ProfilePeekSheet(conv: JSONObject, nav: NavController, onDismiss: ()
             }
             Spacer(Modifier.height(14.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                PeekAction(Icons.Filled.Chat, "Message") {
+                PeekAction(KpChatMessageVector(), "Message") {
                     onDismiss()
                     nav.navigate("chat/$id")
                 }
@@ -1954,7 +2601,6 @@ private fun PeekAction(icon: ImageVector, label: String, onClick: () -> Unit) {
             .size(50.dp)
             .clip(CircleShape)
             .background(circleButtonFill())
-            .border(1.dp, CircleButtonEdge, CircleShape)
             .clickable {
                 haptics.tap()
                 onClick()

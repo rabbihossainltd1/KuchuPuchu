@@ -7,9 +7,18 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -35,6 +44,8 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Root of the v3 app. Auth gate → main tabs (Chats / Status / Calls) with
@@ -43,7 +54,54 @@ import kotlinx.coroutines.launch
 @Composable
 fun KpApp() {
     val nav = rememberNavController()
+    val navEntry by nav.currentBackStackEntryAsState()
+    val homeTab = rememberSaveable { mutableIntStateOf(0) }
     val authed by Store.authed
+    val currentUser = Store.me
+    val accountId = currentUser?.optString("id").orEmpty()
+    val homeNavOrderJson = currentUser?.optJSONArray("homeNavOrder")?.toString().orEmpty()
+    val initialHomeNavOrder = remember(accountId, homeNavOrderJson) {
+        val saved = currentUser?.optJSONArray("homeNavOrder")
+        val ids = saved?.let { array -> List(array.length()) { array.optString(it) } }
+        HomeNavOrderPolicy.normalize(ids)
+    }
+    val homeNavOrderPending = currentUser?.optBoolean("_homeNavOrderPending") == true
+
+    // A reorder is cached immediately on this install, then retried through the
+    // authenticated account endpoint after reconnect/relaunch until the server
+    // confirms the same order.
+    LaunchedEffect(authed, accountId, homeNavOrderJson, homeNavOrderPending) {
+        if (!authed || accountId.isBlank() || !homeNavOrderPending) return@LaunchedEffect
+        val order = HomeNavOrderPolicy.normalize(
+            Store.me?.optJSONArray("homeNavOrder")?.let { array ->
+                List(array.length()) { array.optString(it) }
+            },
+        )
+        var retryDelayMs = 1_000L
+        while (true) {
+            try {
+                val response =
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        Api.patch("/api/me", JSONObject().put("homeNavOrder", JSONArray(order)))
+                    }
+                val savedUser = response.optJSONObject("user") ?: error("Missing saved profile")
+                val latest = Store.me
+                if (
+                    Store.myId() == accountId &&
+                    latest?.optJSONArray("homeNavOrder")?.toString() == homeNavOrderJson
+                ) {
+                    Store.saveMe(savedUser)
+                }
+                return@LaunchedEffect
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Retry while this order remains current; a newer drag cancels this effect.
+                kotlinx.coroutines.delay(retryDelayMs)
+                retryDelayMs = (retryDelayMs * 2).coerceAtMost(30_000L)
+            }
+        }
+    }
 
     // Owner round 13d: if the previous launch crashed, surface the captured
     // stack right away (Copy → paste to the developer).
@@ -99,7 +157,30 @@ fun KpApp() {
                     Cache.bust("/api/users/$uid")
                     Cache.bustAll("/api/users/$uid/")
                     Cache.bustAll("/api/conversations")
-                    if (ev.optBoolean("self")) Cache.bust("/api/me")
+                    if (ev.optBoolean("self")) {
+                        Cache.bust("/api/me")
+                        ScreenStore.appScope.launch {
+                            val fresh =
+                                runCatching {
+                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        Api.get("/api/me", true).optJSONObject("user")
+                                    }
+                                }.getOrNull()
+                            if (fresh != null && Store.myId() == uid) {
+                                val current = Store.me
+                                val localOrder = current?.optJSONArray("homeNavOrder")
+                                val serverOrder = fresh.optJSONArray("homeNavOrder")
+                                if (
+                                    current?.optBoolean("_homeNavOrderPending") == true &&
+                                    localOrder != null && localOrder.toString() != serverOrder?.toString()
+                                ) {
+                                    fresh.put("homeNavOrder", JSONArray(localOrder.toString()))
+                                    fresh.put("_homeNavOrderPending", true)
+                                }
+                                Store.saveMe(fresh)
+                            }
+                        }
+                    }
                 }
                 ScreenStore.pokeProfile()
                 ScreenStore.pokeInbox()
@@ -161,7 +242,31 @@ fun KpApp() {
         }
     }
 
-    Surface(Modifier.fillMaxSize(), color = Cream) {
+    val modalActive = KpModalBlurState.isActive
+    val modalWindowVisible = KpModalBlurState.hasVisibleWindow
+    val modalBlur = remember { Animatable(0f) }
+    LaunchedEffect(modalActive) {
+        if (modalActive) {
+            modalBlur.animateTo(30f, tween(260, easing = FastOutSlowInEasing))
+        } else {
+            // Release the backdrop early in the sheet's exit, not after the
+            // surface has nearly disappeared; keep the reduction even throughout.
+            modalBlur.animateTo(0f, tween(160, easing = LinearEasing))
+        }
+    }
+    val modalBlurRadius = modalBlur.value.dp
+    val currentDestination = navEntry?.destination?.route
+    val actualRoute =
+        if (currentDestination == "chat/{id}") "chat/${navEntry?.arguments?.getString("id") ?: ""}"
+        else currentDestination.orEmpty()
+    LaunchedEffect(actualRoute, KpFocusSheetState.request?.key) {
+        val request = KpFocusSheetState.request
+        if (request != null && request.ownerRoute != actualRoute && !KpFocusSheetState.closing) {
+            KpFocusSheetState.dismiss()
+        }
+    }
+    Box(Modifier.fillMaxSize()) {
+        Surface(Modifier.fillMaxSize().blur(modalBlurRadius), color = Cream) {
         if (!authed) {
             LoginScreen { Store.authed.value = true }
         } else {
@@ -188,7 +293,6 @@ fun KpApp() {
             // and the mirrored reaction buzzed a phone nobody was looking at.
             // Every reader (the notification path, the in-app sound, the unread
             // merge, the mirror) now sees what is really in front.
-            val navEntry by nav.currentBackStackEntryAsState()
             LaunchedEffect(navEntry) {
                 val e = navEntry
                 val dest = e?.destination?.route
@@ -206,9 +310,22 @@ fun KpApp() {
                 enterTransition = { fadeIn(tween(220)) + slideInHorizontally(tween(260)) { it / 6 } },
                 exitTransition = { fadeOut(tween(180)) },
                 popEnterTransition = { fadeIn(tween(220)) },
-                popExitTransition = { fadeOut(tween(200)) + slideOutHorizontally(tween(260)) { it / 6 } },
+                popExitTransition = {
+                    if (targetState.destination.route == "main") fadeOut(tween(180))
+                    else fadeOut(tween(200)) + slideOutHorizontally(tween(260)) { it / 6 }
+                },
             ) {
-                composable("main") { ChatListScreen(nav) }
+                composable(
+                    "main",
+                    // Keep the home surface stationary while the floating nav
+                    // owns its separate motion. This is not the crash fix by
+                    // itself: tab/badge reads are scoped to the nav-pill child
+                    // below so they do not restart this animated NavHost.
+                    enterTransition = { EnterTransition.None },
+                    exitTransition = { ExitTransition.None },
+                    popEnterTransition = { EnterTransition.None },
+                    popExitTransition = { ExitTransition.None },
+                ) { ChatListScreen(nav, homeTab) }
                 composable("newchat") { NewChatScreen(nav) }
                 // Owner round 32 (item 12): `with` = comma-separated user ids
                 // pre-picked as members ("Create group with …" from the list).
@@ -218,7 +335,22 @@ fun KpApp() {
                 ) { entry ->
                     CreateGroupScreen(nav, entry.arguments?.getString("with") ?: "")
                 }
-                composable("chat/{id}") { entry ->
+                composable(
+                    "chat/{id}",
+                    // Use NavHost's normal content transition for the chat page:
+                    // it moves the destination surface without layering/recomposing
+                    // the whole large ChatScreen on every animation frame.
+                    enterTransition = {
+                        fadeIn(tween(200, easing = FastOutSlowInEasing)) +
+                            slideInHorizontally(tween(220, easing = FastOutSlowInEasing)) { it / 4 }
+                    },
+                    exitTransition = { fadeOut(tween(180, easing = FastOutSlowInEasing)) },
+                    popEnterTransition = { fadeIn(tween(240, easing = FastOutSlowInEasing)) },
+                    popExitTransition = {
+                        fadeOut(tween(180, easing = FastOutSlowInEasing)) +
+                            slideOutHorizontally(tween(250, easing = FastOutSlowInEasing)) { it / 4 }
+                    },
+                ) { entry ->
                     val id = entry.arguments?.getString("id") ?: ""
                     ChatScreen(nav, id)
                 }
@@ -347,6 +479,39 @@ fun KpApp() {
             // the install confirm sheet opens right over the app.
             KpUpdateGate()
         }
+        }
+        val callFullscreen = CallEngine.instance?.let { it.active != null && !it.minimized } == true
+        val rootHaptics = rememberHaptics()
+        HomeBottomNavigation(
+            selectedTab = homeTab,
+            visible = authed && actualRoute == "main" && HomeNavState.visible.value && !callFullscreen && !modalWindowVisible,
+            modalOpen = modalWindowVisible,
+            userId = accountId,
+            initialOrder = initialHomeNavOrder,
+            onOrderChanged = { order ->
+                val existing = Store.me
+                if (existing != null && existing.optString("id") == accountId) {
+                    val optimistic = JSONObject(existing.toString())
+                        .put("homeNavOrder", JSONArray(order))
+                        .put("_homeNavOrderPending", true)
+                    Store.saveMe(optimistic)
+                }
+            },
+            onSelect = { index ->
+                rootHaptics.tap()
+                if (index != 0) {
+                    ListSelect.clear()
+                    ListSelect.muteFor = null
+                }
+                HomeNavState.visible.value = true
+                homeTab.intValue = index
+            },
+        )
+        // Keep one stable root call site for the live item throughout the
+        // sheet's entry, open, and return phases. This avoids a second handoff
+        // between a fallback overlay and the sheet host.
+        KpFocusedSheetHost()
+        KpRootFocusOverlayHost()
     }
 }
 
@@ -421,6 +586,9 @@ fun KpUpdateGate() {
     val installing = KpUpdate.installing
     val justUpdated = KpUpdate.justUpdated
     if (upd == null && ready == null && !downloading && !installing && !justUpdated) return
+    // Register at this composable boundary, not inside the Dialog's content,
+    // so dismissal releases the app blur as soon as the gate leaves composition.
+    KpRegisterModalBlur()
     // Non-skippable popup — Dialog with no outside/back dismiss so an update cannot be swiped away. The old KpSheet was dismissible and a bottom sheet.
     androidx.compose.ui.window.Dialog(
         onDismissRequest = {},
@@ -437,7 +605,7 @@ fun KpUpdateGate() {
         ) {
             androidx.compose.material3.Card(
                 shape = RoundedCornerShape(20.dp),
-                colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Card),
+                colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = GlassSheetSurface),
                 elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 8.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
