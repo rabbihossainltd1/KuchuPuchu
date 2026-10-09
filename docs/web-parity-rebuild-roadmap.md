@@ -49,7 +49,9 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 | **E1** viewers + shared media + view-once + albums | ✅ merged | PR #84 → `main` @ `de54086` |
 | **E2** voice note + document preview + forward + multi-select | ✅ merged | PR #86 → `main` @ `aaa206d` |
 | **F** status (feed + composer + viewer + privacy) | ✅ built | এই branch; নিচের হিসাব |
-| **G**–**I** | ⏳ বাকি | — |
+| **G** calls (flag-gated 1:1) | ✅ merged | PR #88 → `main` @ `375be10e` |
+| **H** Web Push (VAPID doorbell) | ✅ built | এই branch; নিচের হিসাব |
+| **I** | ⏳ বাকি | — |
 
 **Slice D-তে যা নামলো** (Worker বা Android-এ একটি লাইনও বদলায়নি):
 
@@ -103,6 +105,15 @@ background call survival — browser-এ অসম্ভব; UI-তে সৎভ
 
 Flag-gated 1:1 voice/video calls are implemented. Worker contract case 62, WebRTC runtime, ICE fallback, call history, ring controls, safety-code verification, browser limitations, and same-origin API integration are documented in `docs/web-calls.md`. Group calls remain explicitly out of scope. Browser E2E wiring is included in CI; the production `public/` PWA remains unchanged.
 
+## Slice H — Web Push ✅
+
+Flag-gated browser doorbell: VAPID subscriptions, Worker delivery, service-worker click routing and settings opt-in/revoke, documented in `docs/web-push.md`.
+
+- **The privacy gate:** the wire payload is GENERIC — `{"t":"kp.msg"}` / `{"t":"kp.call"}` (+ `"s":1` for a message-muted chat). No text, no names, no conversation id. Contract case 77 decrypts every delivery with the subscription's own P-256 key and fails on anything else.
+- **Worker:** `web_push_subs` registry (separate from the FCM `devices` table per plan §7.4), `GET/POST/DELETE /api/push/web`, RFC 8292 ES256 JWT + RFC 8291 `aes128gcm` on SubtleCrypto, fan-out to message (no-live-socket members only), missed call and ringing call, 404/410 + 5xx-streak cleanup, 8-browser cap. Off unless `VAPID_PRIVATE_KEY` is set (503/fail-closed).
+- **Web:** `VITE_KP_WEB_PUSH` flag (default off); Account → Notifications card with honest unsupported/denied/best-effort copy; the app-shell service worker (`web/service-worker.template.js`, NOT `public/sw.js`) shows the generic notification and hands the app a `kp-push-nav` message — call knocks land on Calls only in a calls-enabled build.
+- Gates: contract **78/78 case** (case 77 = 43 check), browser **6 test** (`test:web:push:e2e`), `verify:web-sw` pins the doorbell copy.
+
 ## কাজের নিয়ম (আগের বার যে ভুলটা হয়েছিল)
 
 1. **প্রতিটি slice শেষ হলেই commit + push।** কোনো বড় কাজ কখনও শুধু sandbox-এ রাখা যাবে না।
@@ -119,6 +130,6 @@ Flag-gated 1:1 voice/video calls are implemented. Worker contract case 62, WebRT
 ## খোলা প্রশ্ন (যেখানে পৌঁছালে সিদ্ধান্ত লাগবে)
 
 - Group video call-এর measured participant cap / SFU সিদ্ধান্ত (future work; Slice G-এর 1:1 scope-এর বাইরে)।
-- Web Push-এর VAPID key + subscription schema (Slice H-এর আগে)।
+- ~~Web Push-এর VAPID key + subscription schema (Slice H-এর আগে)।~~ সমাধান (Slice H): `VAPID_PRIVATE_KEY` secret থেকে পাবলিক key derive হয়; সাবস্ক্রিপশন `web_push_subs` টেবিলে; `docs/web-push.md`। বাকি শুধু লাইভ ডিপ্লয়-তে সিক্রেট বসানো — যেটা আলাদা অনুমতির কাজ।
 - নতুন `web/` অ্যাপ কখন production cutover হবে — `public/` প্রতিস্থাপন নাকি আলাদা path-এ parallel।
 - Long-lived session token WS query-তে রাখা বনাম short-lived ticket route (plan §৭.২)।

@@ -51,6 +51,8 @@ jobs:
         run: npm run test:web:status:e2e
       - name: Web calls browser tests
         run: npm run test:web:calls:e2e
+      - name: Web push browser tests
+        run: npm run test:web:push:e2e
       - name: Upload Web browser QA report
         if: failure()
         uses: actions/upload-artifact@v4

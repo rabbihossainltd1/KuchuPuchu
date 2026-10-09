@@ -31,6 +31,15 @@ export type Env = {
   MEDIA?: R2Bucket;
   FCM_CONFIG?: string;
   FCM_CREDENTIALS?: string;
+  /** Web Push (slice H): the VAPID P-256 private key as unpadded base64url
+   *  PKCS8. Unset ⇒ the whole browser-doorbell pipeline answers "not
+   *  configured" (503 on subscribe, `supported:false` on read, zero fan-out) —
+   *  fail-closed exactly like the google-login gate above. The public key is
+   *  DERIVED from this at runtime, so the pair can never disagree. */
+  VAPID_PRIVATE_KEY?: string;
+  /** Contact URI for the VAPID JWT `sub` claim (RFC 8292 wants mailto: or
+   *  https:). Defaults to the project push address when unset. */
+  VAPID_SUBJECT?: string;
   /** Optional self-hosted/purchased TURN for reliable calls on strict NATs.
    *  Comma-separated URLs, e.g. "turn:turn.example.com:3478,turns:turn.example.com:5349". */
   TURN_URLS?: string;
@@ -3403,6 +3412,22 @@ async function ensureSchema(db: D1Database) {
       meta TEXT, created_at TEXT NOT NULL
     )`,
     `CREATE TABLE IF NOT EXISTS devices (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+    // Slice H: browser push SUBSCRIPTIONS. Deliberately NOT the `devices`
+    // table: that registry is Android's FCM-token world, and the parity plan
+    // (§7.4) forbids ever reusing a phone's FCM route as a web subscription.
+    // A row is one browser's PushManager output: an endpoint URL plus the two
+    // public half-secrets (p256dh + auth) RFC 8291 needs to encrypt a doorbell.
+    // `failures` is the cleanup counter: a push service answering 5xx bumps it,
+    // and WEB_PUSH_FAILURE_LIMIT prunes the row — a dead browser must not stay
+    // encrypted-for forever.
+    `CREATE TABLE IF NOT EXISTS web_push_subs (
+      endpoint TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      failures INTEGER NOT NULL DEFAULT 0
+    )`,
     `CREATE TABLE IF NOT EXISTS blocks (owner_id TEXT NOT NULL, target_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (owner_id, target_id))`,
     // Owner round 34 (item 15): the blocked side's one "please unblock me"
     // per block. The row dies with the block (see the DELETE route), so a
@@ -3482,6 +3507,7 @@ async function ensureSchema(db: D1Database) {
     `CREATE INDEX IF NOT EXISTS idx_calls_active ON calls(callee_id, status)`,
     `CREATE INDEX IF NOT EXISTS idx_calls_caller ON calls(caller_id, created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_web_push_user ON web_push_subs(user_id)`,
     `CREATE INDEX IF NOT EXISTS idx_files_owner ON files(owner_id)`,
     // M2 (audit 2026-09-21): global (cross-isolate) fixed-window counters
     // backing rateLimitGlobal. PK serves the point lookups; the cron prunes
@@ -4844,8 +4870,316 @@ async function pushToUser(
   return false;
 }
 
+/* ---------------- Web Push: the browser doorbell (slice H) ----------------
+ *
+ * The phone's doorbell is FCM above. A browser has no FCM, so this pipeline
+ * speaks the open Web Push stack instead — VAPID-signed JWTs (RFC 8292) and
+ * RFC 8291 encrypted payloads — and it is a SEPARATE registry from `devices`
+ * on purpose: the parity plan (§7.4) forbids reusing the phone's FCM route as
+ * a web subscription.
+ *
+ * The load-bearing privacy rule: the payload is GENERIC. It carries a type and
+ * nothing else — no message text, no sender name, not even the conversation
+ * id. The push service (Google/Mozilla) learns only "something happened for
+ * this subscription", the notification shows a generic line, and the app
+ * fetches whatever it may show through the normal authenticated API once the
+ * user opens it. A web doorbell that carried a plaintext preview would be a
+ * hole straight through the KP1 seal, so contract case 77 decrypts every send
+ * and fails if the body text or the sender name is inside.
+ *
+ * Delivery is best-effort by definition (plan §3 line "Web Push + Notification
+ * API": delivery/closed-app wake is not guaranteed), and the UI says so.
+ */
+
+const WEB_PUSH_SUB_LIMIT = 8; // browsers per user; the oldest is evicted past this
+const WEB_PUSH_FAILURE_LIMIT = 5; // 5xx-streak that retires a subscription
+const WEB_PUSH_TTL_MESSAGE_S = 60; // a doorbell older than a minute is stale news
+const WEB_PUSH_TTL_CALL_S = 300; // a missed/ringing call may wait for the user a bit longer
+
+type WebPushSubRow = {
+  endpoint: string;
+  user_id: string;
+  p256dh: string;
+  auth: string;
+  created_at: string;
+  failures: number;
+};
+
+const B64URL_RE = /^[A-Za-z0-9_-]+$/;
+
+function base64UrlDecode(text: string): Uint8Array<ArrayBuffer> | null {
+  const clean = text.replace(/=+$/, "");
+  if (!clean || !B64URL_RE.test(clean) || clean.length % 4 === 1) return null;
+  try {
+    const bin = atob(clean.replace(/-/g, "+").replace(/_/g, "/"));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+function concatBytes(...parts: Uint8Array[]): Uint8Array<ArrayBuffer> {
+  const total = parts.reduce((sum, part) => sum + part.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+  return out;
+}
+
+/** HKDF-SHA256 extract+expand in one SubtleCrypto pass, returned as bytes. */
+async function hkdfBits(
+  ikm: Uint8Array<ArrayBuffer>,
+  salt: Uint8Array<ArrayBuffer>,
+  info: Uint8Array<ArrayBuffer>,
+  bytes: number,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const key = await crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    { name: "HKDF", hash: "SHA-256", salt, info },
+    key,
+    bytes * 8,
+  );
+  return new Uint8Array(bits);
+}
+
+type VapidKeys = {
+  privateKey: CryptoKey;
+  /** The uncompressed P-256 point (65 bytes) the client hands to PushManager. */
+  publicKeyRaw: Uint8Array;
+};
+
+let vapidKeyCache: { source: string; keys: VapidKeys } | null = null;
+
+async function vapidKeys(env: Env): Promise<VapidKeys | null> {
+  if (!env.VAPID_PRIVATE_KEY) return null;
+  if (vapidKeyCache && vapidKeyCache.source === env.VAPID_PRIVATE_KEY) return vapidKeyCache.keys;
+  try {
+    const der = base64UrlDecode(env.VAPID_PRIVATE_KEY);
+    if (!der) return null;
+    const privateKey = await crypto.subtle.importKey(
+      "pkcs8",
+      der,
+      { name: "ECDSA", namedCurve: "P-256" },
+      true, // extractable ONLY so the public point can be read back out
+      ["sign"],
+    );
+    const jwk = await crypto.subtle.exportKey("jwk", privateKey);
+    const x = base64UrlDecode(jwk.x ?? "");
+    const y = base64UrlDecode(jwk.y ?? "");
+    if (!x || x.length !== 32 || !y || y.length !== 32) return null;
+    const keys: VapidKeys = {
+      privateKey,
+      publicKeyRaw: concatBytes(new Uint8Array([0x04]), x, y),
+    };
+    vapidKeyCache = { source: env.VAPID_PRIVATE_KEY, keys };
+    return keys;
+  } catch {
+    return null;
+  }
+}
+
+/** The RFC 8292 VAPID JWT: ES256, audience = the push service's origin. */
+async function vapidJwt(env: Env, keys: VapidKeys, audience: string): Promise<string | null> {
+  try {
+    const header = { typ: "JWT", alg: "ES256" };
+    const claims = {
+      aud: audience,
+      exp: Math.floor(Date.now() / 1000) + 12 * 3600,
+      sub: env.VAPID_SUBJECT || "mailto:push@kuchupuchu.app",
+    };
+    const enc = new TextEncoder();
+    const signingInput = `${base64UrlEncode(enc.encode(JSON.stringify(header)))}.${base64UrlEncode(
+      enc.encode(JSON.stringify(claims)),
+    )}`;
+    const signature = await crypto.subtle.sign(
+      { name: "ECDSA", hash: "SHA-256" },
+      keys.privateKey,
+      enc.encode(signingInput),
+    );
+    return `${signingInput}.${base64UrlEncode(new Uint8Array(signature))}`;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Server-side reaper for stale RINGING calls.
+ * RFC 8291 `aes128gcm` record for one subscription: an ephemeral P-256 pair,
+ * ECDH against the browser's p256dh, the `WebPush: info` binding, then the
+ * content-encoding's own HKDF pair for key + nonce. The returned bytes are the
+ * whole request body (header block + ciphertext).
+ */
+async function encryptWebPush(
+  sub: Pick<WebPushSubRow, "p256dh" | "auth">,
+  plaintext: Uint8Array<ArrayBuffer>,
+): Promise<{ body: Uint8Array<ArrayBuffer>; ephPublic: Uint8Array<ArrayBuffer> } | null> {
+  try {
+    const uaPublic = base64UrlDecode(sub.p256dh);
+    const authSecret = base64UrlDecode(sub.auth);
+    if (!uaPublic || uaPublic.length !== 65 || !authSecret || authSecret.length !== 16) return null;
+    const pair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
+      "deriveBits",
+    ]);
+    const uaKey = await crypto.subtle.importKey(
+      "raw",
+      uaPublic,
+      { name: "ECDH", namedCurve: "P-256" },
+      false,
+      [],
+    );
+    const ecdh = new Uint8Array(
+      await crypto.subtle.deriveBits({ name: "ECDH", public: uaKey }, pair.privateKey, 256),
+    );
+    const ephPublic = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey));
+    const enc = new TextEncoder();
+    // PRK = HKDF(auth_secret, ecdh); IKM = Expand(PRK, "WebPush: info" ‖ 0 ‖ ua ‖ as)
+    const ikm = await hkdfBits(
+      ecdh,
+      authSecret,
+      concatBytes(enc.encode("WebPush: info"), new Uint8Array([0]), uaPublic, ephPublic),
+      32,
+    );
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const cek = await hkdfBits(ikm, salt, enc.encode("Content-Encoding: aes128gcm\0"), 16);
+    const nonce = await hkdfBits(ikm, salt, enc.encode("Content-Encoding: nonce\0"), 12);
+    const aesKey = await crypto.subtle.importKey("raw", cek, "AES-GCM", false, ["encrypt"]);
+    // aes128gcm delimiter: plaintext ‖ 0x02 marks the FINAL record.
+    const padded = concatBytes(plaintext, new Uint8Array([0x02]));
+    const ciphertext = new Uint8Array(
+      await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, aesKey, padded),
+    );
+    const recordSize = 4096;
+    const header = concatBytes(
+      salt,
+      new Uint8Array([
+        (recordSize >>> 24) & 0xff,
+        (recordSize >>> 16) & 0xff,
+        (recordSize >>> 8) & 0xff,
+        recordSize & 0xff,
+      ]),
+      new Uint8Array([ephPublic.length]),
+      ephPublic,
+    );
+    return { body: concatBytes(header, ciphertext), ephPublic };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Deliver one generic doorbell to one subscription and keep the registry
+ * honest from the push service's answers: 404/410 = the browser is gone (the
+ * row dies at once), a 5xx bumps the failure counter until the limit retires
+ * it, and a success resets the counter.
+ */
+async function sendWebPush(
+  env: Env,
+  db: D1Database,
+  sub: WebPushSubRow,
+  payload: string,
+  ttlSeconds: number,
+): Promise<boolean> {
+  const keys = await vapidKeys(env);
+  if (!keys) return false;
+  let audience: string;
+  try {
+    audience = new URL(sub.endpoint).origin;
+  } catch {
+    await run(db, "DELETE FROM web_push_subs WHERE endpoint = ?", sub.endpoint).catch(() => {});
+    return false;
+  }
+  const jwt = await vapidJwt(env, keys, audience);
+  if (!jwt) return false;
+  const encrypted = await encryptWebPush(sub, new TextEncoder().encode(payload));
+  if (!encrypted) {
+    // A subscription this worker cannot encrypt for is dead weight.
+    await run(db, "DELETE FROM web_push_subs WHERE endpoint = ?", sub.endpoint).catch(() => {});
+    return false;
+  }
+  try {
+    const res = await fetch(sub.endpoint, {
+      method: "POST",
+      headers: {
+        authorization: `WebPush ${jwt}`,
+        "content-encoding": "aes128gcm",
+        "content-type": "application/octet-stream",
+        "crypto-key": `p256ecdsa=${base64UrlEncode(keys.publicKeyRaw)}`,
+        ttl: String(ttlSeconds),
+      },
+      body: encrypted.body,
+    });
+    if (res.status >= 200 && res.status < 300) {
+      if (sub.failures > 0) {
+        await run(db, "UPDATE web_push_subs SET failures = 0 WHERE endpoint = ?", sub.endpoint);
+      }
+      return true;
+    }
+    if (res.status === 404 || res.status === 410) {
+      await run(db, "DELETE FROM web_push_subs WHERE endpoint = ?", sub.endpoint).catch(() => {});
+      return false;
+    }
+    if (res.status !== 429) {
+      const failures = sub.failures + 1;
+      if (failures >= WEB_PUSH_FAILURE_LIMIT) {
+        await run(db, "DELETE FROM web_push_subs WHERE endpoint = ?", sub.endpoint).catch(() => {});
+      } else {
+        await run(
+          db,
+          "UPDATE web_push_subs SET failures = ? WHERE endpoint = ?",
+          failures,
+          sub.endpoint,
+        );
+      }
+    }
+    return false;
+  } catch {
+    // Network trouble is transient; the 5xx counter, not an exception, retires
+    // a subscription.
+    return false;
+  }
+}
+
+/**
+ * Fan the generic doorbell out to every one of the user's browser
+ * subscriptions. Returns whether ANY delivery was accepted. The payload is
+ * built here and nowhere else — one place guarantees it stays generic.
+ * `silent` rides as `s:1` so a chat muted for messages still updates its
+ * browser quietly instead of ringing (Android's silent-channel mirror).
+ */
+async function webPushToUser(
+  env: Env,
+  db: D1Database,
+  userId: string,
+  kind: "kp.msg" | "kp.call",
+  ttlSeconds: number,
+  silent = false,
+): Promise<boolean> {
+  if (!env.VAPID_PRIVATE_KEY) return false;
+  const subs = await all<WebPushSubRow>(
+    db,
+    "SELECT * FROM web_push_subs WHERE user_id = ?",
+    userId,
+  );
+  if (subs.length === 0) return false;
+  const payload = JSON.stringify(silent ? { t: kind, s: 1 } : { t: kind });
+  let anyAccepted = false;
+  await Promise.all(
+    subs.map(async (sub) => {
+      try {
+        if (await sendWebPush(env, db, sub, payload, ttlSeconds)) anyAccepted = true;
+      } catch {
+        /* one dead browser must not sink the others */
+      }
+    }),
+  );
+  return anyAccepted;
+}
+
+/** Server-side reaper for stale RINGING calls.
  *
  * The MISSED transition + `missed_call` push used to live ONLY inside
  * GET /api/calls/active, so when both phones were backgrounded nobody polled
@@ -5363,6 +5697,14 @@ async function notifyMissedCall(
       ? { title: `Missed call · ${name}`, body, channel: MISSED_CALL_CHANNEL, tag: callTag(row.id) }
       : undefined,
   );
+  // Slice H web doorbell: the same best-effort knock for browsers, generic
+  // payload, and only when no socket is live (an open tab's Calls poll paints
+  // its own red row). The caller's NAME stays out of it — the phone needs the
+  // name for its tray card, but the web notification opens the app and lets
+  // the authenticated API say who called.
+  if (live <= 0) {
+    await webPushToUser(env, db, row.callee_id, "kp.call", WEB_PUSH_TTL_CALL_S);
+  }
 }
 
 /* ---------------- system messages + call log ---------------- */
@@ -8993,6 +9335,95 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     return json({ ok: true });
   }
 
+  /* ---------- Web Push subscription registry (slice H) ----------
+   * A SEPARATE registry from `devices` (the phone's FCM tokens). The parity
+   * plan (§7.4) is explicit: a phone's FCM route is never reused as a web
+   * subscription. The payload this registry feeds is generic — see
+   * webPushToUser — so subscribing here hands the server a doorbell, not the
+   * right to read anything.
+   */
+
+  if (path === "/api/push/web" && method === "GET") {
+    // Capability + the VAPID public key the browser hands to PushManager.
+    // Deliberately says nothing about OTHER users; `subscriptions` is only
+    // ever the caller's own rows.
+    const keys = await vapidKeys(env);
+    const mine = await all<WebPushSubRow>(
+      db,
+      "SELECT * FROM web_push_subs WHERE user_id = ? ORDER BY created_at DESC",
+      uid,
+    );
+    return json({
+      supported: keys !== null,
+      publicKey: keys ? base64UrlEncode(keys.publicKeyRaw) : null,
+      subscriptions: mine.map((sub) => ({
+        endpoint: sub.endpoint,
+        createdAt: sub.created_at,
+      })),
+    });
+  }
+
+  if (path === "/api/push/web" && method === "POST") {
+    rateLimit(`webpush:${uid}`, 20, 5);
+    if (!env.VAPID_PRIVATE_KEY) fail(503, "Web Push is not configured on this server.");
+    const endpoint = String(body.endpoint ?? "");
+    const p256dh = String(body.p256dh ?? "");
+    const auth = String(body.auth ?? "");
+    if (!/^https:\/\//.test(endpoint) || endpoint.length > 2048)
+      fail(400, "A Web Push subscription needs a valid https endpoint.", "BAD_ENDPOINT");
+    const sub: Pick<WebPushSubRow, "p256dh" | "auth"> = { p256dh, auth };
+    if (!(await encryptWebPush(sub, new TextEncoder().encode("probe")))) {
+      fail(400, "A Web Push subscription needs valid p256dh and auth keys.", "BAD_KEYS");
+    }
+    // Enforce the per-user browser cap BEFORE the insert: evict the oldest so
+    // a user who signs into nine browsers keeps the newest eight, not a pile.
+    const count = await one<{ n: number }>(
+      db,
+      "SELECT COUNT(*) AS n FROM web_push_subs WHERE user_id = ?",
+      uid,
+    );
+    if ((count?.n ?? 0) >= WEB_PUSH_SUB_LIMIT) {
+      await run(
+        db,
+        `DELETE FROM web_push_subs WHERE endpoint IN (
+           SELECT endpoint FROM web_push_subs WHERE user_id = ?
+           ORDER BY created_at ASC LIMIT ?
+         )`,
+        uid,
+        (count?.n ?? 0) - WEB_PUSH_SUB_LIMIT + 1,
+      );
+    }
+    // Re-subscribing the SAME endpoint (PushManager renews keys on a browser
+    // update) must replace the old row, not duplicate it — endpoint is the PK.
+    await run(
+      db,
+      `INSERT INTO web_push_subs (endpoint, user_id, p256dh, auth, created_at, failures)
+       VALUES (?, ?, ?, ?, ?, 0)
+       ON CONFLICT(endpoint) DO UPDATE SET
+         p256dh = excluded.p256dh, auth = excluded.auth,
+         created_at = excluded.created_at, failures = 0`,
+      endpoint,
+      uid,
+      p256dh,
+      auth,
+      nowIso(),
+    );
+    return json({ ok: true }, 201);
+  }
+
+  if (path === "/api/push/web" && method === "DELETE") {
+    const endpoint = String(body.endpoint ?? "");
+    if (!endpoint) fail(400, "Which subscription to remove?", "BAD_ENDPOINT");
+    const removed = await run(
+      db,
+      "DELETE FROM web_push_subs WHERE endpoint = ? AND user_id = ?",
+      endpoint,
+      uid,
+    );
+    if (removed === 0) fail(404, "That subscription is not registered here.", "NOT_FOUND");
+    return json({ ok: true });
+  }
+
   // Client breadcrumbs: the app reports doc-open/push-receive stages so
   // "kichui hoi na" becomes exact evidence instead of a guess.
   if (path === "/api/debug/clientlog" && method === "POST") {
@@ -9929,6 +10360,21 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         },
         fallbackNote,
       );
+      // Slice H web doorbell: browsers with NO live socket are the only ones
+      // that need a push — an open tab already got the WS poke. The payload is
+      // generic (see webPushToUser): never a preview, never a name, so a muted
+      // chat can still ring silently without leaking why. Hidden chats were
+      // already short-circuited above (no push of any kind).
+      if (live <= 0) {
+        await webPushToUser(
+          env,
+          db,
+          memberId.user_id,
+          "kp.msg",
+          WEB_PUSH_TTL_MESSAGE_S,
+          memberId.muted_msg === 1,
+        );
+      }
       // N4 -> r84-4 (owner r84 #4: "massage delivered double tick er system a
       // problem ache opponent all open na korle double tick hoi na mane user
       // background a notification peleo delivered dekhai na"): for the owner
@@ -10949,6 +11395,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             nowIso(),
             callId,
           );
+        }
+        // Slice H web doorbell for a RINGING call: best-effort by definition
+        // (plan §3: no full-screen takeover from a browser) — the notification
+        // opens the Calls tab, and its payload is generic: the caller's name is
+        // FCM-card fuel for the phone, never web-push cargo. A live socket
+        // means the browser tab rings itself through the /active poll, so the
+        // knock only goes out without one.
+        if (live <= 0) {
+          await webPushToUser(env, db, other, "kp.call", WEB_PUSH_TTL_CALL_S);
         }
       })(),
     );

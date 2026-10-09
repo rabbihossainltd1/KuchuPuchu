@@ -23,13 +23,14 @@
     "security:deps": "npm audit --omit=dev --audit-level=critical",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
-    "ci": "npm run format:check && npm run typecheck && npm run typecheck:web && npm run check:web-stickers && npm run build:web && npm run verify:web-sw && npm run test && npm run test:web:e2e && npm run test:web:account:e2e && npm run test:web:messaging:e2e && npm run test:web:status:e2e && npm run test:web:calls:e2e && npm run security:secrets && npm run validate:android",
+    "ci": "npm run format:check && npm run typecheck && npm run typecheck:web && npm run check:web-stickers && npm run build:web && npm run verify:web-sw && npm run test && npm run test:web:e2e && npm run test:web:account:e2e && npm run test:web:messaging:e2e && npm run test:web:status:e2e && npm run test:web:calls:e2e && npm run test:web:push:e2e && npm run security:secrets && npm run validate:android",
     "validate:android": "tsx scripts/validate-android.ts",
     "test:web:messaging:e2e": "playwright test --config playwright.messaging.config.ts",
     "test:web:status:e2e": "playwright test --config playwright.status.config.ts",
     "generate:web-stickers": "tsx scripts/generate-web-stickers.ts",
     "check:web-stickers": "tsx scripts/generate-web-stickers.ts --check",
-    "test:web:calls:e2e": "playwright test --config playwright.calls.config.ts"
+    "test:web:calls:e2e": "playwright test --config playwright.calls.config.ts",
+    "test:web:push:e2e": "playwright test --config playwright.push.config.ts"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",

@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState, type ReactNode } from "react";
+import { Suspense, lazy, useEffect, useState, type ReactNode } from "react";
 import { isWebFeatureEnabled } from "./featureFlags";
 import { BrandMark, Icon, type IconName } from "./icons";
 import { RouteLink } from "./RouteLink";
@@ -180,6 +180,26 @@ export default function App() {
   const messagingEnabled = isWebFeatureEnabled("messaging");
   const statusesEnabled = isWebFeatureEnabled("statuses");
   const callsEnabled = isWebFeatureEnabled("calls");
+
+  // Slice H: a doorbell click on an ALREADY-OPEN window arrives as a
+  // postMessage from the service worker (the click's own navigation would
+  // only open a new tab). The worker hands over the target path; the app
+  // decides the real section, because /calls only exists in a calls-enabled
+  // build and every other knock lands on the chat list.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+    const onPushNav = (event: MessageEvent) => {
+      const data = event.data as { type?: string; path?: string } | null;
+      if (!data || data.type !== "kp-push-nav") return;
+      if (data.path === "/calls" && callsEnabled) {
+        navigate({ kind: "section", section: "calls" });
+      } else {
+        navigate({ kind: "section", section: "chats" });
+      }
+    };
+    navigator.serviceWorker.addEventListener("message", onPushNav);
+    return () => navigator.serviceWorker.removeEventListener("message", onPushNav);
+  }, [navigate, callsEnabled]);
   const isNotFound = route.kind === "not-found";
   const isConversation = route.kind === "conversation";
   const isAccountRoute = routeIsAccount(route);
