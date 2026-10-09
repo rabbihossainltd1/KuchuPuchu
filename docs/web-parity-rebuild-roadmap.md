@@ -155,15 +155,18 @@ assets root — owner-approved direct replacement. Full mechanics in
   can never be stale and no dashboard change was needed.
 - **Prod flags:** account + messaging + statuses + media on; calls off (plan
   default), push off (VAPID unset).
-- **Headers:** `[[assets.rules]]` — immutable hashed bundles, `no-store`
-  `/sw.js`, and the CSP as a server header including `frame-ancestors 'self'`
-  (slice I's deploy-day promise); the meta CSP left `index.html`.
+- **Headers:** `web/public/_headers` (the documented Workers Assets
+  mechanism) — `no-store` `/sw.js`, and the CSP as a server header including
+  `frame-ancestors 'self'` (slice I's deploy-day promise) on every document;
+  the meta CSP left `index.html`. (A first attempt at `[[assets.rules]]` was
+  silently ignored by wrangler — the live deploy proved it and the follow-up
+  moved to `_headers`.)
 - **SW migration:** the new worker deletes retired `kp-shell-*` caches on
   activation; rollback is symmetric (legacy activate deletes ours). Existing
   installs cross over in about one reload.
 - **Retirement:** `public/` kept only as fixtures/rollback reference
   (`public/RETIRED.md`).
-- Gates: case 79 (22 checks), new `test:web:cutover:e2e` (3 tests, the only
+- Gates: case 79 (20 checks), new `test:web:cutover:e2e` (3 tests, the only
   suite with service workers allowed, built with the exact prod script), full
   `npm run ci` green; live `curl -sI` header check after deploy.
 - Folded hardening: the voice player's `ended` state is now honest
