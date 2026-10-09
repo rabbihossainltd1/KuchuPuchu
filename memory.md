@@ -959,6 +959,13 @@ Owner: "ager session ei kaj korte korte dead hoye geche … kota kaj hoyeche" �
 - Web roadmap next (historical; current working handoff is the Android polish section below): G calls (flag default-off; only with a measured participant cap for groups), H Web Push (VAPID design), I hardening.
 
 
+## Web P3 slice G — calls (2026-10-05)
+- Implemented flag-default-off 1:1 voice/video calls in `web/src/calls/`; Worker contract case 62 is green (252 checks), web typecheck is clean, and `docs/web-calls.md` records scope and native-only disclosures.
+- Fixed real WebRTC defects found by two-context testing: platform event forwarding/raw track unwrapping, SDP CRLF preservation, MediaStream association for tracks/transceivers, and ICE cursor advancement only after candidate application.
+- Added `test:web:calls:e2e` to package scripts and CI. Production `public/` remains unchanged.
+- Browser execution in this sandbox was blocked by missing host `libnspr4.so` for Playwright Chromium; the CI workflow installs Chromium with dependencies.
+- CI FIX (2026-10-09, commit after 5f75fd3): every server-finalised refusal (LINE_BUSY, block, declined ring) now clears itself after one beat instead of waiting for a Close tap; the calls E2E detects the closed audio-output picker trigger (setSinkId browsers drew a picker, never an open listbox) and installs the screen-share NotAllowedError refusal itself, because headless Chromium does not reliably refuse getDisplayMedia. Local suite 45/45 green; CI re-dispatched on the branch (pull_request events stopped firing repo-wide after 2026-10-05; workflow_dispatch is the working trigger).
+
 ## Android polish — 2026-10-08 (current branch: `fix/android-chat-polish`)
 - Scope: complete the three requested Android fixes on a feature branch; no release or production deploy.
 - Navigation card: `ChatListScreen.kt` now offsets only the glass background and matching native-blur mask to `navContentYOffset + 1.5.dp`; icons and indicator keep the original `3.dp` content offset.
@@ -967,3 +974,4 @@ Owner: "ager session ei kaj korte korte dead hoye geche … kota kaj hoyeche" �
 - Local verification: cases 37 (21/21), 47 (131/131), 68 (6/6), 62, 65, 70 and 71 passed; modified `.mjs` files pass syntax/Prettier checks and `git diff --check` is clean. The case-32 changed source witnesses were checked separately; its full scenario needs `better-sqlite3`.
 - Not run locally: `npm test`, JVM/Android build, lint, or emulator checks. The checkout has no `node_modules`, only Java 11, and no Android SDK/`adb`; no large project dependency install was attempted. PR GitHub CI is the planned full gate.
 - Feature commits: `5cdb813` navigation; `d62f870` tapped status; `2e596d5` cold emoji fallback. Owner later explicitly superseded the earlier PR-only workflow and authorized a direct push to `main` with CI monitoring; the handoff state is kept in `memory.md` and `PROJECT_UNDERSTANDING.md`. `git fetch origin main` showed the local branch was 0 behind / 5 ahead; `git push origin HEAD:main` failed at the HTTPS username prompt (`terminal prompts disabled`). No CI started and no remote PR exists. `gh` is absent, the GitHub connector is unsupported, and no credential was requested in chat or stored. Next: owner configures Git authentication in the workspace (do not send a token in chat); then retry the direct main push and monitor CI only after a successful push. No release/deploy.
+

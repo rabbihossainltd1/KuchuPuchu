@@ -33,6 +33,22 @@ const StatusWorkspace = lazy(() =>
   })),
 );
 
+/**
+ * Calls are the largest lazy chunk of all: the WebRTC engine, the peer runtime
+ * and the call surfaces. With the `calls` flag off — every production build
+ * today — none of it is downloaded, parsed or executed, and no call request is
+ * ever made.
+ *
+ * Unlike the other workspaces this one is mounted ABOVE the routes, not inside
+ * one: a ring has to be catchable while the reader is on Chats, on Status or on
+ * a deep link, because the browser has no system call UI to hand it to.
+ */
+const CallsLayer = lazy(() =>
+  import("./calls/CallsLayer").then((module) => ({
+    default: module.CallsLayer,
+  })),
+);
+
 type View = {
   id: Exclude<SectionId, "account">;
   label: string;
@@ -163,6 +179,7 @@ export default function App() {
   const accountEnabled = isWebFeatureEnabled("accountIntegration");
   const messagingEnabled = isWebFeatureEnabled("messaging");
   const statusesEnabled = isWebFeatureEnabled("statuses");
+  const callsEnabled = isWebFeatureEnabled("calls");
   const isNotFound = route.kind === "not-found";
   const isConversation = route.kind === "conversation";
   const isAccountRoute = routeIsAccount(route);
@@ -170,12 +187,20 @@ export default function App() {
   const isChatsArea =
     route.kind === "conversation" || (route.kind === "section" && route.section === "chats");
   const isStatusArea = route.kind === "section" && route.section === "statuses";
+  const isCallsArea = route.kind === "section" && route.section === "calls";
   // With messaging on, the chat list itself carries private data, so it needs a
   // verified session too — not just the deep-link and account routes. A status
   // feed is other people's pictures and a reply is a sealed message, so it is
-  // the same rule.
+  // the same rule. A call history is a list of who you spoke to and when, and a
+  // live call holds an open signalling socket — the same rule again.
   const needsSession =
-    protectedRoute || (messagingEnabled && isChatsArea) || (statusesEnabled && isStatusArea);
+    protectedRoute ||
+    (messagingEnabled && isChatsArea) ||
+    (statusesEnabled && isStatusArea) ||
+    (callsEnabled && isCallsArea);
+  // The engine polls and listens for rings on every route, not only on /calls,
+  // so its session requirement is the flag's, not the route's.
+  const callsLive = callsEnabled && accountEnabled;
   const goToChats = () => navigate({ kind: "section", section: "chats" });
   const logOutToChats = () => {
     navigate({ kind: "section", section: "chats" }, { replace: true });
@@ -193,18 +218,18 @@ export default function App() {
     return <AccountRolloutGate onBack={goToChats} />;
   }
 
-  if ((messagingEnabled || statusesEnabled) && needsSession && !accountEnabled) {
+  if ((messagingEnabled || statusesEnabled || callsEnabled) && needsSession && !accountEnabled) {
     return (
       <FullPageNotice
         eyebrow="MESSAGING ROLLOUT"
-        title="Chats and status need account access"
-        body="Messaging and status load private conversation data, so they require a verified browser session. That session lives behind the account rollout flag, which is off in this build. No conversation or status request is made until both flags are on."
+        title="Chats, status and calls need account access"
+        body="Messaging, status and calls load private conversation data, so they require a verified browser session. That session lives behind the account rollout flag, which is off in this build. No conversation, status or call request is made until both flags are on."
         onBack={goToChats}
       />
     );
   }
 
-  if ((accountEnabled || messagingEnabled || statusesEnabled) && needsSession) {
+  if ((accountEnabled || messagingEnabled || statusesEnabled || callsEnabled) && needsSession) {
     if (authStatus === "restoring") {
       return (
         <main className="auth-page">
@@ -236,15 +261,18 @@ export default function App() {
         : null;
   const active = views.find((view) => view.id === activeViewId) ?? views[0]!;
   const sectionHeading = isNotFound ? "Not found" : active.label;
+  const callsLine = callsEnabled
+    ? "Calls are enabled for this opt-in build: 1:1 voice and video in the browser, with the call history tab. Group calls stay on the phone."
+    : "Calls remain disabled.";
   const bannerCopy =
     messagingEnabled && statusesEnabled
-      ? "Messaging and status are enabled for this opt-in build: chats, live updates, sealed text and 24-hour statuses are on. Calls remain disabled."
+      ? `Messaging and status are enabled for this opt-in build: chats, live updates, sealed text and 24-hour statuses are on. ${callsLine}`
       : messagingEnabled
-        ? "Messaging is enabled for this opt-in build: chats, live updates and sealed text are on. Status, media and calls remain disabled."
+        ? `Messaging is enabled for this opt-in build: chats, live updates and sealed text are on. Status and media remain disabled. ${callsLine}`
         : statusesEnabled
-          ? "Status is enabled for this opt-in build: the feed, the viewer and the composers are on. Messaging, media and calls remain disabled."
+          ? `Status is enabled for this opt-in build: the feed, the viewer and the composers are on. Messaging and media remain disabled. ${callsLine}`
           : accountEnabled
-            ? "Account flows are enabled for this opt-in build; messaging, status, media and calls remain disabled."
+            ? `Account flows are enabled for this opt-in build; messaging, status and media remain disabled. ${callsLine}`
             : "Account sign-in remains behind a default-off rollout flag; messaging, status, media and calls are disabled.";
   const accountChipLabel = user
     ? `${user.displayName || user.username} account signed in`
@@ -305,6 +333,17 @@ export default function App() {
           </div>
         </aside>
 
+        {/* The calls layer sits ABOVE the route branches: it owns the ring
+            overlay (which has to survive a route change, because a browser has
+            no system call UI to hand a call to) and, on /calls, the history tab
+            itself. With the flag off it is not mounted, not downloaded and makes
+            no request at all. */}
+        {callsLive ? (
+          <Suspense fallback={<p className="welcome-card__body">Loading calls…</p>}>
+            <CallsLayer route={route} navigate={navigate} />
+          </Suspense>
+        ) : null}
+
         {statusesEnabled && isStatusArea ? (
           <Suspense fallback={<p className="welcome-card__body">Loading statuses…</p>}>
             <StatusWorkspace
@@ -315,7 +354,7 @@ export default function App() {
               }
             />
           </Suspense>
-        ) : messagingEnabled && isChatsArea ? (
+        ) : callsEnabled && isCallsArea ? null : messagingEnabled && isChatsArea ? (
           <Suspense fallback={<p className="welcome-card__body">Loading chats…</p>}>
             <MessagingWorkspace route={route} navigate={navigate} isOnline={isOnline} />
           </Suspense>

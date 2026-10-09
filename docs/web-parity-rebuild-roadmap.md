@@ -99,6 +99,10 @@ Private-group "call recording" — code-এ user-facing recorder পাওয়
 SIM verification, `FLAG_SECURE` screenshot block, native audio route, full phonebook sync, guaranteed
 background call survival — browser-এ অসম্ভব; UI-তে সৎভাবে সীমা দেখানো হবে (plan §৬)।
 
+## Slice G — Web calls ✅
+
+Flag-gated 1:1 voice/video calls are implemented. Worker contract case 62, WebRTC runtime, ICE fallback, call history, ring controls, safety-code verification, browser limitations, and same-origin API integration are documented in `docs/web-calls.md`. Group calls remain explicitly out of scope. Browser E2E wiring is included in CI; the production `public/` PWA remains unchanged.
+
 ## কাজের নিয়ম (আগের বার যে ভুলটা হয়েছিল)
 
 1. **প্রতিটি slice শেষ হলেই commit + push।** কোনো বড় কাজ কখনও শুধু sandbox-এ রাখা যাবে না।
@@ -114,7 +118,7 @@ background call survival — browser-এ অসম্ভব; UI-তে সৎভ
 
 ## খোলা প্রশ্ন (যেখানে পৌঁছালে সিদ্ধান্ত লাগবে)
 
-- Group video call-এর measured participant cap / SFU সিদ্ধান্ত (Slice G-এর আগে)।
+- Group video call-এর measured participant cap / SFU সিদ্ধান্ত (future work; Slice G-এর 1:1 scope-এর বাইরে)।
 - Web Push-এর VAPID key + subscription schema (Slice H-এর আগে)।
 - নতুন `web/` অ্যাপ কখন production cutover হবে — `public/` প্রতিস্থাপন নাকি আলাদা path-এ parallel।
 - Long-lived session token WS query-তে রাখা বনাম short-lived ticket route (plan §৭.২)।
