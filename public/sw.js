@@ -3,7 +3,11 @@
  * goes straight to the network — never cached. */
 "use strict";
 
-const SHELL = "kp-shell-v1";
+// Bump on every shell change: the fetch handler is cache-first for /app.js, so
+// a deploy that forgets to rename this cache keeps serving the STALE shell to
+// every existing install forever (that is exactly how the broken conversation
+// list stayed broken after the server-side shape change).
+const SHELL = "kp-shell-v2";
 const ASSETS = ["/", "/app.js", "/icon.svg", "/manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {
