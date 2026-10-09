@@ -21,7 +21,7 @@ export function browserSocketFactory(): SocketFactory {
   return (options) => {
     const socket = createManagedSocket<unknown>({
       path: options.path,
-      token: options.token,
+      acquireTicket: options.acquireTicket,
       parseFrame: options.parseFrame,
       onFrame: options.onFrame,
       onStatus: (status: SocketStatus) => options.onStatus(status),

@@ -300,6 +300,10 @@ export async function createMockStatusWorker(
       route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 
     await page.route("**/api/auth/refresh", (route) => json(route, { ok: true }));
+    // Plan §7.2: socket dials mint a one-time ticket first; give the dial one.
+    await page.route("**/api/ws/ticket", (route) =>
+      json(route, { ticket: "e2e.ticket", expiresIn: 60 }),
+    );
     await page.route("**/api/e2ee/backup", (route) =>
       json(route, { backup: plaintextBackupBlob(me) }),
     );

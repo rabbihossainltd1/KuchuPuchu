@@ -52,6 +52,7 @@ import {
   parseSocketFrame,
   prependOlderPage,
   reconcileMessagePage,
+  socketTicketUrl,
   socketUrl,
   tickState,
   totalUnread,
@@ -480,6 +481,10 @@ check(
   socketUrl("/ws/user", "tok/en") === "wss://kp.example/ws/user?token=tok%2Fen",
 );
 check(
+  "the ticket url keeps the one-time ticket as a query parameter only",
+  socketTicketUrl("/ws/user", "t/1") === "wss://kp.example/ws/user?ticket=t%2F1",
+);
+check(
   "backoff is capped",
   backoffDelayMs(0) === 2500 && backoffDelayMs(1) === 5000 && backoffDelayMs(10) === 30000,
 );
@@ -520,9 +525,10 @@ FakeWebSocket.instances = [];
 const frames = [];
 const statuses = [];
 const scheduled = [];
+let ticketSeq = 0;
 const socket = createManagedSocket({
   path: "/ws/chat/c_1",
-  token: "tok",
+  acquireTicket: async () => `tick-${++ticketSeq}`,
   webSocketImpl: FakeWebSocket,
   onFrame: (frame) => frames.push(frame),
   onStatus: (status) => statuses.push(status),
@@ -534,12 +540,22 @@ const socket = createManagedSocket({
   heartbeatMs: 20000,
 });
 
+// The dial now mints a one-time ticket first (async), so let the microtasks
+// settle before driving the constructed socket.
+const settle = async () => {
+  for (let i = 0; i < 20; i += 1) await Promise.resolve();
+};
+await settle();
+
 check("connecting is reported before the socket opens", statuses[0] === "connecting");
 check("send before open reports failure", socket.send({ type: "hb" }) === false);
 
 FakeWebSocket.instances[0].open();
 check("open is reported once connected", statuses.includes("open") && socket.status() === "open");
-check("the socket url carries the token", FakeWebSocket.instances[0].url.includes("token=tok"));
+check(
+  "the socket url carries the one-time ticket",
+  FakeWebSocket.instances[0].url.includes("ticket=tick-1"),
+);
 
 FakeWebSocket.instances[0].emit(JSON.stringify({ type: "conv", conversationId: "c_1" }));
 check("a valid frame reaches the handler", frames.length === 1 && frames[0].type === "conv");
@@ -560,7 +576,12 @@ check(
 );
 scheduled[0].ran = true;
 scheduled[0].callback();
+await settle();
 check("the reconnect opens a second socket", FakeWebSocket.instances.length === 2);
+check(
+  "the reconnect mints a FRESH ticket",
+  FakeWebSocket.instances[1].url.includes("ticket=tick-2"),
+);
 FakeWebSocket.instances[1].drop();
 check("the second backoff doubles", scheduled.at(-1).delayMs === 5000);
 
@@ -571,19 +592,33 @@ check(
 );
 const before = scheduled.length;
 scheduled.at(-1).callback();
+await settle();
 check(
   "a pending reconnect after close opens no further socket",
   FakeWebSocket.instances.length === 2 && scheduled.length === before + 0,
 );
 
-const noToken = createManagedSocket({
+let rejectedDials = 0;
+const noTicket = createManagedSocket({
   path: "/ws/user",
-  token: "",
+  acquireTicket: async () => {
+    throw new Error("no session");
+  },
   webSocketImpl: FakeWebSocket,
   onFrame: () => undefined,
+  schedule: () => {
+    rejectedDials += 1;
+    return { cancel: () => undefined };
+  },
 });
-check("without a token no socket is opened", noToken.status() === "closed");
-noToken.close();
+await settle();
+check(
+  "a rejected ticket dials nothing and backs off",
+  FakeWebSocket.instances.length === 2 &&
+    noTicket.status() === "reconnecting" &&
+    rejectedDials === 1,
+);
+noTicket.close();
 
 /* ------------------------------------------------------------------ outbox --- */
 

@@ -111,7 +111,7 @@ export type SocketHandle = {
  */
 export type SocketFactory = (options: {
   path: string;
-  token: string;
+  acquireTicket: () => Promise<string>;
   parseFrame: (raw: unknown) => unknown;
   onFrame: (frame: unknown) => void;
   onStatus: (status: SocketStatus) => void;
@@ -128,7 +128,8 @@ export type CallPeerTarget = {
 
 export type EngineOptions = {
   readonly api: ApiClient;
-  readonly token: string;
+  /** Mint one 60-second single-use socket ticket per connect (plan §7.2). */
+  readonly acquireTicket: () => Promise<string>;
   readonly meId: string;
   readonly runtime: PeerRuntime;
   readonly clock: CallClock;
@@ -570,7 +571,7 @@ export function createCallEngine(options: EngineOptions): CallEngine {
     closeCallSocket();
     callSocket = options.sockets({
       path: `/ws/call/${callId}`,
-      token: options.token,
+      acquireTicket: options.acquireTicket,
       parseFrame: (raw) => parseCallFrame(raw),
       onStatus: (status) => publish({ signal: status }),
       onFrame: (frame) => onCallFrame(frame as CallFrame | null, callId),
@@ -1281,7 +1282,7 @@ export function createCallEngine(options: EngineOptions): CallEngine {
     if (!userSocket) {
       userSocket = options.sockets({
         path: "/ws/user",
-        token: options.token,
+        acquireTicket: options.acquireTicket,
         parseFrame: (raw) => parseIncomingCallPing(raw),
         onStatus: () => undefined,
         onFrame: (frame) => {

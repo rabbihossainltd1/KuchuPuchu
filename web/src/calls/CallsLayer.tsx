@@ -28,6 +28,7 @@ import { messagingApi } from "../messaging/messagingApi";
 import { newClientId } from "../messaging/protocol";
 import { protectOutgoingBody } from "../messaging/e2ee";
 import { useE2eeIdentity } from "../messaging/useE2eeIdentity";
+import { requestWsTicket } from "../messaging/wsTicket";
 import type { AppRoute } from "../router";
 import type { Navigate } from "../useBrowserRouter";
 import { CallStage } from "./CallStage";
@@ -98,7 +99,7 @@ export function CallsLayer({ route, navigate }: Props) {
     if (!api || !token || !meId) return null;
     return createCallEngine({
       api,
-      token,
+      acquireTicket: () => requestWsTicket(token),
       meId,
       runtime: browserPeerRuntime(() => audioRef.current),
       clock: browserClock(),
