@@ -56,6 +56,7 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 
 | **J** production cutover (React PWA at /) | ✅ merged | PR #92+#93 (parallel session), integration PR #94 → `main` @ `958dff9` |
 | **K** production statuses on | ✅ merged | PR #95 → `main` @ `41cfa971492be11750a0f356fb53572fc04df45b` |
+| **O** WS socket tickets (plan §7.2) | ✅ built | এই branch; নিচের হিসাব |
 
 **Slice D-তে যা নামলো** (Worker বা Android-এ একটি লাইনও বদলায়নি):
 
@@ -192,6 +193,23 @@ Nothing else changes: calls stay default-off (standing directive) and the
 already ship inside the messaging surface. Case 79 pins the recipe; docs
 updated (`web-feature-flags.md`, `web-cutover.md`).
 
+## Slice O — WS socket tickets (plan §7.2) ✅
+
+The browser stopped putting its long-lived session token in socket URLs:
+
+- Worker: `POST /api/ws/ticket` (header auth, rate-limited) mints an
+  HMAC-SHA256 ticket `{aid, exp: now+60s, jti}`; `requireUser` spends it on
+  `/ws/*` ONLY — signature, expiry and a UNIQUE `ws_tickets(jti)` ledger make
+  it single-use, lazy-purged. Unset `WS_TICKET_KEY` ⇒ 503 fail-closed; the
+  legacy `?token=` path stays for rollback/Android parity (case 48 untouched).
+- Web: `wsTicket.ts` + `socketTicketUrl()`; the managed socket mints a FRESH
+  ticket per dial (incl. reconnects). Messaging, chat and call sockets all
+  switched; e2e mocks mint `e2e.ticket`.
+- Tests: case 80 drives the REAL worker — mint/spend/replay/tamper/expire/
+  REST-boundary/legacy-fallback/purge/no-key, 24 checks.
+- Provisioning: `WS_TICKET_KEY` secret uploaded BEFORE merge (otherwise the
+  new client would 503-loop on every dial).
+
 ## কাজের নিয়ম (আগের বার যে ভুলটা হয়েছিল)
 
 1. **প্রতিটি slice শেষ হলেই commit + push।** কোনো বড় কাজ কখনও শুধু sandbox-এ রাখা যাবে না।
@@ -210,4 +228,4 @@ updated (`web-feature-flags.md`, `web-cutover.md`).
 - Group video call-এর measured participant cap / SFU সিদ্ধান্ত (future work; Slice G-এর 1:1 scope-এর বাইরে)।
 - ~~Web Push-এর VAPID key + subscription schema (Slice H-এর আগে)।~~ সমাধান (Slice H): `VAPID_PRIVATE_KEY` secret থেকে পাবলিক key derive হয়; সাবস্ক্রিপশন `web_push_subs` টেবিলে; `docs/web-push.md`। বাকি শুধু লাইভ ডিপ্লয়-তে সিক্রেট বসানো — যেটা আলাদা অনুমতির কাজ।
 - ~~নতুন `web/` অ্যাপ কখন production cutover হবে — `public/` প্রতিস্থাপন নাকি আলাদা path-এ parallel।~~ সমাধান (Slice J): মালিক সরাসরি প্রতিস্থাপন অনুমোদন করেছেন; `docs/web-cutover.md`।
-- Long-lived session token WS query-তে রাখা বনাম short-lived ticket route (plan §৭.২)।
+- ~~Long-lived session token WS query-তে রাখা বনাম short-lived ticket route~~ — শিপড (স্লাইস ও): ব্রাউজার সকেট এখন ৬০-সেকেন্ডের একবার-ব্যবহারযোগ্য টিকিট নেয়; `?token=` ফলব্যাক অক্ষত।

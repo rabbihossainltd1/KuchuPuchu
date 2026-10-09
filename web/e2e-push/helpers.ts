@@ -83,6 +83,10 @@ export async function createMockPushWorker(options: { supported?: boolean } = {}
     await page.route("**/api/me", (route) =>
       route.request().method() === "GET" ? json(route, { user: ME }) : json(route, { ok: true }),
     );
+    // Plan §7.2: socket dials mint a one-time ticket first; give the dial one.
+    await page.route("**/api/ws/ticket", (route) =>
+      json(route, { ticket: "e2e.ticket", expiresIn: 60 }),
+    );
     await page.route("**/api/auth/devices", (route) => json(route, { items: [] }));
     await page.route("**/api/calls/active", (route) => json(route, { calls: [] }));
     await page.route("**/api/calls/history", (route) => json(route, { calls: [] }));

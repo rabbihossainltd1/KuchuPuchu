@@ -166,6 +166,9 @@ async function mockWorker(
       result = jsonResponse({ items: devices });
     } else if (url.pathname === "/api/auth/logout" || url.pathname === "/api/auth/refresh") {
       result = jsonResponse({ ok: true, expiresAt: "2026-12-31T00:00:00.000Z", extended: false });
+    } else if (url.pathname === "/api/ws/ticket") {
+      // Plan §7.2: socket dials mint a one-time ticket first; give the dial one.
+      result = jsonResponse({ ticket: "e2e.ticket", expiresIn: 60 });
     } else {
       result = jsonResponse({ error: { code: "NOT_MOCKED" } }, 404);
     }

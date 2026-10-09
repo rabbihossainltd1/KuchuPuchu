@@ -3,15 +3,16 @@
  *
  * The Android client and the production PWA both keep a 20-second heartbeat
  * frame and reconnect after a drop; this reproduces that with a capped
- * exponential backoff. Browsers cannot set WebSocket headers, so the bearer
- * travels as a query parameter — the Worker accepts that on `/ws/*` only, and
- * `test/cases/48-r104-web.mjs` pins that boundary.
+ * exponential backoff. Browsers cannot set WebSocket headers, so every
+ * (re)connect first mints a 60-second single-use ticket over ordinary header
+ * auth (`acquireTicket`, plan §7.2) and opens the socket with THAT — the
+ * long-lived session token never travels in a URL.
  *
  * The socket implementation and the scheduler are injectable so the reconnect
  * and heartbeat behaviour can be driven deterministically from a test.
  */
 
-import { parseSocketFrame, socketUrl, type SocketFrame } from "./protocol";
+import { parseSocketFrame, socketTicketUrl, type SocketFrame } from "./protocol";
 
 export type SocketStatus = "idle" | "connecting" | "open" | "reconnecting" | "closed";
 
@@ -23,7 +24,13 @@ export type TimerHandle = { cancel(): void };
 
 export type ManagedSocketOptions<TFrame = SocketFrame> = {
   readonly path: string;
-  readonly token: string;
+  /**
+   * Mint one 60-second single-use socket ticket (plan §7.2). Called before
+   * EVERY connect attempt, including reconnects — a ticket is spent the moment
+   * a socket opens with it, so a retry always needs a fresh one. Rejection is
+   * treated like a failed dial: back off and try again.
+   */
+  readonly acquireTicket: () => Promise<string>;
   readonly onFrame: (frame: TFrame) => void;
   readonly onStatus?: (status: SocketStatus) => void;
   readonly webSocketImpl?: typeof WebSocket;
@@ -115,49 +122,65 @@ export function createManagedSocket<TFrame = SocketFrame>(
     }, heartbeatMs);
   };
 
+  let dialSeq = 0;
+
   const connect = () => {
-    if (closed || !options.token) {
+    if (closed) {
       publish("closed");
       return;
     }
 
     publish(attempts === 0 ? "connecting" : "reconnecting");
-    let socket: WebSocket;
-    try {
-      socket = new WebSocketImpl(socketUrl(options.path, options.token));
-    } catch {
-      queueReconnect();
-      return;
-    }
-    current = socket;
-
-    socket.onopen = () => {
-      if (current !== socket) return;
-      attempts = 0;
-      publish("open");
-      startHeartbeat(socket);
-    };
-
-    socket.onmessage = (event: MessageEvent) => {
-      if (current !== socket) return;
-      const frame = parseFrame(event.data);
-      if (frame) options.onFrame(frame);
-    };
-
-    socket.onerror = () => {
-      // The close handler owns recovery; an error alone is not a state change.
-    };
-
-    socket.onclose = () => {
-      if (current !== socket) return;
-      current = null;
-      stopHeartbeat();
-      if (closed) {
-        publish("closed");
+    const dial = ++dialSeq;
+    void (async () => {
+      // One fresh ticket per dial — it is single-use on the server.
+      let ticket = "";
+      try {
+        ticket = await options.acquireTicket();
+      } catch {
+        if (closed || dial !== dialSeq) return;
+        queueReconnect();
         return;
       }
-      queueReconnect();
-    };
+      if (closed || dial !== dialSeq) return;
+      let socket: WebSocket;
+      try {
+        socket = new WebSocketImpl(socketTicketUrl(options.path, ticket));
+      } catch {
+        if (closed || dial !== dialSeq) return;
+        queueReconnect();
+        return;
+      }
+      current = socket;
+
+      socket.onopen = () => {
+        if (current !== socket) return;
+        attempts = 0;
+        publish("open");
+        startHeartbeat(socket);
+      };
+
+      socket.onmessage = (event: MessageEvent) => {
+        if (current !== socket) return;
+        const frame = parseFrame(event.data);
+        if (frame) options.onFrame(frame);
+      };
+
+      socket.onerror = () => {
+        // The close handler owns recovery; an error alone is not a state change.
+      };
+
+      socket.onclose = () => {
+        if (current !== socket) return;
+        current = null;
+        stopHeartbeat();
+        if (closed) {
+          publish("closed");
+          return;
+        }
+        queueReconnect();
+      };
+    })();
   };
 
   const queueReconnect = () => {

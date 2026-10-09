@@ -725,6 +725,11 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         });
 
       await page.route("**/api/auth/refresh", (route) => json(route, { ok: true }));
+      // Plan §7.2: every socket dial mints a one-time ticket first. The socket
+      // itself is intercepted above, so the ticket only needs to exist.
+      await page.route("**/api/ws/ticket", (route) =>
+        json(route, { ticket: "e2e.ticket", expiresIn: 60 }),
+      );
       await page.route("**/api/e2ee/backup", (route) =>
         json(route, { backup: plaintextBackupBlob(me) }),
       );

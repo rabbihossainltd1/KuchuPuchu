@@ -40,6 +40,12 @@ export type Env = {
   /** Contact URI for the VAPID JWT `sub` claim (RFC 8292 wants mailto: or
    *  https:). Defaults to the project push address when unset. */
   VAPID_SUBJECT?: string;
+  /** Socket tickets (plan §7.2): 32 random bytes, base64. Signs the
+   *  60-second, single-use tickets browsers present to `/ws/*` INSTEAD of
+   *  putting the long-lived session token in a URL. Unset ⇒ the ticket route
+   *  answers 503 and sockets fall back to the legacy query-token path —
+   *  fail-closed, never fail-open. */
+  WS_TICKET_KEY?: string;
   /** Optional self-hosted/purchased TURN for reliable calls on strict NATs.
    *  Comma-separated URLs, e.g. "turn:turn.example.com:3478,turns:turn.example.com:5349". */
   TURN_URLS?: string;
@@ -3433,6 +3439,14 @@ async function ensureSchema(db: D1Database) {
       created_at TEXT NOT NULL,
       failures INTEGER NOT NULL DEFAULT 0
     )`,
+    // Socket tickets (plan §7.2): the spent-jti ledger that makes each ticket
+    // single-use. Rows live ~2 minutes (lazy purge on every consume), so this
+    // table stays tiny; the PRIMARY KEY is what rejects a replay.
+    `CREATE TABLE IF NOT EXISTS ws_tickets (
+      jti TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      expires_at INTEGER NOT NULL
+    )`,
     `CREATE TABLE IF NOT EXISTS blocks (owner_id TEXT NOT NULL, target_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (owner_id, target_id))`,
     // Owner round 34 (item 15): the blocked side's one "please unblock me"
     // per block. The row dies with the block (see the DELETE route), so a
@@ -4045,6 +4059,122 @@ function userSelf(row: UserRow, online = false) {
 }
 
 /** The bearer token, or "". Three routes need it; only one place parses it. */
+/* Socket tickets (plan §7.2). A browser cannot set WebSocket headers, so the
+ * legacy path travelled the long-lived session token as `?token=` — a bearer
+ * in URLs, logs and history. The ticket route replaces that for `/ws/*`:
+ * the client POSTs `/api/ws/ticket` with its ordinary header auth, receives a
+ * 60-second HMAC-signed ticket bound to its account, and spends it exactly
+ * once to open a socket. The long-lived token never leaves the header. */
+
+const WS_TICKET_TTL_MS = 60_000;
+
+let wsTicketKeyCache: { source: string; key: CryptoKey } | null = null;
+
+async function wsTicketKey(env: Env): Promise<CryptoKey | null> {
+  if (!env.WS_TICKET_KEY) return null;
+  if (wsTicketKeyCache && wsTicketKeyCache.source === env.WS_TICKET_KEY)
+    return wsTicketKeyCache.key;
+  try {
+    const raw = base64UrlDecode(env.WS_TICKET_KEY);
+    if (!raw || raw.length < 32) return null;
+    const key = await crypto.subtle.importKey(
+      "raw",
+      raw,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign", "verify"],
+    );
+    wsTicketKeyCache = { source: env.WS_TICKET_KEY, key };
+    return key;
+  } catch {
+    return null;
+  }
+}
+
+async function wsTicketSignature(key: CryptoKey, message: string): Promise<string> {
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message));
+  return base64UrlEncode(new Uint8Array(sig));
+}
+
+/** Mint one ticket for the caller. Shape: base64url(payload).base64url(sig). */
+async function issueWsTicket(env: Env, uid: string): Promise<string | null> {
+  const key = await wsTicketKey(env);
+  if (!key) return null;
+  const jti = [...crypto.getRandomValues(new Uint8Array(16))]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  const payload = JSON.stringify({ a: uid, e: Date.now() + WS_TICKET_TTL_MS, j: jti });
+  const message = base64UrlEncode(payload);
+  return `${message}.${await wsTicketSignature(key, message)}`;
+}
+
+/**
+ * Resolve a `/ws/*` request that authenticates with `?ticket=` instead of a
+ * bearer token. Returns null when no ticket is present (the caller then falls
+ * through to the ordinary path); fails closed on anything malformed,
+ * expired, replayed or signed by someone else. Spending is enforced by a
+ * UNIQUE insert — the first consumer wins, every later attempt 401s.
+ */
+async function consumeWsTicket(
+  db: D1Database,
+  env: Env | undefined,
+  request: Request,
+): Promise<(UserRow & { session_expires_at: string; session_device_id: string | null }) | null> {
+  let url: URL;
+  try {
+    url = new URL(request.url);
+  } catch {
+    return null;
+  }
+  // Tickets are ONLY an entry door for sockets. A ticket on a REST route is a
+  // confused (or probing) client, never a fast path to an endpoint.
+  if (!url.pathname.startsWith("/ws/")) return null;
+  const ticket = (url.searchParams.get("ticket") ?? "").trim();
+  if (!ticket) return null;
+  const key = env ? await wsTicketKey(env) : null;
+  if (!key) fail(503, "Ticket sign-in is not configured.", "NO_TICKET_KEY");
+  const dot = ticket.indexOf(".");
+  const message = dot > 0 ? ticket.slice(0, dot) : "";
+  const signature = dot > 0 && dot < ticket.length - 1 ? ticket.slice(dot + 1) : "";
+  if (!message || !signature) fail(401, "Sign in first.", "UNAUTHENTICATED");
+  const expected = await wsTicketSignature(key, message);
+  if (signature.length !== expected.length || signature !== expected)
+    fail(401, "Sign in first.", "UNAUTHENTICATED");
+  const decoded = base64UrlDecode(message);
+  let payload: { a?: unknown; e?: unknown; j?: unknown } = {};
+  try {
+    payload = JSON.parse(new TextDecoder().decode(decoded ?? new Uint8Array()));
+  } catch {
+    fail(401, "Sign in first.", "UNAUTHENTICATED");
+  }
+  const uid = typeof payload.a === "string" ? payload.a : "";
+  const expiresAt = typeof payload.e === "number" ? payload.e : 0;
+  const jti = typeof payload.j === "string" ? payload.j : "";
+  if (!uid || !/^[0-9a-f]{32}$/.test(jti)) fail(401, "Sign in first.", "UNAUTHENTICATED");
+  if (expiresAt <= Date.now()) fail(401, "Ticket expired.", "UNAUTHENTICATED");
+  // Lazy purge keeps the spent-ticket table from growing forever; the bound
+  // is tiny anyway (one row per socket open, alive for a minute).
+  await run(db, "DELETE FROM ws_tickets WHERE expires_at < ?", Date.now() - WS_TICKET_TTL_MS);
+  try {
+    await run(
+      db,
+      "INSERT INTO ws_tickets (jti, user_id, expires_at) VALUES (?, ?, ?)",
+      jti,
+      uid,
+      expiresAt,
+    );
+  } catch {
+    fail(401, "Ticket already used.", "UNAUTHENTICATED");
+  }
+  const user = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", uid);
+  if (!user) fail(401, "Sign in first.", "UNAUTHENTICATED");
+  return {
+    ...user,
+    session_expires_at: new Date(expiresAt).toISOString(),
+    session_device_id: null,
+  };
+}
+
 function bearerToken(request: Request): string {
   const header = request.headers.get("authorization") ?? "";
   const fromHeader = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
@@ -4077,22 +4207,29 @@ async function requireUser(db: D1Database, request: Request, env?: Env, ctx?: Ex
     if (!author) fail(404, "Not found.");
     return { ...author, session_expires_at: nowIso(), session_device_id: null };
   }
+  type AuthedRow = UserRow & { session_expires_at: string; session_device_id: string | null };
   const token = bearerToken(request);
-  if (!token) fail(401, "Sign in first.", "UNAUTHENTICATED");
-  const hash = await sha256Hex(token);
-  // Session + user in ONE statement. The two separate SELECTs used to sit on
-  // every authenticated request — two D1 round trips each caller always paid,
-  // which on a poll-every-second chat screen was pure added latency.
-  const row = await one<UserRow & { session_expires_at: string; session_device_id: string | null }>(
-    db,
-    `SELECT u.*, s.expires_at AS session_expires_at, s.device_id AS session_device_id
-       FROM sessions s JOIN users u ON u.id = s.user_id
-      WHERE s.token_hash = ?`,
-    hash,
-  );
+  let row: AuthedRow | null = null;
+  if (token) {
+    const hash = await sha256Hex(token);
+    // Session + user in ONE statement. The two separate SELECTs used to sit on
+    // every authenticated request — two D1 round trips each caller always paid,
+    // which on a poll-every-second chat screen was pure added latency.
+    row = await one<AuthedRow>(
+      db,
+      `SELECT u.*, s.expires_at AS session_expires_at, s.device_id AS session_device_id
+         FROM sessions s JOIN users u ON u.id = s.user_id
+        WHERE s.token_hash = ?`,
+      hash,
+    );
+    if (row && Date.parse(row.session_expires_at) < Date.now())
+      fail(401, "Session expired.", "UNAUTHENTICATED");
+  }
+  // Plan §7.2: browsers open sockets with a one-time 60-second ticket instead
+  // of putting the long-lived session token in a URL. Tickets only ever open
+  // `/ws/*` — REST keeps header-only auth, exactly as before.
+  if (!row) row = await consumeWsTicket(db, env, request);
   if (!row) fail(401, "Sign in first.", "UNAUTHENTICATED");
-  if (Date.parse(row.session_expires_at) < Date.now())
-    fail(401, "Session expired.", "UNAUTHENTICATED");
   // Presence used to be written on every authenticated request — including the
   // 800ms chat poll — which turned every read into a D1 write. Only refresh it
   // once the stored value is older than the online window.
@@ -7387,6 +7524,17 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         headers: { upgrade: "websocket", "x-kp-user": uid },
       }),
     );
+  }
+
+  // Socket tickets (plan §7.2): a browser swaps its header-authenticated
+  // session for a 60-second, single-use ticket and opens `/ws/*` with THAT —
+  // the long-lived token never travels in a URL again. Rate-limited like the
+  // other per-user writes; the spend ledger lives in `ws_tickets`.
+  if (path === "/api/ws/ticket" && method === "POST") {
+    rateLimit(`wsticket:${uid}`, 30, 30);
+    const ticket = await issueWsTicket(env, uid);
+    if (!ticket) fail(503, "Ticket sign-in is not configured.", "NO_TICKET_KEY");
+    return json({ ticket, expiresIn: WS_TICKET_TTL_MS / 1000 });
   }
 
   if (path === "/api/me" && method === "GET") return json({ user: userSelf(me, true) });

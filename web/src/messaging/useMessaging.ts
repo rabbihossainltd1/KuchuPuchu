@@ -56,6 +56,7 @@ import {
   type OutboxStore,
 } from "./outbox";
 import { createManagedSocket, type ManagedSocket, type SocketStatus } from "./sockets";
+import { requestWsTicket } from "./wsTicket";
 import { fetchMessageMediaBlob, uploadFile } from "./filesApi";
 import { attachmentMeta, type PendingAttachment } from "./attachments";
 import { albumId } from "../media/uploadContract";
@@ -346,7 +347,7 @@ export function useMessaging(options: Options): MessagingController {
     if (!enabled || !token) return;
     const socket = createManagedSocket({
       path: "/ws/user",
-      token,
+      acquireTicket: () => requestWsTicket(token),
       onStatus: setListSocketStatus,
       onFrame: (frame) => {
         if (frame.type !== "conv") return;
@@ -491,7 +492,7 @@ export function useMessaging(options: Options): MessagingController {
 
     const socket = createManagedSocket({
       path: `/ws/chat/${encodeURIComponent(conversationId)}`,
-      token,
+      acquireTicket: () => requestWsTicket(token),
       onStatus: setChatSocketStatus,
       shouldReconnect: () => selectedRef.current?.id === conversationId,
       onFrame: (frame) => {

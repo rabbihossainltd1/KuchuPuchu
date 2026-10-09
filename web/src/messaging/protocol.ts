@@ -869,6 +869,17 @@ export function socketUrl(path: string, token: string): string {
   return `${protocol}://${window.location.host}${path}?token=${encodeURIComponent(token)}`;
 }
 
+/**
+ * Plan §7.2: the socket opens with a 60-second, single-use ticket instead of
+ * the long-lived session token, so no bearer ever sits in a URL. The ticket
+ * arrives from POST /api/ws/ticket (`wsTicket.ts`) with ordinary header auth.
+ */
+export function socketTicketUrl(path: string, ticket: string): string {
+  if (typeof window === "undefined") return "";
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  return `${protocol}://${window.location.host}${path}?ticket=${encodeURIComponent(ticket)}`;
+}
+
 export function parseSocketFrame(raw: unknown): SocketFrame | null {
   if (typeof raw !== "string" || !raw) return null;
   let payload: unknown;

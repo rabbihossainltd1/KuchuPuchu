@@ -1033,3 +1033,9 @@ Owner: "ager session ei kaj korte korte dead hoye geche … kota kaj hoyeche" �
 - NOT FLIPPED: calls (standing default-off directive); media (reserved flag — nothing reads it yet; attachments/viewers ship inside messaging). Fixed docs that the parallel session had wrongly marked media "on in prod".
 - PINS: case 79 recipe checks updated (statuses on; calls+media absent). Docs: web-feature-flags.md rows, web-cutover.md recipe, roadmap slice K.
 - ROLLBACK: one-line recipe revert; statuses nav disappears, worker routes untouched (phone unaffected either way).
+
+## Web slice O — WS socket tickets (plan §7.2) — 2026-10-10 (branch feat/web-p7-ws-ticket, base main @ b772bd0)
+- WHAT: browsers no longer put the long-lived session token in socket URLs. Worker mints `POST /api/ws/ticket` → HMAC-SHA256 `{aid, exp: now+60s, jti}`; `requireUser` spends tickets on `/ws/*` only — signature + expiry + UNIQUE `ws_tickets(jti)` single-use ledger (lazy purge). Unset `WS_TICKET_KEY` ⇒ 503 fail-closed. Legacy `?token=` fallback KEPT (case 48 unchanged).
+- WEB: wsTicket.ts + socketTicketUrl(); managed socket mints a fresh ticket per dial incl. reconnects; messaging/chat/call sockets switched. e2e helpers mint `e2e.ticket`.
+- TESTS: case 80 = 24 behavioral checks against the real worker (the plan's ship condition): mint/spend/replay/tamper/expire/REST-boundary/legacy-fallback/purge/no-key.
+- PROVISIONING: `WS_TICKET_KEY` AND `VAPID_PRIVATE_KEY` secrets uploaded to Cloudflare BEFORE merge (ticket key first so the new client never 503-loops).
