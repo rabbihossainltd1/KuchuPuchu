@@ -26,9 +26,17 @@ assert.ok(precache.every((url) => url.startsWith("/") && !url.includes("..")));
 assert.ok(precache.every((url) => !/\.(?:map)(?:$|\?)/i.test(url)));
 assert.ok(precache.every((url) => !/^\/(?:api|ws)(?:\/|$)/.test(url)));
 assert.ok(
-  precache.every((url) => url === "/index.html" || /\.(?:js|css)$/i.test(url)),
-  "only the app shell, JavaScript, and CSS may be cached; media stays network-only",
+  precache.every(
+    (url) =>
+      url === "/index.html" ||
+      url === "/icon.svg" ||
+      url === "/manifest.webmanifest" ||
+      /\.(?:js|css)$/i.test(url),
+  ),
+  "only the app shell, its identity files, JavaScript and CSS may be cached; media stays network-only",
 );
+assert.ok(precache.includes("/icon.svg"), "precache must include the PWA icon");
+assert.ok(precache.includes("/manifest.webmanifest"), "precache must include the manifest");
 
 for (const url of precache) {
   assert.ok(existsSync(join(dist, url.slice(1))), `precache asset is missing: ${url}`);
@@ -223,7 +231,14 @@ handlers.get("activate")!({
 assert.ok(activationPromise, "activate must wait for cache cleanup and client claim");
 await activationPromise;
 assert.ok(!cacheStores.has("kp-web-shell-obsolete"), "activation must remove stale Web caches");
-assert.ok(cacheStores.has("kp-shell-v1"), "activation must preserve the existing public PWA cache");
+// Slice J cutover: the RETIRED legacy shell caches (public/sw.js) are deleted
+// on activation — no stale legacy bytes may survive the migration. A rollback
+// to the legacy worker symmetrically deletes the kp-web-shell-* caches.
+assert.ok(
+  worker.includes('const LEGACY_CACHE_PREFIXES = ["kp-shell-"];'),
+  "activation must target the retired legacy cache prefix",
+);
+assert.ok(!cacheStores.has("kp-shell-v1"), "activation must delete retired legacy shell caches");
 assert.ok(cacheStores.has("another-app-cache"), "activation must preserve unrelated caches");
 assert.ok(clientsClaimed, "activation must claim eligible clients");
 

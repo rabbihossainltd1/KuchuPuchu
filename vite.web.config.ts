@@ -22,12 +22,28 @@ function versionedServiceWorker(): Plugin {
             (output) => output.fileName === "index.html" || /\.(?:js|css)$/i.test(output.fileName),
           )
           .sort((left, right) => left.fileName.localeCompare(right.fileName));
+        // Slice J: the PWA identity files live in web/public (copied verbatim
+        // to the dist root) and join the shell precache — the same idea the
+        // legacy kp-shell cache had, minus the stale-prone unversioned app.js.
+        // Their real bytes feed the build id, so an icon/manifest change also
+        // rotates the service worker.
+        const publicExtras = ["icon.svg", "manifest.webmanifest"].map((name) => ({
+          url: `/${name}`,
+          bytes: readFileSync(resolve(process.cwd(), "web/public", name)),
+        }));
         const digest = createHash("sha256").update(serviceWorkerTemplate);
-        const precacheUrls = files.map((output) => `/${output.fileName}`);
+        const precacheUrls = [
+          ...files.map((output) => `/${output.fileName}`),
+          ...publicExtras.map((extra) => extra.url),
+        ].sort();
 
         for (const output of files) {
           digest.update(output.fileName).update("\0");
           digest.update(output.type === "chunk" ? output.code : output.source).update("\0");
+        }
+        for (const extra of publicExtras) {
+          digest.update(extra.url).update("\0");
+          digest.update(extra.bytes).update("\0");
         }
 
         if (!precacheUrls.includes("/index.html")) {
@@ -45,8 +61,9 @@ function versionedServiceWorker(): Plugin {
 }
 
 /**
- * Incremental Web client workspace. The current production PWA remains served
- * from ./public until the migrated flows pass parity and regression gates.
+ * The production Web client workspace. Since the slice J cutover, this build
+ * (web/dist) is what the Worker serves at / — see wrangler.toml [assets] and
+ * docs/web-cutover.md for the service-worker migration and rollback story.
  */
 export default defineConfig({
   root: "web",
@@ -67,6 +84,8 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
-    sourcemap: true,
+    // Slice J: the dist is now uploaded as PUBLIC worker assets, so no
+    // sourcemaps — they would ship the whole source next to the bundles.
+    sourcemap: false,
   },
 });

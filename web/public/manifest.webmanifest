@@ -1,0 +1,17 @@
+{
+  "name": "KuchuPuchu Web",
+  "short_name": "KuchuPuchu",
+  "description": "KuchuPuchu messages, photos and more — right in your browser.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0D1524",
+  "theme_color": "#0D1524",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

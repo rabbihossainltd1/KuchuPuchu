@@ -7,6 +7,11 @@ const CACHE_NAME = `${CACHE_PREFIX}${BUILD_ID}`;
 const PRECACHE_URLS = __PRECACHE_URLS__;
 const APP_SHELL = "/index.html";
 const API_OR_WS_PATH = /^\/(?:api|ws)(?:\/|$)/;
+// Slice J cutover: installs that still carry the RETIRED legacy shell caches
+// (public/sw.js, kp-shell-v1/v2) get them deleted when this worker activates,
+// so no stale legacy bytes survive the migration (and a rollback to the
+// legacy worker symmetrically deletes ours).
+const LEGACY_CACHE_PREFIXES = ["kp-shell-"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -31,7 +36,11 @@ self.addEventListener("activate", (event) => {
       .then((keys) =>
         Promise.all(
           keys
-            .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+            .filter(
+              (key) =>
+                (key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME) ||
+                LEGACY_CACHE_PREFIXES.some((prefix) => key.startsWith(prefix)),
+            )
             .map((key) => caches.delete(key)),
         ),
       )
