@@ -54,7 +54,7 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 | hotfix — legacy web empty list (`{items}` + SW cache bump) | ✅ merged | PR #90 → `main` @ `eab68c3` |
 | **I** hardening (themes, motion, a11y, CSP, IDB) | ✅ merged | PR #91 → `main` @ `1af2694` |
 
-| **J** production cutover (React PWA at /) | ✅ merged | PR #92+#93 (parallel session) then integration PR #94 → worker-stamped headers |
+| **J** production cutover (React PWA at /) | ✅ merged | PR #92+#93 (parallel session), integration PR #94 → `main` @ `958dff9` |
 
 **Slice D-তে যা নামলো** (Worker বা Android-এ একটি লাইনও বদলায়নি):
 
