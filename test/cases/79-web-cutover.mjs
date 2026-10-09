@@ -104,9 +104,10 @@ check(
   prodRecipe.includes("VITE_KP_WEB_STATUSES=true") && prodRecipe.includes("VITE_KP_WEB_PUSH=true"),
 );
 check(
-  "calls stay default-off and the reserved media gate stays unflipped",
-  !prodRecipe.includes("VITE_KP_WEB_CALLS") && !prodRecipe.includes("VITE_KP_WEB_MEDIA"),
+  "calls ship in production since slice Q (owner-approved 1:1 WebRTC)",
+  prodRecipe.includes("VITE_KP_WEB_CALLS=true"),
 );
+check("the reserved media gate stays unflipped", !prodRecipe.includes("VITE_KP_WEB_MEDIA"));
 check("no sourcemaps ship with the public assets", viteConfig.includes("sourcemap: false"));
 check(
   "the ci chain runs the cutover suite, then the prod build and a second verify",

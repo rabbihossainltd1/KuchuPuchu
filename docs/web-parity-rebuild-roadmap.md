@@ -57,7 +57,8 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 | **J** production cutover (React PWA at /) | ✅ merged | PR #92+#93 (parallel session), integration PR #94 → `main` @ `958dff9` |
 | **K** production statuses on | ✅ merged | PR #95 → `main` @ `41cfa971492be11750a0f356fb53572fc04df45b` |
 | **O** WS socket tickets (plan §7.2) | ✅ merged | PR #96 → `main` @ `892714df4831ef3bcae0554292a720ce89254159` |
-| **P** production web-push on | ✅ built | এই branch; নিচের হিসাব |
+| **P** production web-push on | ✅ merged | PR #97 → `main` @ `433adb652d44197d848127b105ed5b240a485bda` |
+| **Q** production calls on (owner-approved) | ✅ built | এই branch; নিচের হিসাব |
 
 **Slice D-তে যা নামলো** (Worker বা Android-এ একটি লাইনও বদলায়নি):
 
@@ -224,6 +225,21 @@ honest "not configured" line instead of a real opt-in.
   now offers a real PushManager subscription. Case 79 pins the flag.
 - Nothing else changes: subscriptions stay account-scoped, payloads stay
   generic, and the phone's FCM route is never reused (parity plan §7.4).
+
+## Slice Q — Production calls on ✅
+
+Owner-approved: the 1:1 WebRTC surface (slice G, 45-test suite) goes live.
+
+- Recipe: `build:web:prod` gains `VITE_KP_WEB_CALLS=true`; case 79 pins it.
+  The gate's default stays `false` — only the production recipe flips it.
+- Server prerequisites were already live: `/api/config/ice` + TURN
+  credentials (`TURN_KEY_ID`/`TURN_API_TOKEN` secrets), CallSignal DO,
+  `/ws/call/:id` (now opened with a one-time ticket, slice O).
+- Honest limits stay documented (`docs/web-calls.md`): no group calls, no
+  Telecom/hold, no closed-tab ringing — the UI names them instead of implying
+  parity.
+- Rollback: one-line recipe revert; the phone and every Worker route are
+  untouched either way.
 
 ## কাজের নিয়ম (আগের বার যে ভুলটা হয়েছিল)
 

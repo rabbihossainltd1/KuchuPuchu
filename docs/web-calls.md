@@ -18,5 +18,6 @@ The Worker endpoints are same-origin `/api/calls/*`, `/api/config/ice`, and rece
 
 - Contract case: `test/cases/62-web-calls.mjs`
 - Browser suite: `npm run test:web:calls:e2e`
-- Feature default: `VITE_KP_WEB_CALLS` is false
-- Production PWA: unchanged
+- Feature default: `VITE_KP_WEB_CALLS` is false (a plain `npm run build:web`)
+- Production recipe: on since slice Q — `build:web:prod` flips the gate
+- Legacy `public/` PWA: retired by the slice J cutover, untouched here
