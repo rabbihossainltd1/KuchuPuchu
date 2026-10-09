@@ -51,8 +51,8 @@ check(
   build.includes('buildConfigField("String", "BUILD_SHA"') &&
     build.includes('buildConfigField("String", "COMPOSE_BOM_VERSION"') &&
     build.includes("buildConfig = true") &&
-    build.includes("versionCode = 278") &&
-    build.includes('versionName = "3.9.201"'),
+    build.includes("versionCode = 279") &&
+    build.includes('versionName = "3.9.202"'),
 );
 check(
   "release CI retains a build-matched R8 mapping artifact beside the unchanged APK artifact",

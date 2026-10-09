@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: Type RELEASE-DEBUG-KEY for the owner-approved v273-compatible signer
+        description: Type RELEASE-DEBUG-KEY-V279 only to authorize the v274-compatible debug signer for this in-app update
         required: true
         type: string
 
@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   release:
-    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == 'RELEASE-DEBUG-KEY' }}
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == 'RELEASE-DEBUG-KEY-V279' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
@@ -29,10 +29,11 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      # One-time owner-approved exception: v273 is signed with the tracked
-      # debug keystore. Requiring this explicit dispatch input and checking the
-      # published signer prevents accidental use for future releases.
-      - name: Confirm v273-compatible keystore is present
+      # The v274 APK was signed with the tracked debug keystore. An in-app update
+      # must keep that certificate or installed copies will reject the APK. This
+      # explicit, version-specific input is required before reusing that key; migrate
+      # to a matching protected signer before the next release.
+      - name: Confirm v274-compatible keystore is present
         run: test -s native-android/app/debug.keystore
 
       - name: Worker and source CI
@@ -48,7 +49,7 @@ jobs:
           ./gradlew :app:testDebugUnitTest :app:lintDebug --no-daemon --continue \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
 
-      - name: Build v273-compatible APK using the debug keystore
+      - name: Build v279 APK with the v274-compatible debug keystore
         working-directory: native-android
         env:
           KP_KEYSTORE_B64: ""
@@ -65,15 +66,15 @@ jobs:
           test -s "$apk"
           code="$(sed -n 's/^[[:space:]]*versionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle.kts | head -n1)"
           name="$(sed -n 's/^[[:space:]]*versionName = \"\([^\"]*\)\".*/\1/p' app/build.gradle.kts | head -n1)"
-          test "$code" = "274"
-          test "$name" = "3.9.197"
-          asset="$RUNNER_TEMP/kuchupuchu-${name}-r104.apk"
+          test "$code" = "279"
+          test "$name" = "3.9.202"
+          asset="$RUNNER_TEMP/kuchupuchu-${name}-r105.apk"
           cp "$apk" "$asset"
           echo "RELEASE_TAG=v${code}" >> "$GITHUB_ENV"
           echo "RELEASE_TITLE=v${code} (${name})" >> "$GITHUB_ENV"
           echo "RELEASE_ASSET=$asset" >> "$GITHUB_ENV"
 
-      - name: Verify signing continuity with v273
+      - name: Verify signing continuity with v274
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -81,10 +82,10 @@ jobs:
           set -euo pipefail
           previous_dir="$RUNNER_TEMP/previous-release"
           mkdir -p "$previous_dir"
-          gh release download v273 \
-            --pattern "kuchupuchu-3.9.196-r103.apk" \
+          gh release download v274 \
+            --pattern "kuchupuchu-3.9.197-r104.apk" \
             --dir "$previous_dir"
-          old_apk="$previous_dir/kuchupuchu-3.9.196-r103.apk"
+          old_apk="$previous_dir/kuchupuchu-3.9.197-r104.apk"
           apksigner="$(command -v apksigner || find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -type f -name apksigner | sort -V | tail -n1)"
           test -x "$apksigner"
           cert_digest() {
