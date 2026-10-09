@@ -279,6 +279,24 @@ check(
     !legacyWebApp.includes("body: { backup: blob }"),
 );
 
+// Conversation list contract, both sides: case 04 pins the SERVER shape
+// ({ items }) — pin the CLIENT that consumes it too. Reading a key that is
+// not there made production web render "no chats" for an account with six
+// conversations: the silent catch turned a shape drift into an empty screen,
+// with WS connected and /api/me working, so nothing else looked wrong.
+check(
+  "legacy web reads the conversation list from r.items",
+  /state\.convs\s*=\s*\(r\.items\s*\|\|/.test(legacyWebApp),
+);
+check(
+  "legacy web never reads the removed r.conversations key",
+  !legacyWebApp.includes("r.conversations"),
+);
+// The shell cache is cache-first for /app.js; renaming the cache key is the
+// ONLY thing that forces existing installs to pick up a fixed shell.
+const legacySw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
+check("legacy web shell cache key is past v1", !/const SHELL = "kp-shell-v1"/.test(legacySw));
+
 // 9. send policy
 check(
   "a solo chat with a real peer is personal",

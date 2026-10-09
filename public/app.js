@@ -945,7 +945,10 @@ import { buildE164, validOtp } from "./login-utils.mjs";
     if (!state.token) return;
     try {
       const r = await api("/api/conversations");
-      state.convs = (r.conversations || []).filter((c) => !c.hidden);
+      // The server wraps the list as { items } (contract pinned in case 04).
+      // Reading a key that is not there silently rendered the empty state for
+      // an account that had six chats - never fall back to a removed key.
+      state.convs = (r.items || []).filter((c) => !c.hidden);
       renderConvs();
     } catch (e) {
       if (state.token) console.warn("convs:", e.message);
