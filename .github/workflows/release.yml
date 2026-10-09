@@ -39,6 +39,7 @@ jobs:
       - name: Worker and source CI
         run: |
           npm ci
+          npx playwright install --with-deps chromium
           npm run ci
           bash scripts/ktlint-check.sh
 
