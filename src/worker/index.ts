@@ -82,6 +82,11 @@ export type Env = {
    *  fall back to fixed friendly lines and picture requests answer
    *  "switched off", never a hole. */
   HF_TOKEN?: string;
+  /** Slice J cutover: the Workers Assets binding for the built React PWA
+   *  (web/dist). Present in the production config ([assets] binding =
+   *  "ASSETS"); absent in binding-free preview uploads, where the worker is
+   *  never asked for asset paths anyway (run_worker_first stays api/ws). */
+  ASSETS?: Fetcher;
 };
 
 type Json = Record<string, unknown>;
@@ -6014,9 +6019,43 @@ function dataUrlResponse(dataUrl: string, filename = "media"): Response {
 
 /* ---------------- main handler ---------------- */
 
+/* Slice J cutover: the same-origin CSP the React shell already declares via
+ * <meta>, plus frame-ancestors — the one directive a meta tag cannot carry,
+ * which is exactly why the worker stamps it as a response header on HTML
+ * documents (docs/web-hardening.md §5, docs/web-cutover.md). */
+const SHELL_CSP =
+  "default-src 'self'; script-src 'self' https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws: wss: https://accounts.google.com; frame-src https://accounts.google.com; frame-ancestors 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'";
+
+async function serveShellAsset(env: Env, request: Request): Promise<Response> {
+  // Binding-free preview uploads never route asset paths through the worker
+  // (their run_worker_first stays api/ws), so a missing binding here means a
+  // misrouted request — answer 404, never crash.
+  if (!env.ASSETS) return json({ error: { code: "NOT_FOUND", message: "Not found." } }, 404);
+  const response = await env.ASSETS.fetch(request);
+  const headers = new Headers(response.headers);
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Referrer-Policy", "no-referrer");
+  if ((headers.get("content-type") ?? "").includes("text/html")) {
+    headers.set("Content-Security-Policy", SHELL_CSP);
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (request.method === "OPTIONS") return json({ ok: true });
+    // Slice J cutover: run_worker_first = ["/*"], so every request lands here
+    // first. /api/* and /ws/* keep their full REST/socket path through
+    // handle(); every other path is the built React PWA from the ASSETS
+    // binding, stamped with the server-side security headers above.
+    const { pathname } = new URL(request.url);
+    if (!pathname.startsWith("/api/") && !pathname.startsWith("/ws/")) {
+      return serveShellAsset(env, request);
+    }
     try {
       return await handle(request, env, ctx);
     } catch (err) {

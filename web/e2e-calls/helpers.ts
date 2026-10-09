@@ -575,8 +575,33 @@ export async function createMockCallsWorker(
   }
 
   if (options.withHistory) {
-    const now = Date.now();
-    const iso = (agoMs: number) => new Date(now - agoMs).toISOString();
+    // The day-section labels render in DHAKA calendar days (the phone's truth),
+    // so seeds must anchor to Dhaka days, not "now minus hours": a runner whose
+    // clock sits inside Dhaka's 00:00-02:00 window would otherwise watch a
+    // "now-26h" seed land two Dhaka days back and flake the Yesterday heading.
+    // Dhaka is UTC+6 with no DST.
+    const dhakaAt = (dayOffset: number, hh: number, mm: number): string => {
+      const parts = new Map(
+        new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Asia/Dhaka",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        })
+          .formatToParts(new Date())
+          .map((part) => [part.type, part.value]),
+      );
+      return new Date(
+        Date.UTC(
+          Number(parts.get("year")),
+          Number(parts.get("month")) - 1,
+          Number(parts.get("day")) + dayOffset,
+          hh - 6,
+          mm,
+        ),
+      ).toISOString();
+    };
+    const iso = (agoMs: number) => new Date(Date.now() - agoMs).toISOString();
     const seed = (call: Partial<CallRecord> & { id: string }): void => {
       calls.set(call.id, {
         kind: "AUDIO",
@@ -594,13 +619,14 @@ export async function createMockCallsWorker(
         ...call,
       } as CallRecord);
     };
-    // Today: a connected voice call, then a missed video call from the peer.
+    // Today (Dhaka): a connected voice call, then a missed video call from the
+    // peer — the missed one is newer so it sorts first.
     seed({
       id: VOICE_CALL_ID,
       status: "ENDED",
-      createdAt: iso(90 * 60_000),
-      startedAt: iso(90 * 60_000),
-      endedAt: iso(83 * 60_000),
+      createdAt: dhakaAt(0, 0, 5),
+      startedAt: dhakaAt(0, 0, 5),
+      endedAt: dhakaAt(0, 0, 12),
     });
     seed({
       id: MISSED_CALL_ID,
@@ -608,11 +634,12 @@ export async function createMockCallsWorker(
       status: "MISSED",
       callerId: PEER.id,
       calleeId: ME.id,
-      createdAt: iso(30 * 60_000),
+      createdAt: dhakaAt(0, 0, 10),
     });
-    // Yesterday: a call I cancelled.
-    seed({ id: CANCELLED_CALL_ID, status: "CANCELLED", createdAt: iso(26 * 60 * 60_000) });
-    // Last week: a group call, which the Web lists but refuses to re-dial.
+    // Yesterday (Dhaka): a call I cancelled.
+    seed({ id: CANCELLED_CALL_ID, status: "CANCELLED", createdAt: dhakaAt(-1, 12, 0) });
+    // Nine Dhaka days back: a group call, which the Web lists but refuses to
+    // re-dial.
     seed({
       id: GROUP_CALL_ID,
       group: true,
@@ -621,9 +648,9 @@ export async function createMockCallsWorker(
       callerId: PEER.id,
       calleeId: "",
       conversationId: GROUP_ID,
-      createdAt: iso(9 * 24 * 60 * 60_000),
-      startedAt: iso(9 * 24 * 60 * 60_000),
-      endedAt: iso(9 * 24 * 60 * 60_000 - 600_000),
+      createdAt: dhakaAt(-9, 12, 0),
+      startedAt: dhakaAt(-9, 12, 0),
+      endedAt: dhakaAt(-9, 12, 10),
     });
   }
 

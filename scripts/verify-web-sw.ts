@@ -223,7 +223,14 @@ handlers.get("activate")!({
 assert.ok(activationPromise, "activate must wait for cache cleanup and client claim");
 await activationPromise;
 assert.ok(!cacheStores.has("kp-web-shell-obsolete"), "activation must remove stale Web caches");
-assert.ok(cacheStores.has("kp-shell-v1"), "activation must preserve the existing public PWA cache");
+// Slice J cutover inverted this pin on purpose: while ./public was the live
+// PWA the React worker had to preserve its caches; now the React shell IS the
+// live PWA, so activation sweeps the legacy kp-shell-* caches — otherwise a
+// resurrected legacy registration would keep serving the old shell.
+assert.ok(
+  !cacheStores.has("kp-shell-v1"),
+  "cutover: activation must sweep the legacy public PWA shell caches",
+);
 assert.ok(cacheStores.has("another-app-cache"), "activation must preserve unrelated caches");
 assert.ok(clientsClaimed, "activation must claim eligible clients");
 

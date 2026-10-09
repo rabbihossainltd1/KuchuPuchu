@@ -49,12 +49,25 @@ CF_ACCOUNT = "92081fac7caf54a46a756c382081544b"
 binding = "MEDIA"
 bucket_name = "kp-media"
 
-# r104-web: the KuchuPuchu web client (PWA) lives in ./public and is served
-# from THIS worker — same origin as /api and /ws, so there is no CORS surface
-# and no second deploy. The API and the sockets always run through the worker;
-# every other path serves the static app (unknown paths fall back to
-# index.html for the SPA router).
+# r104-web / slice J cutover: the React PWA (web/dist) is now THE production
+# web client, served from THIS worker — same origin as /api and /ws, so there
+# is no CORS surface and no second deploy. The legacy ./public client stays in
+# the repo for the contract suite and one-revert rollback, but is no longer
+# served by this config (the preview-only wrangler.kuchupuchu-preview.toml
+# still points at ./public and never runs the worker for asset paths).
+#
+# The build step produces web/dist before every deploy; Workers Builds'
+# production trigger runs `npx wrangler deploy`, and wrangler runs [build]
+# command first — so the cutover needs no dashboard change.
+[build]
+command = "npm run build:web:prod"
+
+# run_worker_first on EVERY path: the worker delegates non-API paths to the
+# ASSETS binding and stamps the deploy-day security headers (CSP with
+# frame-ancestors, nosniff, referrer-policy) onto the responses — a meta tag
+# cannot carry frame-ancestors, only a header can (docs/web-hardening.md).
 [assets]
-directory = "./public"
+directory = "./web/dist"
+binding = "ASSETS"
 not_found_handling = "single-page-application"
-run_worker_first = ["/api/*", "/ws/*"]
+run_worker_first = ["/*"]

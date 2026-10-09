@@ -86,8 +86,9 @@ Parity plan §8 P6 ("Visual/motion parity & hardening") এর exit-gate রি�
   `<script>` কোথাও নেই, তাই script-src-এ `'unsafe-inline'` লাগেনি;
   style-src-এ `'unsafe-inline'` কারণ GSI স্টাইল অ্যাট্রিবিউট ইনজেক্ট করে এবং
   legacy index.html-এর ইনলাইন `<style>`; `frame-ancestors` meta-তে অচল —
-  Worker-ডিপ্লয়ের দিন সার্ভার হেডারে যোগ করতে হবে (এখনো production-এ React
-  অ্যাপ শিপ হয়নি, তাই হেডার-পথ পরের সিদ্ধান্ত)।
+  Slice J cutover-এ এটা Worker-এর সার্ভার হেডারে চলে এসেছে (`serveShellAsset`
+  HTML ডকুমেন্টে CSP ছাপে, `frame-ancestors 'self'` সহ; বিস্তারিত
+  `docs/web-cutover.md`)।
 - XSS অডিট: `web/src`-এ `innerHTML`/`dangerouslySetInnerHTML` শূন্য (React
   ডিফল্ট এস্কেপিং); legacy `public/app.js` `esc()` দিয়েই রেন্ডার করে (আগের
   স্লাইসের অডিট অক্ষত); মিডিয়া URL same-origin `/api/files/:key` allowlist।

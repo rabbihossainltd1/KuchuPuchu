@@ -2,6 +2,15 @@
 "use strict";
 
 const CACHE_PREFIX = "kp-web-shell-";
+// Slice J cutover: the LEGACY public/ client cached its shell under
+// "kp-shell-v1"/"kp-shell-v2". When this worker activates on an existing
+// install (updates wait for clients to close — the deliberate no-skip-waiting
+// policy pinned by verify-web-sw), activate must sweep those caches too, or
+// a leftover legacy cache would keep serving the old shell to any legacy
+// registration that wakes up later. (The reverse direction is symmetric: the
+// legacy worker deletes any cache that is not its own, so a one-revert
+// rollback self-heals the same way.)
+const LEGACY_CACHE_PREFIX = "kp-shell-";
 const BUILD_ID = "__BUILD_ID__";
 const CACHE_NAME = `${CACHE_PREFIX}${BUILD_ID}`;
 const PRECACHE_URLS = __PRECACHE_URLS__;
@@ -31,7 +40,11 @@ self.addEventListener("activate", (event) => {
       .then((keys) =>
         Promise.all(
           keys
-            .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+            .filter(
+              (key) =>
+                (key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME) ||
+                key.startsWith(LEGACY_CACHE_PREFIX),
+            )
             .map((key) => caches.delete(key)),
         ),
       )

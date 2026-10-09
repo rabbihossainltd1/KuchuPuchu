@@ -45,8 +45,12 @@ function versionedServiceWorker(): Plugin {
 }
 
 /**
- * Incremental Web client workspace. The current production PWA remains served
- * from ./public until the migrated flows pass parity and regression gates.
+ * The production Web client workspace. Since the slice J cutover, the root
+ * wrangler.toml builds this app (`build:web:prod` — account + messaging flags
+ * on, matching the legacy ./public surface; calls stay off) and serves
+ * web/dist from the worker on the same origin as /api and /ws. ./public stays
+ * in the repo only for the legacy contract suite and one-revert rollback.
+ * Default-flag `build:web` remains the safe preview/E2E recipe.
  */
 export default defineConfig({
   root: "web",
@@ -67,6 +71,9 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
-    sourcemap: true,
+    // Slice J cutover: the deployed recipe (KP_WEB_PROD=1) must not publish
+    // source maps — everything in web/dist is world-readable once served, and
+    // the legacy ./public never shipped maps. Preview/E2E builds keep them.
+    sourcemap: process.env.KP_WEB_PROD !== "1",
   },
 });

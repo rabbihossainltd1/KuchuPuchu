@@ -53,6 +53,7 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 | **H** Web Push (VAPID doorbell) | ✅ merged | PR #89 → `main` @ `e5ee47a` |
 | hotfix — legacy web empty list (`{items}` + SW cache bump) | ✅ merged | PR #90 → `main` @ `eab68c3` |
 | **I** hardening (themes, motion, a11y, CSP, IDB) | ✅ merged | PR #91 → `main` @ `1af2694` |
+| **J** production cutover (React PWA live) | ✅ built | এই branch; নিচের হিসাব |
 
 **Slice D-তে যা নামলো** (Worker বা Android-এ একটি লাইনও বদলায়নি):
 
@@ -143,6 +144,31 @@ fix. Full review in `docs/web-hardening.md`.
 - Gates: new `test:web:hardening:e2e` (20 tests), case 78 (19 checks), full
   `npm run ci` green. Worker/Android/legacy route code unchanged this slice.
 
+## Slice J — Production cutover ✅
+
+The built React PWA (`web/dist`) replaces `./public` as the live web client on
+the same origin as `/api` and `/ws`. Full Bengali review in
+`docs/web-cutover.md`.
+
+- **Serving:** `[build] command = "npm run build:web:prod"` runs before every
+  `wrangler deploy` (no dashboard change); `[assets]` now points at
+  `./web/dist` with `binding = "ASSETS"` and `run_worker_first = ["/*"]`; the
+  worker delegates non-API paths to the binding and stamps server-side
+  security headers — CSP with `frame-ancestors 'self'` on HTML (the deploy-day
+  TODO from Slice I), nosniff + no-referrer on everything.
+- **Production recipe:** account + messaging flags on (the legacy surface);
+  calls/statuses/media stay default-off. Pinned by case 79.
+- **SW migration:** the React worker sweeps legacy `kp-shell-*` caches on
+  activate; no-skip-waiting update policy kept; the legacy worker's
+  delete-everything-else activate makes a one-revert rollback self-heal.
+  `verify:web-sw` pin inverted on purpose to enforce the sweep.
+- **Install metadata:** React shell ships the same manifest/icon as legacy,
+  so home-screen installs keep their identity.
+- **Untouched:** the preview config still serves `./public` without a build
+  step; `public/` stays in-repo for the legacy contract suite and rollback.
+- Gates: case 79 (24 checks), full `npm run ci` green (now including
+  `build:web:prod`), post-merge live header/shell/health checks.
+
 ## কাজের নিয়ম (আগের বার যে ভুলটা হয়েছিল)
 
 1. **প্রতিটি slice শেষ হলেই commit + push।** কোনো বড় কাজ কখনও শুধু sandbox-এ রাখা যাবে না।
@@ -160,5 +186,5 @@ fix. Full review in `docs/web-hardening.md`.
 
 - Group video call-এর measured participant cap / SFU সিদ্ধান্ত (future work; Slice G-এর 1:1 scope-এর বাইরে)।
 - ~~Web Push-এর VAPID key + subscription schema (Slice H-এর আগে)।~~ সমাধান (Slice H): `VAPID_PRIVATE_KEY` secret থেকে পাবলিক key derive হয়; সাবস্ক্রিপশন `web_push_subs` টেবিলে; `docs/web-push.md`। বাকি শুধু লাইভ ডিপ্লয়-তে সিক্রেট বসানো — যেটা আলাদা অনুমতির কাজ।
-- নতুন `web/` অ্যাপ কখন production cutover হবে — `public/` প্রতিস্থাপন নাকি আলাদা path-এ parallel।
+- ~~নতুন `web/` অ্যাপ কখন production cutover হবে — `public/` প্রতিস্থাপন নাকি আলাদা path-এ parallel।~~ সমাধান (Slice J): মালিক সরাসরি প্রতিস্থাপন অনুমোদন করেছেন; `docs/web-cutover.md`।
 - Long-lived session token WS query-তে রাখা বনাম short-lived ticket route (plan §৭.২)।

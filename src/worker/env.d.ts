@@ -51,6 +51,12 @@ declare global {
     passThroughOnException(): void;
   }
 
+  /** Workers Assets binding (slice J cutover): serves web/dist with the
+   *  configured not_found_handling, exactly like the asset server would. */
+  interface Fetcher {
+    fetch(input: Request | string, init?: RequestInit): Promise<Response>;
+  }
+
   /** Minimal subset of the Workers `scheduled` handler's controller. */
   interface ScheduledController {
     scheduledTime: number;

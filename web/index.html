@@ -2,7 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- Slice J cutover: same install metadata the legacy ./public PWA had,
+         so existing home-screen installs keep their icon and manifest. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
     <!-- Slice I security contract (docs/web-hardening.md): same-origin app,
          one allowlisted third party (Google Identity Services), no inline
          scripts, no object/embed, navigations cannot escape the origin.
@@ -15,9 +20,9 @@
     <meta name="theme-color" content="#0d1524" />
     <meta
       name="description"
-      content="KuchuPuchu Web account and navigation preview. Browser sign-in is available only in opt-in builds; messaging, status, media and calls remain disabled."
+      content="KuchuPuchu — messages, photos and more, right in your browser."
     />
-    <title>KuchuPuchu Web · Account preview</title>
+    <title>KuchuPuchu</title>
   </head>
   <body>
     <div id="root"></div>
