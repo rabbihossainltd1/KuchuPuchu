@@ -100,10 +100,12 @@ check(
     prodRecipe.includes("VITE_KP_WEB_MESSAGING=true"),
 );
 check(
-  "the production recipe leaves calls, statuses and media at their safe defaults",
-  !prodRecipe.includes("VITE_KP_WEB_CALLS") &&
-    !prodRecipe.includes("VITE_KP_WEB_STATUSES") &&
-    !prodRecipe.includes("VITE_KP_WEB_MEDIA"),
+  "the production recipe enables the implemented parity surface (account, messaging, statuses)",
+  prodRecipe.includes("VITE_KP_WEB_STATUSES=true"),
+);
+check(
+  "calls stay default-off and the reserved media gate stays unflipped",
+  !prodRecipe.includes("VITE_KP_WEB_CALLS") && !prodRecipe.includes("VITE_KP_WEB_MEDIA"),
 );
 check("no sourcemaps ship with the public assets", viteConfig.includes("sourcemap: false"));
 check(

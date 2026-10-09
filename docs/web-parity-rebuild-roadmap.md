@@ -55,6 +55,7 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 | **I** hardening (themes, motion, a11y, CSP, IDB) | ✅ merged | PR #91 → `main` @ `1af2694` |
 
 | **J** production cutover (React PWA at /) | ✅ merged | PR #92+#93 (parallel session), integration PR #94 → `main` @ `958dff9` |
+| **K** production statuses on | ✅ built | এই branch; নিচের হিসাব |
 
 **Slice D-তে যা নামলো** (Worker বা Android-এ একটি লাইনও বদলায়নি):
 
@@ -180,6 +181,16 @@ owner chose the worker-stamped-header mechanism). Full mechanics in
 - Gates: case 79 (integration pins), `test:web:cutover:e2e` (3 tests, the only
   suite with service workers allowed, built with the exact prod script), full
   `npm run ci` green; post-merge live `curl -sI` header/shell/health checks.
+
+## Slice K — Production statuses on ✅
+
+The last implemented-but-dark surface goes live: `build:web:prod` gains
+`VITE_KP_WEB_STATUSES=true`, so signed-in production users get the phone's
+status feed, composers, viewer and privacy controls (slice F, 23-test suite).
+Nothing else changes: calls stay default-off (standing directive) and the
+`media` flag remains reserved — no code reads it yet, attachments/viewers
+already ship inside the messaging surface. Case 79 pins the recipe; docs
+updated (`web-feature-flags.md`, `web-cutover.md`).
 
 ## কাজের নিয়ম (আগের বার যে ভুলটা হয়েছিল)
 

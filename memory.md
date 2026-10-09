@@ -1027,3 +1027,9 @@ Owner: "ager session ei kaj korte korte dead hoye geche … kota kaj hoyeche" �
 - MINE WINS ON FLAGS: build:web:prod = account+messaging only (legacy parity); their statuses/media=true reverted to off (separate future decision; calls off per standing directive).
 - case 78 CSP section repointed from _headers to worker SHELL_CSP; case 79 rewritten as integration pins (28 checks).
 - GOTCHAS: git identity + node_modules + ms-playwright browsers keep vanishing between sandbox restores — re-run npm ci / playwright install / git config each turn; /tmp does NOT persist across commands.
+
+## Web P3 slice K — production statuses on — 2026-10-10 (branch feat/web-p6-prod-statuses, base main @ c29847b; recipe-only + docs + pins)
+- WHAT: `build:web:prod` += `VITE_KP_WEB_STATUSES=true` — the last implemented-but-dark surface (slice F: feed/composers/viewer/privacy, 23-test suite) goes live for signed-in users. Phone parity beyond the legacy surface, owner-delegated via "next a ja ache koro".
+- NOT FLIPPED: calls (standing default-off directive); media (reserved flag — nothing reads it yet; attachments/viewers ship inside messaging). Fixed docs that the parallel session had wrongly marked media "on in prod".
+- PINS: case 79 recipe checks updated (statuses on; calls+media absent). Docs: web-feature-flags.md rows, web-cutover.md recipe, roadmap slice K.
+- ROLLBACK: one-line recipe revert; statuses nav disappears, worker routes untouched (phone unaffected either way).
