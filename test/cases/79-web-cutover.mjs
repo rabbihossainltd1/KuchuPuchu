@@ -41,25 +41,21 @@ check(
   wrangler.includes('not_found_handling = "single-page-application"'),
 );
 
-// 2. header rules: caching + the security contract
+// 2. response headers via the Workers Assets _headers file — the documented
+// mechanism (wrangler has no toml-level asset rules; slice J first tried
+// [[assets.rules]] and the live deploy proved it was silently ignored).
+const headersFile = read("../../web/public/_headers");
 check(
-  "hashed bundles are immutable",
-  /path = "\/assets\/\*"\s+headers = \{ Cache-Control = "public, max-age=31536000, immutable" \}/.test(
-    wrangler,
-  ),
+  "wrangler.toml carries no unsupported assets rules (the mechanism is _headers)",
+  !wrangler.includes("[[assets.rules]]"),
 );
 check(
-  "sw.js is no-store so every update check revalidates",
-  /path = "\/sw\.js"\s+headers = \{ Cache-Control = "no-store" \}/.test(wrangler),
+  "the _headers file ships the security contract for every document",
+  headersFile.includes("/*") &&
+    headersFile.includes("X-Content-Type-Options: nosniff") &&
+    headersFile.includes("Referrer-Policy: strict-origin-when-cross-origin"),
 );
-const fallbackRule = wrangler.match(/path = "\/\*"\s+headers = \{ ([^}]+) \}/)?.[1] ?? "";
-check("documents are no-store", fallbackRule.includes('Cache-Control = "no-store"'));
-check("nosniff on documents", fallbackRule.includes('X-Content-Type-Options = "nosniff"'));
-check(
-  "sane referrer policy",
-  fallbackRule.includes('Referrer-Policy = "strict-origin-when-cross-origin"'),
-);
-const csp = fallbackRule.match(/Content-Security-Policy = "([^"]+)"/)?.[1] ?? "";
+const csp = headersFile.match(/Content-Security-Policy: ([^\n]+)\n/)?.[1] ?? "";
 check(
   "server CSP: same-origin default, GSI the only third party, no inline scripts",
   /default-src 'self'/.test(csp) &&
@@ -70,6 +66,10 @@ check(
 check(
   "server CSP: frame-ancestors (impossible in meta) is enforced",
   /frame-ancestors 'self'/.test(csp),
+);
+check(
+  "sw.js is no-store so every update check revalidates",
+  /\/sw\.js\s*\n\s*Cache-Control: no-store/.test(headersFile),
 );
 
 // 3. the non-production preview mirrors the same mechanics without prod bindings

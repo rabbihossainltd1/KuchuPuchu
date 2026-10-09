@@ -24,17 +24,22 @@
 
 ## ২. হেডার — Slice I-এর "ডিপ্লয়-ডে" প্রতিশ্রুতি পূরণ
 
-`[[assets.rules]]` (প্রথম-ম্যাচ জেতে):
+মেকানিজম: অ্যাসেট ডিরেক্টরির **`_headers` ফাইল** (`web/public/_headers`,
+বিল্ডে dist-এ কপি হয়) — Workers Assets-এর ডকুমেন্টেড পথ। প্রথম চেষ্টার
+`[[assets.rules]]` toml সিনট্যাক্স লাইভ ডিপ্লয়ে প্রমাণিতভাবে নীরবে ইগনোরড
+(wrangler 4.86: "Unexpected fields found in assets field: rules") — তাই
+টমল-লেভেল রুল নেই; কেস ৭৯ টমলে `[[assets.rules]]`-এর *অনুপস্থিতি* পিন করে।
 
-| path | হেডার |
+| প্যাটার্ন | হেডার |
 | --- | --- |
-| `/assets/*` | `Cache-Control: public, max-age=31536000, immutable` (হ্যাশড বান্ডল) |
+| `/*` | `X-Content-Type-Options: nosniff` + `Referrer-Policy: strict-origin-when-cross-origin` + **CSP হেডার** |
 | `/sw.js` | `Cache-Control: no-store` — আপডেট চেক প্রতিবার রিভ্যালিডেট করবে; ক্যাশড sw.js-ই ছিল লেগ্যাসি খালি-লিস্ট বাগের স্থায়িত্বের কারণ |
-| `/*` | `no-store` + `X-Content-Type-Options: nosniff` + `Referrer-Policy: strict-origin-when-cross-origin` + **CSP হেডার** |
 
-CSP হেডারটি Slice I-এর meta CSP-এর হুবহু সেট + `frame-ancestors 'self'`
-(meta-তে অসম্ভব)। `web/index.html` থেকে meta CSP **সরানো হয়েছে** — একটাই
-সত্যের উৎস। কেস ৭৮/৭৯ দুই দিক পিন করে।
+হ্যাশড বান্ডল ডিফল্ট `must-revalidate` + ETag-এই থাকে — correctness over
+cleverness; `_headers`-এ ওভারল্যাপিং প্যাটার্নের কম্বাইন-হেডার ঝুঁকি এড়ানো
+হয়েছে। CSP হেডারটি Slice I-এর meta CSP-এর হুবহু সেট + `frame-ancestors
+'self'` (meta-তে অসম্ভব)। `web/index.html` থেকে meta CSP **সরানো হয়েছে** —
+একটাই সত্যের উৎস। কেস ৭৮/৭৯ দুই দিক পিন করে; লাইভ `curl -sI` চূড়ান্ত প্রুফ।
 
 ## ৩. সার্ভিস-ওয়ার্কার মাইগ্রেশন (বিদ্যমান ইনস্টল)
 
@@ -67,7 +72,7 @@ cutover কমিট রিভার্ট = `public/` আবার অ্যা
 
 ## ৬. গেট
 
-- কন্ট্রাক্ট **কেস ৭৯** (২১ চেক): বিল্ড হুক, অ্যাসেট রুট, হেডার রুল, CSP +
+- কন্ট্রাক্ট **কেস ৭৯** (২০ চেক): বিল্ড হুক, অ্যাসেট রুট, হেডার রুল, CSP +
   frame-ancestors, প্রিভিউ মিরর, প্রোড ফ্ল্যাগ ম্যাট্রিক্স, PWA শেল, লেগ্যাসি
   ক্লিনআপ পিন, RETIRED নোট।
 - **`test:web:cutover:e2e`** (৩ টেস্ট, `serviceWorkers: "allow"` — একমাত্র

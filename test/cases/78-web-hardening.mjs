@@ -57,13 +57,13 @@ check("calls mock serves { items }", callsHelpers.includes("items: conversations
 check("status mock serves { items }", statusHelpers.includes("{ items: [] }"));
 check("forward spec override serves { items }", forwardSpec.includes("items: ["));
 
-// 3. the CSP contract — slice J: the CSP moved from a <meta> tag to the
-// Worker's assets rules header (frame-ancestors is impossible in meta), so
-// the single source of truth is wrangler.toml.
-const wranglerToml = read("../../wrangler.toml");
-const cspMatch = wranglerToml.match(/Content-Security-Policy = "([^"]+)"/);
+// 3. the CSP contract — slice J: the CSP moved from a <meta> tag to a server
+// header via the Workers Assets _headers file (frame-ancestors is impossible
+// in meta), so the single source of truth is web/public/_headers.
+const headersFile = read("../../web/public/_headers");
+const cspMatch = headersFile.match(/Content-Security-Policy: ([^\n]+)\n/);
 const csp = cspMatch?.[1] ?? "";
-check("the assets rules ship a server CSP", csp !== "", csp.slice(0, 60));
+check("the _headers file ships a server CSP", csp !== "", csp.slice(0, 60));
 check(
   "the react shell no longer carries a meta CSP (one source of truth)",
   !/http-equiv="Content-Security-Policy"/i.test(indexHtml),
