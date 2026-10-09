@@ -1,92 +1,104 @@
-# Slice J — Production cutover: React PWA হলো এখন লাইভ ক্লায়েন্ট
+# Slice J — Production cutover: React PWA এখন লাইভ ওয়েব ক্লায়েন্ট
 
-অনুমোদন: মালিক সরাসরি প্রতিস্থাপন (replace) স্ট্র্যাটেজি বেছে নেন — `public/`
-লেগ্যাসি শেল আর সার্ভ হয় না; `web/dist` (React বিল্ড) এখন `/`-এ। এই ডক সেই
-মাইগ্রেশনের মেকানিক্স, রোলব্যাক, আর গেটের হিসাব।
+> অবস্থা: মার্জড (PR #92 + #93 এক parallel session থেকে; PR #94 integration-এ
+> header মেকানিজম বদল)। মালিক সরাসরি প্রতিস্থাপন (replace) অনুমোদন করেছেন;
+> দুটো session-এর দ্বন্দ্বে মালিক worker-stamped হেডার বেছে নিয়েছেন।
 
-## ১. কী বদলালো ডিপ্লয়ে
+## ০. দুই implementation-এর ইতিহাস
 
-- `wrangler.toml [assets] directory` এখন `"./web/dist"`; `run_worker_first`
-  (`/api/*`, `/ws/*`) আর SPA ফলব্যাক অপরিবর্তিত — CORS সারফেস নেই, দ্বিতীয়
-  ডিপ্লয় নেই।
-- **বিল্ড হুক:** Workers Builds-এর প্রোড ট্রিগারের build command ফাঁকা আর
-  ড্যাশবোর্ড API নেই — তাই হুক `wrangler.toml [build] command =
-  "npm run build:web:prod"`-এ। `wrangler deploy`/`versions upload` নিজেই এই
-  কমান্ড চালায়, তাই অ্যাসেট কখনো পুরনো থাকতে পারে না, ড্যাশবোর্ডে কিছু
-  ছুঁতে হয়নি।
-- **প্রোড ফ্ল্যাগ** (`build:web:prod`): account + messaging + statuses + media
-  ON; **calls OFF** (প্ল্যান-ডিফল্ট), **push OFF** (VAPID সিক্রেট এখনো সেট
-  হয়নি — UI সত্যি কথাই বলে)। serviceWorker ফ্ল্যাগ ডিফল্ট true।
-- প্রিভিউ কনফিগ (`wrangler.kuchupuchu-preview.toml`) একই মেকানিক্স মিরর করে;
-  প্রোড বাইন্ডিং/ট্রিগার/মাইগ্রেশন আগের মতোই বাদ।
-- **সোরসম্যাপ বন্ধ:** dist এখন পাবলিক অ্যাসেট হিসেবে আপলোড হয়, তাই
-  `sourcemap: false` — বান্ডলের পাশে পুরো সোর্স পাঠানো নিরাপদ নয়।
+একই দিনে দুই session একই cutover বানিয়ে ফেলে: প্রথমটা (#92) `_headers`
+ফাইলে হেডার দেয়, #93-এ সেটা polish; দ্বিতীয়টা (#94, এই branch) Worker-এর
+`serveShellAsset()`-এ হেডার ছাপে। মালিকের সিদ্ধান্তে #94-ই চূড়ান্ত মেকানিজম;
+`_headers` ফাইল আর `[[assets.rules]]` দুটোই অবসর। কারণ:
 
-## ২. হেডার — Slice I-এর "ডিপ্লয়-ডে" প্রতিশ্রুতি পূরণ
+- `[[assets.rules]]` হেডারের জন্য **নীরবে উপেক্ষিত** — লাইভ ডিপ্লয়ে প্রমাণিত
+  (#93-এর কমিট বার্তা)।
+- `_headers` কাজ করছিল, কিন্তু দুটো আলাদা source of truth (meta + ফাইল +
+  ভবিষ্যতের worker) রাখার চেয়ে একটা পরীক্ষাযোগ্য worker-পথ পরিষ্কার।
+- worker-stamp contract case 79-এ সরাসরি পিন করা যায়; `_headers`-এর runtime
+  আচরণ wrangler-এর খেয়ালখুশির ওপর থাকে।
 
-মেকানিজম: অ্যাসেট ডিরেক্টরির **`_headers` ফাইল** (`web/public/_headers`,
-বিল্ডে dist-এ কপি হয়) — Workers Assets-এর ডকুমেন্টেড পথ। প্রথম চেষ্টার
-`[[assets.rules]]` toml সিনট্যাক্স লাইভ ডিপ্লয়ে প্রমাণিতভাবে নীরবে ইগনোরড
-(wrangler 4.86: "Unexpected fields found in assets field: rules") — তাই
-টমল-লেভেল রুল নেই; কেস ৭৯ টমলে `[[assets.rules]]`-এর *অনুপস্থিতি* পিন করে।
+বাকি সব ভালো অংশ দুই পক্ষ থেকে নেওয়া হয়েছে: `LEGACY_CACHE_PREFIXES` সুইপ,
+precache-এ icon/manifest, `/sw.js`-এ `no-store`, cutover E2E সুট (service
+worker সহ একমাত্র সুট), voice player-এর honest `ended` স্টেট, sourcemap বন্ধ,
+`public/RETIRED.md`।
 
-| প্যাটার্ন | হেডার |
-| --- | --- |
-| `/*` | `X-Content-Type-Options: nosniff` + `Referrer-Policy: strict-origin-when-cross-origin` + **CSP হেডার** |
-| `/sw.js` | `Cache-Control: no-store` — আপডেট চেক প্রতিবার রিভ্যালিডেট করবে; ক্যাশড sw.js-ই ছিল লেগ্যাসি খালি-লিস্ট বাগের স্থায়িত্বের কারণ |
+## ১. সার্ভিং মেকানিজম
 
-হ্যাশড বান্ডল ডিফল্ট `must-revalidate` + ETag-এই থাকে — correctness over
-cleverness; `_headers`-এ ওভারল্যাপিং প্যাটার্নের কম্বাইন-হেডার ঝুঁকি এড়ানো
-হয়েছে। CSP হেডারটি Slice I-এর meta CSP-এর হুবহু সেট + `frame-ancestors
-'self'` (meta-তে অসম্ভব)। `web/index.html` থেকে meta CSP **সরানো হয়েছে** —
-একটাই সত্যের উৎস। কেস ৭৮/৭৯ দুই দিক পিন করে; লাইভ `curl -sI` চূড়ান্ত প্রুফ।
+- `wrangler.toml`: `[build] command = "npm run build:web:prod"` — প্রতি
+  `wrangler deploy`/`versions upload`-এর আগে বিল্ড; ড্যাশবোর্ড ছোঁয়া লাগেনি।
+- `[assets] directory = "./web/dist"`, `binding = "ASSETS"`,
+  `run_worker_first = ["/*"]`, `not_found_handling = "single-page-application"`।
+- Worker-এর `fetch()`: `/api/*` ও `/ws/*` আগের মতো REST/সকেট পাথ; বাকিটা
+  `serveShellAsset()` — `env.ASSETS.fetch(request)` করে হেডার ছাপে। বাইন্ডিং
+  নেই এমন ভার্সনে অ্যাসেট-পাথ এলে 404, ক্র্যাশ নয়।
+- preview কনফিগ এখন একই React বিল্ড সার্ভ করে (একই `[build]` হুক), তবে
+  production বাইন্ডিং ছাড়া — case 54 সেটা পিন করে।
+
+### প্রোডাকশন রেসিপি
+
+`build:web:prod` = `VITE_KP_WEB_ACCOUNT_INTEGRATION=true
+VITE_KP_WEB_MESSAGING=true` — লাইভ সারফেস লেগ্যাসির সমান (অ্যাকাউন্ট + চ্যাট)।
+কলস স্থায়ী নির্দেশনায় ডিফল্ট-অফ; স্ট্যাটাস/মিডিয়া আলাদা ভবিষ্যৎ সিদ্ধান্ত
+(#92 সেগুলো চালু করেছিল; integration-ে মালিক-অনুমোদিত legacy parity-তে
+ফেরানো)। ভিট কনফিগে `sourcemap: false` — ডিপ্লয়ের পর `web/dist`-এর সব ফাইল
+world-readable, লেগ্যাসি কখনো `.map` ছাপেনি।
+
+## ২. সিকিউরিটি হেডার
+
+HTML ডকুমেন্টে Worker ছাপে `Content-Security-Policy` — meta-র একই ডিরেক্টিভ +
+`frame-ancestors 'self'` (meta বহন করতে পারে না বলেই হেডার লাগত); সব
+রেসপন্সে `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`;
+`/sw.js`-এ `Cache-Control: no-store` — ক্যাশ করা SWই লেগ্যাসি খালি-লিস্ট বাগটাকে
+ইনস্টলগুলোর মধ্যে বাঁচিয়ে রেখেছিল, তাই প্রতি আপডেট-চেকে রিভ্যালিডেশন।
+meta CSP `index.html`-এ থেকে যায় — worker-বিহীন প্রিভিউয়ের বেল্ট; লাইভে
+কার্যকর চুক্তি হেডারটি।
 
 ## ৩. সার্ভিস-ওয়ার্কার মাইগ্রেশন (বিদ্যমান ইনস্টল)
 
-১. ডিপ্লয়ের পর বিদ্যমান লেগ্যাসি SW (`kp-shell-v2`) এক নেভিগেশন পর্যন্ত
-   নিজের ক্যাশড শেল সার্ভ করতেই পারে — ইউজার একবার লেগ্যাসি অ্যাপ দেখতে পারে।
-২. একই নেভিগেশনে ব্রাউজারের আপডেট চেক `/sw.js` নামায় (SW-স্ক্রিপ্ট ফেচ কখনো
-   পুরনো SW ইন্টারসেপ্ট করে না; হেডারও no-store) → বাইট আলাদা → React SW
-   ইনস্টল (precache: index.html + হ্যাশড js/css + `/icon.svg` +
-   `/manifest.webmanifest`)।
-৩. অ্যাক্টিভেশনে React SW `kp-shell-*` (v1/v2) **মুছে দেয়** + `clients.claim()`।
-   পরের নেভিগেশন React অ্যাপ। অর্থাৎ প্রতি ইউজারে ≈ এক extra রিলোড।
-৪. React SW-এ `skipWaiting` নেই (verify-web-sw পিন) — প্রথম ভিজিটে কোনো
-   নিয়ন্ত্রক SW না থাকায় অ্যাক্টিভেশন সাথে সাথেই হয়।
+বিদ্যমান ইনস্টলে লেগ্যাসি `public/sw.js` (`kp-shell-v1/v2`, cache-first)।
+টাইমলাইন:
 
-অফলাইন: navigate network-first, ব্যর্থ হলে ক্যাশড `/index.html`; প্রিভিউ
-ইমেজ/মিডিয়া কখনো ক্যাশ হয় না (verify-web-sw allowlist)।
+1. আপডেট-চেকে `/sw.js`-এর নতুন বাইট (no-store, তাই প্রতি চেকে তাজা) →
+   React SW (`kp-web-shell-<buildId>`) ইনস্টল, অপেক্ষমাণ (no-skip-waiting —
+   খোলা ট্যাব মাঝ-সেশনে ভাঙে না)।
+2. ক্লায়েন্ট খালি হলে activate: `LEGACY_CACHE_PREFIXES = ["kp-shell-"]`
+   ঝেড়ে ফেলা + ক্লায়েন্ট claim; precache-এ `index.html` + হ্যাশড js/css +
+   `icon.svg` + `manifest.webmanifest` (এদের বাইট build-id ঘোরায়)।
+3. পরের খোলায় React শেল; navigate network-first, অফলাইনে precached শেল।
 
-## ৪. রোলব্যাক — প্রতিসম
+SW স্ক্রিপ্টের আপডেট-ফেচ নিয়ন্ত্রিত SW-এর fetch হ্যান্ডলার দিয়ে যায় না, তাই
+লেগ্যাসির runtime cache-put বিষ নয়।
 
-cutover কমিট রিভার্ট = `public/` আবার অ্যাসেট রুট; লেগ্যাসি SW-এর activate
-হ্যান্ডলার তার নিজের বাদে **সব** ক্যাশ মোছে (সেই `kp-web-shell-*`-সহ) →
-ইনস্টলগুলো আপনা-আপনি লেগ্যাসিতে ফেরত। দ্বিমুখী সুইচ, হাতে ক্যাশ পরিষ্কার
-করতে হয় না।
+### রোলব্যাক সিমেট্রি
 
-## ৫. `public/` এখন RETIRED
+রিভার্ট = `public/` আবার সার্ভ; React SW-এর ইনস্টলগুলোর আপডেট-চেকে লেগ্যাসি
+`sw.js`-এর ভিন্ন বাইট → লেগ্যাসি SW-এর activate "নিজেরটা ছাড়া বাকি সব"
+(`kp-web-shell-*` সহ) মুছবে → লেগ্যাসি ফিরবে। দুই দিকই সেলফ-হিলিং।
 
-সার্ভ হয় না, তবু রেপোতে: (১) কেস ০৪/৫৫-এর ফিক্সচার (r.items ড্রিফট পিন,
-`kp-shell-v2` বাম্প-রুল), (২) রোলব্যাক, (৩) মাইগ্রেশন রেফারেন্স। দেখুন
-`public/RETIRED.md`। নতুন কাজ শুধু `web/`-এ।
+## ৪. ইনস্টল মেটাডেটা
 
-## ৬. গেট
+React শেল লেগ্যাসির একই `manifest.webmanifest` + `icon.svg` বহন করে
+(`web/public/` → বিল্ডে কপি), হোম-স্ক্রিন ইনস্টলের আইকন/নাম অপরিবর্তিত।
 
-- কন্ট্রাক্ট **কেস ৭৯** (২০ চেক): বিল্ড হুক, অ্যাসেট রুট, হেডার রুল, CSP +
-  frame-ancestors, প্রিভিউ মিরর, প্রোড ফ্ল্যাগ ম্যাট্রিক্স, PWA শেল, লেগ্যাসি
-  ক্লিনআপ পিন, RETIRED নোট।
-- **`test:web:cutover:e2e`** (৩ টেস্ট, `serviceWorkers: "allow"` — একমাত্র
-  স্যুট যেটা SW চালায়): লেগ্যাসি ক্যাশ সিড করে অ্যাক্টিভেশনে মুছে যাওয়া প্রমাণ;
-  অফলাইন নেভিগেশনে প্রিক্যাশ থেকে শেল; প্রিক্যাশ ম্যানিফেস্ট নিরাপদ।
-  বিল্ড হয় হুবহু `build:web:prod` দিয়ে — CI সার্ভড বাইটই প্রুভ করে।
-- পুরো `npm run ci` সবুজ।
+## ৫. গেট
 
-## ৭. জানা সীমা
+- কেস ৭ (integration): সার্ভিং কনফিগ, worker-stamp হেডার, `_headers`/
+  `[[assets.rules]]`-এর অনুপস্থিতি, রেসিপির ফ্ল্যাগ সেট, SW মাইগ্রেশন পিন,
+  ইনস্টল মেটাডেটা, preview-এর বাইন্ডিংহীনতা।
+- `verify:web-sw`: activate-এ `kp-shell-*` ঝাড়ু, no-skip-waiting, precache-এ
+  identity ফাইল।
+- `test:web:cutover:e2e` (৩ টেস্ট): লেগ্যাসি ক্যাশ seed করে activate-এর ঝাড়ু +
+  প্রিক্যাশ-থেকে অফলাইন শেল — একমাত্র সুট যেখানে service worker allowed,
+  বিল্ড হয় হুবহু prod স্ক্রিপ্টে।
+- full `npm run ci` সবুজ (prod বিল্ড + দ্বিতীয় `verify:web-sw` সহ)।
+- মার্জ-পরবর্তী লাইভ: `/`-এ React শেল + CSP হেডার (frame-ancestors সহ),
+  `/sw.js`-এ no-store + নতুন worker, `/api/health` 200।
 
-- `wrangler dev` লোকালি এই রেপোর একটা **আগের থেকে থাকা** কোয়ার্কে থামে
-  (miniflare `CONV_LIST_PREVIEW_QUERY` এক্সপোর্টটাকে হ্যান্ডলার ম্যাপে পায় না;
-  প্রোড রানটাইম সহনশীল)। তাই হেডারগুলোর লোকাল রানটাইম প্রুফ সম্ভব হয়নি —
-  প্রুফ = ডিপ্লয়ের পর লাইভ `curl -sI` (CSP/frame-ancestors, sw.js no-store,
-  assets immutable)। এটা আলাদা ইস্যু; এই স্লাইসের স্কোপ নয়।
-- বিদ্যমান ইনস্টলে প্রথম ভিজিটে এক রিলোড পর্যন্ত লেগ্যাসি শেল দেখা যেতে
-  পারে (উপরে ৩.১) — SW মাইগ্রেশনের প্রকৃতিগত, ক্ষতিকর নয়।
+## ৬. যা ইচ্ছে করে ছোঁয়া হয়নি
+
+- `public/` রিপোতে থেকে যাচ্ছে (কন্ট্রাক্ট কেস ০/৫৫ + রোলব্যাক রেফারেন্স,
+  `public/RETIRED.md`)।
+- Worker-এর const এক্সপোর্ট (কেস ২৭ ইত্যাদি) অক্ষত — লোকাল `wrangler dev`-এর
+  workerd সেগুলোতে আগে থেকেই কড়া; প্রোডাকশন রানটাইম (compat 2025-08-01)
+  মেনে চলে। লোকাল ডেভ আলাদা সমস্যা, এই স্লাইসের নয়।

@@ -57,16 +57,21 @@ check("calls mock serves { items }", callsHelpers.includes("items: conversations
 check("status mock serves { items }", statusHelpers.includes("{ items: [] }"));
 check("forward spec override serves { items }", forwardSpec.includes("items: ["));
 
-// 3. the CSP contract — slice J: the CSP moved from a <meta> tag to a server
-// header via the Workers Assets _headers file (frame-ancestors is impossible
-// in meta), so the single source of truth is web/public/_headers.
-const headersFile = read("../../web/public/_headers");
-const cspMatch = headersFile.match(/Content-Security-Policy: ([^\n]+)\n/);
-const csp = cspMatch?.[1] ?? "";
-check("the _headers file ships a server CSP", csp !== "", csp.slice(0, 60));
+// 3. the CSP contract — slice J integration: the effective CSP is a SERVER
+// header stamped by the worker's serveShellAsset (frame-ancestors is
+// impossible in meta); the meta tag stays only as belt for worker-less
+// previews. The retired _headers file must not come back (case 79 pins the
+// same single-source-of-truth rule).
+const workerSrc = read("../../src/worker/index.ts");
+const csp = workerSrc.match(/const SHELL_CSP =\s*"([^"]+)"/)?.[1] ?? "";
+check("the worker ships a server CSP", csp !== "", csp.slice(0, 60));
 check(
-  "the react shell no longer carries a meta CSP (one source of truth)",
-  !/http-equiv="Content-Security-Policy"/i.test(indexHtml),
+  "the react shell keeps the meta CSP as belt for worker-less previews",
+  /http-equiv="Content-Security-Policy"/i.test(indexHtml),
+);
+check(
+  "the retired _headers file stays gone (one source of truth)",
+  !read("../../package.json").includes("_headers") && workerSrc.includes("serveShellAsset"),
 );
 check(
   "frame-ancestors is now enforced (deploy-day promise from slice I)",

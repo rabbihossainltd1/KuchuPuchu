@@ -53,7 +53,8 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 | **H** Web Push (VAPID doorbell) | ✅ merged | PR #89 → `main` @ `e5ee47a` |
 | hotfix — legacy web empty list (`{items}` + SW cache bump) | ✅ merged | PR #90 → `main` @ `eab68c3` |
 | **I** hardening (themes, motion, a11y, CSP, IDB) | ✅ merged | PR #91 → `main` @ `1af2694` |
-| **J** production cutover (React PWA at /) | ✅ merged | PR #92 → `main` @ `7acc0e1`; headers fix PR #93 → `main` @ `1d2f7f8` |
+
+| **J** production cutover (React PWA at /) | ✅ merged | PR #92+#93 (parallel session) then integration PR #94 → worker-stamped headers |
 
 **Slice D-তে যা নামলো** (Worker বা Android-এ একটি লাইনও বদলায়নি):
 
@@ -147,31 +148,38 @@ fix. Full review in `docs/web-hardening.md`.
 ## Slice J — Production cutover ✅
 
 The React PWA (`web/dist`) replaced the legacy `public/` shell at the Worker's
-assets root — owner-approved direct replacement. Full mechanics in
+assets root — owner-approved direct replacement. Two parallel sessions shipped
+it (PR #92 + headers fix #93 from one, PR #94 integration from the other; the
+owner chose the worker-stamped-header mechanism). Full mechanics in
 `docs/web-cutover.md`.
 
 - **Build hook:** `wrangler.toml [build] command = "npm run build:web:prod"` —
   `wrangler deploy`/`versions upload` build the web app themselves, so assets
   can never be stale and no dashboard change was needed.
-- **Prod flags:** account + messaging + statuses + media on; calls off (plan
-  default), push off (VAPID unset).
-- **Headers:** `web/public/_headers` (the documented Workers Assets
-  mechanism) — `no-store` `/sw.js`, and the CSP as a server header including
-  `frame-ancestors 'self'` (slice I's deploy-day promise) on every document;
-  the meta CSP left `index.html`. (A first attempt at `[[assets.rules]]` was
-  silently ignored by wrangler — the live deploy proved it and the follow-up
-  moved to `_headers`.)
+- **Prod flags:** account + messaging on (the legacy surface); calls off
+  (standing directive), statuses/media off (separate future decision), push
+  off until VAPID is set.
+- **Headers:** the worker runs first on every path, delegates non-API paths to
+  the `ASSETS` binding and stamps the security headers — CSP with
+  `frame-ancestors 'self'` on HTML (slice I's deploy-day promise), nosniff +
+  no-referrer everywhere, `no-store` on `/sw.js`. A first attempt used
+  `[[assets.rules]]` (silently ignored — live deploy proved it), a second used
+  a `_headers` file (PR #93); the integration retired `_headers` for this
+  single worker-stamped source of truth (the meta CSP stays only as belt for
+  worker-less previews).
 - **SW migration:** the new worker deletes retired `kp-shell-*` caches on
-  activation; rollback is symmetric (legacy activate deletes ours). Existing
-  installs cross over in about one reload.
+  activation (no-skip-waiting policy kept); icon/manifest join the precache
+  and rotate the build id; rollback is symmetric (legacy activate deletes
+  ours). Existing installs cross over in about one reload.
 - **Retirement:** `public/` kept only as fixtures/rollback reference
-  (`public/RETIRED.md`).
-- Gates: case 79 (20 checks), new `test:web:cutover:e2e` (3 tests, the only
+  (`public/RETIRED.md`); the preview config now serves the same React build
+  via the same `[build]` hook, still without production bindings.
+- **Folded hardening:** the voice player's `ended` state is now honest
+  (paused-at-end, replay on next tap/key — also removed a keyboard-seek race);
+  no sourcemaps in any build, so none ship as public assets.
+- Gates: case 79 (integration pins), `test:web:cutover:e2e` (3 tests, the only
   suite with service workers allowed, built with the exact prod script), full
-  `npm run ci` green; live `curl -sI` header check after deploy.
-- Folded hardening: the voice player's `ended` state is now honest
-  (paused-at-end, replay on next tap/key; no sourcemaps in the public asset
-  upload) — this also removed a real keyboard-seek race the gate kept catching.
+  `npm run ci` green; post-merge live `curl -sI` header/shell/health checks.
 
 ## কাজের নিয়ম (আগের বার যে ভুলটা হয়েছিল)
 
@@ -190,5 +198,5 @@ assets root — owner-approved direct replacement. Full mechanics in
 
 - Group video call-এর measured participant cap / SFU সিদ্ধান্ত (future work; Slice G-এর 1:1 scope-এর বাইরে)।
 - ~~Web Push-এর VAPID key + subscription schema (Slice H-এর আগে)।~~ সমাধান (Slice H): `VAPID_PRIVATE_KEY` secret থেকে পাবলিক key derive হয়; সাবস্ক্রিপশন `web_push_subs` টেবিলে; `docs/web-push.md`। বাকি শুধু লাইভ ডিপ্লয়-তে সিক্রেট বসানো — যেটা আলাদা অনুমতির কাজ।
-- নতুন `web/` অ্যাপ কখন production cutover হবে — `public/` প্রতিস্থাপন নাকি আলাদা path-এ parallel।
+- ~~নতুন `web/` অ্যাপ কখন production cutover হবে — `public/` প্রতিস্থাপন নাকি আলাদা path-এ parallel।~~ সমাধান (Slice J): মালিক সরাসরি প্রতিস্থাপন অনুমোদন করেছেন; `docs/web-cutover.md`।
 - Long-lived session token WS query-তে রাখা বনাম short-lived ticket route (plan §৭.২)।
