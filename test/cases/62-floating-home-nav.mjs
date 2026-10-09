@@ -18,6 +18,17 @@ const theme = fs.readFileSync(
   path.join(root, "native-android/app/src/main/res/values/themes.xml"),
   "utf8",
 );
+const navPolicy = fs.readFileSync(
+  path.join(root, "native-android/app/src/main/java/app/kuchupuchu/android/HomeNavOrderPolicy.kt"),
+  "utf8",
+);
+const navPolicyTest = fs.readFileSync(
+  path.join(
+    root,
+    "native-android/app/src/test/java/app/kuchupuchu/android/HomeNavOrderPolicyTest.kt",
+  ),
+  "utf8",
+);
 const navEnter = fs.readFileSync(
   path.join(root, "native-android/app/src/main/res/anim/kp_nav_enter.xml"),
   "utf8",
@@ -40,7 +51,8 @@ const check = (name, condition, detail = "") =>
 check(
   "home navigation distributes all four tabs in equal-width slots",
   nav.includes("horizontalArrangement = Arrangement.spacedBy(gap)") &&
-    (nav.match(/Modifier\.weight\(1f\)/g) ?? []).length >= 4 &&
+    (nav.match(/Modifier\.weight\(1f\)/g) ?? []).length >= 1 &&
+    nav.includes("navOrder.forEach { itemId ->") &&
     nav.includes("val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4"),
 );
 check(
@@ -184,14 +196,27 @@ check(
     app.includes("HomeBottomNavigation("),
 );
 check(
-  "home nav exposes stable tab semantics and the selected tab state",
-  nav.includes("onSelect(0)") &&
-    nav.includes("onSelect(1)") &&
-    nav.includes("onSelect(2)") &&
-    nav.includes("onSelect(3)") &&
+  "home nav exposes stable tab semantics and follows the selected content tab after reordering",
+  nav.includes("onSelect(pageIndex)") &&
+    nav.includes(
+      "val selectedId = HomeNavOrderPolicy.defaultOrder.getOrElse(tab.coerceIn(0, 3))",
+    ) &&
     chatList.includes("role = Role.Tab") &&
     chatList.includes("this.selected = selected") &&
     chatList.includes("contentDescription = accessibilityLabel"),
+);
+check(
+  "long-press horizontal drag reorders stable tab ids and persists the account preference for sync",
+  chatList.includes("detectDragGesturesAfterLongPress") &&
+    nav.includes("HomeNavOrderPolicy.move(navOrder, itemId, target)") &&
+    nav.includes("if (saveOrder) onOrderChanged(navOrder)") &&
+    rootNav.includes("onOrderChanged = { order ->") &&
+    app.includes('Api.patch("/api/me", JSONObject().put("homeNavOrder", JSONArray(order)))') &&
+    app.includes('"_homeNavOrderPending"') &&
+    navPolicy.includes('listOf("chats", "status", "calls", "profile")') &&
+    navPolicy.includes("fun move(order: List<String>, itemId: String, destination: Int)") &&
+    navPolicyTest.includes("HomeNavOrderPolicy.move(") &&
+    navPolicyTest.includes("HomeNavOrderPolicy.normalize("),
 );
 check(
   "chat overflow action stays above the floating nav reservation",

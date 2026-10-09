@@ -415,7 +415,9 @@ check(
     src.includes("async function hedgeStream(") &&
     src.includes("async function aiBrainStream(") &&
     src.includes("const AI_DELTA_MS = 140;") &&
-    src.includes('{ type: "ai_delta", conversationId: convId, text }') &&
+    src.includes("const liveText = firstReplyIntro ? `${firstReplyIntro} ${text}` : text;") &&
+    src.includes('type: "ai_delta",') &&
+    src.includes("text: liveText,") &&
     src.includes(
       'answer = await aiBrainStream(env, [{ role: "user", content: fullPrompt }], 900, push);',
     ) &&

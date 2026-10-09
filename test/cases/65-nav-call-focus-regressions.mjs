@@ -80,11 +80,13 @@ check(
 );
 check(
   "four equally sized tab slots share a centered indicator with the demo's 450ms easing",
-  (nav.match(/Modifier\.weight\(1f\)/g) ?? []).length >= 4 &&
+  nav.includes("navOrder.forEach { itemId ->") &&
+    (nav.match(/Modifier\.weight\(1f\)/g) ?? []).length === 1 &&
     nav.includes("val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4") &&
     nav.includes("val indicatorSize = 40.dp") &&
     nav.includes("capsulePadding + (slotWidth - indicatorSize) * 0.5f") &&
-    nav.includes("(slotWidth + gap) * tab.coerceIn(0, 3).toFloat()") &&
+    nav.includes("val selectedPosition = navOrder.indexOf(selectedId).coerceIn(0, 3)") &&
+    nav.includes("(slotWidth + gap) * selectedPosition.toFloat()") &&
     nav.includes("CubicBezierEasing(0.34f, 1.45f, 0.5f, 1f)") &&
     nav.includes("tween(450, easing = indicatorEasing)") &&
     nav.includes(".offset(x = indicatorX, y = indicatorY)"),

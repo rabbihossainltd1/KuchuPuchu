@@ -727,7 +727,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
     "r71-18: the switches are the server's (read from the conversation, written back one at a time) and a capture alert lands as a red chip with one buzz",
     chat.includes('c?.optJSONObject("privacy")') &&
       chat.includes(
-        "fun setChatPrivacy(\n        shot: Boolean? = null,\n        rec: Boolean? = null,\n        save: Boolean? = null,\n        allowShot: Boolean? = null,\n        allowRec: Boolean? = null,\n    )",
+        "fun setChatPrivacy(\n        shot: Boolean? = null,\n        rec: Boolean? = null,\n        save: Boolean? = null,\n        allowShot: Boolean? = null,\n        allowRec: Boolean? = null,\n        readReceiptsOverride: Boolean? = null,\n        updateReadReceipts: Boolean = false,\n    )",
       ) &&
       chat.includes('"/api/conversations/$convId/privacy"') &&
       // r76-19 (owner item 3: rapid flips auto-reverted): pokes are ignored
@@ -774,7 +774,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       // the payload answers them — NULL rows come back as the member's
       // profile defaults (private: off; public: shot on, rec off, save on).
       worker.includes(
-        "UPDATE members SET priv_shot = ?, priv_rec = ?, priv_save = ?, priv_allow_shot = ?, priv_allow_rec = ? WHERE conv_id = ? AND user_id = ?",
+        "UPDATE members SET priv_shot = ?, priv_rec = ?, priv_save = ?, priv_allow_shot = ?, priv_allow_rec = ?, priv_read_receipts = ? WHERE conv_id = ? AND user_id = ?",
       ) &&
       worker.includes(
         "shot: meShot,\n      rec: meRec,\n      save: meSave,\n      allowShot: meAllowShot,\n      allowRec: meAllowRec,",
@@ -1166,7 +1166,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
   const worker = read("src/worker/index.ts");
   check(
     'r77-10 (owner: "screenshot block on kori tobe opponent taw screenshot nite parche - app reopen na kora porjonto privacy apply hoi na, shob privacy tei same problem"): the messages poll carries the conversation\'s privacy truth (same rule/defaults as the detail payload), the freshness marker SEALS it (a flip busts `unchanged`), and the chat re-reads its detail the moment any field drifts - Guard and the save gates move within one tick instead of after a reopen. Behavior live-proven in 08-change-markers (baseline flags, unchanged tick, flip busts marker, new truth arrives)',
-    worker.includes("let priv: Record<string, boolean> = {};") &&
+    worker.includes("const readReceiptSettings = {") &&
+      worker.includes("let priv: Record<string, unknown> = { ...readReceiptSettings };") &&
       worker.includes("typingKind,\n        priv,\n      ]),") &&
       worker.includes("      marker,\n      priv,\n") &&
       chat.includes("val priv: JSONObject?,") &&

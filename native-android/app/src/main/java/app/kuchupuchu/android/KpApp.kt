@@ -1,6 +1,5 @@
 package app.kuchupuchu.android
 
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -45,6 +44,8 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Root of the v3 app. Auth gate → main tabs (Chats / Status / Calls) with
@@ -56,6 +57,51 @@ fun KpApp() {
     val navEntry by nav.currentBackStackEntryAsState()
     val homeTab = rememberSaveable { mutableIntStateOf(0) }
     val authed by Store.authed
+    val currentUser = Store.me
+    val accountId = currentUser?.optString("id").orEmpty()
+    val homeNavOrderJson = currentUser?.optJSONArray("homeNavOrder")?.toString().orEmpty()
+    val initialHomeNavOrder = remember(accountId, homeNavOrderJson) {
+        val saved = currentUser?.optJSONArray("homeNavOrder")
+        val ids = saved?.let { array -> List(array.length()) { array.optString(it) } }
+        HomeNavOrderPolicy.normalize(ids)
+    }
+    val homeNavOrderPending = currentUser?.optBoolean("_homeNavOrderPending") == true
+
+    // A reorder is cached immediately on this install, then retried through the
+    // authenticated account endpoint after reconnect/relaunch until the server
+    // confirms the same order.
+    LaunchedEffect(authed, accountId, homeNavOrderJson, homeNavOrderPending) {
+        if (!authed || accountId.isBlank() || !homeNavOrderPending) return@LaunchedEffect
+        val order = HomeNavOrderPolicy.normalize(
+            Store.me?.optJSONArray("homeNavOrder")?.let { array ->
+                List(array.length()) { array.optString(it) }
+            },
+        )
+        var retryDelayMs = 1_000L
+        while (true) {
+            try {
+                val response =
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        Api.patch("/api/me", JSONObject().put("homeNavOrder", JSONArray(order)))
+                    }
+                val savedUser = response.optJSONObject("user") ?: error("Missing saved profile")
+                val latest = Store.me
+                if (
+                    Store.myId() == accountId &&
+                    latest?.optJSONArray("homeNavOrder")?.toString() == homeNavOrderJson
+                ) {
+                    Store.saveMe(savedUser)
+                }
+                return@LaunchedEffect
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Retry while this order remains current; a newer drag cancels this effect.
+                kotlinx.coroutines.delay(retryDelayMs)
+                retryDelayMs = (retryDelayMs * 2).coerceAtMost(30_000L)
+            }
+        }
+    }
 
     // Owner round 13d: if the previous launch crashed, surface the captured
     // stack right away (Copy → paste to the developer).
@@ -111,7 +157,30 @@ fun KpApp() {
                     Cache.bust("/api/users/$uid")
                     Cache.bustAll("/api/users/$uid/")
                     Cache.bustAll("/api/conversations")
-                    if (ev.optBoolean("self")) Cache.bust("/api/me")
+                    if (ev.optBoolean("self")) {
+                        Cache.bust("/api/me")
+                        ScreenStore.appScope.launch {
+                            val fresh =
+                                runCatching {
+                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        Api.get("/api/me", true).optJSONObject("user")
+                                    }
+                                }.getOrNull()
+                            if (fresh != null && Store.myId() == uid) {
+                                val current = Store.me
+                                val localOrder = current?.optJSONArray("homeNavOrder")
+                                val serverOrder = fresh.optJSONArray("homeNavOrder")
+                                if (
+                                    current?.optBoolean("_homeNavOrderPending") == true &&
+                                    localOrder != null && localOrder.toString() != serverOrder?.toString()
+                                ) {
+                                    fresh.put("homeNavOrder", JSONArray(localOrder.toString()))
+                                    fresh.put("_homeNavOrderPending", true)
+                                }
+                                Store.saveMe(fresh)
+                            }
+                        }
+                    }
                 }
                 ScreenStore.pokeProfile()
                 ScreenStore.pokeInbox()
@@ -417,6 +486,17 @@ fun KpApp() {
             selectedTab = homeTab,
             visible = authed && actualRoute == "main" && HomeNavState.visible.value && !callFullscreen && !modalWindowVisible,
             modalOpen = modalWindowVisible,
+            userId = accountId,
+            initialOrder = initialHomeNavOrder,
+            onOrderChanged = { order ->
+                val existing = Store.me
+                if (existing != null && existing.optString("id") == accountId) {
+                    val optimistic = JSONObject(existing.toString())
+                        .put("homeNavOrder", JSONArray(order))
+                        .put("_homeNavOrderPending", true)
+                    Store.saveMe(optimistic)
+                }
+            },
             onSelect = { index ->
                 rootHaptics.tap()
                 if (index != 0) {
@@ -527,7 +607,7 @@ fun KpUpdateGate() {
                 shape = RoundedCornerShape(20.dp),
                 colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = GlassSheetSurface),
                 elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 8.dp),
-                modifier = Modifier.fillMaxWidth().border(1.dp, GlassSheetEdge, RoundedCornerShape(20.dp)),
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
                     // v166 (owner: "in app update downloading er somoy ei

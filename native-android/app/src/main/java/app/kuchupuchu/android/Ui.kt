@@ -1018,7 +1018,6 @@ fun KpDeleteDialog(
                 .padding(horizontal = 16.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .background(GlassSheetSurface)
-                .border(1.dp, GlassSheetEdge, RoundedCornerShape(10.dp))
                 .padding(start = 24.dp, end = 24.dp, top = 14.dp, bottom = 12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {

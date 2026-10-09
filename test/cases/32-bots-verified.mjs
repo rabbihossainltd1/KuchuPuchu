@@ -1626,7 +1626,7 @@ const convBetween = (db, a, b) =>
       chat.includes("fun chatOtherFill") &&
       chat.includes("chatMineFill(theme)") &&
       chat.includes("chatOtherFill(theme)") &&
-      chat.includes("containerColor = Card") &&
+      chat.includes("containerColor = securityBlue.copy(alpha = 0.12f)") &&
       !chat.includes('"default" to "Cream"') &&
       chat.includes("KpThemeMode.darkBlue) Color(0xFF0C1A15)"),
   );
@@ -3712,7 +3712,7 @@ const convBetween = (db, a, b) =>
               w.includes("const MEMBER_COLS =") &&
               // r71-18: the list gained the three chat-privacy columns.
               w.includes(
-                '"conv_id, user_id, role, muted, unread, last_read_at, hidden, hidden_key, muted_call, muted_msg, priv_shot, priv_rec, priv_save, priv_allow_shot, priv_allow_rec";',
+                '"conv_id, user_id, role, muted, unread, last_read_at, hidden, hidden_key, muted_call, muted_msg, priv_shot, priv_rec, priv_save, priv_allow_shot, priv_allow_rec, priv_read_receipts";',
               ) &&
               w.includes(
                 '"UPDATE members SET hidden = ?, hidden_key = ? WHERE conv_id = ? AND user_id = ?",',
@@ -4888,6 +4888,128 @@ const convBetween = (db, a, b) =>
         .get(cid, a.user.id).unread === 0,
     JSON.stringify({ readAt: peerPage.json.readAt, aRow }).slice(0, 160),
   );
+  // Per-chat override can contradict the account default, and NULL returns to the global value.
+  await k.call("PATCH", "/api/me", { readReceipts: false }, a.token);
+  const soloOn = await k.call(
+    "POST",
+    `/api/conversations/${cid}/privacy`,
+    { readReceiptsOverride: true },
+    a.token,
+  );
+  await k.call("POST", `/api/conversations/${cid}/read`, {}, a.token);
+  const soloDetail = (await k.call("GET", `/api/conversations/${cid}`, undefined, a.token)).json
+    .conversation;
+  const soloPageB = await k.call("GET", `/api/conversations/${cid}/messages`, undefined, b.token);
+  check(
+    "per-chat On overrides global Off in a 1:1 chat and remains visible to the peer",
+    soloOn.json.privacy?.globalReadReceipts === false &&
+      soloOn.json.privacy?.readReceipts === true &&
+      soloDetail?.privacy?.readReceiptsOverride === true &&
+      soloDetail?.privacy?.readReceipts === true &&
+      soloPageB.json.readAt != null,
+    JSON.stringify({ privacy: soloDetail?.privacy, readAt: soloPageB.json.readAt }),
+  );
+  await k.call(
+    "POST",
+    `/api/conversations/${cid}/privacy`,
+    { readReceiptsOverride: null },
+    a.token,
+  );
+  await k.call("POST", `/api/conversations/${cid}/read`, {}, a.token);
+  const soloReset = (await k.call("GET", `/api/conversations/${cid}`, undefined, a.token)).json
+    .conversation;
+  const soloPageBAfterReset = await k.call(
+    "GET",
+    `/api/conversations/${cid}/messages`,
+    undefined,
+    b.token,
+  );
+  check(
+    "Use global clears the 1:1 override and follows global Off on every server read",
+    soloReset?.privacy?.readReceiptsOverride == null &&
+      soloReset?.privacy?.globalReadReceipts === false &&
+      soloReset?.privacy?.readReceipts === false &&
+      soloPageBAfterReset.json.readAt == null,
+    JSON.stringify({ privacy: soloReset?.privacy, readAt: soloPageBAfterReset.json.readAt }),
+  );
+
+  // In a group only the opted-out member's own timestamp is hidden. Their own
+  // Off must not hide other members' timestamps, but disables the all-read aggregate.
+  await k.call("PATCH", "/api/me", { readReceipts: true }, a.token);
+  await k.call("POST", `/api/conversations/${gid}/read`, {}, a.token);
+  await k.call("POST", `/api/conversations/${gid}/read`, {}, b.token);
+  await k.call(
+    "POST",
+    `/api/conversations/${gid}/privacy`,
+    { readReceiptsOverride: false },
+    a.token,
+  );
+  await k.call("POST", `/api/conversations/${gid}/read`, {}, a.token);
+  const groupPageBOff = await k.call(
+    "GET",
+    `/api/conversations/${gid}/messages`,
+    undefined,
+    b.token,
+  );
+  const groupDetailBOff = (await k.call("GET", `/api/conversations/${gid}`, undefined, b.token))
+    .json.conversation;
+  const groupDetailAOff = (await k.call("GET", `/api/conversations/${gid}`, undefined, a.token))
+    .json.conversation;
+  const groupARowOff = groupDetailBOff?.members?.find((m) => m.user?.id === a.user.id);
+  const groupBRowVisibleToA = groupDetailAOff?.members?.find((m) => m.user?.id === b.user.id);
+  check(
+    "group Off hides only that member's own read time, keeps other members visible, and suppresses all-read",
+    groupARowOff?.lastReadAt == null &&
+      typeof groupBRowVisibleToA?.lastReadAt === "string" &&
+      groupPageBOff.json.readAt == null,
+    JSON.stringify({ groupARowOff, groupBRowVisibleToA, readAt: groupPageBOff.json.readAt }),
+  );
+  await k.call(
+    "POST",
+    `/api/conversations/${gid}/privacy`,
+    { readReceiptsOverride: true },
+    a.token,
+  );
+  await k.call("POST", `/api/conversations/${gid}/read`, {}, a.token);
+  const groupPageBOn = await k.call(
+    "GET",
+    `/api/conversations/${gid}/messages`,
+    undefined,
+    b.token,
+  );
+  const groupDetailBOn = (await k.call("GET", `/api/conversations/${gid}`, undefined, b.token)).json
+    .conversation;
+  const groupARowOn = groupDetailBOn?.members?.find((m) => m.user?.id === a.user.id);
+  check(
+    "group On restores the member's individual timestamp and the all-read aggregate",
+    typeof groupARowOn?.lastReadAt === "string" && typeof groupPageBOn.json.readAt === "string",
+    JSON.stringify({ groupARowOn, readAt: groupPageBOn.json.readAt }),
+  );
+
+  // Account-synced home-tab order is strict, validated, and returned by /api/me.
+  const savedHomeOrder = ["profile", "calls", "chats", "status"];
+  const orderWrite = await k.call("PATCH", "/api/me", { homeNavOrder: savedHomeOrder }, a.token);
+  const orderRead = await k.call("GET", "/api/me", undefined, a.token);
+  const badOrder = await k.call(
+    "PATCH",
+    "/api/me",
+    { homeNavOrder: ["profile", "calls", "chats", "chats"] },
+    a.token,
+  );
+  check(
+    "home-tab order saves on the account, reloads from /api/me, and rejects malformed permutations",
+    orderWrite.status === 200 &&
+      JSON.stringify(orderWrite.json.user?.homeNavOrder) === JSON.stringify(savedHomeOrder) &&
+      JSON.stringify(orderRead.json.user?.homeNavOrder) === JSON.stringify(savedHomeOrder) &&
+      badOrder.status === 400 &&
+      badOrder.json.error?.code === "BAD_HOME_NAV_ORDER",
+    JSON.stringify({
+      write: orderWrite.json.user?.homeNavOrder,
+      read: orderRead.json.user?.homeNavOrder,
+      bad: badOrder.status,
+    }),
+  );
+
   // devices list
   const devs = await k.call("GET", "/api/auth/devices", undefined, a.token);
   check(
@@ -9168,7 +9290,8 @@ const convBetween = (db, a, b) =>
         src.includes("if (!pictureTurn && OWNER_INTENT.test(asked)) {") &&
         ai.includes("Never say you cannot see images.") &&
         ai.includes("if (caption && (IMAGE_EDIT_HINT.test(caption) || wantsPicture(caption))) {") &&
-        ai.includes("VALUES (?, ?, ?, 'IMAGE', NULL, ?, ?)`") &&
+        ai.includes("VALUES (?, ?, ?, 'IMAGE', ?, ?, ?)`") &&
+        ai.includes("await sendBotImage(drawn.image, firstReplyIntro)") &&
         ai.includes("kp_media: `/api/messages/${imgMid}/media`,") &&
         // v166: the photo leg calls the HF vision model, and the text-only
         // apology behind it, through the hedged helper.
@@ -10944,7 +11067,11 @@ const convBetween = (db, a, b) =>
     const url = typeof input === "string" ? input : input.url;
     if (url.startsWith("https://generativelanguage.googleapis.com/")) {
       geminiAsked.push(url);
-      const pieces = ["Bhalo ", "acho? ", "Ami ", "KuchuPuchu AI."];
+      const request = JSON.parse(init.body);
+      const promptText = request.contents?.[0]?.parts?.[0]?.text ?? "";
+      const pieces = promptText.includes("Who created KuchuPuchu?")
+        ? ["KuchuPuchu was created by MD Rabbi Hossain (@rabbihossainltd)."]
+        : ["Bhalo ", "acho? ", "Ami ", "KuchuPuchu AI."];
       const enc = new TextEncoder();
       const body = new ReadableStream({
         async start(ctrl) {
@@ -11027,11 +11154,51 @@ const convBetween = (db, a, b) =>
         growing &&
         deltas.every((f) => body.startsWith(f.text.trimEnd())) &&
         body.includes("KuchuPuchu AI.") &&
+        body.includes("এই অ্যাপটি তৈরি করেছেন MD Rabbi Hossain (@rabbihossainltd)।") &&
+        (body.match(/MD Rabbi Hossain/g) ?? []).length === 1 &&
         finals.some((f) => f.message.senderId === "kp_ai_bot" && f.message.kind === "TEXT"),
       JSON.stringify({ asked: geminiAsked.length, deltas: deltas.map((f) => f.text), body }).slice(
         0,
         600,
       ),
+    );
+
+    seenFrames.length = 0;
+    await call(
+      "POST",
+      `/api/conversations/${conv.id}/messages`,
+      { kind: "TEXT", body: "Are you available?", clientId: "live-2" },
+      a.token,
+    );
+    const laterBot = seenFrames.filter(
+      (f) =>
+        f.type === "message" && f.message.senderId === "kp_ai_bot" && f.message.kind === "TEXT",
+    );
+    const laterBody = laterBot.at(-1)?.message.body ?? "";
+    check(
+      "AI does not volunteer or repeat the owner introduction on later unrelated replies",
+      laterBody.includes("Bhalo") && !laterBody.includes("MD Rabbi Hossain"),
+      laterBody,
+    );
+
+    seenFrames.length = 0;
+    await call(
+      "POST",
+      `/api/conversations/${conv.id}/messages`,
+      { kind: "TEXT", body: "Who created KuchuPuchu?", clientId: "live-3" },
+      a.token,
+    );
+    const directOwnerBot = seenFrames.filter(
+      (f) =>
+        f.type === "message" && f.message.senderId === "kp_ai_bot" && f.message.kind === "TEXT",
+    );
+    const directOwnerBody = directOwnerBot.at(-1)?.message.body ?? "";
+    check(
+      "later owner details appear when directly asked, without another generic intro",
+      directOwnerBody.includes("KuchuPuchu was created by MD Rabbi Hossain") &&
+        (directOwnerBody.match(/MD Rabbi Hossain/g) ?? []).length === 1 &&
+        !directOwnerBody.includes("I'm KuchuPuchu AI, created by"),
+      directOwnerBody,
     );
   } finally {
     globalThis.fetch = realFetch;

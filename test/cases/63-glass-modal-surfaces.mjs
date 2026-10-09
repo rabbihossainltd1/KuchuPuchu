@@ -1,4 +1,5 @@
-// Shared Android glass treatment for modal sheets and popup cards.
+// Borderless modal surfaces: popup/sheet edges are removed without removing
+// outlines from controls inside those surfaces.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -24,16 +25,22 @@ const emojiStart = chat.indexOf("private fun EmojiSheetDialog(");
 const viewersSheetStart = status.indexOf("private fun ViewersSheet(");
 const viewersSheetEnd = status.indexOf("/**\n * Status clip player", viewersSheetStart);
 const viewersSheet = status.slice(viewersSheetStart, viewersSheetEnd);
+const quickReactionStart = chat.indexOf("private fun MessageQuickReactionBar(");
+const quickReactionEnd = chat.indexOf("/** Owner round 16: reaction chips", quickReactionStart);
+const quickReaction = chat.slice(quickReactionStart, quickReactionEnd);
+const deleteDialogStart = ui.indexOf("fun KpDeleteDialog(");
+const deleteDialogEnd = ui.indexOf("\n@Composable", deleteDialogStart);
+const deleteDialog = ui.slice(deleteDialogStart, deleteDialogEnd);
 
 const lines = [];
 const check = (name, condition, detail = "") =>
   lines.push(`  ${condition ? "OK     " : "BROKEN "}  ${name}${detail ? `  -> ${detail}` : ""}`);
 
 check(
-  "modal glass palette uses a light, theme-aware transparent surface and edge",
+  "shared modal fill remains translucent and theme-aware, with no shared edge color",
   theme.includes("val GlassSheetSurface: Color") &&
     theme.includes("Card.copy(alpha = if (KpThemeMode.darkBlue) 0.76f else 0.80f)") &&
-    theme.includes("val GlassSheetEdge: Color"),
+    !theme.includes("GlassSheetEdge"),
 );
 check(
   "modal blur is reference-counted and releases on Hidden target observation or confirmation, then reacquires if a swipe reverses",
@@ -103,17 +110,15 @@ check(
     !focus.includes("slotExtra"),
 );
 check(
-  "shared KpSheet registers blur outside ModalBottomSheet content for immediate release on dismissal",
+  "shared KpSheet keeps its glass fill and blur registration without adding an outer outline",
   sharedSheet.includes("containerColor = GlassSheetSurface") &&
     sharedSheet.indexOf("KpRegisterModalBlur()") >= 0 &&
     sharedSheet.indexOf("KpRegisterModalBlur()") < sharedSheet.indexOf("ModalBottomSheet(") &&
-    sharedSheet.slice(sharedSheet.indexOf("ModalBottomSheet(")).indexOf("KpRegisterModalBlur()") <
-      0 &&
-    !sharedSheet.includes("kpGlassSheetModifier") &&
-    !sharedSheet.includes("modifier = kpGlassSheetModifier()"),
+    !sharedSheet.includes(".border(") &&
+    !sharedSheet.includes("kpGlassSheetModifier"),
 );
 check(
-  "country picker, status menu, and emoji picker keep the glass fill and modal blur without a window-sized border",
+  "country picker, status menu, and emoji picker use the shared borderless sheet surface and blur",
   login.includes("containerColor = GlassSheetSurface") &&
     login.indexOf("KpRegisterModalBlur()", countryStart) <
       login.indexOf("ModalBottomSheet(", countryStart) &&
@@ -123,9 +128,9 @@ check(
     chat.includes("containerColor = GlassSheetSurface") &&
     chat.indexOf("KpRegisterModalBlur()", emojiStart) <
       chat.indexOf("ModalBottomSheet(", emojiStart) &&
-    !login.includes("kpGlassSheetModifier") &&
-    !status.includes("kpGlassSheetModifier") &&
-    !chat.includes("kpGlassSheetModifier"),
+    !login.includes("GlassSheetEdge") &&
+    !status.includes("GlassSheetEdge") &&
+    !chat.includes("GlassSheetEdge"),
 );
 check(
   "sheets keep a light dismissal scrim so the strongly blurred backdrop remains visible",
@@ -139,28 +144,34 @@ check(
     ),
 );
 check(
-  "custom status-viewer sheet and centered delete popup share the glass surface",
-  status.includes(".background(GlassSheetSurface)") &&
-    status.includes(".border(1.dp, GlassSheetEdge") &&
-    ui.includes(".background(GlassSheetSurface)") &&
-    ui.includes(".border(1.dp, GlassSheetEdge") &&
+  "custom status-viewer bottom sheet and centered delete popup retain the fill without an outside stroke",
+  viewersSheet.includes(".background(GlassSheetSurface)") &&
+    !viewersSheet.includes(".border(") &&
+    deleteDialog.includes(".background(GlassSheetSurface)") &&
+    !deleteDialog.includes("GlassSheetEdge") &&
+    !deleteDialog.includes("BorderStroke(1.dp") &&
     ui.includes("KpRegisterModalBlur()"),
 );
 check(
-  "custom status-viewer sheet starts the shared blur exit with its slide-out and disposes after the same motion",
-  viewersSheet.includes("var closing by remember { mutableStateOf(false) }") &&
-    viewersSheet.includes("targetValue = if (shown && !closing) 0f else 1f") &&
-    viewersSheet.includes("blurRegistration.release()") &&
-    viewersSheet.includes("Dialog(onDismissRequest = ::dismiss") &&
-    viewersSheet.includes("delay(220)") &&
-    viewersSheet.includes(".clickable(onClick = ::dismiss)"),
-);
-check(
-  "root update popup and forward-picker footer use the same glass treatment",
+  "root update popup and forward-picker footer have no outline while internal choice controls keep theirs",
   kpApp.includes("KpRegisterModalBlur()") &&
     kpApp.includes("containerColor = GlassSheetSurface") &&
-    chat.includes(".background(GlassSheetSurface)") &&
-    chat.includes(".border(0.5.dp, GlassSheetEdge)"),
+    !kpApp.includes("GlassSheetEdge") &&
+    chat.includes(
+      ".background(GlassSheetSurface)\n                        .padding(horizontal = 16.dp, vertical = 10.dp)",
+    ) &&
+    !chat.includes("GlassSheetEdge") &&
+    chat.includes(".border(1.dp, if (selected) ActionBlue else Line, RoundedCornerShape(11.dp)"),
+);
+check(
+  "floating reaction popup, search results card, and all modal surfaces are borderless without removing inner control outlines",
+  !quickReaction.includes(".border(") &&
+    chat.includes(
+      ".background(GlassSheetSurface)\n                .padding(horizontal = 14.dp, vertical = 6.dp)",
+    ) &&
+    !chat.includes("GlassSheetEdge") &&
+    ui.includes(".border(2.dp, if (also) ActionBlue else Muted") &&
+    ui.includes(".border(1.dp, borderColor ?: if (focused) ActionBlue"),
 );
 check(
   "home nav keeps modal suppression and a translucent floating fill with native background blur",

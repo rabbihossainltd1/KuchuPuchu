@@ -505,6 +505,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     // the profile-defaulted value (private: off; public: shot on, rec off).
     var privAllowShot by remember(convId) { mutableStateOf(true) }
     var privAllowRec by remember(convId) { mutableStateOf(false) }
+    var privReadReceipts by remember(convId) { mutableStateOf(true) }
+    var privReadReceiptsOverride by remember(convId) { mutableStateOf<Boolean?>(null) }
+    var globalReadReceipts by remember(convId) { mutableStateOf(true) }
     // r76-19 (owner item 3: "options gula rapidly on off korle majhe majhe
     // auto off hochhe"): while a privacy write is on its way, the pokes of
     // the OLDER writes must not repaint the sheet - the switch flipped back
@@ -786,7 +789,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                     c.arr("members").objects().forEach { m ->
                         val u = m.optJSONObject("user")
                         if (u != null && u.optString("id") != Store.myId()) {
-                            otherReadAt = m.optIso("lastReadAt")
+                            // A group tick is the server's all-members aggregate,
+                            // never one arbitrary member's individual timestamp.
+                            otherReadAt = if (c.optBoolean("isGroup")) null else m.optIso("lastReadAt")
                         }
                     }
                 }
@@ -909,7 +914,11 @@ fun ChatScreen(nav: NavController, convId: String) {
                                         pv.optBoolean("meRec", false) != pr.optBoolean("rec", false) ||
                                         pv.optBoolean("meSave", true) != pr.optBoolean("save", true) ||
                                         pv.optBoolean("meAllowShot", true) != pr.optBoolean("allowShot", true) ||
-                                        pv.optBoolean("meAllowRec", false) != pr.optBoolean("allowRec", false))))
+                                        pv.optBoolean("meAllowRec", false) != pr.optBoolean("allowRec", false))) ||
+                                (pr != null && pv.has("readReceipts") &&
+                                    (pv.optBoolean("readReceipts", true) != pr.optBoolean("readReceipts", true) ||
+                                        pv.optBoolean("globalReadReceipts", true) != pr.optBoolean("globalReadReceipts", true) ||
+                                        pv.opt("readReceiptsOverride")?.toString() != pr.opt("readReceiptsOverride")?.toString())))
                     if (drifted) {
                         Cache.bust("/api/conversations/$convId")
                         refreshMeta()
@@ -1747,6 +1756,8 @@ fun ChatScreen(nav: NavController, convId: String) {
         save: Boolean? = null,
         allowShot: Boolean? = null,
         allowRec: Boolean? = null,
+        readReceiptsOverride: Boolean? = null,
+        updateReadReceipts: Boolean = false,
     ) {
         if (shot != null) privShot = shot
         if (rec != null) privRec = rec
@@ -1754,6 +1765,10 @@ fun ChatScreen(nav: NavController, convId: String) {
         // r76-18 (owner item 3): the Allow switches ride the same POST.
         if (allowShot != null) privAllowShot = allowShot
         if (allowRec != null) privAllowRec = allowRec
+        if (updateReadReceipts) {
+            privReadReceiptsOverride = readReceiptsOverride
+            privReadReceipts = readReceiptsOverride ?: globalReadReceipts
+        }
         privWrites++
         scope.launch {
             try {
@@ -1769,6 +1784,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 save?.let { put("save", it) }
                                 allowShot?.let { put("allowShot", it) }
                                 allowRec?.let { put("allowRec", it) }
+                                if (updateReadReceipts)
+                                    put("readReceiptsOverride", readReceiptsOverride ?: JSONObject.NULL)
                             },
                         )
                     }
@@ -3117,6 +3134,12 @@ fun ChatScreen(nav: NavController, convId: String) {
         // off; public: shot on, rec off, save on).
         privAllowShot = pr.optBoolean("allowShot", true)
         privAllowRec = pr.optBoolean("allowRec")
+        globalReadReceipts = pr.optBoolean("globalReadReceipts", true)
+        privReadReceipts = pr.optBoolean("readReceipts", globalReadReceipts)
+        privReadReceiptsOverride =
+            if (pr.has("readReceiptsOverride") && !pr.isNull("readReceiptsOverride"))
+                pr.optBoolean("readReceiptsOverride")
+            else null
     }
     val peerSaveOk = c?.optBoolean("peerSave", true) != false
     // r76-18 (owner item 4): the peer's Allow switches — when either is off my
@@ -5661,6 +5684,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             shot = privShot,
             rec = privRec,
             save = privSave,
+            readReceipts = privReadReceipts,
+            readReceiptsOverride = privReadReceiptsOverride,
+            globalReadReceipts = globalReadReceipts,
             // r76-18 (owner item 3): the two Allow switches — the alert rows
             // only exist while their Allow switch is on.
             allowShot = privAllowShot,
@@ -5694,6 +5720,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                 }
             },
             onSave = { setChatPrivacy(save = it) },
+            onReadReceiptsOverride = {
+                setChatPrivacy(readReceiptsOverride = it, updateReadReceipts = true)
+            },
             onAllowShot = { setChatPrivacy(allowShot = it) },
             onAllowRec = { setChatPrivacy(allowRec = it) },
         )
@@ -7232,7 +7261,6 @@ internal fun ForwardDialog(onClose: () -> Unit, onSend: (List<String>) -> Unit, 
                     Modifier
                         .fillMaxWidth()
                         .background(GlassSheetSurface)
-                        .border(0.5.dp, GlassSheetEdge)
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -7341,39 +7369,39 @@ private fun LoginApprovalMessage(m: JSONObject) {
             if (z.hour >= 12) "PM" else "AM",
         )
     }.getOrDefault("")
+    val securityBlue = Color(0xFF2563EB)
+    val securityBlueText = if (KpThemeMode.darkBlue) Color(0xFFBFDBFE) else Color(0xFF1D4ED8)
+    val securitySurface = if (KpThemeMode.darkBlue) Color(0xFF172A4A) else Color(0xFFEAF2FF)
+    val codeSurface = if (KpThemeMode.darkBlue) Color(0xFF21395F) else Color(0xFFD8E8FF)
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(GoldSoft)
-            .border(
-                androidx.compose.foundation.BorderStroke(1.dp, Color(0x33F59E0B)),
-                RoundedCornerShape(14.dp),
-            )
-            .padding(12.dp),
+            .padding(vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(securitySurface)
+            .padding(10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier
-                    .size(26.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Gold),
+                    .size(23.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(securityBlue),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("K", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text("K", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(7.dp))
             Column {
-                Text("KuchuPuchu · Security", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = GoldDeep)
-                Text(time + " · Bangladesh time", fontSize = 10.sp, color = Muted, maxLines = 1)
+                Text("KuchuPuchu · Security", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = securityBlueText)
+                Text(time + " · Bangladesh time", fontSize = 9.5.sp, color = Muted, maxLines = 1)
             }
         }
-        Spacer(Modifier.height(8.dp))
-        Text("New sign-in attempt", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+        Spacer(Modifier.height(5.dp))
+        Text("New sign-in attempt", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = Ink)
         Text(
-            "Device: $device wants to sign in to your account with your phone number.",
-            fontSize = 12.sp,
+            "Device: $device wants to sign in to your account.",
+            fontSize = 11.sp,
             color = Ink,
         )
         // Full origin details (owner rule): where the attempt came from.
@@ -7382,44 +7410,71 @@ private fun LoginApprovalMessage(m: JSONObject) {
         val country = meta.optString("country").takeIf { it.isNotBlank() }
         val place = listOfNotNull(city, country).joinToString(", ")
         if (place.isNotBlank()) {
-            Text("Location: $place", fontSize = 12.sp, color = Ink)
+            Text("Location: $place", fontSize = 10.5.sp, color = Ink, maxLines = 1)
         }
         if (ip != null) {
-            Text("IP: $ip", fontSize = 12.sp, color = Ink)
+            Text("IP: $ip", fontSize = 10.5.sp, color = Ink, maxLines = 1)
         }
         if (status == "PENDING" || status == "OTP_LOCKED") {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(5.dp))
             when {
                 otpCode != null -> {
-                    Text("Sign-in code · enter on the new device", fontSize = 11.sp, color = Muted)
-                    Spacer(Modifier.height(5.dp))
-                    Box(
+                    Text("Sign-in code · enter on the new device", fontSize = 10.sp, color = Muted)
+                    Spacer(Modifier.height(3.dp))
+                    Row(
                         Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Color(0x22F59E0B))
-                            .border(1.dp, Color(0x66F59E0B), RoundedCornerShape(10.dp))
-                            .padding(vertical = 9.dp),
-                        contentAlignment = Alignment.Center,
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(codeSurface)
+                            .padding(start = 10.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
                             otpCode,
-                            fontSize = 26.sp,
+                            modifier = Modifier.weight(1f),
+                            fontSize = 21.sp,
                             fontWeight = FontWeight.Bold,
-                            letterSpacing = 5.sp,
-                            color = GoldDeep,
+                            letterSpacing = 4.sp,
+                            color = securityBlueText,
                             maxLines = 1,
                         )
+                        androidx.compose.material3.TextButton(
+                            onClick = {
+                                runCatching {
+                                    val clipboard =
+                                        ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                            as android.content.ClipboardManager
+                                    clipboard.setPrimaryClip(
+                                        android.content.ClipData.newPlainText("Login approval code", otpCode),
+                                    )
+                                    android.widget.Toast.makeText(
+                                        ctx,
+                                        "Code copied",
+                                        android.widget.Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.ContentCopy,
+                                contentDescription = "Copy sign-in code",
+                                tint = securityBlueText,
+                                modifier = Modifier.size(15.dp),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text("Copy", color = securityBlueText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
                 otpLocked -> Text(
                     "Five incorrect codes used. The code is cleared, but approval is still available.",
-                    fontSize = 11.sp,
+                    fontSize = 10.sp,
                     color = Muted,
                 )
                 else -> Text(
                     "No code is available. You can still approve this sign-in.",
-                    fontSize = 11.sp,
+                    fontSize = 10.sp,
                     color = Muted,
                 )
             }
@@ -7446,11 +7501,15 @@ private fun LoginApprovalMessage(m: JSONObject) {
                         }.start()
                     },
                     enabled = !busy,
-                    shape = RoundedCornerShape(10.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = ActionBlueInk),
+                    shape = RoundedCornerShape(9.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = securityBlue,
+                        contentColor = Color.White,
+                    ),
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text("Accept", maxLines = 1, fontWeight = FontWeight.SemiBold)
+                    Text("Accept", maxLines = 1, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Spacer(Modifier.width(8.dp))
                 androidx.compose.material3.Button(
@@ -7472,11 +7531,15 @@ private fun LoginApprovalMessage(m: JSONObject) {
                         }.start()
                     },
                     enabled = !busy,
-                    shape = RoundedCornerShape(10.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Card, contentColor = Red),
+                    shape = RoundedCornerShape(9.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = securityBlue.copy(alpha = 0.12f),
+                        contentColor = securityBlueText,
+                    ),
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text("Decline", maxLines = 1, fontWeight = FontWeight.SemiBold)
+                    Text("Decline", maxLines = 1, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         } else {
@@ -9066,7 +9129,6 @@ private fun MessageQuickReactionBar(
             .fillMaxSize()
             .clip(shape)
             .background(Card)
-            .border(1.dp, Line, shape)
             .padding(horizontal = 5.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -12149,7 +12211,6 @@ private fun ChatSearchSheet(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(18.dp))
                 .background(GlassSheetSurface)
-                .border(1.dp, GlassSheetEdge, RoundedCornerShape(18.dp))
                 .padding(horizontal = 14.dp, vertical = 6.dp),
         ) {
             hits.take(12).forEachIndexed { i, m ->
@@ -12200,6 +12261,9 @@ private fun ChatPrivacySheet(
     shot: Boolean,
     rec: Boolean,
     save: Boolean,
+    readReceipts: Boolean,
+    readReceiptsOverride: Boolean?,
+    globalReadReceipts: Boolean,
     // r76-18 (owner item 3): the two Allow switches. Profile defaults come
     // from the server (private: off; public: shot on, rec off, save on); the
     // alert rows below only show while their Allow switch is on.
@@ -12213,6 +12277,7 @@ private fun ChatPrivacySheet(
     onShot: (Boolean) -> Unit,
     onRec: (Boolean) -> Unit,
     onSave: (Boolean) -> Unit,
+    onReadReceiptsOverride: (Boolean?) -> Unit,
     onAllowShot: (Boolean) -> Unit,
     onAllowRec: (Boolean) -> Unit,
 ) {
@@ -12223,6 +12288,12 @@ private fun ChatPrivacySheet(
     // The screen-recording row stays Android 15+ — a recording leaves no file
     // to read, so claiming it below that would be a lie.
     KpSheet(onDismiss = onClose, title = "Chat privacy") {
+        ReadReceiptsChoice(
+            selectedOverride = readReceiptsOverride,
+            globalEnabled = globalReadReceipts,
+            effectiveEnabled = readReceipts,
+            onSelect = onReadReceiptsOverride,
+        )
         // r76-18 (owner item 3): "allow screenshot" first, its alert second —
         // and the alert row only EXISTS while the Allow switch is on. The
         // block itself (FLAG_SECURE on the other phone) works everywhere;
@@ -12284,6 +12355,61 @@ private fun ChatPrivacySheet(
             enabled = true,
             onChange = onSave,
         )
+    }
+}
+
+/** Account-default / per-chat read-receipt choice. */
+@Composable
+private fun ReadReceiptsChoice(
+    selectedOverride: Boolean?,
+    globalEnabled: Boolean,
+    effectiveEnabled: Boolean,
+    onSelect: (Boolean?) -> Unit,
+) {
+    val haptics = rememberHaptics()
+    val choices = listOf(null to "Use global", true to "On", false to "Off")
+    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.DoneAll, "Read receipts", tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Text("Read receipts", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    "${if (selectedOverride == null) "Using global" else if (effectiveEnabled) "On for this chat" else "Off for this chat"} · global ${if (globalEnabled) "On" else "Off"}",
+                    color = Muted,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            choices.forEach { (choice, label) ->
+                val selected = choice == selectedOverride
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(11.dp))
+                        .background(if (selected) ActionBlue.copy(alpha = 0.14f) else Color.Transparent)
+                        .border(1.dp, if (selected) ActionBlue else Line, RoundedCornerShape(11.dp))
+                        .clickable {
+                            haptics.tap()
+                            onSelect(choice)
+                        }
+                        .padding(vertical = 9.dp, horizontal = 2.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label,
+                        color = if (selected) ActionBlueDeep else Ink,
+                        fontSize = 11.sp,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
+            }
+        }
     }
 }
 

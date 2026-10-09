@@ -32,6 +32,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -103,6 +104,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -993,12 +995,28 @@ internal fun HomeBottomNavigation(
     selectedTab: MutableIntState,
     visible: Boolean,
     modalOpen: Boolean,
+    userId: String,
+    initialOrder: List<String>,
     onSelect: (Int) -> Unit,
+    onOrderChanged: (List<String>) -> Unit,
 ) {
     // Read fast-changing tab and badge state in the pill's own restart scope.
     // Reading these in KpApp used to invalidate the entire NavHost on every
     // tab/badge update, even though only this independent window needs them.
     val tab = selectedTab.intValue
+    var navOrder by remember(userId) {
+        mutableStateOf(HomeNavOrderPolicy.normalize(initialOrder))
+    }
+    var draggingId by remember(userId) { mutableStateOf<String?>(null) }
+    var dragStartOrder by remember(userId) { mutableStateOf(HomeNavOrderPolicy.defaultOrder) }
+    var dragStartIndex by remember(userId) { mutableStateOf(0) }
+    var dragDistancePx by remember(userId) { mutableStateOf(0f) }
+    var dragOffsetPx by remember(userId) { mutableStateOf(0f) }
+    var dragChanged by remember(userId) { mutableStateOf(false) }
+    val reorderHaptics = rememberHaptics()
+    LaunchedEffect(userId, initialOrder) {
+        if (draggingId == null) navOrder = HomeNavOrderPolicy.normalize(initialOrder)
+    }
     val unreadChats = ScreenStore.convs.count { !it.optBoolean("hidden") && it.optInt("unread", 0) > 0 }
     val unseenStatus = ScreenStore.statuses.any { !it.optBoolean("mine") && !it.optBoolean("allViewed") }
     val density = LocalDensity.current
@@ -1167,9 +1185,12 @@ internal fun HomeBottomNavigation(
                         .background(pillFill),
                 )
                 val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4
+                val reorderStepPx = with(density) { (slotWidth + gap).toPx() }
+                val selectedId = HomeNavOrderPolicy.defaultOrder.getOrElse(tab.coerceIn(0, 3)) { "chats" }
+                val selectedPosition = navOrder.indexOf(selectedId).coerceIn(0, 3)
                 val indicatorX by animateDpAsState(
                     targetValue = capsulePadding + (slotWidth - indicatorSize) * 0.5f +
-                        (slotWidth + gap) * tab.coerceIn(0, 3).toFloat(),
+                        (slotWidth + gap) * selectedPosition.toFloat(),
                     animationSpec = tween(450, easing = indicatorEasing),
                     label = "navIndicatorX",
                 )
@@ -1188,66 +1209,90 @@ internal fun HomeBottomNavigation(
                         .offset(y = navContentYOffset),
                     horizontalArrangement = Arrangement.spacedBy(gap),
                 ) {
-                    NavItem(
-                        label = "Chats",
-                        selected = tab == 0,
-                        modifier = Modifier.weight(1f),
-                        height = itemH,
-                        iconSize = navIconSize,
-                        sizeScale = navScale,
-                        badge = unreadChats,
-                        enabled = windowInteractive,
-                        idleTint = idleTint,
-                        selectedTint = selectedTint,
-                        onClick = { onSelect(0) },
-                    ) { tint ->
-                        Icon(
-                            painter = painterResource(R.drawable.ic_nav_chat),
-                            contentDescription = null,
-                            tint = tint,
-                            modifier = Modifier.size(navIconSize),
-                        )
-                    }
-                    NavItem(
-                        label = "Status",
-                        selected = tab == 1,
-                        modifier = Modifier.weight(1f),
-                        height = itemH,
-                        iconSize = navIconSize,
-                        sizeScale = navScale,
-                        newStatus = unseenStatus,
-                        enabled = windowInteractive,
-                        idleTint = idleTint,
-                        selectedTint = selectedTint,
-                        onClick = { onSelect(1) },
-                    ) { tint -> StatusGlyphIcon(tint, navIconSize) }
-                    NavItem(
-                        label = "Calls",
-                        selected = tab == 2,
-                        modifier = Modifier.weight(1f),
-                        height = itemH,
-                        iconSize = navIconSize,
-                        sizeScale = navScale,
-                        enabled = windowInteractive,
-                        idleTint = idleTint,
-                        selectedTint = selectedTint,
-                        onClick = { onSelect(2) },
-                    ) { tint ->
-                        Icon(Icons.Filled.Call, contentDescription = null, tint = tint, modifier = Modifier.size(navIconSize))
-                    }
-                    NavItem(
-                        label = "Profile",
-                        selected = tab == 3,
-                        modifier = Modifier.weight(1f),
-                        height = itemH,
-                        iconSize = navIconSize,
-                        sizeScale = navScale,
-                        enabled = windowInteractive,
-                        idleTint = idleTint,
-                        selectedTint = selectedTint,
-                        onClick = { onSelect(3) },
-                    ) { tint ->
-                        Icon(Icons.Filled.Person, contentDescription = null, tint = tint, modifier = Modifier.size(navIconSize))
+                    navOrder.forEach { itemId ->
+                        key(itemId) {
+                            val pageIndex = HomeNavOrderPolicy.defaultOrder.indexOf(itemId)
+                            val label = when (itemId) {
+                                "status" -> "Status"
+                                "calls" -> "Calls"
+                                "profile" -> "Profile"
+                                else -> "Chats"
+                            }
+                            NavItem(
+                                label = label,
+                                selected = tab == pageIndex,
+                                modifier = Modifier.weight(1f),
+                                height = itemH,
+                                iconSize = navIconSize,
+                                sizeScale = navScale,
+                                badge = if (itemId == "chats") unreadChats else 0,
+                                newStatus = itemId == "status" && unseenStatus,
+                                enabled = windowInteractive,
+                                idleTint = idleTint,
+                                selectedTint = selectedTint,
+                                reorderable = true,
+                                isDragging = draggingId == itemId,
+                                reorderOffsetPx = if (draggingId == itemId) dragOffsetPx else 0f,
+                                onClick = { onSelect(pageIndex) },
+                                onReorderStart = {
+                                    draggingId = itemId
+                                    dragStartOrder = navOrder
+                                    dragStartIndex = navOrder.indexOf(itemId).coerceAtLeast(0)
+                                    dragDistancePx = 0f
+                                    dragOffsetPx = 0f
+                                    dragChanged = false
+                                    reorderHaptics.tap()
+                                },
+                                onReorderDrag = { deltaX ->
+                                    if (draggingId == itemId && reorderStepPx > 0f) {
+                                        dragDistancePx += deltaX
+                                        val target =
+                                            (dragStartIndex + (dragDistancePx / reorderStepPx).roundToInt())
+                                                .coerceIn(0, HomeNavOrderPolicy.defaultOrder.lastIndex)
+                                        val next = HomeNavOrderPolicy.move(navOrder, itemId, target)
+                                        if (next != navOrder) {
+                                            navOrder = next
+                                            dragChanged = true
+                                            reorderHaptics.tap()
+                                        }
+                                        dragOffsetPx =
+                                            dragDistancePx - (target - dragStartIndex) * reorderStepPx
+                                    }
+                                },
+                                onReorderEnd = { cancelled ->
+                                    if (draggingId == itemId) {
+                                        if (cancelled && dragChanged) navOrder = dragStartOrder
+                                        val saveOrder = !cancelled && dragChanged
+                                        draggingId = null
+                                        dragOffsetPx = 0f
+                                        dragChanged = false
+                                        if (saveOrder) onOrderChanged(navOrder)
+                                    }
+                                },
+                            ) { tint ->
+                                when (itemId) {
+                                    "status" -> StatusGlyphIcon(tint, navIconSize)
+                                    "calls" -> Icon(
+                                        Icons.Filled.Call,
+                                        contentDescription = null,
+                                        tint = tint,
+                                        modifier = Modifier.size(navIconSize),
+                                    )
+                                    "profile" -> Icon(
+                                        Icons.Filled.Person,
+                                        contentDescription = null,
+                                        tint = tint,
+                                        modifier = Modifier.size(navIconSize),
+                                    )
+                                    else -> Icon(
+                                        painter = painterResource(R.drawable.ic_nav_chat),
+                                        contentDescription = null,
+                                        tint = tint,
+                                        modifier = Modifier.size(navIconSize),
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1275,6 +1320,7 @@ private fun HomeNavPillDialog(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun NavItem(
     label: String,
@@ -1288,7 +1334,13 @@ private fun NavItem(
     enabled: Boolean = true,
     idleTint: Color,
     selectedTint: Color,
+    reorderable: Boolean,
+    isDragging: Boolean,
+    reorderOffsetPx: Float,
     onClick: () -> Unit,
+    onReorderStart: () -> Unit,
+    onReorderDrag: (Float) -> Unit,
+    onReorderEnd: (cancelled: Boolean) -> Unit,
     icon: @Composable (Color) -> Unit,
 ) {
     val tint by animateColorAsState(if (selected) selectedTint else idleTint, tween(250), label = "navTint")
@@ -1326,12 +1378,36 @@ private fun NavItem(
         if (badge > 0) append(", $badge unread chats")
         if (newStatus) append(", new updates")
     }
+    val reorderGesture =
+        if (enabled && reorderable) {
+            Modifier.pointerInput(label, enabled) {
+                var started = false
+                detectDragGesturesAfterLongPress(
+                    onDragStart = {
+                        started = true
+                        onReorderStart()
+                    },
+                    onDragEnd = { if (started) onReorderEnd(false) },
+                    onDragCancel = { if (started) onReorderEnd(true) },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        if (started) onReorderDrag(dragAmount.x)
+                    },
+                )
+            }
+        } else Modifier
     Box(
         modifier
             .fillMaxWidth()
             .height(height)
             // Do not clip this hit target: the unread badge intentionally
             // overhangs the icon's corner and must remain completely visible.
+            .graphicsLayer {
+                translationX = if (isDragging) reorderOffsetPx else 0f
+                scaleX = if (isDragging) 1.08f else 1f
+                scaleY = if (isDragging) 1.08f else 1f
+            }
+            .then(reorderGesture)
             .semantics(mergeDescendants = true) {
                 contentDescription = accessibilityLabel
                 role = Role.Tab

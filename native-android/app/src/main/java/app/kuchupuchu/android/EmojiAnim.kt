@@ -10,6 +10,7 @@ package app.kuchupuchu.android
  */
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -516,6 +517,8 @@ private fun NotoEmojiGlyph(
 
     Box(
         modifier = Modifier.combinedClickable(
+            indication = null,
+            interactionSource = remember { MutableInteractionSource() },
             onClick = {
                 onTap?.invoke()
                 // r67-4: replay() owns the buzz now (haptics.reaction()) — the

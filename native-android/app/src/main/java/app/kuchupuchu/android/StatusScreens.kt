@@ -2,7 +2,6 @@ package app.kuchupuchu.android
 
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -1479,7 +1478,6 @@ private fun ViewersSheet(
                     .graphicsLayer { translationY = progress * 900f }
                     .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
                     .background(GlassSheetSurface)
-                    .border(1.dp, GlassSheetEdge, RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
                     .clickable(onClick = {})  // don't close when touching the sheet
                     .navigationBarsPadding()
                     .padding(vertical = 10.dp),
