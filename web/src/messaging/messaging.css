@@ -250,6 +250,9 @@
   flex: 1;
   min-height: 0;
   scrollbar-gutter: stable;
+  /* Slice I chat themes: the wallpaper variable is set on the chat root by
+   * chatTheme.ts; without a theme it falls back to the app background. */
+  background: var(--chat-wallpaper, var(--kp-bg));
 }
 
 .transcript__day {
@@ -298,18 +301,23 @@
 
 .bubble {
   max-width: min(680px, 78%);
-  background: var(--kp-card);
+  background: var(--chat-other, var(--kp-card));
   border: 1px solid var(--kp-line);
   border-radius: 16px;
   padding: 10px 12px;
   display: grid;
   gap: 6px;
   position: relative;
+  color: var(--chat-other-ink, var(--kp-ink));
 }
 
 .bubble--own {
-  background: #1b3a6b;
+  /* Slice I chat themes: the phone paints my bubble with a per-theme gradient;
+   * the fallback pair is the original flat own-bubble blue. */
+  background: linear-gradient(135deg, var(--chat-mine-from, #1b3a6b), var(--chat-mine-to, #1b3a6b));
   border-color: #2a4f8c;
+  border-color: color-mix(in srgb, var(--chat-mine-to, #1b3a6b) 70%, transparent);
+  color: var(--chat-mine-ink, var(--kp-ink));
 }
 
 .bubble--failed {
@@ -403,7 +411,7 @@
   align-items: center;
   gap: 8px;
   font-size: 0.7rem;
-  color: var(--kp-muted);
+  color: var(--chat-other-muted, var(--kp-muted));
 }
 
 .bubble__meta time {
@@ -411,12 +419,13 @@
 }
 
 /* The muted meta colour fails 4.5:1 against the own-bubble blue, so the
-   outgoing bubble gets a lighter stamp. Contrast is part of acceptance. */
+   outgoing bubble gets a lighter stamp. Contrast is part of acceptance.
+   Slice I: chat themes re-point the stamp through the theme's own ink. */
 .bubble--own .bubble__meta,
 .bubble--own .bubble__meta time,
 .bubble--own .bubble__reply-body,
 .bubble--own .bubble__media-note {
-  color: #cdd9f5;
+  color: var(--chat-mine-ink, #cdd9f5);
 }
 
 .chat-notes {
@@ -2848,4 +2857,132 @@ button.attachment__expand {
   display: grid;
   place-items: center;
   color: #fff;
+}
+
+/* Slice I: the per-chat theme picker (Android's five chat themes). Swatches
+ * paint the real wallpaper + own-bubble gradient of each theme so the picker
+ * shows exactly what it will apply. */
+.chat-theme-picker {
+  display: grid;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.chat-theme-picker__label {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--kp-muted);
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.chat-theme-picker__label span {
+  color: var(--kp-ink);
+  font-weight: 600;
+}
+
+.chat-theme-picker__options {
+  display: flex;
+  gap: 10px;
+}
+
+.chat-theme-swatch {
+  width: 40px;
+  height: 28px;
+  border-radius: 9px;
+  border: 2px solid var(--kp-line);
+  cursor: pointer;
+  padding: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.chat-theme-swatch span {
+  position: absolute;
+  inset: 0;
+}
+
+.chat-theme-swatch.is-active {
+  border-color: var(--kp-accent, var(--kp-blue));
+  box-shadow:
+    0 0 0 2px var(--kp-bg),
+    0 0 0 4px var(--kp-accent, var(--kp-blue));
+}
+
+.chat-theme-swatch[data-theme="darkblue"] span {
+  background: linear-gradient(135deg, #2f6fed 0 45%, #16213a 45%);
+  background-color: #0d1524;
+}
+
+.chat-theme-swatch[data-theme="default"] span {
+  background: linear-gradient(135deg, #f59e0b 0 45%, #ffffff 45%);
+  background-color: #f7f6f4;
+}
+
+.chat-theme-swatch[data-theme="mint"] span {
+  background: linear-gradient(135deg, #34d399 0 45%, #0c1a15 45%);
+}
+
+.chat-theme-swatch[data-theme="rose"] span {
+  background: linear-gradient(135deg, #fb7185 0 45%, #23141a 45%);
+}
+
+.chat-theme-swatch[data-theme="night"] span {
+  background: linear-gradient(135deg, #818cf8 0 45%, #0b1220 45%);
+}
+
+.chat-theme-picker__locked {
+  margin: 4px 0;
+  font-size: 0.8rem;
+  color: var(--kp-muted);
+}
+
+/* The theme chooser rides the same dropdown pattern as Privacy notes: a chip
+ * summary, an absolutely-positioned panel below it. */
+.chat-theme-menu {
+  position: relative;
+}
+
+.chat-theme-menu > summary {
+  cursor: pointer;
+  list-style: none;
+  border: 1px solid var(--kp-line);
+  border-radius: 999px;
+  padding: 6px 12px;
+  color: var(--kp-muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.chat-theme-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-theme-menu > summary:hover,
+.chat-theme-menu > summary:focus-visible {
+  color: var(--kp-ink);
+  border-color: var(--kp-blue-light);
+}
+
+.chat-theme-menu__panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 7;
+  width: min(300px, 80vw);
+  padding: 12px;
+  background: var(--kp-card-raised);
+  border: 1px solid var(--kp-line);
+  border-radius: 14px;
+  box-shadow: 0 18px 40px rgba(4, 9, 20, 0.55);
+  display: grid;
+  gap: 10px;
+}
+
+.chat-theme-picker__note {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--kp-muted);
+  line-height: 1.4;
 }

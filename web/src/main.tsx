@@ -5,6 +5,12 @@ import { AuthProvider } from "./auth/AuthContext";
 import { isWebFeatureEnabled } from "./featureFlags";
 import "./styles.css";
 import "./auth/authStyles.css";
+import { initAppTheme } from "./theme/appTheme";
+
+// Slice I: apply the stored appearance BEFORE the first paint so a light-theme
+// user never sees a dark flash (the phone recreates the activity on switch;
+// the web equivalent is one attribute set before React mounts).
+initAppTheme();
 
 const root = document.getElementById("root");
 

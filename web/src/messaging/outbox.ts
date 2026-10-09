@@ -221,6 +221,28 @@ export function isIndexedDbUsable(): boolean {
   }
 }
 
+/**
+ * Slice I (account-isolation hardening): drop the whole messaging database —
+ * outbox AND drafts. Called on sign-out / account switch so one account's
+ * unsent bytes can never be re-sent, read or surfaced under a different
+ * login on the same browser. The phone enforces the same wall; the Web used
+ * to keep the database forever. Best-effort: a blocked delete (another open
+ * handle) must not stop the sign-out itself.
+ */
+export function deleteMessagingDatabase(): Promise<void> {
+  if (!isIndexedDbUsable()) return Promise.resolve();
+  return new Promise((resolve) => {
+    try {
+      const request = indexedDB.deleteDatabase(OUTBOX_DB_NAME);
+      request.onsuccess = () => resolve();
+      request.onerror = () => resolve();
+      request.onblocked = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(OUTBOX_DB_NAME, OUTBOX_DB_VERSION);

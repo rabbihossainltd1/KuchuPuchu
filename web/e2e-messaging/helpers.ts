@@ -743,7 +743,10 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         });
       });
 
-      await page.route("**/api/conversations", (route) => json(route, { conversations }));
+      // Slice I: the real Worker wraps the list as { items, marker }; the mock
+      // must serve the same shape or the suites would pass against a contract
+      // the server does not speak (the exact drift that hid an empty list).
+      await page.route("**/api/conversations", (route) => json(route, { items: conversations }));
 
       /* --- uploads: single POST, multipart lifecycle, authenticated GET --- */
 

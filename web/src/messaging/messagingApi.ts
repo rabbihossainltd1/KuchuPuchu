@@ -249,4 +249,17 @@ export const messagingApi = {
       body: JSON.stringify({ e2eePublicKey }),
     });
   },
+
+  /**
+   * Slice I (chat-theme parity): `PATCH /api/conversations/:id { theme }` —
+   * the same route Android uses. Any member may theme a solo chat; in a GROUP
+   * the Worker answers 403 for non-owners, which the caller surfaces honestly.
+   */
+  async setConversationTheme(api: ApiClient, conversationId: string, theme: string): Promise<void> {
+    await api.request<unknown>(`/api/conversations/${encodeURIComponent(conversationId)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ theme }),
+    });
+  },
 };
