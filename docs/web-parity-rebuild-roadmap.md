@@ -55,7 +55,7 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 | **I** hardening (themes, motion, a11y, CSP, IDB) | ✅ merged | PR #91 → `main` @ `1af2694` |
 
 | **J** production cutover (React PWA at /) | ✅ merged | PR #92+#93 (parallel session), integration PR #94 → `main` @ `958dff9` |
-| **K** production statuses on | ✅ built | এই branch; নিচের হিসাব |
+| **K** production statuses on | ✅ merged | PR #95 → `main` @ `41cfa971492be11750a0f356fb53572fc04df45b` |
 
 **Slice D-তে যা নামলো** (Worker বা Android-এ একটি লাইনও বদলায়নি):
 
