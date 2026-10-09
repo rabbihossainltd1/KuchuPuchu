@@ -6038,6 +6038,13 @@ async function serveShellAsset(env: Env, request: Request): Promise<Response> {
   if ((headers.get("content-type") ?? "").includes("text/html")) {
     headers.set("Content-Security-Policy", SHELL_CSP);
   }
+  // The worker script must revalidate on every browser update check — a
+  // cached sw.js is exactly how the legacy empty-list bug stayed alive for
+  // existing installs (idea carried over from the first slice-J attempt's
+  // _headers file, now stamped here).
+  if (new URL(request.url).pathname === "/sw.js") {
+    headers.set("Cache-Control", "no-store");
+  }
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,

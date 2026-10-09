@@ -53,7 +53,8 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 | **H** Web Push (VAPID doorbell) | ✅ merged | PR #89 → `main` @ `e5ee47a` |
 | hotfix — legacy web empty list (`{items}` + SW cache bump) | ✅ merged | PR #90 → `main` @ `eab68c3` |
 | **I** hardening (themes, motion, a11y, CSP, IDB) | ✅ merged | PR #91 → `main` @ `1af2694` |
-| **J** production cutover (React PWA live) | ✅ built | এই branch; নিচের হিসাব |
+
+| **J** production cutover (React PWA at /) | ✅ merged | PR #92+#93 (parallel session) then integration PR #94 → worker-stamped headers |
 
 **Slice D-তে যা নামলো** (Worker বা Android-এ একটি লাইনও বদলায়নি):
 
@@ -146,28 +147,39 @@ fix. Full review in `docs/web-hardening.md`.
 
 ## Slice J — Production cutover ✅
 
-The built React PWA (`web/dist`) replaces `./public` as the live web client on
-the same origin as `/api` and `/ws`. Full Bengali review in
+The React PWA (`web/dist`) replaced the legacy `public/` shell at the Worker's
+assets root — owner-approved direct replacement. Two parallel sessions shipped
+it (PR #92 + headers fix #93 from one, PR #94 integration from the other; the
+owner chose the worker-stamped-header mechanism). Full mechanics in
 `docs/web-cutover.md`.
 
-- **Serving:** `[build] command = "npm run build:web:prod"` runs before every
-  `wrangler deploy` (no dashboard change); `[assets]` now points at
-  `./web/dist` with `binding = "ASSETS"` and `run_worker_first = ["/*"]`; the
-  worker delegates non-API paths to the binding and stamps server-side
-  security headers — CSP with `frame-ancestors 'self'` on HTML (the deploy-day
-  TODO from Slice I), nosniff + no-referrer on everything.
-- **Production recipe:** account + messaging flags on (the legacy surface);
-  calls/statuses/media stay default-off. Pinned by case 79.
-- **SW migration:** the React worker sweeps legacy `kp-shell-*` caches on
-  activate; no-skip-waiting update policy kept; the legacy worker's
-  delete-everything-else activate makes a one-revert rollback self-heal.
-  `verify:web-sw` pin inverted on purpose to enforce the sweep.
-- **Install metadata:** React shell ships the same manifest/icon as legacy,
-  so home-screen installs keep their identity.
-- **Untouched:** the preview config still serves `./public` without a build
-  step; `public/` stays in-repo for the legacy contract suite and rollback.
-- Gates: case 79 (24 checks), full `npm run ci` green (now including
-  `build:web:prod`), post-merge live header/shell/health checks.
+- **Build hook:** `wrangler.toml [build] command = "npm run build:web:prod"` —
+  `wrangler deploy`/`versions upload` build the web app themselves, so assets
+  can never be stale and no dashboard change was needed.
+- **Prod flags:** account + messaging on (the legacy surface); calls off
+  (standing directive), statuses/media off (separate future decision), push
+  off until VAPID is set.
+- **Headers:** the worker runs first on every path, delegates non-API paths to
+  the `ASSETS` binding and stamps the security headers — CSP with
+  `frame-ancestors 'self'` on HTML (slice I's deploy-day promise), nosniff +
+  no-referrer everywhere, `no-store` on `/sw.js`. A first attempt used
+  `[[assets.rules]]` (silently ignored — live deploy proved it), a second used
+  a `_headers` file (PR #93); the integration retired `_headers` for this
+  single worker-stamped source of truth (the meta CSP stays only as belt for
+  worker-less previews).
+- **SW migration:** the new worker deletes retired `kp-shell-*` caches on
+  activation (no-skip-waiting policy kept); icon/manifest join the precache
+  and rotate the build id; rollback is symmetric (legacy activate deletes
+  ours). Existing installs cross over in about one reload.
+- **Retirement:** `public/` kept only as fixtures/rollback reference
+  (`public/RETIRED.md`); the preview config now serves the same React build
+  via the same `[build]` hook, still without production bindings.
+- **Folded hardening:** the voice player's `ended` state is now honest
+  (paused-at-end, replay on next tap/key — also removed a keyboard-seek race);
+  no sourcemaps in any build, so none ship as public assets.
+- Gates: case 79 (integration pins), `test:web:cutover:e2e` (3 tests, the only
+  suite with service workers allowed, built with the exact prod script), full
+  `npm run ci` green; post-merge live `curl -sI` header/shell/health checks.
 
 ## কাজের নিয়ম (আগের বার যে ভুলটা হয়েছিল)
 

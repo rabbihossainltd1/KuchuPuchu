@@ -22,12 +22,28 @@ function versionedServiceWorker(): Plugin {
             (output) => output.fileName === "index.html" || /\.(?:js|css)$/i.test(output.fileName),
           )
           .sort((left, right) => left.fileName.localeCompare(right.fileName));
+        // Slice J: the PWA identity files live in web/public (copied verbatim
+        // to the dist root) and join the shell precache — the same idea the
+        // legacy kp-shell cache had, minus the stale-prone unversioned app.js.
+        // Their real bytes feed the build id, so an icon/manifest change also
+        // rotates the service worker.
+        const publicExtras = ["icon.svg", "manifest.webmanifest"].map((name) => ({
+          url: `/${name}`,
+          bytes: readFileSync(resolve(process.cwd(), "web/public", name)),
+        }));
         const digest = createHash("sha256").update(serviceWorkerTemplate);
-        const precacheUrls = files.map((output) => `/${output.fileName}`);
+        const precacheUrls = [
+          ...files.map((output) => `/${output.fileName}`),
+          ...publicExtras.map((extra) => extra.url),
+        ].sort();
 
         for (const output of files) {
           digest.update(output.fileName).update("\0");
           digest.update(output.type === "chunk" ? output.code : output.source).update("\0");
+        }
+        for (const extra of publicExtras) {
+          digest.update(extra.url).update("\0");
+          digest.update(extra.bytes).update("\0");
         }
 
         if (!precacheUrls.includes("/index.html")) {
@@ -45,12 +61,9 @@ function versionedServiceWorker(): Plugin {
 }
 
 /**
- * The production Web client workspace. Since the slice J cutover, the root
- * wrangler.toml builds this app (`build:web:prod` — account + messaging flags
- * on, matching the legacy ./public surface; calls stay off) and serves
- * web/dist from the worker on the same origin as /api and /ws. ./public stays
- * in the repo only for the legacy contract suite and one-revert rollback.
- * Default-flag `build:web` remains the safe preview/E2E recipe.
+ * The production Web client workspace. Since the slice J cutover, this build
+ * (web/dist) is what the Worker serves at / — see wrangler.toml [assets] and
+ * docs/web-cutover.md for the service-worker migration and rollback story.
  */
 export default defineConfig({
   root: "web",
@@ -71,9 +84,8 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
-    // Slice J cutover: the deployed recipe (KP_WEB_PROD=1) must not publish
-    // source maps — everything in web/dist is world-readable once served, and
-    // the legacy ./public never shipped maps. Preview/E2E builds keep them.
-    sourcemap: process.env.KP_WEB_PROD !== "1",
+    // Slice J: the dist is now uploaded as PUBLIC worker assets, so no
+    // sourcemaps — they would ship the whole source next to the bundles.
+    sourcemap: false,
   },
 });

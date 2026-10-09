@@ -1,20 +1,14 @@
-// Slice J (production cutover) static pins. The cutover itself is a config +
-// worker + service-worker change; the browser suites already prove the React
-// app, so this case stops the SERVING contract from silently drifting back:
+// 79 — production cutover contract (slice J, integration of the two parallel
+// attempts; owner chose the worker-stamped-header mechanism, PR #94).
 //
-//  1. The root worker serves web/dist (the built React PWA) on the same
-//     origin as /api and /ws, builds it before every deploy, and stamps the
-//     deploy-day security headers (CSP with frame-ancestors) server-side.
-//  2. The preview-only config keeps serving ./public and never runs the
-//     worker for asset paths — a preview upload must not need the React build
-//     and must not touch production serving.
-//  3. The production recipe enables exactly the legacy surface (account +
-//     messaging); calls stay default-off per the standing directive.
-//  4. The React service worker sweeps the legacy kp-shell-* caches on
-//     activate and keeps the no-skipWaiting update policy; the legacy worker's
-//     delete-everything-else activate makes a one-revert rollback self-heal.
-//  5. The React shell carries the same install metadata (manifest, icon) the
-//     legacy PWA had, so existing home-screen installs keep their identity.
+// The React PWA (web/dist) replaced the legacy public/ shell at the Worker's
+// assets root. These checks pin the deploy mechanics a browser cannot prove
+// for itself: the build hook, the served directory, the single header
+// mechanism (worker stamps; neither _headers nor [[assets.rules]]), the
+// production recipe's flags, the service-worker migration, and the install
+// metadata. Runtime migration behaviour lives in web/e2e-cutover; the worker's
+// own privacy rules stay in verify-web-sw; cases 04/55 keep pinning the
+// retired legacy files.
 
 import { existsSync, readFileSync } from "node:fs";
 
@@ -29,7 +23,8 @@ const preview = read("../../wrangler.kuchupuchu-preview.toml");
 const worker = read("../../src/worker/index.ts");
 const swTemplate = read("../../web/service-worker.template.js");
 const verifySw = read("../../scripts/verify-web-sw.ts");
-const pkg = read("../../package.json");
+const pkg = JSON.parse(read("../../package.json"));
+const viteConfig = read("../../vite.web.config.ts");
 const indexHtml = read("../../web/index.html");
 const legacySw = read("../../public/sw.js");
 
@@ -38,6 +33,10 @@ const legacySw = read("../../public/sw.js");
 check(
   "the production worker serves the built React app, not ./public",
   wrangler.includes('directory = "./web/dist"'),
+);
+check(
+  "wrangler builds the web app itself on every deploy/upload",
+  wrangler.includes("[build]") && wrangler.includes('command = "npm run build:web:prod"'),
 );
 check(
   "the assets binding is exposed to the worker as ASSETS",
@@ -51,23 +50,17 @@ check(
   "unknown paths still fall back to the shell for deep links",
   wrangler.includes('not_found_handling = "single-page-application"'),
 );
-check(
-  "wrangler builds the production recipe before every deploy",
-  wrangler.includes("[build]") && wrangler.includes('command = "npm run build:web:prod"'),
-);
-check(
-  "the preview config still targets ./public and never builds the React app",
-  preview.includes('directory = "./public"') &&
-    !preview.includes("[build]") &&
-    !preview.includes("web/dist"),
-);
-check(
-  "the preview config keeps the worker off asset paths",
-  preview.includes('run_worker_first = ["/api/*", "/ws/*"]'),
-);
 
-/* ---------------------------------------------------- worker delegation --- */
+/* ------------------------- one header mechanism: the worker, nothing else --- */
 
+check(
+  "the retired _headers file is gone (single source of truth)",
+  !existsSync(new URL("../../web/public/_headers", import.meta.url)),
+);
+check(
+  "wrangler carries no unsupported assets rules (live deploys ignored them)",
+  !wrangler.includes("[[assets.rules]]"),
+);
 check(
   "non-API paths delegate to the ASSETS binding before the REST router",
   worker.includes("serveShellAsset(env, request)") &&
@@ -85,9 +78,13 @@ check(
     worker.includes('headers.set("Referrer-Policy", "no-referrer")'),
 );
 check(
-  "the header CSP matches the meta CSP plus frame-ancestors",
-  worker.includes("frame-src https://accounts.google.com; frame-ancestors 'self'; font-src") &&
-    indexHtml.includes("frame-src https://accounts.google.com; font-src"),
+  "sw.js is no-store so every update check revalidates",
+  worker.includes('pathname === "/sw.js"') &&
+    worker.includes('headers.set("Cache-Control", "no-store")'),
+);
+check(
+  "the meta CSP stays as belt for worker-less previews",
+  indexHtml.includes('http-equiv="Content-Security-Policy"'),
 );
 check(
   "a binding-free worker answers 404 for asset paths instead of crashing",
@@ -96,16 +93,11 @@ check(
 
 /* ----------------------------------------------------- production recipe --- */
 
-const prodRecipe = pkg.match(/"build:web:prod": "([^"]+)"/)?.[1] ?? "";
+const prodRecipe = pkg.scripts["build:web:prod"] ?? "";
 check(
   "the production recipe enables account integration and messaging",
   prodRecipe.includes("VITE_KP_WEB_ACCOUNT_INTEGRATION=true") &&
     prodRecipe.includes("VITE_KP_WEB_MESSAGING=true"),
-);
-check(
-  "the production recipe publishes no source maps (legacy never did)",
-  prodRecipe.includes("KP_WEB_PROD=1") &&
-    read("../../vite.web.config.ts").includes('process.env.KP_WEB_PROD !== "1"'),
 );
 check(
   "the production recipe leaves calls, statuses and media at their safe defaults",
@@ -113,21 +105,30 @@ check(
     !prodRecipe.includes("VITE_KP_WEB_STATUSES") &&
     !prodRecipe.includes("VITE_KP_WEB_MEDIA"),
 );
+check("no sourcemaps ship with the public assets", viteConfig.includes("sourcemap: false"));
 check(
-  "the production recipe is part of the CI chain",
-  JSON.parse(pkg).scripts.ci.includes("build:web:prod"),
+  "the ci chain runs the cutover suite, then the prod build and a second verify",
+  pkg.scripts.ci.includes(
+    "test:web:cutover:e2e && npm run build:web:prod && npm run verify:web-sw",
+  ),
 );
 
 /* ----------------------------------------------- service-worker migration --- */
 
 check(
-  "the React worker sweeps legacy kp-shell-* caches on activate",
-  swTemplate.includes('const LEGACY_CACHE_PREFIX = "kp-shell-"') &&
-    swTemplate.includes("key.startsWith(LEGACY_CACHE_PREFIX)"),
+  "the React worker sweeps retired kp-shell-* caches on activate",
+  swTemplate.includes('const LEGACY_CACHE_PREFIXES = ["kp-shell-"];') &&
+    swTemplate.includes("LEGACY_CACHE_PREFIXES.some((prefix) => key.startsWith(prefix))"),
 );
 check(
   "the no-skipWaiting update policy is kept (updates wait for clients)",
   !swTemplate.includes("skipWaiting"),
+);
+check(
+  "icon and manifest join the precache and rotate the build id",
+  viteConfig.includes('const publicExtras = ["icon.svg", "manifest.webmanifest"]') &&
+    verifySw.includes('precache.includes("/icon.svg")') &&
+    verifySw.includes('precache.includes("/manifest.webmanifest")'),
 );
 check(
   "verify-web-sw enforces the legacy sweep and the no-skipWaiting policy",
@@ -137,6 +138,18 @@ check(
 check(
   "the legacy worker still deletes foreign caches, so a revert self-heals",
   legacySw.includes("ks.filter((k) => k !== SHELL)"),
+);
+
+/* --------------------------------------- preview mirrors prod, no bindings --- */
+
+check(
+  "the preview config serves the same React build via the same build hook",
+  preview.includes('directory = "./web/dist"') &&
+    preview.includes('command = "npm run build:web:prod"'),
+);
+check(
+  "the preview config keeps production bindings out",
+  !preview.includes("d1_databases") && !preview.includes("r2_buckets"),
 );
 
 /* -------------------------------------------------------- install metadata --- */

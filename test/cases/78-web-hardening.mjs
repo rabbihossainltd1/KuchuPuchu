@@ -57,10 +57,26 @@ check("calls mock serves { items }", callsHelpers.includes("items: conversations
 check("status mock serves { items }", statusHelpers.includes("{ items: [] }"));
 check("forward spec override serves { items }", forwardSpec.includes("items: ["));
 
-// 3. the CSP contract
-const cspMatch = indexHtml.match(/Content-Security-Policy"\s+content="([^"]+)"/);
-const csp = cspMatch?.[1] ?? "";
-check("the react shell ships a meta CSP", csp !== "", csp.slice(0, 60));
+// 3. the CSP contract — slice J integration: the effective CSP is a SERVER
+// header stamped by the worker's serveShellAsset (frame-ancestors is
+// impossible in meta); the meta tag stays only as belt for worker-less
+// previews. The retired _headers file must not come back (case 79 pins the
+// same single-source-of-truth rule).
+const workerSrc = read("../../src/worker/index.ts");
+const csp = workerSrc.match(/const SHELL_CSP =\s*"([^"]+)"/)?.[1] ?? "";
+check("the worker ships a server CSP", csp !== "", csp.slice(0, 60));
+check(
+  "the react shell keeps the meta CSP as belt for worker-less previews",
+  /http-equiv="Content-Security-Policy"/i.test(indexHtml),
+);
+check(
+  "the retired _headers file stays gone (one source of truth)",
+  !read("../../package.json").includes("_headers") && workerSrc.includes("serveShellAsset"),
+);
+check(
+  "frame-ancestors is now enforced (deploy-day promise from slice I)",
+  /frame-ancestors 'self'/.test(csp),
+);
 check("default-src is same-origin", /default-src 'self'/.test(csp));
 check(
   "scripts come only from the app and Google Identity Services",

@@ -49,12 +49,12 @@ CF_ACCOUNT = "92081fac7caf54a46a756c382081544b"
 binding = "MEDIA"
 bucket_name = "kp-media"
 
-# r104-web / slice J cutover: the React PWA (web/dist) is now THE production
-# web client, served from THIS worker — same origin as /api and /ws, so there
-# is no CORS surface and no second deploy. The legacy ./public client stays in
-# the repo for the contract suite and one-revert rollback, but is no longer
-# served by this config (the preview-only wrangler.kuchupuchu-preview.toml
-# still points at ./public and never runs the worker for asset paths).
+# r104-web / slice J cutover (integration of the two parallel slice-J attempts;
+# owner chose the worker-stamped-header mechanism, PR #94): the React PWA
+# (web/dist) is THE production web client, served from THIS worker — same
+# origin as /api and /ws, no CORS surface, no second deploy. ./public is
+# retired (kept in-repo for the legacy contract cases 04/55 and rollback
+# history; see public/RETIRED.md).
 #
 # The build step produces web/dist before every deploy; Workers Builds'
 # production trigger runs `npx wrangler deploy`, and wrangler runs [build]
@@ -63,11 +63,16 @@ bucket_name = "kp-media"
 command = "npm run build:web:prod"
 
 # run_worker_first on EVERY path: the worker delegates non-API paths to the
-# ASSETS binding and stamps the deploy-day security headers (CSP with
-# frame-ancestors, nosniff, referrer-policy) onto the responses — a meta tag
+# ASSETS binding and stamps the security headers (CSP with frame-ancestors,
+# nosniff, referrer-policy, no-store sw.js) onto the responses — a meta tag
 # cannot carry frame-ancestors, only a header can (docs/web-hardening.md).
+# The first slice-J attempt used wrangler's assets rules toml table (live
+# deploys proved it is silently ignored for headers) and then a _headers file
+# (PR #93); the owner chose this worker-stamped single source of truth
+# instead — case 79 pins the absence of both alternatives.
 [assets]
 directory = "./web/dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 run_worker_first = ["/*"]
+
