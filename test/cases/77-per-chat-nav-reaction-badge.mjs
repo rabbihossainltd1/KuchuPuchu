@@ -79,8 +79,11 @@ check(
 );
 check(
   "bottom-nav hold enlarges only the held item smoothly and other items animate into place",
-  navPill.includes("HomeNavOrderPolicy.defaultOrder.forEach { itemId ->") &&
-    navPill.includes("val animatedSlotOffsetPx by animateFloatAsState(") &&
+  // ee3534a: the reorder animation moved to LazyRow + animateItem; the held
+  // item still scales alone while the others spring into place.
+  navPill.includes("LazyRow(") &&
+    navPill.includes("val isMoving = draggingId == itemId || settlingId == itemId") &&
+    navPill.includes("Modifier.animateItem(") &&
     navPill.includes("reorderOffsetPx = itemOffsetPx") &&
     navPill.includes("settlingOffset.animateTo(") &&
     nav.includes("targetValue = if (isDragging) 1.06f else 1f") &&

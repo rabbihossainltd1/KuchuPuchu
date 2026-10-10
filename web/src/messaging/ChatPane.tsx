@@ -85,6 +85,7 @@ import {
 import { ChatMenu } from "./ChatMenu";
 import { ConversationAvatar } from "./Avatar";
 import {
+  takePendingMessageJump,
   MESSAGE_BODY_LIMIT,
   TICK_LABELS,
   clockTime,
@@ -177,6 +178,42 @@ export function ChatPane({
 }: Props) {
   const composerId = useId();
   const transcriptRef = useRef<HTMLOListElement | null>(null);
+
+  /** Slice S: scroll a search hit into view; older-than-loaded says so aloud. */
+  const jumpToMessage = (messageId: string) => {
+    const root = transcriptRef.current;
+    const el = root?.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
+    if (el instanceof HTMLElement) {
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+      el.classList.add("bubble-row--jump");
+      window.setTimeout(() => el.classList.remove("bubble-row--jump"), 1600);
+    } else {
+      controller.announce("That message is older than the loaded history in this build.");
+    }
+  };
+
+  // Global search hands the hit over through the pending-jump store; the row
+  // may still be paging in, so poll briefly before giving up honestly.
+  useEffect(() => {
+    const id = takePendingMessageJump();
+    if (!id) return;
+    let tries = 0;
+    const timer = window.setInterval(() => {
+      tries += 1;
+      const el = transcriptRef.current?.querySelector(`[data-message-id="${CSS.escape(id)}"]`);
+      if (el instanceof HTMLElement) {
+        window.clearInterval(timer);
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        el.classList.add("bubble-row--jump");
+        window.setTimeout(() => el.classList.remove("bubble-row--jump"), 1600);
+      } else if (tries > 8) {
+        window.clearInterval(timer);
+        controller.announce("That message is older than the loaded history in this build.");
+      }
+    }, 250);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
   const [confirmDeleteId, setConfirmDeleteId] = useState("");
@@ -766,6 +803,7 @@ export function ChatPane({
           }}
           navigate={navigate}
           meId={meId}
+          onJumpToMessage={jumpToMessage}
         />
       ) : null}
 

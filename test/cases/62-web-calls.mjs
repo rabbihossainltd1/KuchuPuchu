@@ -360,8 +360,12 @@ check(
 );
 check(
   "three failed reads in a row say Reconnecting…",
-  engineSource.includes("netFailStreak == 3 && active != null") &&
-    engineSource.includes('notify("Reconnecting…")'),
+  // ee3534a: the streak now routes through beginReconnecting(), which pauses
+  // the clock on an established call and ends a never-connected one instead.
+  engineSource.includes("netFailStreak >= 3") &&
+    engineSource.includes(
+      "if (currentCall.startedAt > 0L) beginReconnecting() else endCallForNetworkFailure()",
+    ),
 );
 check(
   "an outgoing ring is given up after a minute",
@@ -414,7 +418,8 @@ check(
 
 check(
   "three failed reads is the streak that says Reconnecting…, not one",
-  engineSource.includes("netFailStreak == 3") &&
+  engineSource.includes("netFailStreak >= 3") &&
+    engineSource.includes("private fun beginReconnecting()") &&
     CALL_NET_FAIL_STREAK === 3 &&
     CALL_RECONNECTING_COPY === "Reconnecting…",
 );
@@ -461,10 +466,10 @@ check(
   engineSource.includes(
     "override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?)",
   ) &&
-    engineSource.includes("fun markConnected()") &&
-    engineSource.includes(
-      "active = cur.copy(connecting = false, startedAt = System.currentTimeMillis())",
-    ) &&
+    // ee3534a: the stamp moved into connectedCallState(); `else -> now` keeps
+    // the epoch at THIS device's media-ready moment, never the server's.
+    engineSource.includes("private fun connectedCallState(cur: CallUi): CallUi {") &&
+    engineSource.includes("else -> now") &&
     webEngine.includes("const markConnected = () => {") &&
     webEngine.includes("connectedAt: clock.now()"),
 );
@@ -472,7 +477,9 @@ check(
   "ICE failure gets exactly one relay-first rescue",
   engineSource.includes("if (!relayRetryUsed && pc != null)") &&
     engineSource.includes("relayRetryUsed = true") &&
-    engineSource.includes('notify("Network is limited — connecting through a relay…")') &&
+    // ee3534a: the rescue re-configures to relay-only and ICE-restarts in
+    // place (reoffer + reanswer) instead of printing its own banner.
+    engineSource.includes("runCatching { pc?.setConfiguration(relayConfig()) }") &&
     webEngine.includes("if (!relayRetryUsed) {"),
 );
 check(

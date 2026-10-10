@@ -281,3 +281,27 @@ The last two gaps of the parity plan's screen-share row, closed:
 - ~~Web Push-এর VAPID key + subscription schema (Slice H-এর আগে)।~~ সমাধান (Slice H): `VAPID_PRIVATE_KEY` secret থেকে পাবলিক key derive হয়; সাবস্ক্রিপশন `web_push_subs` টেবিলে; `docs/web-push.md`। সিক্রেট লাইভ ডিপ্লয়-তে বসানো হয়েছে আর প্রোডাকশন রেসিপিতে `VITE_KP_WEB_PUSH=true` চালু (স্লাইস পি)।
 - ~~নতুন `web/` অ্যাপ কখন production cutover হবে — `public/` প্রতিস্থাপন নাকি আলাদা path-এ parallel।~~ সমাধান (Slice J): মালিক সরাসরি প্রতিস্থাপন অনুমোদন করেছেন; `docs/web-cutover.md`।
 - ~~Long-lived session token WS query-তে রাখা বনাম short-lived ticket route~~ — শিপড (স্লাইস ও): ব্রাউজার সকেট এখন ৬০-সেকেন্ডের একবার-ব্যবহারযোগ্য টিকিট নেয়; `?token=` ফলব্যাক অক্ষত।
+
+## Slice S — Global search, New chat, Search in chat ✅
+
+The parity plan's §3.2 search rows, closed against the existing Worker routes
+(no server change):
+
+- **Global search pane** (rail *Search*, `web/src/messaging/SearchPane.tsx`):
+  one debounced field over `GET /api/search` answering three groups — Chats,
+  Messages, People. A sealed hit previews as its category word (list-row
+  rule), view-once rows are skipped, and every privacy wall stays
+  server-side. `/` focuses the field.
+- **New chat**: the list header's plus is live and lands on the search pane;
+  a person row's *Message* opens the 1:1 via `POST /api/conversations` with
+  `request: true`, so a stranger arrives as a message request exactly like a
+  username search on the phone.
+- **Search in chat**: the ⋮ sheet gains *Search in chat*
+  (`GET /api/conversations/:id/messages/search`); picking a hit closes the
+  sheet and scrolls the transcript to the row, with a brief highlight ring.
+  A hit older than the loaded page is announced as such — never a fake jump.
+- Tests: `web/e2e-messaging/search.spec.ts` (5 tests against the mocked
+  Worker, incl. sealed-snippet and older-than-loaded honesty).
+- Contract pins refreshed for the parallel session's `ee3534a` Android
+  refactor (call recovery via `beginReconnecting()`, relay-only ICE rescue,
+  LazyRow nav reorder): cases 62 + 77 now pin the new source, same intent.

@@ -1,11 +1,15 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ApiClient } from "../auth/authApi";
 import { Icon, type IconName } from "../icons";
 import type { Navigate } from "../useBrowserRouter";
 import { CAPABILITY_COPY } from "./chatCopy";
 import { chatThemeOr, CHAT_THEME_LABELS } from "./chatTheme";
 import { messagingApi } from "./messagingApi";
+import type { MessageRow } from "./protocol";
+import { searchSnippet } from "./SearchPane";
+
 import {
+  clockTime,
   conversationPeerId,
   conversationTitle,
   isBotConversation,
@@ -28,6 +32,7 @@ export function ChatMenu({
   onOpenMedia,
   navigate,
   meId,
+  onJumpToMessage,
 }: {
   api: ApiClient | null;
   conversation: ConversationRow;
@@ -37,8 +42,14 @@ export function ChatMenu({
   onOpenMedia: () => void;
   navigate: Navigate;
   meId: string;
+  onJumpToMessage: (messageId: string) => void;
 }) {
-  const [view, setView] = useState<"root" | "mute" | "privacy" | "notes" | "theme">("root");
+  const [view, setView] = useState<"root" | "mute" | "privacy" | "notes" | "theme" | "find">(
+    "root",
+  );
+  const [findQuery, setFindQuery] = useState("");
+  const [findResults, setFindResults] = useState<readonly MessageRow[]>([]);
+  const findInputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState("");
   const [confirm, setConfirm] = useState("");
   const [muteCall, setMuteCall] = useState(conversation.mutedCall);
@@ -103,6 +114,7 @@ export function ChatMenu({
               conversation.isGroup ? "Group Media" : "Media, links, and docs",
               onOpenMedia,
             )}
+            {row("search", "Search in chat", () => setView("find"))}
             {row("bellOff", muted ? "Unmute…" : "Mute…", () => setView("mute"))}
             {!conversation.isGroup && !bot
               ? row("lock", "Chat privacy", () => setView("privacy"))
@@ -264,6 +276,22 @@ export function ChatMenu({
           </>
         )}
 
+        {view === "find" && (
+          <FindView
+            api={api}
+            conversationId={conversation.id}
+            inputRef={findInputRef}
+            results={findResults}
+            setResults={setFindResults}
+            query={findQuery}
+            setQuery={setFindQuery}
+            onPick={(id) => {
+              onJumpToMessage(id);
+              onClose();
+            }}
+          />
+        )}
+
         {view === "notes" && (
           <>
             <p className="chat-menu__title">Privacy notes</p>
@@ -290,5 +318,90 @@ export function ChatMenu({
         )}
       </div>
     </div>
+  );
+}
+
+/** The ⋮ sheet's in-chat search: server-side LIKE over this conversation's
+ *  TEXT/IMAGE/FILE rows, view-once excluded, debounce + abort like the global
+ *  pane. Picking a row closes the sheet and asks the transcript to scroll. */
+function FindView({
+  api,
+  conversationId,
+  inputRef,
+  results,
+  setResults,
+  query,
+  setQuery,
+  onPick,
+}: {
+  api: ApiClient | null;
+  conversationId: string;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  results: readonly MessageRow[];
+  setResults: (rows: readonly MessageRow[]) => void;
+  query: string;
+  setQuery: (value: string) => void;
+  onPick: (messageId: string) => void;
+}) {
+  const needle = query.trim();
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, [inputRef]);
+
+  useEffect(() => {
+    if (!api || needle.length < 2) {
+      setResults([]);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void messagingApi
+        .searchMessages(api, conversationId, needle, controller.signal)
+        .then((rows) => setResults(rows.filter((row) => !row.viewOnce)))
+        .catch(() => {
+          if (!controller.signal.aborted) setResults([]);
+        });
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [api, conversationId, needle, setResults]);
+
+  return (
+    <>
+      <p className="chat-menu__title">Search in chat</p>
+      <label className="search-field chat-menu__find-field" htmlFor="chat-find">
+        <Icon name="search" size={16} />
+        <input
+          id="chat-find"
+          ref={inputRef}
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Message text"
+          aria-label="Search messages in this chat"
+          autoComplete="off"
+        />
+      </label>
+      <ul className="chat-menu__find-results" aria-label="Message matches">
+        {results.map((row) => (
+          <li key={row.id}>
+            <button
+              type="button"
+              className="chat-menu__row chat-menu__find-row"
+              onClick={() => onPick(row.id)}
+            >
+              <span className="chat-menu__find-snippet">{searchSnippet(row)}</span>
+              <span className="chat-menu__find-time">{clockTime(row.createdAt)}</span>
+            </button>
+          </li>
+        ))}
+        {needle.length >= 2 && results.length === 0 && (
+          <li className="chat-menu__note">No matches in this chat.</li>
+        )}
+      </ul>
+    </>
   );
 }
