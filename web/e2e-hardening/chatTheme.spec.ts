@@ -37,7 +37,8 @@ test("picking a chat theme repaints the pane and PATCHes the server once", async
   const pane = page.locator("main.conversation-pane");
   await expect(pane).toHaveAttribute("data-chat-theme", "darkblue");
 
-  await page.getByText("Theme · থিম").click();
+  await page.getByRole("button", { name: "More options" }).click();
+  await page.getByRole("button", { name: "Chat theme" }).click();
   await page.getByRole("radio", { name: /Mint/ }).click();
 
   await expect(pane).toHaveAttribute("data-chat-theme", "mint");
@@ -86,7 +87,8 @@ test("a refused theme save rolls back and explains", async ({ page }) => {
   await page.getByText("Rahi").first().click();
   const pane = page.locator("main.conversation-pane");
 
-  await page.getByText("Theme · থিম").click();
+  await page.getByRole("button", { name: "More options" }).click();
+  await page.getByRole("button", { name: "Chat theme" }).click();
   await page.getByRole("radio", { name: /Rose/ }).click();
 
   // The optimistic flip is undone…
@@ -105,6 +107,9 @@ test("a non-owner group says who may change the theme instead of showing a picke
   await page.goto("/");
   await page.getByText("Squad").first().click();
 
+  // The lock is disclosed inside the ⋮ sheet's theme view, not as a banner.
+  await page.getByRole("button", { name: "More options" }).click();
+  await page.getByRole("button", { name: "Chat theme" }).click();
   await expect(page.getByText(/Only the group owner can change this chat's theme/)).toBeVisible();
   await expect(page.locator(".chat-theme-menu")).toHaveCount(0);
 });
@@ -117,7 +122,8 @@ test("all five Android themes apply distinct wallpapers", async ({ page }) => {
 
   await page.goto("/");
   await page.getByText("Rahi").first().click();
-  await page.getByText("Theme · থিম").click();
+  await page.getByRole("button", { name: "More options" }).click();
+  await page.getByRole("button", { name: "Chat theme" }).click();
 
   const expected: Array<[RegExp, string]> = [
     [/Mint/, "rgb(12, 26, 21)"],

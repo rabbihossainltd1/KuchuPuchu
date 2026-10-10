@@ -466,7 +466,10 @@ test.describe("Web attachments", () => {
     // The camera tile is a browser substitute and says so through its input.
     await expect(tileInput(page, "Camera")).toHaveAttribute("capture", "environment");
     await expect(tileInput(page, "Gallery")).toHaveAttribute("multiple", "");
-    // Deferred surfaces point at the roadmap rather than pretending to work.
-    await expect(page.locator(".chat-notes")).toContainText("arrive in a later slice");
+    // Deferred surfaces point at the roadmap rather than pretending to work;
+    // the roadmap copy lives in the ⋮ sheet's Privacy notes view.
+    await page.getByRole("button", { name: "More options" }).click();
+    await page.getByRole("button", { name: "Privacy notes" }).click();
+    await expect(page.locator(".chat-menu__notes")).toContainText("arrive in a later slice");
   });
 });

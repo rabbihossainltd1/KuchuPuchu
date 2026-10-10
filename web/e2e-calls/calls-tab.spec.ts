@@ -297,9 +297,10 @@ test.describe("the chat header's call gate", () => {
     expect(worker.starts).toHaveLength(before);
     await expect(stage(page)).toHaveCount(0);
 
-    // And the chat's own notes say why, in the pane the reader is looking at.
-    await page.locator(".chat-notes summary").click();
-    await expect(page.locator(".chat-notes")).toContainText(
+    // And the chat's own notes say why, in the ⋮ sheet's Privacy notes view.
+    await page.getByRole("button", { name: "More options" }).click();
+    await page.getByRole("button", { name: "Privacy notes" }).click();
+    await expect(page.locator(".chat-menu__notes")).toContainText(
       "Group calls stay on the phone: the Web runs no group mesh yet.",
     );
   });
@@ -310,8 +311,9 @@ test.describe("the chat header's call gate", () => {
     await expect(chatHeader(page).getByRole("button", { name: /Voice call/ })).toHaveCount(0);
     await expect(chatHeader(page).getByRole("button", { name: /Video call/ })).toHaveCount(0);
     // The reason is disclosed where the reader can find it.
-    await page.locator(".chat-notes summary").click();
-    await expect(page.locator(".chat-notes")).toContainText("Calls are muted for this chat");
+    await page.getByRole("button", { name: "More options" }).click();
+    await page.getByRole("button", { name: "Privacy notes" }).click();
+    await expect(page.locator(".chat-menu__notes")).toContainText("Calls are muted for this chat");
   });
 
   test("a bot chat offers no call", async ({ page }) => {

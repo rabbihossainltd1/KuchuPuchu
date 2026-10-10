@@ -332,7 +332,14 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         body: sealedFromPeer,
         createdAt: new Date().toISOString(),
       },
-      other: { id: PEER_ID, displayName: PEER_NAME, username: "rahi", e2eePublicKey: peer.u },
+      other: {
+        id: PEER_ID,
+        displayName: PEER_NAME,
+        username: "rahi",
+        e2eePublicKey: peer.u,
+        online: true,
+        lastActiveAt: new Date().toISOString(),
+      },
       // r76-18: the server answers with the EFFECTIVE value, so a switched-off
       // permission arrives as an explicit false rather than as a missing flag.
       ...(options.peerSaveOff ? { peerSave: false } : {}),
@@ -345,6 +352,11 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
       hidden: 0,
       lastMessageAt: new Date(Date.now() - 3_600_000).toISOString(),
       lastMessagePreview: { kind: "TEXT", category: "message", body: "group plaintext" },
+      members: [
+        { user: { id: ME.id, displayName: ME.displayName } },
+        { user: { id: PEER_ID, displayName: PEER_NAME } },
+        { user: { id: "u_third", displayName: "Third Member" } },
+      ],
     },
     {
       id: HIDDEN_ID,

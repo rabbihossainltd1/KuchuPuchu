@@ -61,9 +61,9 @@ test.describe("Web messaging", () => {
     ).toBeVisible();
     await expect(page.getByText("2 unread").first()).toBeVisible();
 
-    // The sealed preview is a lock, never ciphertext.
+    // The sealed preview is the plain category word, never ciphertext.
     await expect(page.getByText("KP1.")).toHaveCount(0);
-    await expect(page.getByText("এনক্রিপ্টেড মেসেজ").first()).toBeVisible();
+    await expect(page.getByText("Message").first()).toBeVisible();
 
     // The list footer reports the /ws/user connection; the open chat reports
     // its own /ws/chat connection separately.
@@ -84,7 +84,8 @@ test.describe("Web messaging", () => {
     await expect(page.getByText(ownPlaintextBody())).toBeVisible();
 
     await expect(page.getByText("Today").first()).toBeVisible();
-    await expect(page.getByText("Direct chat · times shown in Dhaka time")).toBeVisible();
+    // The header subtitle is the phone's presence line — the mock peer is online.
+    await expect(page.getByText("online")).toBeVisible();
 
     // Opening marks the conversation read.
     await expect.poll(() => worker.readCalls.length).toBeGreaterThan(0);
@@ -159,7 +160,9 @@ test.describe("Web messaging", () => {
     await page.getByLabel("Message text").press("Escape");
     await expect(page.getByText(`Replying to ${PEER_NAME}`)).toHaveCount(0);
 
-    // Copy is a real clipboard write, and the copy is confirmed aloud.
+    // Copy is a real clipboard write, and the copy is confirmed aloud. The
+    // action row only takes pointer events once revealed on hover.
+    await page.locator(".bubble-row").first().locator(".bubble").hover();
     await page
       .getByRole("button", { name: new RegExp(`Copy message from ${PEER_NAME}`) })
       .first()
@@ -177,12 +180,14 @@ test.describe("Web messaging", () => {
 
     // Delete asks before it acts, and only the sender's rows offer it.
     const ownRow = page.locator(".bubble-row--own").first();
+    await ownRow.locator(".bubble").hover();
     await ownRow.getByRole("button", { name: "Delete your message" }).click();
     await expect(page.getByText("Delete for everyone?")).toBeVisible();
     await page.getByRole("button", { name: "Keep message" }).click();
     await expect(page.getByText("Delete for everyone?")).toHaveCount(0);
     expect(worker.deletedMessageIds.length).toBe(0);
 
+    await ownRow.locator(".bubble").hover();
     await ownRow.getByRole("button", { name: "Delete your message" }).click();
     await page.getByRole("button", { name: "Delete for everyone" }).click();
     await expect.poll(() => worker.deletedMessageIds.length).toBe(1);
@@ -192,11 +197,10 @@ test.describe("Web messaging", () => {
     await page.getByRole("link", { name: /KuchuPuchu/ }).click();
     await expect(page).toHaveURL(new RegExp(`/chats/${BOT_ID}`));
 
-    await expect(page.getByText("Notification account · one-way")).toBeVisible();
+    await expect(page.getByText("Official account")).toBeVisible();
     const composer = page.getByLabel("This account does not accept replies");
     await expect(composer).toBeDisabled();
     await expect(page.getByRole("button", { name: "Replies are not accepted" })).toBeDisabled();
-    await expect(page.getByText("One-way notification account.")).toBeVisible();
 
     expect(worker.sent.length).toBe(0);
   });
@@ -204,7 +208,7 @@ test.describe("Web messaging", () => {
   test("group chats stay plaintext and label their sender", async ({ page }) => {
     await page.getByRole("link", { name: /Squad/ }).click();
     await expect(page).toHaveURL(new RegExp(`/chats/${GROUP_ID}`));
-    await expect(page.getByText("Group chat")).toBeVisible();
+    await expect(page.getByText(/members/)).toBeVisible();
     await expect(page.locator(".transcript").getByText("group plaintext")).toBeVisible();
     await expect(page.locator(".bubble__sender").first()).toContainText(PEER_NAME);
 
@@ -225,7 +229,7 @@ test.describe("Web messaging", () => {
 
     // A typing frame lights the header; it is not the only indicator.
     chatSocket!.send(JSON.stringify({ type: "typing", userId: "u_peer", at, kind: "text" }));
-    await expect(page.getByText("টাইপ করছে… typing")).toBeVisible();
+    await expect(page.getByText("typing…")).toBeVisible();
 
     // An incoming sealed message is decrypted and appended once.
     const { sealFor } = await import("./helpers");
@@ -291,25 +295,24 @@ test.describe("Web messaging", () => {
     userSocket!.send(JSON.stringify({ type: "conv", conversationId: CHAT_ID }));
     await expect(page.getByRole("link", { name: new RegExp(PEER_NAME) })).toBeVisible();
 
-    // Heartbeats keep flowing; the mock simply receives them.
-    await expect(page.locator(".socket-pill")).toHaveText("Live");
+    // Heartbeats keep flowing; the mock simply receives them. The live state
+    // rides the list footer's indicator now, not a header pill.
+    await expect(page.locator(".list-footer")).toContainText("Live");
   });
 
   test("browser-only limitations are disclosed in the chat surface", async ({ page }) => {
     await page.getByRole("link", { name: new RegExp(PEER_NAME) }).click();
     await expect(page.getByText("এই মেসেজটি ফোন থেকে এনক্রিপ্টেড")).toBeVisible();
 
-    // The disclosure is keyboard reachable and its contents are real text, not
-    // a tooltip that only exists on hover.
-    const summary = page.locator(".chat-notes summary");
-    await summary.focus();
-    await summary.press("Enter");
+    // The disclosure lives in the ⋮ sheet's Privacy notes view.
+    await page.getByRole("button", { name: "More options" }).click();
+    await page.getByRole("button", { name: "Privacy notes" }).click();
 
     await expect(page.getByText(/cannot block or detect screenshots/)).toBeVisible();
     await expect(
       page.getByText(/Media bytes are account-controlled, not end-to-end encrypted/),
     ).toBeVisible();
-    await expect(page.locator(".chat-notes")).toContainText("arrive in a later slice");
+    await expect(page.locator(".chat-menu__notes")).toContainText("arrive in a later slice");
 
     // Attaching is live now; what is still missing is stated, not stubbed.
     await expect(

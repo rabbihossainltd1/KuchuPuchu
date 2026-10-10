@@ -41,7 +41,14 @@ export type IconName =
   | "callOut"
   | "speaker"
   | "attach"
-  | "mood";
+  | "mood"
+  | "tickSent"
+  | "tickAll"
+  | "tickPending"
+  | "palette"
+  | "block"
+  | "logout"
+  | "bellOff";
 
 /* The glyphs below are the APP's own, not web lookalikes. Nav + composer copy
    the phone's original artwork point for point:
@@ -309,6 +316,54 @@ const shapes: Record<IconName, ReactNode> = {
       stroke="none"
       d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S7.83 8 7 8 5.5 8.67 5.5 9.5 6.17 11 7 11zm3.5 5.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"
     />
+  ),
+  /* The phone's TickIcon glyphs, 13 dp on the bubble stamp: Done for sent,
+     DoneAll for delivered / seen, the Schedule clock while sending. */
+  tickSent: <path fill={F} stroke="none" d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z" />,
+  tickAll: (
+    <path
+      fill={F}
+      stroke="none"
+      d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19 22.24 8.41 20.83 5.99zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z"
+    />
+  ),
+  tickPending: (
+    <path
+      fill={F}
+      stroke="none"
+      d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c4.42 0 8-3.58 8-8s-3.58-8-8-8-8 3.58-8 8 3.58 8 8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"
+    />
+  ),
+  palette: (
+    <path
+      fill={F}
+      stroke="none"
+      d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.33 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"
+    />
+  ),
+  block: (
+    <path
+      fill={F}
+      stroke="none"
+      d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM4 12c0-4.42 3.58-8 8-8 1.85 0 3.55.63 4.9 1.69L5.69 16.9C4.63 15.55 4 13.85 4 12zm8 8c-1.85 0-3.55-.63-4.9-1.69L18.31 7.1C19.37 8.45 20 10.15 20 12c0 4.42-3.58 8-8 8z"
+    />
+  ),
+  logout: (
+    <path
+      fill={F}
+      stroke="none"
+      d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"
+    />
+  ),
+  bellOff: (
+    <>
+      <path
+        fill={F}
+        stroke="none"
+        d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"
+      />
+      <path d="M4 4l16 16" strokeWidth="2" />
+    </>
   ),
 };
 

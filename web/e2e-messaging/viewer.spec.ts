@@ -22,11 +22,12 @@ let userSocket: WebSocketRoute | null = null;
 
 const openChat = async (page: Page, name: RegExp = new RegExp(PEER_NAME)) => {
   await page.getByRole("link", { name }).click();
-  await expect(page.getByRole("button", { name: "Media, links and docs" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "More options" })).toBeVisible();
 };
 
 const openGallery = async (page: Page) => {
-  await page.getByRole("button", { name: "Media, links and docs" }).click();
+  await page.getByRole("button", { name: "More options" }).click();
+  await page.getByRole("button", { name: /Media, links, and docs|Group Media/ }).click();
   await expect(page.getByRole("dialog", { name: "Media, links, and docs" })).toBeVisible();
 };
 
@@ -323,12 +324,15 @@ test.describe("Web media viewers", () => {
   test("the transcript still discloses what is not built yet", async ({ page }) => {
     await openChat(page);
     // Slice E2: voice notes, documents and forwarding are built now, so the
-    // notes say what THEY do — and keep naming what is still to come.
-    await expect(page.locator(".chat-notes")).toContainText("voice notes");
-    await expect(page.locator(".chat-notes")).toContainText("webm/opus");
-    await expect(page.locator(".chat-notes")).toContainText("PDF");
-    await expect(page.locator(".chat-notes")).toContainText("never rendered");
-    await expect(page.locator(".chat-notes")).toContainText("re-sealed");
-    await expect(page.locator(".chat-notes")).toContainText("arrive in a later slice");
+    // notes say what THEY do — and keep naming what is still to come. The
+    // notes live in the ⋮ sheet's Privacy notes view.
+    await page.getByRole("button", { name: "More options" }).click();
+    await page.getByRole("button", { name: "Privacy notes" }).click();
+    await expect(page.locator(".chat-menu__notes")).toContainText("voice notes");
+    await expect(page.locator(".chat-menu__notes")).toContainText("webm/opus");
+    await expect(page.locator(".chat-menu__notes")).toContainText("PDF");
+    await expect(page.locator(".chat-menu__notes")).toContainText("never rendered");
+    await expect(page.locator(".chat-menu__notes")).toContainText("re-sealed");
+    await expect(page.locator(".chat-menu__notes")).toContainText("arrive in a later slice");
   });
 });

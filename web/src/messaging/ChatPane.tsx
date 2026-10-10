@@ -82,12 +82,14 @@ import {
   type AttachmentRejection,
   type PendingAttachment,
 } from "./attachments";
+import { ChatMenu } from "./ChatMenu";
 import { ConversationAvatar } from "./Avatar";
 import {
   MESSAGE_BODY_LIMIT,
   TICK_LABELS,
   clockTime,
   conversationPeerId,
+  headerSubtitle,
   conversationTitle,
   foldAlbums,
   groupByDay,
@@ -185,6 +187,7 @@ export function ChatPane({
   const [unlockError, setUnlockError] = useState("");
   const [pending, setPending] = useState<readonly PendingAttachment[]>([]);
   const [attachOpen, setAttachOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [stickerOpen, setStickerOpen] = useState(false);
   const [editorTarget, setEditorTarget] = useState<PendingAttachment | null>(null);
   const [galleryOpen, setGalleryOpen] = useState(false);
@@ -686,20 +689,13 @@ export function ChatPane({
             <p>
               {controller.typingActive
                 ? controller.typingKind === "voice"
-                  ? "ভয়েস রেকর্ড করছে… recording a voice note"
-                  : "টাইপ করছে… typing"
-                : oneWay
-                  ? "Notification account · one-way"
-                  : conversation.isGroup
-                    ? "Group chat"
-                    : "Direct chat · times shown in Dhaka time"}
+                  ? "recording a voice note…"
+                  : "typing…"
+                : headerSubtitle(conversation)}
             </p>
           </div>
         </div>
         <div className="conversation-actions" aria-label="Conversation actions">
-          <span className={`socket-pill${controller.chatSocket === "open" ? " is-open" : ""}`}>
-            {controller.chatSocket === "open" ? "Live" : "Reconnecting"}
-          </span>
           {/* The phone's two header glyphs. Disabled-with-reason for a group,
               absent for every case ChatScreen.kt leaves absent. */}
           {callGate.show ? (
@@ -742,79 +738,36 @@ export function ChatPane({
               </button>
             </>
           ) : null}
-          {/* Native-only gaps are disclosed, not silently dropped: the browser
-              cannot block screen capture, and media bytes are not sealed. */}
+          {/* Everything else lives in the phone's ⋮ sheet. */}
           <button
             type="button"
-            className="text-button"
-            aria-haspopup="dialog"
-            onClick={() => {
-              setGalleryOpen(true);
-              void controller.openSharedMedia();
-            }}
+            className="icon-button"
+            aria-label="More options"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((value) => !value)}
           >
-            Media, links and docs
+            <Icon name="more" size={20} />
           </button>
-          <details className="chat-notes">
-            <summary>Privacy notes</summary>
-            <ul>
-              <li>{CAPABILITY_COPY.mediaNotEncrypted}</li>
-              <li>{CAPABILITY_COPY.captureWarning}</li>
-              <li>{CAPABILITY_COPY.stillPending}</li>
-              <li>{CAPABILITY_COPY.voiceRecorderNotice}</li>
-              <li>{CAPABILITY_COPY.documentPreviewNotice}</li>
-              <li>{CAPABILITY_COPY.forwardingNotice}</li>
-              {conversation.mutedCall ? (
-                <li>
-                  Calls are muted for this chat, so its call buttons are hidden — the phone does the
-                  same. Unmute it in the chat's mute chooser to bring them back.
-                </li>
-              ) : null}
-              {callGate.group ? (
-                <li>Group calls stay on the phone: the Web runs no group mesh yet.</li>
-              ) : null}
-            </ul>
-          </details>
-
-          {canPickTheme ? (
-            <details className="chat-theme-menu">
-              <summary>Theme · থিম</summary>
-              <div className="chat-theme-menu__panel" role="radiogroup" aria-label="Chat theme">
-                <p className="chat-theme-picker__label">
-                  Chat theme <span>{chatThemeLabel(conversation.theme)}</span>
-                </p>
-                <div className="chat-theme-picker__options">
-                  {CHAT_THEME_LABELS.map((option) => {
-                    const active = chatThemeOr(conversation.theme) === option.value;
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        role="radio"
-                        aria-checked={active}
-                        className={`chat-theme-swatch${active ? " is-active" : ""}`}
-                        data-theme={option.value}
-                        title={`${option.label} · ${option.bangla}`}
-                        aria-label={`Chat theme ${option.label} (${option.bangla})`}
-                        onClick={() => void controller.setChatTheme(option.value)}
-                      >
-                        <span aria-hidden="true" />
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="chat-theme-picker__note">
-                  Saved for everyone in this chat — the phone shows the same five themes.
-                </p>
-              </div>
-            </details>
-          ) : (
-            <p className="chat-theme-picker__locked">
-              Only the group owner can change this chat&apos;s theme.
-            </p>
-          )}
         </div>
       </header>
+
+      {menuOpen ? (
+        <ChatMenu
+          api={api}
+          conversation={conversation}
+          controller={controller}
+          canPickTheme={canPickTheme}
+          onClose={() => setMenuOpen(false)}
+          onOpenMedia={() => {
+            setMenuOpen(false);
+            setGalleryOpen(true);
+            void controller.openSharedMedia();
+          }}
+          navigate={navigate}
+          meId={meId}
+        />
+      ) : null}
 
       {identityStatus === "locked" && (
         <form className="e2ee-bar e2ee-bar--locked" onSubmit={submitUnlock}>
@@ -923,9 +876,7 @@ export function ChatPane({
           </li>
         )}
         {controller.messagesStatus === "ready" && controller.messages.length === 0 && (
-          <li className="transcript__state">
-            No messages yet. Sent messages are sealed on this device before they leave it.
-          </li>
+          <li className="transcript__state">No messages yet.</li>
         )}
 
         {days.map((group) => (
@@ -1073,11 +1024,18 @@ export function ChatPane({
                         <time dateTime={message.createdAt}>{clockTime(message.createdAt)}</time>
                         {own && message.kind !== "DELETED" && (
                           <span className={`bubble__tick bubble__tick--${ticks}`}>
-                            {ticks === "read" || ticks === "delivered"
-                              ? "✓✓"
-                              : ticks === "failed"
-                                ? "!"
-                                : "✓"}
+                            {/* The phone's TickIcon: clock while sending, Done
+                                for sent, DoneAll for delivered / seen. */}
+                            <Icon
+                              name={
+                                ticks === "pending"
+                                  ? "tickPending"
+                                  : ticks === "read" || ticks === "delivered"
+                                    ? "tickAll"
+                                    : "tickSent"
+                              }
+                              size={13}
+                            />
                             <span className="sr-only"> {TICK_LABELS[ticks]}</span>
                           </span>
                         )}
@@ -1650,16 +1608,9 @@ export function ChatPane({
             </p>
           ) : null}
 
-          <p className="composer__hint">
-            {oneWay
-              ? "One-way notification account."
-              : identityStatus === "ready"
-                ? "Personal chat bodies are sealed on this device (KP1). Times are Asia/Dhaka."
-                : "Secure chat is not ready yet, so personal messages cannot be sent."}
-            <span className="composer__counter" aria-hidden="true">
-              {(isEditing ? editText : controller.draft).length}/{MESSAGE_BODY_LIMIT}
-            </span>
-          </p>
+          {identityStatus !== "ready" && !oneWay ? (
+            <p className="composer__hint">Secure chat is not ready yet.</p>
+          ) : null}
         </footer>
       )}
 
