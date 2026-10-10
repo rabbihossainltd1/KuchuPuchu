@@ -60,7 +60,7 @@ Only these are true, and the tests assert exactly these:
 - A browser **never mints a second identity**. If the server holds a `KP2.` blob the UI shows a passphrase form and stays locked; adopting base64 JSON `{p,u}` or generating fresh only happens when the server has nothing.
 - Bots (`kp_official_bot`, `kp_ai_bot`) stay plaintext by design, and a personal chat whose peer has no usable key **refuses to send** rather than silently downgrading: `SendRefusedError` with the `SECURE_CHAT_WAITING` copy.
 
-Not encrypted, and the UI says so in the chat's *Privacy notes* disclosure:
+Not encrypted, and the UI says so in the chat's *Privacy notes* view (inside the ⋮ conversation sheet, see *Chat surface parity* below):
 
 - **Group** message bodies — the server stores group plaintext today.
 - **Media bytes** (photos, video, voice, documents) — account-controlled, not sealed.
@@ -198,6 +198,34 @@ The selection bar is the phone's: back, count, **Copy** (TEXT rows only, `
 | Drafts in app storage | Needs IndexedDB | When unavailable, a `role="status"` banner says drafts live in memory only |
 
 `Add call`, Poll, Event and AI image tiles remain **verified placeholders**: they are not built as live features.
+
+## Chat surface parity (live batch 2)
+
+The chat surface follows the phone's `ChatScreen.kt` layout, and every string
+follows one rule: **what the phone says, verbatim** — English-only copy, no
+invented emojis, no extra explanation lines.
+
+- **Header** keeps only back, avatar, title and the phone's subtitle
+  (`online`, `last seen …`, `typing…`, `N members`, `Official account`), plus
+  one ⋮ button. Connection state lives in the list footer, not the header.
+- **⋮ sheet** (`web/src/messaging/ChatMenu.tsx`) holds everything the phone's
+  overflow menu holds that the browser can do: *Media, links, and docs*
+  (*Group Media* in groups), *Mute…* (Calls + Messages toggles), *Chat
+  privacy* (screenshots, recording, save media, read receipts), *Chat theme*,
+  *Privacy notes*, *Block/Unblock*, *Delete chat* (two-step). Groups get
+  *Mute…*, *Chat theme* and *Leave group*. A non-owner group's theme view
+  shows the owner-lock notice instead of the picker. Not possible on the Web
+  (Scheduled, New group, View contact, Search in chat, Disappearing messages)
+  is skipped and disclosed, never stubbed.
+- **Bubbles** are phone-sized; the per-message action row and the quick
+  reaction bar float over the row's top corners (actions right, reactions
+  left) and reserve no space. They take pointer events only on hover or
+  keyboard focus, so nothing in the transcript is hover-locked.
+- **Ticks** are the app's glyphs at 13 dp: single grey while pending/sent to
+  server, double grey when delivered, double `#53BDEB` when read.
+- **Previews** (`conversationPreviewText`) mirror Android's
+  `ChatPreviewText.kt`: plain category words, `<Category> · View once`, and a
+  sealed body previews as its category word — never ciphertext, never a lock.
 
 ## Desktop-first interaction rules
 
