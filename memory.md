@@ -1080,3 +1080,13 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - SKIPPED & disclosed as not-on-web: Scheduled, New group, View contact, Search in chat, Disappearing messages.
 - TESTS: e2e pins updated to the new surfaces (menu navigation for notes/theme/gallery, hover-before-click for action rows, footer Live, members subtitle, Official account); themeMatrix snapshots regenerated twice (final compact-bubble CSS); calls-tab + chatTheme non-owner updated.
 - CI: full npm run ci green. MERGED as PR #101; live sw BUILD_ID rotated to a0ebdb71a99adc31.
+
+## Web slice S — global search, New chat, Search in chat — 2026-10-10 (branch feat/web-s-search, base main @ b8f88f8)
+- WHAT: closed the parity plan §3.2 search rows against EXISTING Worker routes (no server change): `GET /api/search`, `POST /api/conversations` (+`request:true`), `GET /api/conversations/:id/messages/search`.
+- SEARCH PANE: rail Search (messaging-gated; placeholder copy stays when the flag is off) renders SearchPane.tsx in the list column — one debounced field, three groups (Chats / Messages / People), `/` focuses. Sealed hits preview as the category word (never ciphertext), view-once skipped client-side like the phone.
+- NEW CHAT: list-header plus is live → search pane; a person row's Message opens the 1:1 with request:true so strangers arrive as message requests (phone username-search parity). Worker refusals (MSG_PRIVACY/BLOCKED) surface in the pane's status line.
+- SEARCH IN CHAT: ⋮ sheet row → FindView (debounce+abort); picking a row closes the sheet and scrolls the transcript with a 1.6s highlight ring (pending-jump store, NOT the URL); a hit older than the loaded page is announced "older than the loaded history" — no fake jump.
+- TESTS: web/e2e-messaging/search.spec.ts 5 tests (groups, sealed snippet, land-on-row, honest older-hit, new-chat request, in-chat jump). themeMatrix regenerated (transcript gained the search row).
+- PARALLEL SESSION ee3534a ("Fix Android notification avatars, nav reorder, and call recovery") landed mid-turn and broke contract pins 62/77; I refreshed them, then the parallel session pushed its own refresh (04d93d2) — merged with -X theirs (owner-approved parallel work wins on its own pins; both suites green).
+- CI: full npm run ci green. MERGED as PR #103; live sw BUILD_ID rotated to c7c30168301356c0.
+- SKIPPED (disclosed as absent, not stubbed): hidden-chat secret-key reveal, profile peek, call/media-related search categories.
