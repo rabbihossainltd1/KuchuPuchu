@@ -57,6 +57,15 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
         <span className="list-header__count" aria-live="polite">
           {controller.totalUnread > 0 ? `${controller.totalUnread} unread` : "All read"}
         </span>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="New chat"
+          title="New chat"
+          onClick={() => navigate({ kind: "section", section: "search" })}
+        >
+          <Icon name="plus" size={21} />
+        </button>
       </header>
 
       <label className="search-field" htmlFor={filterId}>
@@ -100,7 +109,7 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
             <p>
               {query
                 ? "Clear the filter to see every loaded chat."
-                : "Start a chat from the phone app, or from New chat once contacts arrive in a later slice. Hidden chats never appear here."}
+                : "Start one with the New chat button. Hidden chats never appear here."}
             </p>
             {query && (
               <button type="button" className="secondary-button" onClick={() => setQuery("")}>

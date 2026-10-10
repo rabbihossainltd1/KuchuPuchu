@@ -205,7 +205,9 @@ export default function App() {
   const isAccountRoute = routeIsAccount(route);
   const protectedRoute = routeRequiresAuthentication(route);
   const isChatsArea =
-    route.kind === "conversation" || (route.kind === "section" && route.section === "chats");
+    route.kind === "conversation" ||
+    (route.kind === "section" &&
+      (route.section === "chats" || (messagingEnabled && route.section === "search")));
   const isStatusArea = route.kind === "section" && route.section === "statuses";
   const isCallsArea = route.kind === "section" && route.section === "calls";
   // With messaging on, the chat list itself carries private data, so it needs a

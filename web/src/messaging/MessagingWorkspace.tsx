@@ -13,6 +13,7 @@ import type { AppRoute } from "../router";
 import type { Navigate } from "../useBrowserRouter";
 import { ChatPane } from "./ChatPane";
 import { ConversationList } from "./ConversationList";
+import { SearchPane } from "./SearchPane";
 import { useE2eeIdentity } from "./useE2eeIdentity";
 import { useMessaging } from "./useMessaging";
 import "./messaging.css";
@@ -46,15 +47,21 @@ export function MessagingWorkspace({ route, navigate, isOnline }: Props) {
     [controller.conversations, controller.selected, selectedId],
   );
 
+  const isSearch = route.kind === "section" && route.section === "search";
+
   return (
     <>
-      <ConversationList
-        controller={controller}
-        selectedId={selected?.id ?? ""}
-        navigate={navigate}
-        isOnline={isOnline}
-        api={token ? api : null}
-      />
+      {isSearch ? (
+        <SearchPane api={token ? api : null} navigate={navigate} />
+      ) : (
+        <ConversationList
+          controller={controller}
+          selectedId={selected?.id ?? ""}
+          navigate={navigate}
+          isOnline={isOnline}
+          api={token ? api : null}
+        />
+      )}
       <ChatPane
         controller={selected ? { ...controller, selected } : controller}
         selectedId={selectedId}

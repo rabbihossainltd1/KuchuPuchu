@@ -400,7 +400,7 @@ export function parseMessagesPage(payload: unknown): MessagesPage {
 
 /* ------------------------------------------------------------ conversations */
 
-function parsePeer(value: unknown): ConversationPeer | null {
+export function parsePeer(value: unknown): ConversationPeer | null {
   if (!isRecord(value)) return null;
   const id = text(value.id, 64);
   if (!id) return null;
@@ -1032,4 +1032,20 @@ export function parseSocketFrame(raw: unknown): SocketFrame | null {
     default:
       return null;
   }
+}
+
+/**
+ * One-shot handoff from global search to the open chat: the search pane stashes
+ * the matched row's id, navigates, and the transcript consumes it once to
+ * scroll the row into view. Kept out of the URL on purpose — route state stays
+ * shareable and private ids never land in history.
+ */
+let pendingJumpId = "";
+export function setPendingMessageJump(id: string): void {
+  pendingJumpId = id;
+}
+export function takePendingMessageJump(): string {
+  const id = pendingJumpId;
+  pendingJumpId = "";
+  return id;
 }

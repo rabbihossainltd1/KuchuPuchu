@@ -217,6 +217,7 @@ export type MockWorker = {
   typingCalls: { conversationId: string; kind: string }[];
   deletedMessageIds: string[];
   reactions: { messageId: string; emoji: string }[];
+  createdConversations: string[];
   install(page: Page): Promise<void>;
 };
 
@@ -664,6 +665,15 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
           rowid: 1,
           meta: { reactions: { [ME.id]: "\u{1F44D}" } },
         },
+        {
+          id: "srch_1",
+          senderId: PEER_ID,
+          senderName: PEER_NAME,
+          kind: "TEXT",
+          body: "pineapple parcel arrives friday",
+          createdAt: new Date(Date.now() - 60_000).toISOString(),
+          rowid: 900,
+        },
       ];
     }
     if (conversationId === GROUP_ID) {
@@ -727,6 +737,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
     readCalls: [],
     typingCalls: [],
     deletedMessageIds: [],
+    createdConversations: [],
     reactions: [],
     async install(page: Page) {
       const json = (route: Route, payload: unknown, status = 200) =>
@@ -1012,6 +1023,111 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         const url = new URL(route.request().url());
         worker.deletedMessageIds.push(decodeURIComponent(url.pathname.split("/")[3] ?? ""));
         return json(route, { ok: true });
+      });
+
+      /* --- slice S: global search, in-chat search, new-chat create --- */
+
+      const directoryUser = {
+        id: "u_dir",
+        displayName: "Directory Person",
+        username: "dirperson",
+        e2eePublicKey: "BDIRKEY",
+        avatarRef: "",
+        online: true,
+        lastActiveAt: new Date().toISOString(),
+        privateProfile: false,
+      };
+
+      await page.route(/\/api\/search(\?|$)/, (route) => {
+        const q = new URL(route.request().url()).searchParams.get("q")?.toLowerCase() ?? "";
+        if (q.length < 2) return json(route, { users: [], chats: [], messages: [] });
+        const users =
+          directoryUser.displayName.toLowerCase().includes(q) || directoryUser.username.includes(q)
+            ? [directoryUser]
+            : [];
+        const chats = conversations.filter((row) =>
+          (row.title ?? row.other?.displayName ?? "").toLowerCase().includes(q),
+        );
+        const messages = q.includes("pineapple")
+          ? [
+              {
+                id: "srch_1",
+                senderId: PEER_ID,
+                senderName: PEER_NAME,
+                kind: "TEXT",
+                body: "pineapple parcel arrives friday",
+                createdAt: new Date(Date.now() - 60_000).toISOString(),
+                rowid: 900,
+                convoId: CHAT_ID,
+                convTitle: PEER_NAME,
+              },
+              {
+                id: "srch_2",
+                senderId: PEER_ID,
+                senderName: PEER_NAME,
+                kind: "TEXT",
+                body: "KP1.c2VhbGVkYm9keQ==",
+                createdAt: new Date(Date.now() - 50_000).toISOString(),
+                rowid: 901,
+                convoId: CHAT_ID,
+                convTitle: PEER_NAME,
+              },
+            ]
+          : [];
+        return json(route, { users, chats, messages });
+      });
+
+      await page.route(/\/api\/conversations\/[^/]+\/messages\/search(\?|$)/, (route) => {
+        const q = new URL(route.request().url()).searchParams.get("q")?.toLowerCase() ?? "";
+        const items =
+          q.length >= 2 && "pineapple".includes(q)
+            ? [
+                {
+                  id: "srch_1",
+                  senderId: PEER_ID,
+                  senderName: PEER_NAME,
+                  kind: "TEXT",
+                  body: "pineapple parcel arrives friday",
+                  createdAt: new Date(Date.now() - 60_000).toISOString(),
+                  rowid: 900,
+                },
+                {
+                  id: "srch_2",
+                  senderId: PEER_ID,
+                  senderName: PEER_NAME,
+                  kind: "TEXT",
+                  body: "KP1.c2VhbGVkYm9keQ==",
+                  createdAt: new Date(Date.now() - 50_000).toISOString(),
+                  rowid: 901,
+                },
+              ]
+            : [];
+        return json(route, { items });
+      });
+
+      await page.route("**/api/conversations", (route) => {
+        if (route.request().method() !== "POST") return json(route, { items: conversations });
+        const body = route.request().postDataJSON() as Record<string, unknown>;
+        const userId = String(body.userId ?? "");
+        worker.createdConversations.push(userId);
+        const row = {
+          id: "c_dir",
+          isGroup: false,
+          unread: 0,
+          hidden: 0,
+          muted: 0,
+          lastMessageAt: new Date().toISOString(),
+          lastMessagePreview: {
+            id: "p_dir",
+            kind: "TEXT",
+            category: "message",
+            body: "say salam",
+            createdAt: new Date().toISOString(),
+          },
+          other: directoryUser,
+        };
+        if (!conversations.some((item) => item.id === "c_dir")) conversations.push(row);
+        return json(route, { conversation: row });
       });
     },
   };

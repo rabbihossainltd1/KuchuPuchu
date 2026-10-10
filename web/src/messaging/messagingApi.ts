@@ -24,6 +24,8 @@ import {
   parseConversationList,
   parseMessageRow,
   parseMessagesPage,
+  parsePeer,
+  type ConversationPeer,
   type ConversationRow,
   type MessageRow,
   type MessagesPage,
@@ -92,6 +94,17 @@ async function postJson(api: ApiClient, path: string, body: Record<string, unkno
   });
 }
 
+export type SearchMessageRow = MessageRow & {
+  readonly convoId: string;
+  readonly convTitle: string;
+};
+
+export type GlobalSearchResults = {
+  readonly users: readonly ConversationPeer[];
+  readonly chats: readonly ConversationRow[];
+  readonly messages: readonly SearchMessageRow[];
+};
+
 export const messagingApi = {
   async listConversations(
     api: ApiClient,
@@ -118,13 +131,16 @@ export const messagingApi = {
   async createConversation(
     api: ApiClient,
     userId: string,
-    signal?: AbortSignal,
+    options?: { request?: boolean; signal?: AbortSignal },
   ): Promise<ConversationRow | null> {
     const payload = await api.request<unknown>("/api/conversations", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ userId }),
-      ...(signal ? { signal } : {}),
+      body: JSON.stringify({
+        userId,
+        ...(options?.request ? { request: true } : {}),
+      }),
+      ...(options?.signal ? { signal: options.signal } : {}),
     });
     return parseConversationDetail(payload);
   },
@@ -300,5 +316,57 @@ export const messagingApi = {
       `/api/conversations/${encodeURIComponent(conversationId)}/members/${encodeURIComponent(userId)}`,
       { method: "DELETE" },
     );
+  },
+
+  /**
+   * Global search (slice S): `GET /api/search?q=` — directory users, matched
+   * chats and matched message rows, all privacy-walled server-side.
+   */
+  async search(api: ApiClient, query: string, signal?: AbortSignal): Promise<GlobalSearchResults> {
+    const payload = await api.request<unknown>(`/api/search?q=${encodeURIComponent(query)}`, {
+      signal,
+    });
+    const raw = (payload ?? {}) as {
+      users?: unknown;
+      chats?: unknown;
+      messages?: unknown;
+    };
+    const users = Array.isArray(raw.users)
+      ? raw.users.map(parsePeer).filter((peer): peer is ConversationPeer => peer !== null)
+      : [];
+    const chats = Array.isArray(raw.chats)
+      ? raw.chats.map(parseConversationDetail).filter((row): row is ConversationRow => row !== null)
+      : [];
+    const messages = Array.isArray(raw.messages)
+      ? raw.messages
+          .map((entry) => {
+            const row = parseMessageRow(entry);
+            if (!row) return null;
+            const extra = (entry ?? {}) as { convoId?: unknown; convTitle?: unknown };
+            return {
+              ...row,
+              convoId: typeof extra.convoId === "string" ? extra.convoId : "",
+              convTitle: typeof extra.convTitle === "string" ? extra.convTitle : "",
+            };
+          })
+          .filter((row): row is SearchMessageRow => row !== null && row.convoId !== "")
+      : [];
+    return { users, chats, messages };
+  },
+
+  /** In-chat search (slice S): `GET /api/conversations/:id/messages/search?q=`. */
+  async searchMessages(
+    api: ApiClient,
+    conversationId: string,
+    query: string,
+    signal?: AbortSignal,
+  ): Promise<readonly MessageRow[]> {
+    const payload = await api.request<unknown>(
+      `/api/conversations/${encodeURIComponent(conversationId)}/messages/search?q=${encodeURIComponent(query)}`,
+      { signal },
+    );
+    const raw = (payload ?? {}) as { items?: unknown };
+    if (!Array.isArray(raw.items)) return [];
+    return raw.items.map(parseMessageRow).filter((row): row is MessageRow => row !== null);
   },
 };
