@@ -161,7 +161,11 @@ check(
 );
 
 // ── KpPush: the hand-off stays awake; the in-chat test survives a query ─────
-has(push, "wakeLock.acquire(6_000L)", "FCM dispatch holds a capped wake lock");
+has(
+  push,
+  "wakeLock.acquire(10_000L)",
+  "FCM dispatch holds a capped wake lock long enough for bounded media/avatar reads",
+);
 has(push, "setReferenceCounted(false)", "…non-ref-counted, so a stray release cannot throw");
 has(push, "if (!wakeLock.isHeld)", "…and never acquired twice");
 check(

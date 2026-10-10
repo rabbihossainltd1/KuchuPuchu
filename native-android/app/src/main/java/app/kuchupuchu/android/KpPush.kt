@@ -223,7 +223,7 @@ object KpPush {
  */
 class KpPushService : FirebaseMessagingService() {
 
-    /** Capped partial wake lock: see onMessageReceived. Never held longer than 6s. */
+    /** Capped partial wake lock: see onMessageReceived. Never held longer than 10s. */
     private val wakeLock: android.os.PowerManager.WakeLock by lazy {
         (getSystemService(Context.POWER_SERVICE) as android.os.PowerManager)
             .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "kp:fcm")
@@ -231,7 +231,9 @@ class KpPushService : FirebaseMessagingService() {
     }
 
     private fun wakeFor() = runCatching {
-        if (!wakeLock.isHeld) wakeLock.acquire(6_000L)
+        // A message card can include a bounded one-second sender-avatar lookup
+        // after decrypt/media work; keep enough wake time to post the finished card.
+        if (!wakeLock.isHeld) wakeLock.acquire(10_000L)
     }
 
     /**
@@ -268,8 +270,8 @@ class KpPushService : FirebaseMessagingService() {
         // free to freeze the process — mid-network-call, in the one background
         // case this code exists for. Every handler here is dispatched onto a
         // thread, so the lock is taken for a capped window instead of being
-        // released by the caller: 6 seconds covers the /calls/active revalidate
-        // and the card post, and the timeout means no code path can leak a hold.
+        // released by the caller: 10 seconds covers bounded decrypt/media/avatar
+        // reads plus the card post, and no code path can leak a hold.
         wakeFor()
         // Owner round 32 (items 1A/1B/26): until this round the manifest bound
         // this service to a non-existent action, so nothing below had ever run
@@ -430,6 +432,22 @@ class KpPushService : FirebaseMessagingService() {
         }.start()
     }
 
+    /**
+     * Resolve the current sender avatar with this recipient's session. The API
+     * endpoint enforces profile-photo privacy and blocks; a timeout, offline
+     * device, or hidden avatar simply keeps the normal brand fallback.
+     */
+    private fun senderAvatar(data: Map<String, String>): android.graphics.Bitmap? {
+        val senderId = data["fromId"]?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{1,128}")) } ?: return null
+        val response = Api.getWithin("/api/users/$senderId/avatar", 1_000L) ?: return null
+        val avatarUrl = response.optString("avatarUrl").takeIf { it.startsWith("data:image/") } ?: return null
+        Bitmaps.ensureInit(this)
+        response.optString("avatarRef")
+            .takeIf { it.startsWith("$senderId@v") }
+            ?.let { AvatarRefs.put(applicationContext, it, avatarUrl) }
+        return runCatching { Bitmaps.load(avatarUrl, maxSide = 256) }.getOrNull()
+    }
+
     private fun handleMessage(data: Map<String, String>) {
         val convoId = data["convoId"] ?: return
         val mid = data["mid"]
@@ -539,6 +557,7 @@ class KpPushService : FirebaseMessagingService() {
             mid = mid,
             loginRequestId = data["kp_login_req"],
             picture = picture,
+            senderAvatar = senderAvatar(data),
             unreadMessages = unreadMessages,
         )
     }

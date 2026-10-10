@@ -93,6 +93,29 @@ object Api {
         }
     }
 
+    /**
+     * Bounded cache-bypassing read for short-lived background work such as a
+     * notification avatar. A cold FCM service must not wait on the normal
+     * 45-second read timeout just to decorate a message card; a miss simply
+     * falls back to the brand icon.
+     */
+    fun getWithin(path: String, millis: Long): JSONObject? {
+        val url = if (path.startsWith("http")) path else "$BASE$path"
+        val request = Request.Builder().url(url).header("Accept", "application/json").get().build()
+        val client = http.newBuilder().callTimeout(millis.coerceAtLeast(1L), TimeUnit.MILLISECONDS).build()
+        return runCatching {
+            client.newCall(request).execute().use { response ->
+                noteBackpressure(response)
+                if (!response.isSuccessful) {
+                    null
+                } else {
+                    val text = response.body?.string().orEmpty()
+                    if (text.isBlank()) JSONObject() else JSONObject(text)
+                }
+            }
+        }.getOrNull()
+    }
+
     fun post(path: String, body: JSONObject? = JSONObject()): JSONObject {
         val data = request(path, "POST", body)
         bustFor(path)

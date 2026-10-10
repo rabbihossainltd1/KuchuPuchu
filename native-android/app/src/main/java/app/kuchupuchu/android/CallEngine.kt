@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.getValue
@@ -62,6 +63,8 @@ data class CallUi(
     val otherAvatar: String = "",
     val startedAt: Long = 0L,
     val connecting: Boolean = false,
+    /** Network recovery pauses the displayed call timer until media is back. */
+    val reconnecting: Boolean = false,
     /** Owner round 31 item 21: the other side is a private profile → no capture. */
     val otherPrivate: Boolean = false,
     /** Owner round 32 (item 30): the peer's user object (badges) for the call screens. */
@@ -103,6 +106,16 @@ class CallEngine(private val app: Application) {
 
     /** When `active` last CHANGED identity — zombie detection for startCall. */
     private var activeSince = 0L
+
+    /** The current network outage is excluded from the local call clock. */
+    private var reconnectCallId = ""
+    private var reconnectStartedAt = 0L
+    private var reconnectTimeout: Job? = null
+    private val MAX_RECONNECT_DURATION_MS = 45_000L
+    private var offlineCallId = ""
+    private var offlineCallStartedAt = 0L
+    private var offlineCallTimeout: Job? = null
+    private val MAX_PRECONNECT_OFFLINE_MS = 8_000L
 
     fun minimizeCall() { minimized = true }
     fun restoreCallUi() { minimized = false }
@@ -450,7 +463,7 @@ class CallEngine(private val app: Application) {
     var polling = false
         private set
 
-    /** Consecutive tick() failures — drives the "Reconnecting…" toast. */
+    /** Consecutive tick() failures — detects a stalled call connection. */
     private var netFailStreak = 0
 
     /** When the outgoing call started ringing — drives the 60s no-answer hangup. */
@@ -784,6 +797,7 @@ class CallEngine(private val app: Application) {
     }
 
     private suspend fun tick() {
+        if (enforceCallNetworkState()) return
         // A hung request must not stall the whole poll loop: on slow networks
         // the 45s read timeout meant the caller sat on "Ringing…" forever even
         // after the other side had answered.
@@ -796,7 +810,12 @@ class CallEngine(private val app: Application) {
                 }
             } ?: run {
                 netFailStreak += 1
-                if (netFailStreak == 3 && active != null) notify("Reconnecting…")
+                if (netFailStreak >= 3) {
+                    val currentCall = active
+                    if (currentCall != null) {
+                        if (currentCall.startedAt > 0L) beginReconnecting() else endCallForNetworkFailure()
+                    }
+                }
                 return
             }
         netFailStreak = 0
@@ -928,6 +947,7 @@ class CallEngine(private val app: Application) {
                 connecting =
                     status == "ACTIVE" &&
                         !(current?.connecting == false && (current?.startedAt ?: 0L) > 0L),
+                reconnecting = sameCall && current?.reconnecting == true,
             )
         if (current?.id != ui.id) activeSince = System.currentTimeMillis()
         if (current?.id?.startsWith("pending") == true) {
@@ -1076,6 +1096,12 @@ class CallEngine(private val app: Application) {
                 return
             }
         }
+        if (!hasValidatedInternet()) {
+            notify("No internet connection. Call ended.")
+            return
+        }
+        reconnectCallId = ""
+        reconnectStartedAt = 0L
         minimized = false
         left.set(false)
         hasRemote = false
@@ -1141,21 +1167,30 @@ class CallEngine(private val app: Application) {
                 // camera is on (their grid shows the picture, not the avatar).
                 if (cameraLive) postMedia(camera = true)
             } catch (e: Exception) {
-                notify((e as? ApiException)?.message ?: "Couldn't start the call. Try again.")
-                hangupLocal()
+                if (!hasValidatedInternet() || hasTransportFailure(e)) {
+                    endCallForNetworkFailure()
+                } else {
+                    notify(callFailureMessage(e))
+                    hangupLocal()
+                }
             }
         }
     }
 
     /** POST /join, then let the next tick's [groupSync] build the mesh. */
     private suspend fun joinGroup(callId: String) {
-        val joined =
-            withContext(Dispatchers.IO) { runCatching { Api.post("/api/calls/$callId/join") }.getOrNull() }
+        val joinedResult = withContext(Dispatchers.IO) { runCatching { Api.post("/api/calls/$callId/join") } }
+        val joined = joinedResult.getOrNull()
         val call = joined?.optJSONObject("call")
         if (call == null) {
             answering.set(false)
-            notify("Couldn't connect the call. Try again.")
-            hangupLocal()
+            val failure = joinedResult.exceptionOrNull()
+            if (failure == null || !hasValidatedInternet() || hasTransportFailure(failure)) {
+                endCallForNetworkFailure()
+            } else {
+                notify(callFailureMessage(failure))
+                hangupLocal()
+            }
             return
         }
         answering.set(false)
@@ -1331,10 +1366,7 @@ class CallEngine(private val app: Application) {
                             -> Handler(Looper.getMainLooper()).post {
                                 val cur = active ?: return@post
                                 hasRemote = true
-                                active = cur.copy(
-                                    connecting = false,
-                                    startedAt = if (!cur.connecting && cur.startedAt > 0L) cur.startedAt else System.currentTimeMillis(),
-                                )
+                                active = connectedCallState(cur)
                                 publishChange()
                                 updateProximityLock()
                                 fgTitle("In a call with ${cur.otherName}")
@@ -1347,8 +1379,11 @@ class CallEngine(private val app: Application) {
                                     groupPeers.remove(peerId)?.let { runCatching { it.close() } }
                                     groupOffered.remove(peerId)
                                     groupAnswered.remove(peerId)
+                                    beginReconnecting()
                                     pokeTick()
                                 }
+                            PeerConnection.IceConnectionState.DISCONNECTED ->
+                                Handler(Looper.getMainLooper()).post { beginReconnecting() }
                             else -> {}
                         }
                     }
@@ -1429,6 +1464,12 @@ class CallEngine(private val app: Application) {
                 return
             }
         }
+        if (!hasValidatedInternet()) {
+            notify("No internet connection. Call ended.")
+            return
+        }
+        reconnectCallId = ""
+        reconnectStartedAt = 0L
         minimized = false
         left.set(false)
         hasRemote = false
@@ -1495,7 +1536,7 @@ class CallEngine(private val app: Application) {
                     )
             } catch (e: Exception) {
                 val api = e as? ApiException
-                val message = api?.message ?: "Couldn't start the call. Try again."
+                val message = callFailureMessage(e)
                 if (api?.status == 486) {
                     // Owner round 12 (2026-09-05): the callee is already on a
                     // call — show "Line busy" ON the calling screen for a beat
@@ -1527,6 +1568,10 @@ class CallEngine(private val app: Application) {
         val rec = active
         if (rec == null || rec.id.startsWith("pending")) {
             pendingAccept = true
+            return
+        }
+        if (!hasValidatedInternet()) {
+            endCallForNetworkFailure()
             return
         }
         if (pc != null && rec.status == "ACTIVE") return
@@ -1626,8 +1671,12 @@ class CallEngine(private val app: Application) {
                 posting.await().getOrThrow()
             } catch (e: Exception) {
                 answering.set(false)
-                notify("Couldn't connect the call. Try again.")
-                hangupLocal()
+                if (!hasValidatedInternet() || hasTransportFailure(e)) {
+                    endCallForNetworkFailure()
+                } else {
+                    notify(callFailureMessage(e))
+                    hangupLocal()
+                }
             }
         }
     }
@@ -1666,8 +1715,7 @@ class CallEngine(private val app: Application) {
         left.set(true)
         rec?.id?.let { ignoredCalls.add(it) }
         val id = rec?.id
-        val seconds =
-            if ((rec?.startedAt ?: 0L) > 0L) ((System.currentTimeMillis() - rec!!.startedAt) / 1000).toInt() else 0
+        val seconds = rec?.let(::elapsedCallSeconds) ?: 0
         hangupLocal()
         if (id != null && !id.startsWith("pending")) {
             scope.launch(Dispatchers.IO) {
@@ -2099,6 +2147,11 @@ class CallEngine(private val app: Application) {
         frameGate = null
         netFailStreak = 0
         outgoingRingAt = 0L
+        reconnectTimeout?.cancel()
+        reconnectTimeout = null
+        reconnectCallId = ""
+        reconnectStartedAt = 0L
+        clearOfflineCallWatch()
         iceCallId = ""
         if (wsCallId.isNotBlank()) {
             KpSocket.leaveCall(wsCallId)
@@ -2295,13 +2348,13 @@ class CallEngine(private val app: Application) {
     private fun restartIce(reason: String) {
         val callId = active?.id?.takeIf { it.isNotBlank() && !it.startsWith("pending") } ?: return
         val peer = pc ?: return
+        if (reason == "Reconnecting…") beginReconnecting() else if (reason.isNotBlank()) notify(reason)
         if (iceRestartCount >= MAX_ICE_RESTARTS) {
-            notify("Call connection failed. Check your internet and try again.")
+            endCallForNetworkFailure()
             return
         }
         if (iceRestarting.getAndSet(true)) return
         iceRestartCount += 1
-        if (reason.isNotBlank()) notify(reason)
         scope.launch {
             try {
                 if (peer.signalingState() != PeerConnection.SignalingState.STABLE) {
@@ -2336,11 +2389,142 @@ class CallEngine(private val app: Application) {
      * connect moment, so the two clocks agree. A re-connect (ICE restart,
      * renegotiation) never rewinds a running clock.
      */
+    private fun beginReconnecting() {
+        val cur = active ?: return
+        // Initial setup remains "Connecting…"; this phase is only for a call
+        // whose media was already established, so the existing clock can pause.
+        if (cur.status != "ACTIVE" || cur.startedAt <= 0L) return
+        if (cur.group && groupPeers.values.any { peer ->
+                val state = runCatching { peer.iceConnectionState() }.getOrNull()
+                state == PeerConnection.IceConnectionState.CONNECTED ||
+                    state == PeerConnection.IceConnectionState.COMPLETED
+            }
+        ) return
+        if (cur.reconnecting && reconnectCallId == cur.id) return
+        reconnectCallId = cur.id
+        reconnectStartedAt = System.currentTimeMillis()
+        active = cur.copy(reconnecting = true)
+        publishChange()
+        reconnectTimeout?.cancel()
+        reconnectTimeout = scope.launch {
+            delay(MAX_RECONNECT_DURATION_MS)
+            if (active?.id == cur.id && active?.reconnecting == true) endCallForNetworkFailure()
+        }
+    }
+
+    /** Resume the same call clock after media is back; outage time is excluded. */
+    private fun connectedCallState(cur: CallUi): CallUi {
+        val now = System.currentTimeMillis()
+        val sameOutage = cur.reconnecting && reconnectCallId == cur.id
+        val startedAt = when {
+            sameOutage && cur.startedAt > 0L -> cur.startedAt + (now - reconnectStartedAt).coerceAtLeast(0L)
+            cur.startedAt > 0L -> cur.startedAt
+            else -> now
+        }
+        if (reconnectCallId == cur.id) {
+            reconnectTimeout?.cancel()
+            reconnectTimeout = null
+            reconnectCallId = ""
+            reconnectStartedAt = 0L
+        }
+        return cur.copy(connecting = false, reconnecting = false, startedAt = startedAt)
+    }
+
+    private fun elapsedCallSeconds(call: CallUi): Int {
+        if (call.startedAt <= 0L) return 0
+        val pausedNow =
+            if (call.reconnecting && reconnectCallId == call.id) {
+                (System.currentTimeMillis() - reconnectStartedAt).coerceAtLeast(0L)
+            } else {
+                0L
+            }
+        return ((System.currentTimeMillis() - call.startedAt - pausedNow) / 1000L).coerceAtLeast(0L).toInt()
+    }
+
+    private fun hasValidatedInternet(): Boolean {
+        val manager = app.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        val network = manager.activeNetwork ?: return false
+        val capabilities = manager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }
+
+    /** A ringing / first-connect call also needs a visible end reason if data vanishes. */
+    private fun clearOfflineCallWatch() {
+        offlineCallTimeout?.cancel()
+        offlineCallTimeout = null
+        offlineCallId = ""
+        offlineCallStartedAt = 0L
+    }
+
+    private fun enforceCallNetworkState(): Boolean {
+        val cur = active
+        if (cur == null || hasValidatedInternet()) {
+            clearOfflineCallWatch()
+            return false
+        }
+        if (cur.startedAt > 0L) {
+            clearOfflineCallWatch()
+            beginReconnecting()
+            return false
+        }
+        if (offlineCallId != cur.id) {
+            offlineCallTimeout?.cancel()
+            offlineCallId = cur.id
+            offlineCallStartedAt = System.currentTimeMillis()
+            offlineCallTimeout = scope.launch {
+                delay(MAX_PRECONNECT_OFFLINE_MS)
+                if (active?.id == cur.id && (active?.startedAt ?: 0L) <= 0L && !hasValidatedInternet()) {
+                    endCallForNetworkFailure()
+                }
+            }
+        } else if (System.currentTimeMillis() - offlineCallStartedAt >= MAX_PRECONNECT_OFFLINE_MS) {
+            endCallForNetworkFailure()
+            return true
+        }
+        return false
+    }
+
+    private fun hasTransportFailure(error: Throwable): Boolean {
+        var cause: Throwable? = error
+        while (cause != null) {
+            if (cause is java.io.IOException) return true
+            cause = cause.cause
+        }
+        return false
+    }
+
+    private fun callFailureMessage(error: Throwable): String = when {
+        !hasValidatedInternet() -> "No internet connection. Call ended."
+        hasTransportFailure(error) -> "Couldn't connect. Check your internet connection. Call ended."
+        else -> (error as? ApiException)?.message?.takeIf { it.isNotBlank() }
+            ?: "Couldn't start the call. Try again."
+    }
+
+    private fun endCallForNetworkFailure() {
+        val cur = active ?: return
+        val callId = cur.id.takeIf { it.isNotBlank() && !it.startsWith("pending") }
+        val seconds = elapsedCallSeconds(cur)
+        if (callId != null) ignoredCalls.add(callId)
+        hangupLocal()
+        notify(
+            if (hasValidatedInternet()) {
+                "Call connection failed. Check your network. Call ended."
+            } else {
+                "No internet connection. Call ended."
+            },
+        )
+        if (callId != null) {
+            scope.launch(Dispatchers.IO) {
+                runCatching { Api.post("/api/calls/$callId/end", JSONObject().put("seconds", seconds)) }
+            }
+        }
+    }
+
     private fun markConnected() {
         val cur = active ?: return
         iceRestartCount = 0
-        if (!cur.connecting && cur.startedAt > 0L) return
-        active = cur.copy(connecting = false, startedAt = System.currentTimeMillis())
+        active = connectedCallState(cur)
         publishChange()
         updateProximityLock()
         // Rebuild the ongoing notification with the media-ready chronometer epoch.
@@ -2391,7 +2575,22 @@ class CallEngine(private val app: Application) {
                 }
 
                 override fun onLost(network: Network) {
-                    if (network == lastNetwork) networkLost = true
+                    if (network == lastNetwork) {
+                        networkLost = true
+                        Handler(Looper.getMainLooper()).post { enforceCallNetworkState() }
+                    }
+                }
+
+                override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                    if (network != lastNetwork) return
+                    Handler(Looper.getMainLooper()).post {
+                        if (capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+                            clearOfflineCallWatch()
+                            if (active?.reconnecting == true) onNetworkChanged()
+                        } else {
+                            enforceCallNetworkState()
+                        }
+                    }
                 }
             }
         runCatching {
@@ -2412,10 +2611,20 @@ class CallEngine(private val app: Application) {
         scope.launch(Dispatchers.IO) { runCatching { Api.http.connectionPool.evictAll() } }
         KpSocket.bounceAll()
         if (active == null) return
+        if (hasValidatedInternet()) beginReconnecting() else enforceCallNetworkState()
         pokeTick()
         scope.launch {
             delay(1_500)
-            if (active != null && pc != null && !iceUp()) restartIce("Reconnecting…")
+            val peer = pc
+            if (active != null && peer != null) {
+                if (iceUp() && peer.connectionState() == PeerConnection.PeerConnectionState.CONNECTED) {
+                    // A network handover can leave ICE healthy; in that case
+                    // no new CONNECTED callback arrives to resume the clock.
+                    markConnected()
+                } else {
+                    restartIce("Reconnecting…")
+                }
+            }
         }
     }
 
@@ -2470,8 +2679,13 @@ class CallEngine(private val app: Application) {
                     // Owner round 33 (item 15): ICE + DTLS up = the call is really
                     // connected on this phone; this is what starts the timer.
                     override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {
-                        if (newState == PeerConnection.PeerConnectionState.CONNECTED) {
-                            Handler(Looper.getMainLooper()).post { markConnected() }
+                        when (newState) {
+                            PeerConnection.PeerConnectionState.CONNECTED ->
+                                Handler(Looper.getMainLooper()).post { markConnected() }
+                            PeerConnection.PeerConnectionState.DISCONNECTED,
+                            PeerConnection.PeerConnectionState.FAILED,
+                            -> Handler(Looper.getMainLooper()).post { beginReconnecting() }
+                            else -> {}
                         }
                     }
                     override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
@@ -2502,7 +2716,9 @@ class CallEngine(private val app: Application) {
                                 // state itself is asked a moment later.
                                 val id = cur.id
                                 Handler(Looper.getMainLooper()).postDelayed({
-                                    if (active?.id == id && active?.connecting == true &&
+                                    if (
+                                        active?.id == id &&
+                                        (active?.connecting == true || active?.reconnecting == true) &&
                                         pc?.connectionState() == PeerConnection.PeerConnectionState.CONNECTED
                                     ) {
                                         markConnected()
@@ -2511,6 +2727,7 @@ class CallEngine(private val app: Application) {
                             }
                             PeerConnection.IceConnectionState.FAILED ->
                                 Handler(Looper.getMainLooper()).post {
+                                    beginReconnecting()
                                     // One automatic rescue before blaming the
                                     // user's network: reconfigure TURN-first /
                                     // relay-only and restart ICE. VPN, symmetric
@@ -2518,7 +2735,6 @@ class CallEngine(private val app: Application) {
                                     // at this step and succeed over a relay.
                                     if (!relayRetryUsed && pc != null) {
                                         relayRetryUsed = true
-                                        notify("Network is limited — connecting through a relay…")
                                         runCatching { pc?.setConfiguration(relayConfig()) }
                                         scope.launch {
                                             try {
@@ -2556,9 +2772,10 @@ class CallEngine(private val app: Application) {
                                 }
                             PeerConnection.IceConnectionState.DISCONNECTED ->
                                 Handler(Looper.getMainLooper()).post {
-                                    // Mid-call: the clock keeps running; the path
-                                    // is repaired quickly — at once after a network
-                                    // change, else after a short grace for a blip.
+                                    // Show recovery in place of the clock while
+                                    // media is down; the clock resumes from its
+                                    // previous elapsed value when ICE + DTLS return.
+                                    beginReconnecting()
                                     armIceWatchdog(if (recentNetworkChange()) 800L else 4_000L)
                                 }
                             else -> {}

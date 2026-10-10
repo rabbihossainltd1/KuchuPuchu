@@ -1906,7 +1906,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
     nids4.includes("fun conversationCard(convId: String): Int = convId.hashCode()") &&
       notify4.includes("NotificationCompat.MessagingStyle(") &&
       notify4.includes("private val convMsgs = mutableMapOf<String, MutableList<StkMsg>>()") &&
-      notify4.includes("while (size > 6) removeAt(0)") &&
+      notify4.includes("while (thread.size > 6) thread.removeAt(0)") &&
+      notify4.includes("while (convMsgs.size > 32) convMsgs.remove(convMsgs.keys.first())") &&
       notify4.includes("if (stackable) NotifyIds.conversationCard(convoId)") &&
       notify4.includes("fun resetConv(convoId: String)") &&
       notify4.includes("fun cancelAllCards()") &&

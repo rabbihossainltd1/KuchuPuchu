@@ -8047,19 +8047,17 @@ const convBetween = (db, a, b) =>
         "override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {",
       ) &&
         eng.includes("private fun markConnected() {") &&
-        eng.includes("if (!cur.connecting && cur.startedAt > 0L) return") &&
+        eng.includes("active = connectedCallState(cur)") &&
+        eng.includes("private fun connectedCallState(cur: CallUi): CallUi") &&
         eng.includes(
-          "active = cur.copy(connecting = false, startedAt = System.currentTimeMillis())",
+          "sameOutage && cur.startedAt > 0L -> cur.startedAt + (now - reconnectStartedAt)",
         ) &&
         eng.includes(
           'if (status == "ACTIVE" && current?.connecting == false && current.startedAt > 0L) current.startedAt',
         ) &&
         !eng.includes("serverMs") &&
         !eng.includes("active = active?.copy(startedAt = ms, connecting = true)") &&
-        !eng.includes("if (ms > 0L) active = active?.copy(startedAt = ms)") &&
-        eng.includes(
-          "startedAt = if (!cur.connecting && cur.startedAt > 0L) cur.startedAt else System.currentTimeMillis(),",
-        ),
+        !eng.includes("if (ms > 0L) active = active?.copy(startedAt = ms)"),
     );
     check(
       "r33-15: faster connect — Accept answers from the offer the ring already carried (no extra /active round trip), pulls the caller's candidates while the answer posts, socket ICE frames are applied directly (own echo = no tick), and the safety-net poll stays at 1.5 s until media is up",

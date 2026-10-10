@@ -11,6 +11,7 @@ import android.os.Build
 import androidx.core.app.RemoteInput
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.graphics.drawable.IconCompat
 
 /** RemoteInput key for the notification reply action (shared with the receiver). */
 private const val KEY_REPLY = "kp_reply_text"
@@ -42,11 +43,29 @@ object KpNotify {
      */
     private val convMsgs = mutableMapOf<String, MutableList<StkMsg>>()
 
-    private class StkMsg(val from: String, val body: String, val at: Long, val photo: Boolean)
+    private class StkMsg(
+        val from: String,
+        val body: String,
+        val at: Long,
+        val photo: Boolean,
+        val avatar: android.graphics.Bitmap?,
+    )
 
     /** r103-2: start the conversation's card fresh (reply / mark-read / opening the chat). */
+    @Synchronized
     fun resetConv(convoId: String) {
         if (convoId.isNotBlank()) convMsgs.remove(convoId)
+    }
+
+    /** Keep the expanded thread bounded; older conversation histories are already in the shade. */
+    @Synchronized
+    private fun appendStackedMessage(convoId: String, message: StkMsg): List<StkMsg> {
+        val thread = convMsgs.remove(convoId) ?: mutableListOf()
+        thread.add(message)
+        while (thread.size > 6) thread.removeAt(0)
+        convMsgs[convoId] = thread
+        while (convMsgs.size > 32) convMsgs.remove(convMsgs.keys.first())
+        return thread.toList()
     }
 
     /** Cancel every message card posted for a conversation and refresh the remaining badge. */
@@ -297,6 +316,31 @@ object KpNotify {
         return out
     }
 
+    /** Center-cropped circular large icon for a message sender. */
+    private fun roundAvatar(source: android.graphics.Bitmap): android.graphics.Bitmap? = runCatching {
+        // Notification icons render small; 128px keeps the bounded stack light.
+        val size = 128
+        val out = android.graphics.Bitmap.createBitmap(
+            size,
+            size,
+            android.graphics.Bitmap.Config.ARGB_8888,
+        )
+        val scale = maxOf(size / source.width.toFloat(), size / source.height.toFloat())
+        val matrix = android.graphics.Matrix().apply {
+            setScale(scale, scale)
+            postTranslate((size - source.width * scale) / 2f, (size - source.height * scale) / 2f)
+        }
+        val shader = android.graphics.BitmapShader(
+            source,
+            android.graphics.Shader.TileMode.CLAMP,
+            android.graphics.Shader.TileMode.CLAMP,
+        ).apply { setLocalMatrix(matrix) }
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
+            .apply { this.shader = shader }
+        android.graphics.Canvas(out).drawCircle(size / 2f, size / 2f, size / 2f, paint)
+        out
+    }.getOrNull()
+
     /** r89-3: the channel id a message card rides - one per notification
      *  tone pick, so no OEM tombstone can keep a stale sound alive. */
     private fun toneChannelFor(ctx: Context): String = "kp_msg_t${SoundPrefs.notifIndex(ctx)}"
@@ -322,6 +366,7 @@ object KpNotify {
         mid: String? = null,
         loginRequestId: String? = null,
         picture: android.graphics.Bitmap? = null,
+        senderAvatar: android.graphics.Bitmap? = null,
         unreadMessages: Int = ScreenStore.totalUnreadMessages(),
     ) {
         ensureChannels(ctx)
@@ -391,15 +436,13 @@ object KpNotify {
         // (blank convoId) and the login alerts keep their own per-message
         // cards.
         val stackable = convoId.isNotBlank() && loginRequestId == null
+        val senderIcon = senderAvatar?.let(::roundAvatar)
         val stacked: List<StkMsg>? =
             if (stackable) {
-                convMsgs
-                    .getOrPut(convoId) { mutableListOf() }
-                    .apply {
-                        add(StkMsg(from, body, System.currentTimeMillis(), picture != null))
-                        while (size > 6) removeAt(0)
-                    }
-                    .toList()
+                appendStackedMessage(
+                    convoId,
+                    StkMsg(from, body, System.currentTimeMillis(), picture != null, senderIcon),
+                )
             } else {
                 null
             }
@@ -423,10 +466,9 @@ object KpNotify {
         val n =
             NotificationCompat.Builder(ctx, if (muted) SILENT_CHANNEL else toneChannelFor(ctx))
                 .setSmallIcon(R.mipmap.ic_stat_kp)
-                // Round brand logo as the large icon: without it the shade
-                // showed the bare square status glyph next to bot messages,
-                // which read as "the AI's photo is a square" (owner report).
-                .setLargeIcon(roundLogo(ctx))
+                // Use the current sender's privacy-checked avatar when it is
+                // available; bot, hidden-photo, and offline cases keep the brand fallback.
+                .setLargeIcon(senderIcon ?: roundLogo(ctx))
                 .setContentTitle(from)
                 .setContentText(body)
                 .setAutoCancel(true)
@@ -465,7 +507,9 @@ object KpNotify {
                                             NotificationCompat.MessagingStyle.Message(
                                                 if (e.photo) "\uD83D\uDDBC\uFE0F Photo" else e.body,
                                                 e.at,
-                                                androidx.core.app.Person.Builder().setName(e.from).build(),
+                                                androidx.core.app.Person.Builder().setName(e.from).apply {
+                                                    e.avatar?.let { setIcon(IconCompat.createWithBitmap(it)) }
+                                                }.build(),
                                             ),
                                         )
                                     }

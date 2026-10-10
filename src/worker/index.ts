@@ -10526,6 +10526,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           mid,
           kind: conv.kind,
           fromName: me.display_name,
+          // Android resolves the sender's photo through the recipient-authenticated
+          // avatar endpoint, which enforces private-avatar and block rules. Never put
+          // a raw avatar blob in the FCM payload.
+          fromId: uid,
           body: preview.slice(0, 120),
           ...(unreadTotalRow ? { unreadTotal: String(unreadTotal) } : {}),
           kp_chat: convId,

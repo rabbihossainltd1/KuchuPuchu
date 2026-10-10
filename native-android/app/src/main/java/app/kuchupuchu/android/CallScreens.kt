@@ -104,8 +104,14 @@ import org.json.JSONObject
 @Composable
 fun CallGate() {
     val engine = CallEngine.instance ?: return
-    val call = engine.active ?: return
-    if (engine.minimized) return
+    // Read both pieces of state before the early branch so an offline-call
+    // failure remains visible briefly after the call itself has ended.
+    val toast = engine.toast
+    val call = engine.active
+    if (call == null || engine.minimized) {
+        if (toast.isNotBlank()) CallNoticeOverlay(toast)
+        return
+    }
     // E6: the call overlay floats above everything — a composer being
     // typed in below keeps IME focus, so the keyboard would park over
     // the call UI. Hide it and force-clear focus the moment the call
@@ -230,23 +236,27 @@ fun CallGate() {
             else -> VoiceCallScreen(call)
         }
 
-        if (engine.toast.isNotBlank()) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(top = 52.dp),
-                contentAlignment = Alignment.TopCenter,
-            ) {
-                Box(
-                    Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Color(0xE61C1917))
-                        .padding(horizontal = 18.dp, vertical = 10.dp),
-                ) {
-                    Text(engine.toast, color = Color.White, fontSize = 13.sp)
-                }
-            }
+        if (toast.isNotBlank()) CallNoticeOverlay(toast)
+    }
+}
+
+@Composable
+private fun CallNoticeOverlay(message: String) {
+    if (message.isBlank()) return
+    Box(
+        Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .padding(top = 52.dp),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Box(
+            Modifier
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color(0xE61C1917))
+                .padding(horizontal = 18.dp, vertical = 10.dp),
+        ) {
+            Text(message, color = Color.White, fontSize = 13.sp)
         }
     }
 }
@@ -495,7 +505,7 @@ private fun SwipeUpChevrons(visible: Boolean) {
 fun VoiceCallScreen(call: CallUi) {
     val engine = CallEngine.instance ?: return
     val haptics = rememberHaptics()
-    val secs = rememberTick(call.startedAt, call.connecting)
+    val secs = rememberTick(call.id, call.startedAt, call.connecting || call.reconnecting || engine.onHold)
     val connected = call.status == "ACTIVE" || engine.hasRemote
 
     DarkCallScaffold {
@@ -526,6 +536,7 @@ fun VoiceCallScreen(call: CallUi) {
             Text(
                 when {
                     call.status == "BUSY" -> "Line busy — on another call"
+                    call.reconnecting -> "Reconnecting…"
                     engine.onHold -> "On hold"
                     call.group && call.status == "ACTIVE" && othersOn == 0 -> "Ringing…"
                     call.group && call.status == "ACTIVE" && connected -> "${othersOn + 1} on call · ${clockText(secs)}"
@@ -647,7 +658,7 @@ fun VoiceCallScreen(call: CallUi) {
 @Composable
 private fun ShareFullscreen(call: CallUi) {
     val engine = CallEngine.instance ?: return
-    val secs = rememberTick(call.startedAt, call.connecting)
+    val secs = rememberTick(call.id, call.startedAt, call.connecting || call.reconnecting || engine.onHold)
     androidx.activity.compose.BackHandler { engine.exitShareFullscreen() }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         VideoRenderer(engine, remote = true, fit = true)
@@ -663,7 +674,11 @@ private fun ShareFullscreen(call: CallUi) {
             Text(call.otherName, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             UserBadges(call.otherUser, 13.dp, gap = 4.dp)
             Spacer(Modifier.width(10.dp))
-            Text(clockText(secs), color = Color(0xB3FFFFFF), fontSize = 13.sp)
+            Text(
+                if (call.reconnecting) "Reconnecting…" else clockText(secs),
+                color = Color(0xB3FFFFFF),
+                fontSize = 13.sp,
+            )
         }
         Box(
             Modifier
@@ -816,7 +831,7 @@ fun OutgoingVideoScreen(call: CallUi) {
 fun InCallVideoScreen(call: CallUi) {
     val engine = CallEngine.instance ?: return
     val haptics = rememberHaptics()
-    val secs = rememberTick(call.startedAt, call.connecting)
+    val secs = rememberTick(call.id, call.startedAt, call.connecting || call.reconnecting || engine.onHold)
     var controlsVisible by remember { mutableStateOf(true) }
     var swapped by remember { mutableStateOf(false) }
     // Which feed is where, and whether there is a self feed at all. Declared up
@@ -894,6 +909,7 @@ fun InCallVideoScreen(call: CallUi) {
                 }
                 Text(
                     when {
+                        call.reconnecting -> "Reconnecting…"
                         engine.sharing -> "You are sharing your screen"
                         call.connecting || call.startedAt <= 0L -> "Connecting…"
                         secs > 0 -> clockText(secs)
@@ -1045,7 +1061,7 @@ fun InCallVideoScreen(call: CallUi) {
 fun GroupVideoScreen(call: CallUi) {
     val engine = CallEngine.instance ?: return
     val haptics = rememberHaptics()
-    val secs = rememberTick(call.startedAt, call.connecting)
+    val secs = rememberTick(call.id, call.startedAt, call.connecting || call.reconnecting || engine.onHold)
     var controlsVisible by remember { mutableStateOf(true) }
     val me = Store.myId()
     // Read once per composition: bumps whenever any member's picture starts,
@@ -1121,6 +1137,7 @@ fun GroupVideoScreen(call: CallUi) {
             Text(call.otherName, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             Text(
                 when {
+                    call.reconnecting -> "Reconnecting…"
                     !connected -> "Ringing…"
                     call.connecting || call.startedAt <= 0L -> "Connecting…"
                     else -> "${others.size + 1} on call · ${clockText(secs)}"
@@ -1507,7 +1524,7 @@ fun ReturnToCallBanner() {
     val call = engine.active ?: return
     if (!engine.minimized) return
     val haptics = rememberHaptics()
-    val secs = rememberTick(call.startedAt, call.connecting || engine.onHold)
+    val secs = rememberTick(call.id, call.startedAt, call.connecting || call.reconnecting || engine.onHold)
     val connected = call.status == "ACTIVE" || engine.hasRemote
     Row(
         Modifier
@@ -1537,6 +1554,7 @@ fun ReturnToCallBanner() {
         )
         Text(
             when {
+                call.reconnecting -> "Reconnecting…"
                 !connected -> if (call.incoming && !call.group) "Ringing" else "Calling…"
                 call.connecting || call.startedAt <= 0L -> "Connecting…"
                 engine.onHold -> "On hold"
@@ -1550,9 +1568,11 @@ fun ReturnToCallBanner() {
 }
 
 @Composable
-private fun rememberTick(startedAt: Long, paused: Boolean): Int {
-    var secs by remember(startedAt) { mutableIntStateOf(0) }
-    LaunchedEffect(startedAt, paused) {
+private fun rememberTick(callId: String, startedAt: Long, paused: Boolean): Int {
+    // Keep the same reading across a reconnect-adjusted epoch for this call;
+    // a new call id still gets its own clean clock.
+    var secs by remember(callId) { mutableIntStateOf(0) }
+    LaunchedEffect(callId, startedAt, paused) {
         while (true) {
             // On hold: FREEZE the reading (real phone apps do) — it used to
             // reset to 00:00, which reads like the call just dropped.

@@ -49,11 +49,11 @@ const check = (name, condition, detail = "") =>
   lines.push(`  ${condition ? "OK     " : "BROKEN "}  ${name}${detail ? `  -> ${detail}` : ""}`);
 
 check(
-  "home navigation distributes all four tabs in equal-width slots",
-  nav.includes("horizontalArrangement = Arrangement.spacedBy(gap)") &&
-    (nav.match(/Modifier\.weight\(1f\)/g) ?? []).length >= 1 &&
-    nav.includes("HomeNavOrderPolicy.defaultOrder.forEach { itemId ->") &&
-    nav.includes("val orderedPosition = navOrder.indexOf(itemId)") &&
+  "home navigation lays the actual stable-id order into four equal-width slots",
+  nav.includes("LazyRow(") &&
+    nav.includes("horizontalArrangement = Arrangement.spacedBy(gap)") &&
+    nav.includes("items(items = navOrder, key = { it })") &&
+    nav.includes(".width(slotWidth)") &&
     nav.includes("val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4"),
 );
 check(
@@ -220,13 +220,13 @@ check(
     navPolicyTest.includes("HomeNavOrderPolicy.normalize("),
 );
 check(
-  "dragged tabs alone scale smoothly while stationary siblings animate into their reordered slots",
-  nav.includes("val animatedSlotOffsetPx by animateFloatAsState(") &&
+  "dragged tabs alone scale smoothly while stable-key siblings animate into their ordered slots",
+  nav.includes("val isMoving = draggingId == itemId || settlingId == itemId") &&
+    nav.includes("Modifier.animateItem(") &&
+    nav.includes("placementSpec = spring(dampingRatio = 0.84f, stiffness = 620f)") &&
+    nav.includes("dragOffsetPx =") &&
     nav.includes("reorderOffsetPx = itemOffsetPx") &&
-    nav.includes("settlingOffset.animateTo(") &&
-    chatList.includes("targetValue = if (isDragging) 1.06f else 1f") &&
-    chatList.includes('label = "navHoldScale"') &&
-    chatList.includes("translationX = reorderOffsetPx"),
+    nav.includes("settlingOffset.animateTo("),
 );
 check(
   "the Chats unread badge is red and circular with no outline",

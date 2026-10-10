@@ -79,10 +79,11 @@ check(
     ),
 );
 check(
-  "four equally sized tab slots share a centered indicator with the demo's 450ms easing",
-  nav.includes("HomeNavOrderPolicy.defaultOrder.forEach { itemId ->") &&
-    nav.includes("val animatedSlotOffsetPx by animateFloatAsState(") &&
-    (nav.match(/Modifier\.weight\(1f\)/g) ?? []).length === 1 &&
+  "four equally sized stable-key tab slots share a centered indicator with the demo's 450ms easing",
+  nav.includes("LazyRow(") &&
+    nav.includes("items(items = navOrder, key = { it })") &&
+    nav.includes(".width(slotWidth)") &&
+    !nav.includes("HomeNavOrderPolicy.defaultOrder.forEach { itemId ->") &&
     nav.includes("val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4") &&
     nav.includes("val indicatorSize = 40.dp") &&
     nav.includes("capsulePadding + (slotWidth - indicatorSize) * 0.5f") &&
@@ -182,14 +183,15 @@ check(
     !cache.includes("registerNetworkCallback(req, cb)"),
 );
 check(
-  "the status feed paints a persisted offline snapshot, keeps its 12-second safety tick on a 30-second cache, and forces explicit inbox-poke syncs",
+  "the status feed keeps its cached offline snapshot and forced sync cadence without appending network-error copy",
   api.includes("allowCachedFallback: Boolean = true") &&
     api.includes("if (allowCachedFallback) Cache.peek(key)?.let { return it }") &&
     !statusScreen.includes("allowCachedFallback = false") &&
     statusScreen.includes("delay(12_000)") &&
     statusScreen.includes("if (Store.foreground && !Api.inCooldown()) refresh()") &&
     statusScreen.includes("refresh(force = true)") &&
-    statusScreen.includes("Tap to retry"),
+    !statusScreen.includes("Tap to retry") &&
+    !statusScreen.includes("Couldn't load viewers. Try again."),
 );
 check(
   "sheet action buttons remain borderless while selection, caption, and confirmation controls keep their treatment",

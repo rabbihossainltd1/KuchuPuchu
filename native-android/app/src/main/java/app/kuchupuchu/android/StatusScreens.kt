@@ -90,7 +90,6 @@ fun StatusScreen(nav: NavController, fabBottom: androidx.compose.ui.unit.Dp = 74
     val scope = rememberCoroutineScope()
     val groups = ScreenStore.statuses
     var composeText by remember { mutableStateOf(false) }
-    var refreshError by remember { mutableStateOf<String?>(null) }
     val haptics = rememberHaptics()
     val listBottomPadding = with(LocalDensity.current) {
         110.dp + WindowInsets.navigationBars.getBottom(this).toDp()
@@ -103,13 +102,11 @@ fun StatusScreen(nav: NavController, fabBottom: androidx.compose.ui.unit.Dp = 74
                     Api.get("/api/statuses", force)
                 }
                 ScreenStore.setStatuses(data.arr("items").objects())
-                refreshError = null
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
-            } catch (e: Exception) {
-                refreshError =
-                    (e as? ApiException)?.message?.takeIf { it.isNotBlank() }
-                        ?: "Check your connection and tap to retry."
+            } catch (_: Exception) {
+                // Keep the last cached feed silently when offline. The status
+                // surface intentionally does not add an error-text block.
             }
         }
     }
@@ -236,29 +233,6 @@ fun StatusScreen(nav: NavController, fabBottom: androidx.compose.ui.unit.Dp = 74
                                 fontSize = 13.sp,
                                 color = Muted,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                }
-
-                refreshError?.let { message ->
-                    item(key = "status_refresh_error") {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Card)
-                                .clickable { refresh(force = true) }
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                "Status could not refresh · $message · Tap to retry",
-                                color = Muted,
-                                fontSize = 13.sp,
-                                maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
@@ -1493,12 +1467,7 @@ private fun ViewersSheet(
                     }
                 }
                 when {
-                    error -> Text(
-                        "Couldn't load viewers. Try again.",
-                        color = Red,
-                        fontSize = 14.sp,
-                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
-                    )
+                    error -> Spacer(Modifier.height(8.dp))
                     loading -> Row(
                         Modifier.padding(18.dp),
                         verticalAlignment = Alignment.CenterVertically,

@@ -720,8 +720,8 @@ check(
   STATUS_COPY.viewersTitle === "Viewed by" && STATUS_COPY.viewersEmpty === "No views yet.",
 );
 check(
-  "a viewer-list failure says so in the phone's words",
-  statusSource.includes(`"Couldn't load viewers. Try again."`) &&
+  "Android viewer-list failures stay quiet offline while web keeps its explicit retry copy",
+  !statusSource.includes(`"Couldn't load viewers. Try again."`) &&
     STATUS_COPY.viewersError === "Couldn't load viewers. Try again.",
 );
 check(
