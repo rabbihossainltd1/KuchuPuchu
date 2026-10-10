@@ -30,6 +30,7 @@ import {
   AUDIO_OUTPUT_UNSUPPORTED_COPY,
   CALL_COPY,
   callStatusText,
+  clockText,
   e2eeChangedCopy,
   e2eeSheetCopy,
   incomingCallLine,
@@ -60,6 +61,20 @@ export function CallStage({ engine, state }: Props) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [verifyOpen, engine]);
+
+  // The fullscreen share view: Escape collapses it, the way the phone's Back
+  // gesture does (ShareFullscreen's BackHandler).
+  useEffect(() => {
+    if (!state.shareFull) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        engine.exitShareFullscreen();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [state.shareFull, engine]);
 
   if (phase === "idle" || phase === "ended") {
     if (!state.error) return null;
@@ -187,13 +202,23 @@ export function CallStage({ engine, state }: Props) {
 
         {/* Their screen share on a VOICE call: the phone shows a 16:9 preview
             card above the buttons and the call stays a voice call (round 31
-            item 19). */}
+            item 19). Tap it for the phone's fullscreen view of the share. */}
         {!video && connected && state.peerScreen ? (
-          <VideoSurface
-            stream={state.remoteStream}
-            className="call-stage__share-preview"
-            label={`${state.peer.name}'s shared screen`}
-          />
+          <div className="call-stage__share-card">
+            <VideoSurface
+              stream={state.remoteStream}
+              className="call-stage__share-preview"
+              label={`${state.peer.name}'s shared screen`}
+            />
+            <button
+              type="button"
+              className="call-stage__share-expand"
+              aria-label={CALL_COPY.shareExpand}
+              onClick={engine.openShareFullscreen}
+            >
+              <Icon name="fullscreen" size={16} />
+            </button>
+          </div>
         ) : null}
 
         {state.error ? (
@@ -325,6 +350,36 @@ export function CallStage({ engine, state }: Props) {
             engine.closeVerify();
           }}
         />
+      ) : null}
+
+      {/* The peer's shared screen, edge-to-edge — Android's ShareFullscreen:
+          black stage, contained picture, name + clock on top, one exit control,
+          Back/Escape to collapse. */}
+      {connected && state.peerScreen && state.shareFull ? (
+        <div
+          className="call-share-full"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${state.peer.name}'s shared screen`}
+        >
+          <VideoSurface
+            stream={state.remoteStream}
+            className="call-share-full__video"
+            label={`${state.peer.name}'s shared screen`}
+          />
+          <div className="call-share-full__bar">
+            <span className="call-share-full__name">{state.peer.name}</span>
+            <span className="call-share-full__clock">{clockText(state.seconds)}</span>
+          </div>
+          <button
+            type="button"
+            className="call-share-full__exit"
+            aria-label={CALL_COPY.shareCollapse}
+            onClick={engine.exitShareFullscreen}
+          >
+            <Icon name="fullscreenExit" size={20} />
+          </button>
+        </div>
       ) : null}
     </div>
   );

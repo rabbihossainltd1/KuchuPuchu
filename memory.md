@@ -1051,3 +1051,9 @@ Owner: "ager session ei kaj korte korte dead hoye geche … kota kaj hoyeche" �
 - PINS: case 79 calls check inverted (on in prod; media gate still unflipped). Docs: web-feature-flags, web-cutover recipe, web-calls verification lines, roadmap slice Q, memory.
 - LIMITS documented, not hidden: no group calls/Telecom/hold/closed-tab ringing (docs/web-calls.md).
 - ROLLBACK: one-line recipe revert.
+
+## Web slice R — screen share complete — 2026-10-10 (branch feat/web-p10-screen-share, base main @ 1373065)
+- WHAT: closed the parity plan's last screen-share gaps. (a) Peer-share fullscreen = Android ShareFullscreen: preview card expands edge-to-edge, name+clock bar, exit control, Escape; engine shareFull state auto-resets on share end/teardown. (b) Share-audio preference = phone's settings toggle: device-local kp.calls.share_audio, Calls settings card; capture asks for sound, engine mixes mic+share via Web Audio graph onto the audio sender (replaceTrack, no renegotiation), stop restores mic + disposes mix.
+- RUNTIME: captureDisplay(withAudio) + mixAudio(primary, secondary) added to PeerRuntime (+ browser impl).
+- TESTS: case 62 new block (preference off/on, mix+replaceTrack:audio, dispose, fullscreen state machine); call-live e2e: granted share (canvas stream) reaches peer over real WebRTC, preview + fullscreen + Escape, share-audio with oscillator track; refusal test unchanged.
+- HONEST LIMITS: system sound OS-dependent ("no audio track" = share without sound, never error); stated in docs/UI.

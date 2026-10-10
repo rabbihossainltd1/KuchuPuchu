@@ -80,7 +80,15 @@ import {
   type CallRow,
   type IceServer,
 } from "./callsModel";
-import type { MediaStreamLike, MediaTrackLike, PeerLike, PeerRuntime, Sdp } from "./peerRuntime";
+import type {
+  AudioMix,
+  MediaStreamLike,
+  MediaTrackLike,
+  PeerLike,
+  PeerRuntime,
+  Sdp,
+} from "./peerRuntime";
+import { SHARE_AUDIO_STORE_KEY } from "./shareAudioPref";
 
 /* ------------------------------------------------------------------- inputs */
 
@@ -160,6 +168,12 @@ export type CallEngineState = {
   readonly sharing: boolean;
   readonly peerCameraOff: boolean;
   readonly peerScreen: boolean;
+  /**
+   * The peer's shared screen is expanded edge-to-edge (Android's
+   * `shareFull`/`ShareFullscreen`). Only ever true while `peerScreen` is; the
+   * engine drops it itself the moment the share ends or the call does.
+   */
+  readonly shareFull: boolean;
   readonly minimized: boolean;
   /**
    * The verify sheet is open. The engine owns it rather than the stage: a
@@ -201,6 +215,7 @@ export const INITIAL_CALL_STATE: CallEngineState = Object.freeze({
   sharing: false,
   peerCameraOff: false,
   peerScreen: false,
+  shareFull: false,
   minimized: false,
   verifyOpen: false,
   localStream: null,
@@ -234,6 +249,9 @@ export type CallEngine = {
   toggleMute(): void;
   toggleCamera(): Promise<void>;
   toggleShare(): Promise<void>;
+  /** Expand the peer's shared screen edge-to-edge; a no-op unless they share. */
+  openShareFullscreen(): void;
+  exitShareFullscreen(): void;
   minimize(): void;
   restore(): void;
   showCode(): void;
@@ -260,6 +278,8 @@ export function createCallEngine(options: EngineOptions): CallEngine {
   let peer: PeerLike | null = null;
   let localStream: MediaStreamLike | null = null;
   let shareStream: MediaStreamLike | null = null;
+  /** Live mic+share-sound mix on the audio sender; null while not sharing sound. */
+  let shareAudioMix: AudioMix | null = null;
   let cameraTrack: MediaTrackLike | null = null;
   let audioTrack: MediaTrackLike | null = null;
   let iceMinted: IceServer | null = null;
@@ -317,6 +337,10 @@ export function createCallEngine(options: EngineOptions): CallEngine {
     stopTrack(cameraTrack);
     audioTrack = null;
     cameraTrack = null;
+    if (shareAudioMix) {
+      shareAudioMix.dispose();
+      shareAudioMix = null;
+    }
     if (shareStream) {
       for (const track of shareStream.getTracks()) stopTrack(track);
       shareStream = null;
@@ -332,6 +356,13 @@ export function createCallEngine(options: EngineOptions): CallEngine {
     const sender = peer.getSenders().find((entry) => entry.track?.kind === "video");
     if (sender) return sender;
     return peer.getTransceivers().find((entry) => entry.kind === "video")?.sender ?? null;
+  };
+
+  const audioSender = () => {
+    if (!peer) return null;
+    const sender = peer.getSenders().find((entry) => entry.track?.kind === "audio");
+    if (sender) return sender;
+    return peer.getTransceivers().find((entry) => entry.kind === "audio")?.sender ?? null;
   };
 
   /**
@@ -600,9 +631,12 @@ export function createCallEngine(options: EngineOptions): CallEngine {
         return;
       case "media":
         if (frame.userId !== options.meId) {
+          // A share that ENDS must also drop the fullscreen view of it — the
+          // phone resets `shareFull` on the same transition.
           publish({
             peerCameraOff: !frame.camera,
             peerScreen: frame.screen,
+            ...(frame.screen ? {} : { shareFull: false }),
             kind: frame.kind === "VIDEO" ? "VIDEO" : state.kind,
           });
         }
@@ -860,6 +894,7 @@ export function createCallEngine(options: EngineOptions): CallEngine {
         publish({
           peerCameraOff: flags.camera !== true,
           peerScreen: flags.screen === true,
+          ...(flags.screen === true ? {} : { shareFull: false }),
         });
       }
       void measureE2ee();
@@ -1208,6 +1243,9 @@ export function createCallEngine(options: EngineOptions): CallEngine {
     postMedia({ camera: !cameraOff });
   };
 
+  /** The device-local "share audio via screen share" preference. */
+  const shareAudioWanted = () => options.store.read(SHARE_AUDIO_STORE_KEY) === "1";
+
   const toggleShare = async () => {
     const callId = state.callId;
     if (!callId || !peer) return;
@@ -1218,6 +1256,17 @@ export function createCallEngine(options: EngineOptions): CallEngine {
       } catch {
         // Without a sender there is nothing to swap back; the track stays put.
       }
+      if (shareAudioMix) {
+        // The call's sound returns to the mic alone; the share's track dies
+        // with the stream cleanup below.
+        try {
+          await audioSender()?.replaceTrack(audioTrack);
+        } catch {
+          // Same honesty as the video swap: no sender, nothing to restore.
+        }
+        shareAudioMix.dispose();
+        shareAudioMix = null;
+      }
       if (shareStream) {
         for (const track of shareStream.getTracks()) stopTrack(track);
         shareStream = null;
@@ -1227,13 +1276,33 @@ export function createCallEngine(options: EngineOptions): CallEngine {
       return;
     }
     try {
-      const stream = await runtime.captureDisplay();
+      const stream = await runtime.captureDisplay(shareAudioWanted());
       const track = stream.getVideoTracks()[0];
       if (!track) throw { name: "NotFoundError", message: "no screen track" };
       shareStream = stream;
       const sender = videoSender();
       if (sender) await sender.replaceTrack(track);
       else peer.addTrack(track, [stream]);
+      // Fold the share's sound into the call audio the way the phone mixes
+      // before the encoder (owner round 31 item 20) — only when the preference
+      // is on AND the capture actually yielded an audio track: browsers deny
+      // system sound silently, and that is "share without sound", never an
+      // error.
+      const shareAudio = stream.getAudioTracks()[0] ?? null;
+      if (shareAudio && audioTrack) {
+        try {
+          const mix = runtime.mixAudio(audioTrack, shareAudio);
+          const micSender = audioSender();
+          if (micSender) {
+            await micSender.replaceTrack(mix.track);
+            shareAudioMix = mix;
+          } else {
+            mix.dispose();
+          }
+        } catch {
+          // A broken mix costs the shared SOUND, never the shared picture.
+        }
+      }
       // The browser's own "Stop sharing" pill ends the track behind our back.
       track.onended = () => {
         if (!state.sharing) return;
@@ -1246,6 +1315,21 @@ export function createCallEngine(options: EngineOptions): CallEngine {
     } catch (error) {
       say(screenShareDeniedCopy(error));
     }
+  };
+
+  /* The peer's shared screen, edge-to-edge — Android's `shareFull`. The gate
+     is `peerScreen`, never a click alone: expanding while nobody is sharing
+     would draw a black screen with no way out of the confusion. The engine
+     drops the flag itself wherever the share ends (media frames, poll flags,
+     call teardown). */
+  const openShareFullscreen = () => {
+    if (!state.peerScreen || state.shareFull) return;
+    publish({ shareFull: true });
+  };
+
+  const exitShareFullscreen = () => {
+    if (!state.shareFull) return;
+    publish({ shareFull: false });
   };
 
   const refreshOutputs = async () => {
@@ -1373,6 +1457,8 @@ export function createCallEngine(options: EngineOptions): CallEngine {
     toggleMute,
     toggleCamera,
     toggleShare,
+    openShareFullscreen,
+    exitShareFullscreen,
     minimize: () => publish({ minimized: true }),
     restore: () => publish({ minimized: false }),
     showCode,

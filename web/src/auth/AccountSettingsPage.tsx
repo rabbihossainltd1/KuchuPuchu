@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ApiError } from "../api";
 import { isWebFeatureEnabled } from "../featureFlags";
 import { BrandMark, Icon } from "../icons";
+import { CallSettingsSection } from "../calls/CallSettingsSection";
 import { PushSettingsSection } from "../push/PushSettingsSection";
 import { AppearanceSection } from "../theme/AppearanceSection";
 import { RouteLink } from "../RouteLink";
@@ -485,6 +486,8 @@ export function AccountSettingsPage({
           <AppearanceSection />
 
           {isWebFeatureEnabled("push") && <PushSettingsSection api={api} />}
+
+          {isWebFeatureEnabled("calls") && <CallSettingsSection />}
         </div>
 
         <footer className="settings-footer">
