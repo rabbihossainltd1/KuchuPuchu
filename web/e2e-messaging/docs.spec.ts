@@ -37,7 +37,7 @@ let userSocket: WebSocketRoute | null = null;
 
 const openChat = async (page: Page) => {
   await page.getByRole("link", { name: new RegExp(PEER_NAME) }).click();
-  await expect(page.getByRole("button", { name: "Media, links and docs" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "More options" })).toBeVisible();
 };
 
 const note = (page: Page, id: string) => page.locator(`[data-message-id="${id}"]`);
@@ -256,7 +256,7 @@ test.describe("Web document reader", () => {
     await reader(page, "notes.txt").getByRole("button", { name: "Close document" }).click();
 
     await expect(reader(page, "notes.txt")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Media, links and docs" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "More options" })).toBeVisible();
     // One fetch, and no second one on the way out.
     expect(worker.fileDownloads.filter((key) => key === "f/notes.txt")).toHaveLength(1);
 
@@ -272,7 +272,9 @@ test.describe("Web document reader", () => {
   test("the chat's own notes say what this reader can and cannot do", async ({ page }) => {
     await openChat(page);
 
-    const notes = page.locator(".chat-notes");
+    await page.getByRole("button", { name: "More options" }).click();
+    await page.getByRole("button", { name: "Privacy notes" }).click();
+    const notes = page.locator(".chat-menu__notes");
     await expect(notes).toContainText("PDF");
     await expect(notes).toContainText("400 KB");
     await expect(notes).toContainText("source");

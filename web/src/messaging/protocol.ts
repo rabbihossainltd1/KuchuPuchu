@@ -32,6 +32,12 @@ export type ConversationPeer = {
    */
   readonly avatarRef: string;
   /**
+   * Presence for the header subtitle — the same two fields the phone draws
+   * ("online" / the Dhaka last-seen). Privacy-walled peers ride false / "".
+   */
+  readonly online: boolean;
+  readonly lastActiveAt: string;
+  /**
    * Owner round 31 item 21: a private profile's chat, calls, pictures and
    * videos are screenshot-blocked and NOT saveable / forwardable on the other
    * phone too. A browser cannot block a screenshot — it says so — but the
@@ -104,6 +110,26 @@ export type ConversationRow = {
   readonly requestPending: boolean;
   readonly blockedByMe: boolean;
   readonly blockedMe: boolean;
+  /** The phone's header subtitle for a group is "<N> members". */
+  readonly memberCount: number;
+  /**
+   * r71-18: MY switches for this chat (the phone's ⋮ → Chat privacy sheet).
+   * `allowShot` / `allowRec` decide what the OTHER side may do with what I
+   * send here; `save` is whether I may keep what they send; `readReceipts`
+   * my read-time sharing for this chat.
+   */
+  readonly privacy: {
+    /** What THEY may do with what I send here (my switches). */
+    readonly shot: boolean;
+    readonly rec: boolean;
+    /** Whether I may keep what they send. */
+    readonly save: boolean;
+    /** Their switches towards me — shown, not editable. */
+    readonly allowShot: boolean;
+    readonly allowRec: boolean;
+    /** My read-receipt sharing for this chat. */
+    readonly readReceipts: boolean;
+  };
   /**
    * r71-18: whether the OTHER side lets me keep what they send here. The
    * worker answers `peerSave`; a false answer withholds Save and Forward on
@@ -384,6 +410,8 @@ function parsePeer(value: unknown): ConversationPeer | null {
     username: text(value.username, 64),
     e2eePublicKey: text(value.e2eePublicKey, 4096),
     avatarRef: text(value.avatarRef, 128),
+    online: booleanish(value.online),
+    lastActiveAt: isoTimestamp(value.lastActiveAt),
     privateProfile: booleanish(value.privateProfile),
   };
 }
@@ -439,6 +467,18 @@ export function parseConversationRow(value: unknown): ConversationRow | null {
     requestPending: booleanish(value.requestPending),
     blockedByMe: booleanish(value.blockedByMe),
     blockedMe: booleanish(value.blockedMe),
+    memberCount: Array.isArray(value.members) ? value.members.length : 0,
+    privacy: (() => {
+      const p = isRecord(value.privacy) ? value.privacy : {};
+      return {
+        shot: booleanish(p.shot),
+        rec: booleanish(p.rec),
+        save: p.save === undefined ? true : booleanish(p.save),
+        allowShot: p.allowShot === undefined ? true : booleanish(p.allowShot),
+        allowRec: booleanish(p.allowRec),
+        readReceipts: p.readReceipts === undefined ? true : booleanish(p.readReceipts),
+      };
+    })(),
   };
 }
 
@@ -490,34 +530,48 @@ export function isBotConversation(conversation: ConversationRow): boolean {
   return !conversation.isGroup && BOT_IDS.has(peer);
 }
 
+/* Plain words, exactly the phone's ChatPreviewText labels — no emoji. */
 const PREVIEW_CATEGORY_LABELS: Readonly<Record<string, string>> = {
-  photo: "\u{1F4F7} Photo",
-  video: "\u{1F3AC} Video",
-  voice: "\u{1F399} Voice message",
-  file: "\u{1F4CE} File",
-  call: "\u{1F4DE} Call",
-  status: "\u{1F4AC} Status",
+  photo: "Photo",
+  video: "Video",
+  voice: "Voice message",
+  file: "File",
+  document: "Document",
+  sticker: "Sticker",
+  contact: "Contact",
+  location: "Location",
+  call: "Call",
+  status: "Status",
 };
 
 /**
- * Chat-list preview text. A sealed body is never shown as ciphertext: the list
- * gets the same lock placeholder the open chat uses.
+ * Chat-list preview text, word for word the phone's ChatPreviewText: plain
+ * category words, "<Category> · View once", and never ciphertext nor a lock
+ * glyph — a sealed body previews as its category word.
  */
 export function conversationPreviewText(conversation: ConversationRow): string {
   const preview = conversation.preview;
   if (!preview) {
-    if (conversation.lastMessage.toLowerCase() === "call") return "\u{1F4DE} Call";
+    if (conversation.lastMessage.toLowerCase() === "call") return "Call";
     return "No messages yet";
   }
-  if (preview.viewOnce) return "\u{1F4F7} View once";
 
   const category = preview.category.toLowerCase();
-  const label = PREVIEW_CATEGORY_LABELS[category];
-  if (label && category !== "message") return label;
+  const label = PREVIEW_CATEGORY_LABELS[category] ?? "Message";
+  if (preview.viewOnce) {
+    return category === "video"
+      ? "Video · View once"
+      : category === "voice"
+        ? "Voice message · View once"
+        : category === "photo"
+          ? "Photo · View once"
+          : "Message · View once";
+  }
+  if (category !== "message") return label;
 
-  if (isEnvelope(preview.body)) return "\u{1F512} এনক্রিপ্টেড মেসেজ";
+  if (isEnvelope(preview.body)) return label;
   const body = preview.body.trim();
-  if (!body) return label ?? "No messages yet";
+  if (!body) return label;
   return body.length > PREVIEW_BODY_LIMIT ? `${body.slice(0, PREVIEW_BODY_LIMIT)}…` : body;
 }
 
@@ -551,11 +605,54 @@ export const TICK_LABELS: Readonly<Record<TickState, string>> = {
 const dhakaFormatter = (options: Intl.DateTimeFormatOptions) =>
   new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dhaka", ...options });
 
-/** Timestamps are shown in Asia/Dhaka and the zone is stated in the UI. */
+/** Timestamps are shown in Asia/Dhaka, the same clock the phone draws. */
 export function clockTime(iso: string): string {
   const parsed = Date.parse(iso);
   if (!Number.isFinite(parsed)) return "";
-  return dhakaFormatter({ hour: "numeric", minute: "2-digit", hour12: true }).format(parsed);
+  return dhakaFormatter({ hour: "numeric", minute: "2-digit", hour12: true })
+    .format(parsed)
+    .replace(/\s?[ap]m/i, (part) => part.toLowerCase());
+}
+
+const dhakaDateParts = (ms: number) => {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Dhaka",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(ms);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  return { year: get("year"), month: get("month"), day: get("day") };
+};
+
+/**
+ * The phone's header subtitle, word for word: groups count members, bots are
+ * official accounts, a person is "online" or last seen in the Dhaka shorthand
+ * ("3:17 am", "yes 11:10 pm", "sun 3:15 pm", "12 aug"). No extra captions.
+ */
+export function headerSubtitle(conversation: ConversationRow): string {
+  if (conversation.isGroup) return `${conversation.memberCount} members`;
+  if (isBotConversation(conversation)) return "Official account";
+  if (conversation.requestPending) return "";
+  const peer = conversation.other;
+  if (!peer) return "";
+  if (peer.online) return "online";
+  const parsed = Date.parse(peer.lastActiveAt);
+  if (!Number.isFinite(parsed)) return "";
+  const time = clockTime(peer.lastActiveAt);
+  const then = dhakaDateParts(parsed);
+  const today = dhakaDateParts(Date.now());
+  const toEpoch = (d: { year: number; month: number; day: number }) =>
+    Math.floor(Date.UTC(d.year, d.month - 1, d.day) / 86400000);
+  const age = toEpoch(today) - toEpoch(then);
+  if (age <= 0) return time;
+  if (age === 1) return `yes ${time}`;
+  if (age < 7) {
+    const weekday = dhakaFormatter({ weekday: "short" }).format(parsed).toLowerCase();
+    return `${weekday} ${time}`;
+  }
+  const month = dhakaFormatter({ month: "short" }).format(parsed).toLowerCase();
+  return `${then.day} ${month}`;
 }
 
 export function dayLabel(iso: string): string {

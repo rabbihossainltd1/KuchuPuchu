@@ -151,19 +151,19 @@ check(
 
 // previews
 check(
-  "a sealed preview shows a lock, never ciphertext",
+  "a sealed preview shows the category word, never ciphertext (phone parity)",
   conversationPreviewText(
     parseConversationRowish({
       id: "c_s",
       lastMessagePreview: { category: "message", body: "KP1.aaaaaaaa" },
     }),
-  ) === "\u{1F512} এনক্রিপ্টেড মেসেজ",
+  ) === "Message",
 );
 check(
   "a view-once preview does not leak the body",
   conversationPreviewText(
     parseConversationRowish({ id: "c_v", lastMessagePreview: { viewOnce: 1, body: "secret" } }),
-  ) === "\u{1F4F7} View once",
+  ) === "Message · View once",
 );
 check(
   "media categories get their own label",
@@ -172,7 +172,7 @@ check(
       id: "c_p",
       lastMessagePreview: { category: "photo", body: "caption" },
     }),
-  ) === "\u{1F4F7} Photo",
+  ) === "Photo",
 );
 check(
   "a long preview is truncated",
@@ -186,7 +186,7 @@ check(
 check(
   "a call-only conversation previews as a call",
   conversationPreviewText(parseConversationRowish({ id: "c_call", lastMessage: "call" })) ===
-    "\u{1F4DE} Call",
+    "Call",
 );
 
 // messages page

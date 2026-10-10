@@ -29,12 +29,16 @@ let userSocket: WebSocketRoute | null = null;
 
 const openChat = async (page: Page) => {
   await page.getByRole("link", { name: new RegExp(PEER_NAME) }).click();
-  await expect(page.getByRole("button", { name: "Media, links and docs" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "More options" })).toBeVisible();
 };
 
 const note = (page: Page, id: string) => page.locator(`[data-message-id="${id}"]`);
-const selectButton = (page: Page, id: string) =>
-  note(page, id).getByRole("button", { name: /select this message/i });
+const selectButton = async (page: Page, id: string) => {
+  // The action row only takes pointer events once the bubble is hovered.
+  const row = note(page, id);
+  await row.locator(".bubble").hover();
+  await row.getByRole("button", { name: /select this message/i }).click();
+};
 const bar = (page: Page) =>
   page.getByRole("toolbar", { name: "Actions for the selected messages" });
 const picker = (page: Page) => page.getByRole("dialog", { name: "Forward to" });
@@ -71,7 +75,7 @@ test.describe("Web multi-select and forwarding", () => {
     await openChat(page);
 
     await expect(bar(page)).toHaveCount(0);
-    await selectButton(page, "m_1").click();
+    await selectButton(page, "m_1");
 
     await expect(bar(page)).toBeVisible();
     await expect(bar(page).getByRole("status")).toHaveText("1 selected");
@@ -81,7 +85,7 @@ test.describe("Web multi-select and forwarding", () => {
     await expect(page.getByRole("textbox")).toHaveCount(0);
     await expect(page.getByRole("button", { name: /Record a voice note/ })).toHaveCount(0);
 
-    await selectButton(page, "m_3").click();
+    await selectButton(page, "m_3");
     await expect(bar(page).getByRole("status")).toHaveText("2 selected");
 
     // Ticking a row off again is the same control, with the other name.
@@ -100,7 +104,7 @@ test.describe("Web multi-select and forwarding", () => {
   }) => {
     await openChat(page);
 
-    await selectButton(page, "alb_a").click();
+    await selectButton(page, "alb_a");
 
     await expect(bar(page).getByRole("status")).toHaveText("2 selected");
     await expect(note(page, "alb_a").getByRole("checkbox")).toHaveAttribute("aria-checked", "true");
@@ -115,8 +119,8 @@ test.describe("Web multi-select and forwarding", () => {
     // m_3 arrives sealed from the peer; m_1 arrives as plain text.
     await expect(note(page, "m_3")).toContainText("এই মেসেজটি ফোন থেকে এনক্রিপ্টেড");
 
-    await selectButton(page, "m_1").click();
-    await selectButton(page, "m_3").click();
+    await selectButton(page, "m_1");
+    await selectButton(page, "m_3");
     await bar(page).getByRole("button", { name: "Copy" }).click();
 
     expect(await clipboard(page)).toBe("আগের প্লেইন মেসেজ\nএই মেসেজটি ফোন থেকে এনক্রিপ্টেড");
@@ -127,7 +131,7 @@ test.describe("Web multi-select and forwarding", () => {
   test("a selection with no text in it offers no Copy at all", async ({ page }) => {
     await openChat(page);
 
-    await selectButton(page, "m_4").click();
+    await selectButton(page, "m_4");
 
     await expect(bar(page).getByRole("status")).toHaveText("1 selected");
     await expect(bar(page).getByRole("button", { name: "Copy", exact: true })).toHaveCount(0);
@@ -139,7 +143,7 @@ test.describe("Web multi-select and forwarding", () => {
   }) => {
     await openChat(page);
 
-    await selectButton(page, "m_3").click();
+    await selectButton(page, "m_3");
     await bar(page)
       .getByRole("button", { name: /Forward/ })
       .click();
@@ -183,7 +187,7 @@ test.describe("Web multi-select and forwarding", () => {
   }) => {
     await openChat(page);
 
-    await selectButton(page, "alb_a").click();
+    await selectButton(page, "alb_a");
     await expect(bar(page).getByRole("status")).toHaveText("2 selected");
     await bar(page)
       .getByRole("button", { name: /Forward/ })
@@ -228,14 +232,14 @@ test.describe("Web multi-select and forwarding", () => {
     await expect(note(page, "once_photo").getByRole("button", { name: /Forward/ })).toHaveCount(0);
 
     // Selecting it refuses the whole bar, with the same reason.
-    await selectButton(page, "once_photo").click();
+    await selectButton(page, "once_photo");
     const forward = bar(page).getByText("Forward", { exact: true });
     await expect(forward).toHaveAttribute("aria-disabled", "true");
     await expect(forward).toHaveAttribute("title", /one opening/);
     await expect(bar(page).getByRole("button", { name: /Forward/ })).toHaveCount(0);
 
     // And a selection that mixes it with an ordinary row is refused too.
-    await selectButton(page, "m_1").click();
+    await selectButton(page, "m_1");
     await expect(bar(page).getByRole("status")).toHaveText("2 selected");
     await expect(bar(page).getByRole("button", { name: /Forward/ })).toHaveCount(0);
     expect(worker.sent).toHaveLength(0);
@@ -270,7 +274,7 @@ test.describe("Web multi-select and forwarding", () => {
     await page.goto("/");
     await openChat(page);
 
-    await selectButton(page, "m_1").click();
+    await selectButton(page, "m_1");
     const forward = bar(page).getByText("Forward", { exact: true });
     await expect(forward).toHaveAttribute("title", /private chat/);
     await expect(bar(page).getByRole("button", { name: /Forward/ })).toHaveCount(0);
@@ -283,20 +287,20 @@ test.describe("Web multi-select and forwarding", () => {
     await openChat(page);
 
     // m_2 is my own, but it is older than the phone's 60-second edit window.
-    await selectButton(page, "m_2").click();
+    await selectButton(page, "m_2");
     await expect(bar(page).getByRole("button", { name: "Edit" })).toHaveCount(0);
 
     // Somebody else's row is never editable, however fresh.
     await bar(page).getByRole("button", { name: "Clear the selection" }).click();
-    await selectButton(page, "m_1").click();
+    await selectButton(page, "m_1");
     await expect(bar(page).getByRole("button", { name: "Edit" })).toHaveCount(0);
   });
 
   test("Delete asks the scope, and 'also delete' really asks the server", async ({ page }) => {
     await openChat(page);
 
-    await selectButton(page, "m_2").click();
-    await selectButton(page, "m_1").click();
+    await selectButton(page, "m_2");
+    await selectButton(page, "m_1");
     await bar(page).getByRole("button", { name: "Delete" }).click();
 
     const confirm = page.getByRole("group", { name: "Confirm delete" });
@@ -325,7 +329,7 @@ test.describe("Web multi-select and forwarding", () => {
   }) => {
     await openChat(page);
 
-    await selectButton(page, "m_1").click();
+    await selectButton(page, "m_1");
     await bar(page).getByRole("button", { name: "Delete" }).click();
     await page
       .getByRole("group", { name: "Confirm delete" })
@@ -347,9 +351,9 @@ test.describe("Web multi-select and forwarding", () => {
     page,
   }) => {
     await page.getByRole("link", { name: /Squad/ }).click();
-    await expect(page.getByRole("button", { name: "Media, links and docs" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "More options" })).toBeVisible();
 
-    await selectButton(page, "g_1").click();
+    await selectButton(page, "g_1");
     await bar(page).getByRole("button", { name: "Delete" }).click();
 
     const confirm = page.getByRole("group", { name: "Confirm delete" });
@@ -370,8 +374,8 @@ test.describe("Web multi-select and forwarding", () => {
   }) => {
     await openChat(page);
 
-    await selectButton(page, "m_1").click();
-    await selectButton(page, "m_2").click();
+    await selectButton(page, "m_1");
+    await selectButton(page, "m_2");
 
     const buttons = bar(page).locator("button");
     const count = await buttons.count();
@@ -436,7 +440,7 @@ test.describe("Web media save permission", () => {
 
     // My own rows in the same chat are still mine to forward.
     await viewer.getByRole("button", { name: "Close viewer" }).click();
-    await selectButton(page, "m_2").click();
+    await selectButton(page, "m_2");
     await expect(bar(page).getByRole("button", { name: /Forward/ })).toBeVisible();
   });
 });

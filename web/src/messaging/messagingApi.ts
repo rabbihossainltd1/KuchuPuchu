@@ -262,4 +262,43 @@ export const messagingApi = {
       body: JSON.stringify({ theme }),
     });
   },
+
+  /* The phone's ⋮ menu writes through these same routes. */
+
+  async setMute(
+    api: ApiClient,
+    conversationId: string,
+    body: { call?: boolean; msg?: boolean; muted?: boolean },
+  ): Promise<void> {
+    await postJson(api, `/api/conversations/${encodeURIComponent(conversationId)}/mute`, body);
+  },
+
+  async setChatPrivacy(
+    api: ApiClient,
+    conversationId: string,
+    body: Record<string, boolean>,
+  ): Promise<void> {
+    await postJson(api, `/api/conversations/${encodeURIComponent(conversationId)}/privacy`, body);
+  },
+
+  async blockUser(api: ApiClient, userId: string): Promise<void> {
+    await postJson(api, "/api/blocks", { userId });
+  },
+
+  async unblockUser(api: ApiClient, userId: string): Promise<void> {
+    await api.request<unknown>(`/api/blocks/${encodeURIComponent(userId)}`, { method: "DELETE" });
+  },
+
+  async hideConversation(api: ApiClient, conversationId: string, hidden: boolean): Promise<void> {
+    await postJson(api, `/api/conversations/${encodeURIComponent(conversationId)}/hide`, {
+      hidden: hidden ? 1 : 0,
+    });
+  },
+
+  async leaveGroup(api: ApiClient, conversationId: string, userId: string): Promise<void> {
+    await api.request<unknown>(
+      `/api/conversations/${encodeURIComponent(conversationId)}/members/${encodeURIComponent(userId)}`,
+      { method: "DELETE" },
+    );
+  },
 };

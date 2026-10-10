@@ -50,7 +50,7 @@ let userSocket: WebSocketRoute | null = null;
 
 const openChat = async (page: Page) => {
   await page.getByRole("link", { name: new RegExp(PEER_NAME) }).click();
-  await expect(page.getByRole("button", { name: "Media, links and docs" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "More options" })).toBeVisible();
 };
 
 /** The bubble for one seeded note. */
@@ -417,7 +417,9 @@ test.describe("Web voice notes", () => {
   }) => {
     await openChat(page);
 
-    const notes = page.locator(".chat-notes");
+    await page.getByRole("button", { name: "More options" }).click();
+    await page.getByRole("button", { name: "Privacy notes" }).click();
+    const notes = page.locator(".chat-menu__notes");
     await expect(notes).toContainText("voice notes");
     await expect(notes).toContainText("100 MB");
     await expect(notes).toContainText("Safari");
