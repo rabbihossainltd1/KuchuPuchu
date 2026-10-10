@@ -12,9 +12,11 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ApiClient } from "../auth/authApi";
 import { Icon } from "../icons";
+import { ConversationAvatar } from "./Avatar";
 import type { ConversationRow } from "./protocol";
-import { conversationInitial, conversationTitle } from "./protocol";
+import { conversationTitle } from "./protocol";
 import { FORWARD_DIALOG_TITLE, forwardPickerSubtitle } from "./forward";
 
 export type ForwardDialogProps = {
@@ -23,9 +25,10 @@ export type ForwardDialogProps = {
   count: number;
   onSend: (targetIds: readonly string[]) => void;
   onClose: () => void;
+  api: ApiClient | null;
 };
 
-export function ForwardDialog({ conversations, count, onSend, onClose }: ForwardDialogProps) {
+export function ForwardDialog({ conversations, count, onSend, onClose, api }: ForwardDialogProps) {
   const [picked, setPicked] = useState<readonly string[]>([]);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -89,9 +92,11 @@ export function ForwardDialog({ conversations, count, onSend, onClose }: Forward
                 className={`forward-dialog__row${on ? " is-picked" : ""}`}
                 onClick={() => toggle(conversation.id)}
               >
-                <span className="forward-dialog__avatar" aria-hidden="true">
-                  {conversationInitial(conversation)}
-                </span>
+                <ConversationAvatar
+                  api={api}
+                  conversation={conversation}
+                  className="forward-dialog__avatar"
+                />
                 <span className="forward-dialog__name">
                   {name}
                   {conversation.privateGroup ? <em> · private group</em> : null}

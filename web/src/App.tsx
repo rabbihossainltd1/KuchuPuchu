@@ -347,7 +347,13 @@ export default function App() {
               <span>Settings</span>
             </RouteLink>
             <div className="account-chip" role="img" aria-label={accountChipLabel}>
-              <div className="account-chip__avatar">{accountInitials}</div>
+              <div className="account-chip__avatar">
+                {user?.avatarUrl ? (
+                  <img className="avatar-img" src={user.avatarUrl} alt="" />
+                ) : (
+                  accountInitials
+                )}
+              </div>
               <span className={`account-chip__status${user ? " is-signed-in" : ""}`} />
             </div>
           </div>

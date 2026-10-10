@@ -26,6 +26,12 @@ export type ConversationPeer = {
   readonly username: string;
   readonly e2eePublicKey: string;
   /**
+   * Stable per-avatar token (`id@vN`) from the worker's user shape. Null on
+   * the wire when the peer has no photo or hid it from this viewer; the
+   * browser caches the fetched data-URI under this ref forever.
+   */
+  readonly avatarRef: string;
+  /**
    * Owner round 31 item 21: a private profile's chat, calls, pictures and
    * videos are screenshot-blocked and NOT saveable / forwardable on the other
    * phone too. A browser cannot block a screenshot — it says so — but the
@@ -68,6 +74,12 @@ export type ConversationRow = {
   readonly lastMessage: string;
   readonly preview: ConversationPreview | null;
   readonly other: ConversationPeer | null;
+  /**
+   * The group's picture token (`g:<id>@vN`), null for solo chats and
+   * picture-less groups. The data-URI itself is fetched once per ref from
+   * /api/conversations/:id/avatar — the list only rides this tiny token.
+   */
+  readonly avatarRef: string;
   /**
    * The admin's "Private group" switch. While it is on the phone hides group
    * media, add-members and call recording — and nothing may be forwarded out
@@ -371,6 +383,7 @@ function parsePeer(value: unknown): ConversationPeer | null {
     displayName: text(value.displayName, 120),
     username: text(value.username, 64),
     e2eePublicKey: text(value.e2eePublicKey, 4096),
+    avatarRef: text(value.avatarRef, 128),
     privateProfile: booleanish(value.privateProfile),
   };
 }
@@ -414,6 +427,7 @@ export function parseConversationRow(value: unknown): ConversationRow | null {
     lastMessage: text(value.lastMessage, 32),
     preview: parsePreview(value.lastMessagePreview),
     other: parsePeer(value.other),
+    avatarRef: text(value.avatarRef, 128),
     privateGroup: booleanish(value.privateGroup),
     // Withheld by an older payload means "allowed": the worker's own default is
     // `otherSave ?? true`, and a missing flag must not silently disable Save.
