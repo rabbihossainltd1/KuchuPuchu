@@ -130,6 +130,15 @@ export function isCallMediaFailure(error: unknown): error is CallMediaFailure {
  * Everything the engine needs from the platform. A fake supplies scripted
  * objects; the browser supplies the real APIs.
  */
+/**
+ * A live mix of two audio tracks plus the handle that tears it down. The
+ * browser builds it with a Web Audio graph; a fake returns a scripted track.
+ */
+export type AudioMix = {
+  readonly track: MediaTrackLike;
+  dispose(): void;
+};
+
 export type PeerRuntime = {
   createPeer(config: { iceServers: readonly IceServer[] }): PeerLike;
   /**
@@ -137,8 +146,22 @@ export type PeerRuntime = {
    * `name` the copy table understands — the engine never guesses at it.
    */
   capture(request: CallMediaRequest): Promise<MediaStreamLike>;
-  /** The browser's own screen/tab/window picker. Cancelling throws. */
-  captureDisplay(): Promise<MediaStreamLike>;
+  /**
+   * The browser's own screen/tab/window picker. Cancelling throws.
+   * `withAudio` also asks the capture for a sound track — tab audio on
+   * Chromium, system audio only where the OS allows it, so the returned
+   * stream may carry no audio track at all and the caller must treat that as
+   * "share without sound", never as an error (parity plan: browser/OS-
+   * dependent, not guaranteed).
+   */
+  captureDisplay(withAudio: boolean): Promise<MediaStreamLike>;
+  /**
+   * Fold the shared screen's sound into the call's mic track, the way the
+   * phone mixes before the encoder (owner round 31 item 20): the peer keeps
+   * hearing the sharer's voice AND the shared audio at once. The returned
+   * track goes on the audio sender; `dispose` releases the graph.
+   */
+  mixAudio(primary: MediaTrackLike, secondary: MediaTrackLike): AudioMix;
   listAudioOutputs(): Promise<readonly AudioOutputDevice[]>;
   /**
    * Wrap received tracks in a stream object a renderer can put on ONE media
@@ -325,15 +348,43 @@ export function browserPeerRuntime(sinkElement: () => HTMLMediaElement | null): 
       return wrapStream(stream);
     },
 
-    async captureDisplay() {
+    async captureDisplay(withAudio) {
       const display = navigator.mediaDevices as MediaDevices & {
         getDisplayMedia?: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
       };
       if (typeof display.getDisplayMedia !== "function") {
         throw { name: "NotFoundError", message: "This browser cannot share a screen." };
       }
-      const stream = await display.getDisplayMedia({ video: true, audio: false });
+      // `audio: true` is a request, not a promise: Chromium yields tab sound,
+      // system sound depends on the OS, and a denial arrives as "the stream
+      // simply has no audio track" — which the engine handles as share-without-
+      // sound rather than a failure.
+      const stream = await display.getDisplayMedia({ video: true, audio: withAudio });
       return wrapStream(stream);
+    },
+
+    mixAudio(primary, secondary) {
+      const context = new AudioContext();
+      const destination = context.createMediaStreamDestination();
+      const sources = [primary, secondary]
+        .map(rawTrack)
+        .filter(notNull)
+        .map((track) => context.createMediaStreamSource(new MediaStream([track])));
+      for (const source of sources) source.connect(destination);
+      const mixed = destination.stream.getAudioTracks()[0];
+      return {
+        track: mixed ? wrapTrack(mixed) : primary,
+        dispose() {
+          for (const source of sources) {
+            try {
+              source.disconnect();
+            } catch {
+              // Already disconnected; nothing to release.
+            }
+          }
+          void context.close().catch(() => undefined);
+        },
+      };
     },
 
     createStream(tracks) {

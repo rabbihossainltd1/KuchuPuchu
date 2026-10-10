@@ -253,6 +253,93 @@ test("a screen share that cannot be granted is reported and changes nothing", as
   await expect(status(caller)).toHaveText(clock);
 });
 
+/** Install a picker that GRANTS: a painted canvas stands in for the shared
+    screen. `withAudioScript` additionally mixes an oscillator track in, the
+    way a tab share hands over sound. */
+const grantDisplay = async (page: Page, withAudioScript: boolean) => {
+  await page.evaluate((withAudio) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 320;
+    canvas.height = 180;
+    const paint = canvas.getContext("2d");
+    window.setInterval(() => {
+      if (!paint) return;
+      paint.fillStyle = `hsl(${Math.floor(Date.now() / 40) % 360} 70% 50%)`;
+      paint.fillRect(0, 0, canvas.width, canvas.height);
+    }, 200);
+    const stream = canvas.captureStream(15);
+    if (withAudio) {
+      const context = new AudioContext();
+      const destination = context.createMediaStreamDestination();
+      const oscillator = context.createOscillator();
+      oscillator.connect(destination);
+      oscillator.start();
+      for (const track of destination.stream.getAudioTracks()) stream.addTrack(track);
+    }
+    (navigator.mediaDevices as { getDisplayMedia?: unknown }).getDisplayMedia = () =>
+      Promise.resolve(stream);
+  }, withAudioScript);
+};
+
+test("a granted screen share reaches the peer, expands fullscreen, and ends cleanly", async () => {
+  await ringPeer("Voice");
+  await connect();
+  await grantDisplay(caller, false);
+
+  await control(caller, "Share screen").click();
+  await expect(control(caller, "Stop share")).toBeVisible();
+  expect(worker.mediaPosts.some((post) => post.screen === true)).toBe(true);
+
+  // The peer hears about the share the way the phone does: the line, the 16:9
+  // preview card — and the call is STILL a voice call (round 31 item 19).
+  await expect(stage(callee).getByText("They are sharing their screen")).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(stage(callee).locator(".call-stage__share-preview")).toBeVisible({
+    timeout: 20_000,
+  });
+  expect(worker.calls.get(CALL_ID)?.kind).toBe("AUDIO");
+
+  // The preview card expands edge-to-edge, and Escape collapses it — the
+  // phone's ShareFullscreen and its Back gesture.
+  await stage(callee).getByRole("button", { name: "View their screen fullscreen" }).click();
+  await expect(callee.locator(".call-share-full")).toBeVisible();
+  await callee.keyboard.press("Escape");
+  await expect(callee.locator(".call-share-full")).toHaveCount(0);
+
+  // Stopping the share tells the peer at once; the preview goes away.
+  await control(caller, "Stop share").click();
+  await expect(control(caller, "Share screen")).toBeVisible();
+  await expect.poll(() => worker.mediaPosts.some((post) => post.screen === false)).toBe(true);
+  await expect(stage(callee).locator(".call-stage__share-preview")).toHaveCount(0, {
+    timeout: 20_000,
+  });
+  await expect(status(caller)).toHaveText(clock);
+});
+
+test("the share-audio preference sends the shared sound when the capture grants it", async () => {
+  await ringPeer("Voice");
+  await connect();
+
+  // The preference is device-local: it must be set BEFORE the share starts.
+  await caller.evaluate(() => window.localStorage.setItem("kp.calls.share_audio", "1"));
+  await grantDisplay(caller, true);
+
+  await control(caller, "Share screen").click();
+  await expect(control(caller, "Stop share")).toBeVisible();
+
+  // The status line says what the phone's foreground title says while a share
+  // is up — and the share still reaches the peer, the call stays connected.
+  await expect(status(caller)).toHaveText("You are sharing your screen");
+  await expect(stage(callee).locator(".call-stage__share-preview")).toBeVisible({
+    timeout: 20_000,
+  });
+
+  await control(caller, "Stop share").click();
+  await expect(control(caller, "Share screen")).toBeVisible();
+  await expect(status(caller)).toHaveText(clock);
+});
+
 test("the audio-output picker opens into labelled options on a connected call", async () => {
   await ringPeer("Voice");
   await connect();

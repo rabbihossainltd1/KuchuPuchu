@@ -35,6 +35,8 @@ export type IconName =
   | "videoOff"
   | "micOff"
   | "screenShare"
+  | "fullscreen"
+  | "fullscreenExit"
   | "callIn"
   | "callOut"
   | "speaker";
@@ -218,6 +220,22 @@ const shapes: Record<IconName, ReactNode> = {
       <path d="M3.5 5.5h17v10.5h-17z" />
       <path d="M8.5 19.5h7M12 16v3.5" />
       <path d="M12 8.5v5M9.8 10.7 12 8.5l2.2 2.2" />
+    </>
+  ),
+  fullscreen: (
+    <>
+      <path d="M4 9V4h5" />
+      <path d="M15 4h5v5" />
+      <path d="M20 15v5h-5" />
+      <path d="M9 20H4v-5" />
+    </>
+  ),
+  fullscreenExit: (
+    <>
+      <path d="M9 4v5H4" />
+      <path d="M20 9h-5V4" />
+      <path d="M15 20v-5h5" />
+      <path d="M4 15h5v5" />
     </>
   ),
   callIn: (

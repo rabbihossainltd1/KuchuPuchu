@@ -59,6 +59,7 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 | **O** WS socket tickets (plan §7.2) | ✅ merged | PR #96 → `main` @ `892714df4831ef3bcae0554292a720ce89254159` |
 | **P** production web-push on | ✅ merged | PR #97 → `main` @ `433adb652d44197d848127b105ed5b240a485bda` |
 | **Q** production calls on (owner-approved) | ✅ merged | PR #98 → `main` @ `1373065cfde46545fcbcfb30f1d19a8381a3f7eb` |
+| **R** screen share complete (fullscreen + share audio) | ✅ built | এই branch; নিচের হিসাব |
 
 **Slice D-তে যা নামলো** (Worker বা Android-এ একটি লাইনও বদলায়নি):
 
@@ -240,6 +241,26 @@ Owner-approved: the 1:1 WebRTC surface (slice G, 45-test suite) goes live.
   parity.
 - Rollback: one-line recipe revert; the phone and every Worker route are
   untouched either way.
+
+## Slice R — Screen share complete ✅
+
+The last two gaps of the parity plan's screen-share row, closed:
+
+- Peer-share FULLSCREEN — Android's `ShareFullscreen`: the preview card on a
+  voice call expands edge-to-edge (black stage, contained picture, name +
+  clock, one exit control, Escape collapses). Engine state `shareFull` drops
+  itself wherever the share ends (media frame, poll flag, teardown).
+- SHARE AUDIO preference — the phone's "Share Audio Via Screen Share" toggle:
+  device-local (`kp.calls.share_audio`, Calls settings card, calls-flag gated),
+  read at share time. When the capture grants an audio track, the engine mixes
+  mic + share sound through a Web Audio graph and puts the mix on the audio
+  sender (`replaceTrack`, no renegotiation); stopping restores the mic and
+  disposes the mix. Tab sound on Chromium; system sound OS-dependent and may
+  arrive as "no audio track" = share without sound, never an error.
+- Tests: case 62 gains the mix/fullscreen state machine (contract), call-live
+  e2e gains the granted-share flow — real WebRTC between two pages, peer
+  preview, fullscreen + Escape, share-audio with an oscillator track.
+- Docs: web-calls.md screen-share section, parity-plan row updated.
 
 ## কাজের নিয়ম (আগের বার যে ভুলটা হয়েছিল)
 

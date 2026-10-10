@@ -102,6 +102,7 @@ import {
 import { callPlacement } from "../../web/src/calls/callGate.ts";
 import { callPath, callsApi } from "../../web/src/calls/callsApi.ts";
 import { INITIAL_CALL_STATE, createCallEngine } from "../../web/src/calls/callEngine.ts";
+import { SHARE_AUDIO_STORE_KEY } from "../../web/src/calls/shareAudioPref.ts";
 import { launchCall, registerCallLauncher } from "../../web/src/calls/callBus.ts";
 
 const lines = [];
@@ -1593,10 +1594,18 @@ function makeRuntime(log, options = {}) {
       if (request.video) tracks.push(makeTrack("video"));
       return makeStream(tracks);
     },
-    async captureDisplay() {
-      log.push("captureDisplay");
+    async captureDisplay(withAudio) {
+      log.push(`captureDisplay:${withAudio ? "audio" : "-"}`);
       if (options.displayError) throw options.displayError;
-      return makeStream([makeTrack("video")]);
+      const tracks = [makeTrack("video")];
+      // A capture only yields sound when it was ASKED for and this fake is
+      // scripted to grant it — the browser may deny system sound silently.
+      if (withAudio && options.shareAudio) tracks.push(makeTrack("audio"));
+      return makeStream(tracks);
+    },
+    mixAudio(primary, secondary) {
+      log.push("mixAudio");
+      return { track: makeTrack("audio"), dispose: () => log.push("mixAudioDispose") };
     },
     createStream(tracks) {
       log.push(`createStream:${tracks.length}`);
@@ -1861,7 +1870,14 @@ const flush = () => new Promise((resolvePromise) => setTimeout(resolvePromise, 0
   transport.calls.length = 0;
   await engine.toggleShare();
   await flush();
-  check("a screen share captures through the browser's own picker", log.includes("captureDisplay"));
+  check(
+    "a screen share captures through the browser's own picker",
+    log.includes("captureDisplay:-"),
+  );
+  check(
+    "without the sound preference the picker is not asked for audio and nothing mixes",
+    !log.includes("captureDisplay:audio") && !log.includes("mixAudio"),
+  );
   check(
     "a screen share never changes the call's kind",
     transport.calls.some((entry) => entry.includes("media:") && entry.endsWith(":-:true")) &&
@@ -1887,6 +1903,107 @@ const flush = () => new Promise((resolvePromise) => setTimeout(resolvePromise, 0
     "the call socket is closed",
     log.some((entry) => entry.startsWith("closeSocket:/ws/call/")),
   );
+  engine.dispose();
+}
+
+{
+  /* ------------------- share sound + peer-share fullscreen (slice R) ----- */
+  const harness = makeHarness({ runtime: { shareAudio: true } });
+  const { engine, log, transport, store } = harness;
+  engine.begin();
+  await engine.start({ id: PEER, name: "Rina", avatar: "", online: true }, "AUDIO");
+  await flush();
+  const callId = engine.state().callId;
+  harness.script.active = [
+    parseCallRow(
+      row({
+        id: callId,
+        status: "ACTIVE",
+        answerSdp: "v=0 answer\na=fingerprint:sha-256 " + "bb".repeat(32),
+        startedAt: "2026-10-05T06:30:05.000Z",
+      }),
+    ),
+  ];
+  await engine.tick();
+  await flush();
+
+  /* The preference is OFF: a share asks for picture only. */
+  await engine.toggleShare();
+  await flush();
+  check(
+    "an unanswered preference keeps the share silent",
+    log.includes("captureDisplay:-") && !log.includes("mixAudio"),
+  );
+  await engine.toggleShare();
+  await flush();
+
+  /* The preference is ON and the capture grants sound: the mix goes on the
+     audio sender, so the peer hears voice AND screen at once. */
+  store.set(SHARE_AUDIO_STORE_KEY, "1");
+  await engine.toggleShare();
+  await flush();
+  check("the preference asks the picker for sound", log.includes("captureDisplay:audio"));
+  check(
+    "the share's sound is folded into the call audio with replaceTrack",
+    log.includes("mixAudio") && log.filter((entry) => entry === "replaceTrack:audio").length === 1,
+  );
+  check("the share itself is still announced", engine.state().sharing === true);
+
+  /* Stopping restores the mic alone and tears the mix down. */
+  await engine.toggleShare();
+  await flush();
+  check(
+    "stopping the sound share puts the mic back and disposes the mix",
+    engine.state().sharing === false &&
+      log.includes("mixAudioDispose") &&
+      log.filter((entry) => entry === "replaceTrack:audio").length === 2,
+  );
+
+  /* The peer's shared screen, edge-to-edge — Android's `shareFull`. */
+  check(
+    "fullscreen refuses while nobody is sharing",
+    (engine.openShareFullscreen(), engine.state().shareFull === false),
+  );
+  harness.script.active = [
+    parseCallRow(
+      row({
+        id: callId,
+        status: "ACTIVE",
+        answerSdp: "v=0 answer\na=fingerprint:sha-256 " + "bb".repeat(32),
+        startedAt: "2026-10-05T06:30:05.000Z",
+        media: { [PEER]: { camera: false, screen: true } },
+      }),
+    ),
+  ];
+  await engine.tick();
+  await flush();
+  check("the poll's media flag raises peerScreen", engine.state().peerScreen === true);
+  engine.openShareFullscreen();
+  check("the peer's share expands fullscreen on request", engine.state().shareFull === true);
+  engine.exitShareFullscreen();
+  check("the exit control collapses it", engine.state().shareFull === false);
+  engine.openShareFullscreen();
+  harness.script.active = [
+    parseCallRow(
+      row({
+        id: callId,
+        status: "ACTIVE",
+        answerSdp: "v=0 answer\na=fingerprint:sha-256 " + "bb".repeat(32),
+        startedAt: "2026-10-05T06:30:05.000Z",
+        media: { [PEER]: { camera: false, screen: false } },
+      }),
+    ),
+  ];
+  await engine.tick();
+  await flush();
+  check(
+    "a share that ends drops the fullscreen view with it",
+    engine.state().peerScreen === false && engine.state().shareFull === false,
+  );
+
+  await engine.hangup();
+  await flush();
+  check("the sound-share call tears down clean", engine.state().phase === "idle");
   engine.dispose();
 }
 

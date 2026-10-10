@@ -193,6 +193,9 @@ export const CALL_COPY = {
   cameraOff: "Camera off",
   shareScreen: "Share screen",
   stopShare: "Stop share",
+  /* The peer's shared screen, edge-to-edge — Android's ShareFullscreen. */
+  shareExpand: "View their screen fullscreen",
+  shareCollapse: "Exit fullscreen",
   endCall: "End call",
   cancelCall: "Cancel",
   audioOutput: "Audio output",
