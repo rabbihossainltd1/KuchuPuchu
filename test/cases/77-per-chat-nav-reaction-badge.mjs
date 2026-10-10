@@ -78,9 +78,10 @@ check(
     !reactions.includes(".border("),
 );
 check(
-  "bottom-nav hold enlarges only the held item smoothly and other items animate into place",
-  navPill.includes("HomeNavOrderPolicy.defaultOrder.forEach { itemId ->") &&
-    navPill.includes("val animatedSlotOffsetPx by animateFloatAsState(") &&
+  "bottom-nav hold enlarges only the held item; stable-key siblings animate into actual reordered slots",
+  navPill.includes("items(items = navOrder, key = { it })") &&
+    navPill.includes("val isMoving = draggingId == itemId || settlingId == itemId") &&
+    navPill.includes("Modifier.animateItem(") &&
     navPill.includes("reorderOffsetPx = itemOffsetPx") &&
     navPill.includes("settlingOffset.animateTo(") &&
     nav.includes("targetValue = if (isDragging) 1.06f else 1f") &&

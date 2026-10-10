@@ -359,9 +359,14 @@ check(
   engineSource.includes("withTimeoutOrNull(4_500)") && CALL_ACTIVE_TIMEOUT_MS === 4_500,
 );
 check(
-  "three failed reads in a row say Reconnecting…",
-  engineSource.includes("netFailStreak == 3 && active != null") &&
-    engineSource.includes('notify("Reconnecting…")'),
+  "three failed reads pause an established call clock and the reconnect label replaces the timer",
+  engineSource.includes("netFailStreak >= 3") &&
+    engineSource.includes("beginReconnecting()") &&
+    !engineSource.includes('notify("Reconnecting…")') &&
+    readFileSync(
+      resolve("native-android/app/src/main/java/app/kuchupuchu/android/CallScreens.kt"),
+      "utf8",
+    ).includes('call.reconnecting -> "Reconnecting…"'),
 );
 check(
   "an outgoing ring is given up after a minute",
@@ -413,8 +418,10 @@ check(
 );
 
 check(
-  "three failed reads is the streak that says Reconnecting…, not one",
-  engineSource.includes("netFailStreak == 3") &&
+  "three failed reads begin recovery without an extra Reconnecting toast",
+  engineSource.includes("netFailStreak >= 3") &&
+    engineSource.includes("beginReconnecting()") &&
+    !engineSource.includes('notify("Reconnecting…")') &&
     CALL_NET_FAIL_STREAK === 3 &&
     CALL_RECONNECTING_COPY === "Reconnecting…",
 );
@@ -462,9 +469,8 @@ check(
     "override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?)",
   ) &&
     engineSource.includes("fun markConnected()") &&
-    engineSource.includes(
-      "active = cur.copy(connecting = false, startedAt = System.currentTimeMillis())",
-    ) &&
+    engineSource.includes("active = connectedCallState(cur)") &&
+    engineSource.includes("private fun connectedCallState(cur: CallUi): CallUi") &&
     webEngine.includes("const markConnected = () => {") &&
     webEngine.includes("connectedAt: clock.now()"),
 );
@@ -472,7 +478,8 @@ check(
   "ICE failure gets exactly one relay-first rescue",
   engineSource.includes("if (!relayRetryUsed && pc != null)") &&
     engineSource.includes("relayRetryUsed = true") &&
-    engineSource.includes('notify("Network is limited — connecting through a relay…")') &&
+    engineSource.includes("beginReconnecting()") &&
+    !engineSource.includes('notify("Network is limited — connecting through a relay…")') &&
     webEngine.includes("if (!relayRetryUsed) {"),
 );
 check(
