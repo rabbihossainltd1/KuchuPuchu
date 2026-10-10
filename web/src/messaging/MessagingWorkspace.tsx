@@ -53,6 +53,7 @@ export function MessagingWorkspace({ route, navigate, isOnline }: Props) {
         selectedId={selected?.id ?? ""}
         navigate={navigate}
         isOnline={isOnline}
+        api={token ? api : null}
       />
       <ChatPane
         controller={selected ? { ...controller, selected } : controller}
@@ -62,6 +63,7 @@ export function MessagingWorkspace({ route, navigate, isOnline }: Props) {
         identityError={identity.error}
         identityNotice={identity.notice}
         onUnlock={identity.unlock}
+        onReloadIdentity={identity.load}
         onDismissIdentityNotice={identity.dismissNotice}
         meId={meId}
         meName={meName}

@@ -82,11 +82,11 @@ import {
   type AttachmentRejection,
   type PendingAttachment,
 } from "./attachments";
+import { ConversationAvatar } from "./Avatar";
 import {
   MESSAGE_BODY_LIMIT,
   TICK_LABELS,
   clockTime,
-  conversationInitial,
   conversationPeerId,
   conversationTitle,
   foldAlbums,
@@ -145,6 +145,7 @@ type Props = {
   identityError: string;
   identityNotice: string;
   onUnlock: (passphrase: string) => Promise<boolean>;
+  onReloadIdentity: () => Promise<void> | void;
   onDismissIdentityNotice: () => void;
   meId: string;
   meName: string;
@@ -166,6 +167,7 @@ export function ChatPane({
   identityError,
   identityNotice,
   onUnlock,
+  onReloadIdentity,
   onDismissIdentityNotice,
   meId,
   meName,
@@ -388,7 +390,17 @@ export function ChatPane({
     if (!list) return;
     const distance = list.scrollHeight - list.scrollTop - list.clientHeight;
     setStickToBottom(distance < 80);
-  }, []);
+    // The phone pulls the next page as the finger nears the top; the web does
+    // the same instead of making the reader hunt for the Load-older button.
+    if (
+      list.scrollTop < 48 &&
+      controller.hasMore &&
+      !controller.loadingOlder &&
+      controller.messagesStatus === "ready"
+    ) {
+      void controller.loadOlder();
+    }
+  }, [controller]);
 
   const copyText = useCallback(
     async (value: string) => {
@@ -664,9 +676,11 @@ export function ChatPane({
           >
             <Icon name="arrow" size={19} />
           </RouteLink>
-          <div className="conversation-avatar" aria-hidden="true">
-            {conversationInitial(conversation)}
-          </div>
+          <ConversationAvatar
+            api={api}
+            conversation={conversation}
+            className="conversation-avatar"
+          />
           <div className="conversation-header__copy">
             <h2 id="conversation-heading">{conversationTitle(conversation)}</h2>
             <p>
@@ -832,6 +846,23 @@ export function ChatPane({
             </p>
           )}
         </form>
+      )}
+
+      {identityStatus === "nokeys" && (
+        <div className="e2ee-bar e2ee-bar--locked" role="status">
+          <Icon name="lock" size={16} />
+          <div className="e2ee-bar__copy">
+            <strong>Secure chat keys are not on this browser</strong>
+            <span>
+              Your messages are sealed to your phone&apos;s key, so this browser can never mint its
+              own. On the phone: Settings → Message key backup → create a backup; then press Check
+              here and unlock with the passphrase. Sealed bodies stay sealed until then.
+            </span>
+          </div>
+          <button type="button" className="primary-button" onClick={() => void onReloadIdentity()}>
+            Check for backup
+          </button>
+        </div>
       )}
 
       {!controller.durable && (
@@ -1447,92 +1478,98 @@ export function ChatPane({
             <VoiceRecorderBar controller={recorder} onAnnounce={controller.announce} />
           ) : (
             <div className="composer__row">
-              <div className="composer__attach">
-                <button
-                  type="button"
-                  className="icon-button"
-                  aria-label="Attach a photo, video or document"
-                  aria-expanded={attachOpen}
-                  aria-haspopup="dialog"
-                  disabled={oneWay}
-                  onClick={() => {
-                    setStickerOpen(false);
-                    setAttachOpen((value) => !value);
-                  }}
-                >
-                  <Icon name="plus" size={20} />
-                </button>
-                <AttachMenu
-                  open={attachOpen && !oneWay}
-                  onClose={() => setAttachOpen(false)}
-                  onFiles={(files, source, asDocument, viewOnce) =>
-                    void onPickFiles(files, source, asDocument, viewOnce)
-                  }
-                  disabled={oneWay}
-                  onAnnounce={controller.announce}
-                />
-              </div>
+              {/* The phone's composer pill: sticker glyph LEFT inside the
+                  pill, the field mid, attach RIGHT inside the pill; the
+                  mic / send circle rides OUTSIDE the pill, right of it. */}
+              <div className="composer__pill">
+                <div className="composer__attach">
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label="Send a sticker"
+                    aria-expanded={stickerOpen}
+                    disabled={oneWay}
+                    onClick={() => {
+                      setAttachOpen(false);
+                      setStickerOpen((value) => !value);
+                    }}
+                  >
+                    <Icon name="mood" size={20} />
+                  </button>
+                  {stickerOpen && !oneWay && (
+                    <Suspense fallback={<p className="attach-loading">Loading stickers…</p>}>
+                      <StickerPicker
+                        onPick={(glyph) => {
+                          setStickerOpen(false);
+                          void controller.sendSticker(glyph);
+                        }}
+                        onClose={() => setStickerOpen(false)}
+                        onAnnounce={controller.announce}
+                      />
+                    </Suspense>
+                  )}
+                </div>
 
-              <div className="composer__attach">
-                <button
-                  type="button"
-                  className="icon-button"
-                  aria-label="Send a sticker"
-                  aria-expanded={stickerOpen}
-                  disabled={oneWay}
-                  onClick={() => {
-                    setAttachOpen(false);
-                    setStickerOpen((value) => !value);
-                  }}
-                >
-                  <span aria-hidden="true">🙂</span>
-                </button>
-                {stickerOpen && !oneWay && (
-                  <Suspense fallback={<p className="attach-loading">Loading stickers…</p>}>
-                    <StickerPicker
-                      onPick={(glyph) => {
-                        setStickerOpen(false);
-                        void controller.sendSticker(glyph);
-                      }}
-                      onClose={() => setStickerOpen(false)}
-                      onAnnounce={controller.announce}
-                    />
-                  </Suspense>
-                )}
-              </div>
-
-              <label className="sr-only" htmlFor={composerId}>
-                {oneWay
-                  ? "This account does not accept replies"
-                  : pending.length > 0
-                    ? "Caption for the attached files"
-                    : "Message text"}
-              </label>
-              <textarea
-                id={composerId}
-                ref={composerRef}
-                className="composer__input"
-                rows={1}
-                value={isEditing ? editText : controller.draft}
-                disabled={oneWay}
-                placeholder={
-                  oneWay
-                    ? "Notification account — replies are not accepted"
+                <label className="sr-only" htmlFor={composerId}>
+                  {oneWay
+                    ? "This account does not accept replies"
                     : pending.length > 0
-                      ? "Add a caption… (optional, sealed in a personal chat)"
-                      : "Type a message. Enter sends, Shift+Enter adds a line."
-                }
-                maxLength={MESSAGE_BODY_LIMIT}
-                onChange={(event) => {
-                  if (isEditing) {
-                    setEditText(event.target.value);
-                    return;
+                      ? "Caption for the attached files"
+                      : "Message text"}
+                </label>
+                <textarea
+                  id={composerId}
+                  ref={composerRef}
+                  className="composer__input"
+                  rows={1}
+                  value={isEditing ? editText : controller.draft}
+                  disabled={oneWay}
+                  placeholder={
+                    oneWay
+                      ? "Notification account — replies are not accepted"
+                      : pending.length > 0
+                        ? "Add a caption… (optional, sealed in a personal chat)"
+                        : "Message"
                   }
-                  controller.setDraft(event.target.value);
-                  controller.composerChanged();
-                }}
-                onKeyDown={onComposerKeyDown}
-              />
+                  title="Enter sends, Shift+Enter adds a line"
+                  maxLength={MESSAGE_BODY_LIMIT}
+                  onChange={(event) => {
+                    if (isEditing) {
+                      setEditText(event.target.value);
+                      return;
+                    }
+                    controller.setDraft(event.target.value);
+                    controller.composerChanged();
+                  }}
+                  onKeyDown={onComposerKeyDown}
+                />
+
+                <div className="composer__attach">
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label="Attach a photo, video or document"
+                    aria-expanded={attachOpen}
+                    aria-haspopup="dialog"
+                    disabled={oneWay}
+                    onClick={() => {
+                      setStickerOpen(false);
+                      setAttachOpen((value) => !value);
+                    }}
+                  >
+                    <Icon name="attach" size={20} />
+                  </button>
+                  <AttachMenu
+                    open={attachOpen && !oneWay}
+                    onClose={() => setAttachOpen(false)}
+                    onFiles={(files, source, asDocument, viewOnce) =>
+                      void onPickFiles(files, source, asDocument, viewOnce)
+                    }
+                    disabled={oneWay}
+                    onAnnounce={controller.announce}
+                  />
+                </div>
+              </div>
 
               {isEditing ? (
                 <button
@@ -1558,7 +1595,7 @@ export function ChatPane({
                         : "Send message"
                   }
                 >
-                  <Icon name="message" size={18} />
+                  <Icon name="send" size={18} />
                 </button>
               ) : (
                 /* The mic/send swap the phone has: with nothing typed and nothing
@@ -1714,6 +1751,7 @@ export function ChatPane({
             <ForwardDialog
               conversations={controller.conversations}
               count={forwardFor.length}
+              api={api}
               onClose={() => setForwardFor(null)}
               onSend={(targets) => {
                 const items = forwardFor;

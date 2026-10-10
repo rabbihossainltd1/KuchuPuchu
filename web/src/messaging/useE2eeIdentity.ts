@@ -21,7 +21,7 @@ import {
 } from "./e2ee";
 import { messagingApi } from "./messagingApi";
 
-export type IdentityStatus = "idle" | "loading" | "ready" | "locked" | "unavailable";
+export type IdentityStatus = "idle" | "loading" | "ready" | "locked" | "nokeys" | "unavailable";
 
 export type E2eeIdentityState = {
   identity: E2eeIdentity | null;
@@ -98,6 +98,24 @@ export function useE2eeIdentity(
       setStatus("idle");
       return;
     }
+    // A stored keypair that disagrees with the account's published public key
+    // is a minted fork (an older build created it before the no-mint rule).
+    // It can never open what peers sealed to the real key, so drop it and let
+    // the backup flow below adopt the account's actual identity.
+    if (
+      identityRef.current &&
+      isValidPublicKey(serverPublicKey) &&
+      identityRef.current.u !== serverPublicKey
+    ) {
+      identityRef.current = null;
+      setIdentity(null);
+      try {
+        window.localStorage.removeItem(E2EE_STORAGE_KEY);
+      } catch {
+        // Storage already gone; nothing to drop.
+      }
+    }
+
     if (identityRef.current) {
       setStatus("ready");
       return;
@@ -136,12 +154,24 @@ export function useE2eeIdentity(
       return;
     }
 
-    // No backup anywhere: keep the minted private identity in browser storage;
-    // publish only its public half. KP2 backup requires explicit user consent.
+    // No backup anywhere. If the account already has a published key (the
+    // phone minted it), minting a second keypair here would strand every
+    // envelope the phone sealed — received bodies could never open on this
+    // browser, and this is exactly the "message bodies read wrong" failure
+    // the live round reported. Stand down and point at the phone's backup;
+    // "Check for backup" re-runs this once the phone uploads one.
+    if (isValidPublicKey(serverPublicKey)) {
+      setStatus("nokeys");
+      return;
+    }
+
+    // A keyless account (no phone key published yet) may mint: keep the minted
+    // private identity in browser storage; publish only its public half. KP2
+    // backup requires explicit user consent.
     const minted = await generateIdentity();
     adopt(minted);
     await publishIdentity(minted);
-  }, [adopt, api, enabled, publishIdentity]);
+  }, [adopt, api, enabled, publishIdentity, serverPublicKey]);
 
   useEffect(() => {
     void load();

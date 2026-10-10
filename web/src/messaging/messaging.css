@@ -88,6 +88,8 @@
   border-radius: 50%;
   display: grid;
   place-items: center;
+  overflow: hidden;
+  flex: 0 0 auto;
   background: linear-gradient(145deg, var(--kp-blue), #1d4ed8);
   color: #fff;
   font-weight: 600;
@@ -679,11 +681,26 @@
   white-space: nowrap;
 }
 
+/* The phone's composer: one pill — sticker glyph LEFT, field mid, attach
+   RIGHT inside it — and the mic / send circle OUTSIDE the pill, right of
+   it. The row is a plain flex line so the pill takes the spare width and
+   the circle never drops to a second line. */
 .composer__row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  display: flex;
   gap: 10px;
-  align-items: end;
+  align-items: flex-end;
+}
+
+.composer__pill {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+  align-items: flex-end;
+  border: 1px solid var(--kp-line);
+  border-radius: 22px;
+  padding: 3px 6px;
+  background: var(--kp-card);
 }
 
 .composer__input {
@@ -691,13 +708,15 @@
   font-size: 0.93rem;
   line-height: 1.5;
   color: var(--kp-ink);
-  background: var(--kp-card);
-  border: 1px solid var(--kp-line);
-  border-radius: 14px;
-  padding: 10px 12px;
-  resize: vertical;
-  min-height: 42px;
-  max-height: 180px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 9px 6px;
+  resize: none;
+  min-height: 40px;
+  max-height: 120px;
+  flex: 1;
+  min-width: 0;
 }
 
 .composer__input:focus-visible {
@@ -2492,6 +2511,7 @@ button.attachment__expand {
   flex: 0 0 auto;
   display: grid;
   place-items: center;
+  overflow: hidden;
   width: 40px;
   height: 40px;
   border-radius: 50%;

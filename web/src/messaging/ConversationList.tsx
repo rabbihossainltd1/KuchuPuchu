@@ -7,12 +7,13 @@
  */
 
 import { useId, useMemo, useState } from "react";
+import type { ApiClient } from "../auth/authApi";
 import { Icon } from "../icons";
 import { RouteLink } from "../RouteLink";
 import type { Navigate } from "../useBrowserRouter";
+import { ConversationAvatar } from "./Avatar";
 import {
   clockTime,
-  conversationInitial,
   conversationPreviewText,
   conversationTitle,
   isOneWayConversation,
@@ -25,9 +26,10 @@ type Props = {
   selectedId: string;
   navigate: Navigate;
   isOnline: boolean;
+  api: ApiClient | null;
 };
 
-export function ConversationList({ controller, selectedId, navigate, isOnline }: Props) {
+export function ConversationList({ controller, selectedId, navigate, isOnline, api }: Props) {
   const filterId = useId();
   const [query, setQuery] = useState("");
 
@@ -121,9 +123,11 @@ export function ConversationList({ controller, selectedId, navigate, isOnline }:
                     aria-current={isSelected ? "true" : undefined}
                     aria-label={`${conversationTitle(row)}${unreadLabel(row)}`}
                   >
-                    <span className="conversation-row__avatar" aria-hidden="true">
-                      {conversationInitial(row)}
-                    </span>
+                    <ConversationAvatar
+                      api={api}
+                      conversation={row}
+                      className="conversation-row__avatar"
+                    />
                     <span className="conversation-row__body">
                       <span className="conversation-row__line">
                         <span className="conversation-row__name">{conversationTitle(row)}</span>
