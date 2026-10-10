@@ -1068,3 +1068,4 @@ Owner-reported live bugs (one batch, one push per owner instruction): (1) profil
 - SCREEN SHARE phone→web: transport + display path audited end-to-end (postMedia screen:true at CallEngine.kt:1885 confirmed; worker /api/calls/:id/media broadcasts; engine media frame + polling both set peerScreen; VideoSurface already muted/autoPlay/playsInline; web↔web share e2e green). No web-side defect found; live retest asked after merge.
 - SNAPSHOTS: themeMatrix chat-light-cream regenerated (intentional composer/icon diff); axe part unchanged.
 - CI: full npm run ci green (contract 82 cases + all browser suites + lint/secret-scan/android-validate).
+- MERGED as PR #100 (merge into main); live sw BUILD_ID rotated to 15acc67cb7ca4bd5. Owner asked to retest phone→web screen share after this deploy.
