@@ -59,7 +59,7 @@ plan-এর নিজের gate মেনে চলা হচ্ছে: _"do no
 | **O** WS socket tickets (plan §7.2) | ✅ merged | PR #96 → `main` @ `892714df4831ef3bcae0554292a720ce89254159` |
 | **P** production web-push on | ✅ merged | PR #97 → `main` @ `433adb652d44197d848127b105ed5b240a485bda` |
 | **Q** production calls on (owner-approved) | ✅ merged | PR #98 → `main` @ `1373065cfde46545fcbcfb30f1d19a8381a3f7eb` |
-| **R** screen share complete (fullscreen + share audio) | ✅ built | এই branch; নিচের হিসাব |
+| **R** screen share complete (fullscreen + share audio) | ✅ merged | PR #99 → `main` @ `420907c27fd69edc209eda94617d6941556854b4` |
 
 **Slice D-তে যা নামলো** (Worker বা Android-এ একটি লাইনও বদলায়নি):
 
