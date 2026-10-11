@@ -4165,6 +4165,61 @@ button.attachment__expand {
 }
 
 /* Slice AP — pin + archive (phone ScreenStore flags on the web). */
+.archive-pull-indicator {
+  position: absolute;
+  z-index: 8;
+  top: 14px;
+  left: 50%;
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  transform: translateX(-50%);
+  color: var(--kp-accent-deep);
+  pointer-events: none;
+}
+
+.archive-pull-indicator__ring {
+  position: absolute;
+  inset: 0;
+  width: 46px;
+  height: 46px;
+  overflow: visible;
+  transform: rotate(-90deg);
+}
+
+.archive-pull-indicator__track,
+.archive-pull-indicator__progress {
+  fill: none;
+  stroke-width: 3;
+}
+
+.archive-pull-indicator__track {
+  stroke: color-mix(in srgb, var(--kp-accent-deep) 18%, transparent);
+}
+
+.archive-pull-indicator__progress {
+  stroke: var(--kp-accent);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 50ms linear;
+}
+
+.archive-pull-indicator.is-opening {
+  animation: archive-pull-open-pop 450ms cubic-bezier(0.2, 0.85, 0.3, 1.2) both;
+}
+
+@keyframes archive-pull-open-pop {
+  0% {
+    transform: translateX(-50%) scale(0.35);
+  }
+  75% {
+    transform: translateX(-50%) scale(1.08);
+  }
+  100% {
+    transform: translateX(-50%) scale(1);
+  }
+}
+
 .archive-entry {
   display: flex;
   align-items: center;

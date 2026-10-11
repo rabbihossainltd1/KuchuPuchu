@@ -6,13 +6,14 @@
  * access. The filter only narrows chats already loaded, and says so.
  */
 
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ApiClient } from "../auth/authApi";
 import { Icon } from "../icons";
 import { RouteLink } from "../RouteLink";
 import type { Navigate } from "../useBrowserRouter";
 import { ArchivePane } from "./ArchivePane";
 import { ConversationAvatar } from "./Avatar";
+import { useArchivePullOpen } from "./useArchivePullOpen";
 import { setArchivedFlag, setPinnedFlag, useConvFlags } from "./convFlags";
 import { DeleteChatsDialog } from "./DeleteChatsDialog";
 import { GroupCreatePane } from "./GroupCreatePane";
@@ -27,6 +28,8 @@ import {
   type ConversationRow,
 } from "./protocol";
 import type { MessagingController } from "./useMessaging";
+
+const ARCHIVE_PULL_RING = 2 * Math.PI * 21;
 
 type Props = {
   controller: MessagingController;
@@ -51,6 +54,24 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
   const [createWith, setCreateWith] = useState<readonly string[] | null>(null);
   const [busy, setBusy] = useState(false);
   const flags = useConvFlags();
+  const listPaneRef = useRef<HTMLElement | null>(null);
+  const listContentRef = useRef<HTMLDivElement | null>(null);
+  const archivePullEnabled =
+    !archiveOpen &&
+    !menuOpen &&
+    !createOpen &&
+    !createWith &&
+    !rowMenu &&
+    !selecting &&
+    !sheetOpen &&
+    !muteOpen &&
+    !deleteOpen;
+  const archivePull = useArchivePullOpen({
+    hostRef: listPaneRef,
+    listRef: listContentRef,
+    enabled: archivePullEnabled,
+    onOpen: () => setArchiveOpen(true),
+  });
 
   const selRows = controller.conversations.filter((row) => selIds.includes(row.id));
   const allPinned = selRows.length > 0 && selRows.every((row) => flags.pinned.includes(row.id));
@@ -129,8 +150,10 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
 
   return (
     <section
+      ref={listPaneRef}
       className={`list-pane${selectedId ? " is-mobile-hidden" : ""}`}
       aria-labelledby="list-heading"
+      onClickCapture={archivePull.onClickCapture}
     >
       <header className="list-header">
         {selecting && (
@@ -357,7 +380,7 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
         />
       </label>
 
-      <div className="list-content">
+      <div ref={listContentRef} className="list-content">
         <button type="button" className="archive-entry" onClick={() => setArchiveOpen(true)}>
           <Icon name="archive" size={18} />
           <span>Archived</span>
@@ -616,6 +639,30 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
           </ul>
         )}
       </div>
+
+      {(archivePull.pull > 27 || archivePull.phase === "opening") && (
+        <div
+          className={`archive-pull-indicator${archivePull.phase === "opening" ? " is-opening" : ""}`}
+          role="progressbar"
+          aria-label="Opening archived chats"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(archivePull.progress * 100)}
+        >
+          <svg className="archive-pull-indicator__ring" viewBox="0 0 46 46" aria-hidden="true">
+            <circle className="archive-pull-indicator__track" cx="23" cy="23" r="21" />
+            <circle
+              className="archive-pull-indicator__progress"
+              cx="23"
+              cy="23"
+              r="21"
+              strokeDasharray={ARCHIVE_PULL_RING}
+              strokeDashoffset={ARCHIVE_PULL_RING * (1 - archivePull.progress)}
+            />
+          </svg>
+          <Icon name="archive" size={22} />
+        </div>
+      )}
 
       <footer className="list-footer">
         <span className="list-footer__live" role="status" aria-live="polite">
