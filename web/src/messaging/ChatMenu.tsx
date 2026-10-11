@@ -8,6 +8,7 @@ import { chatThemeOr, CHAT_THEME_LABELS } from "./chatTheme";
 import { hiddenKeyHash } from "./e2ee";
 import { DAY_OPTIONS, customPick, quickPicks, scheduleStamp, type ScheduledRow } from "./schedule";
 import { messagingApi } from "./messagingApi";
+import { MuteChooser } from "./MuteChooser";
 import type { MessageRow } from "./protocol";
 import { searchSnippet } from "./SearchPane";
 
@@ -86,8 +87,6 @@ export function ChatMenu({
   const findInputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [muteCall, setMuteCall] = useState(conversation.mutedCall);
-  const [muteMsg, setMuteMsg] = useState(conversation.mutedMsg);
   const [priv, setPriv] = useState(conversation.privacy);
 
   useEffect(() => {
@@ -494,38 +493,15 @@ export function ChatMenu({
         {view === "mute" && (
           <>
             <p className="chat-menu__title">Mute…</p>
-            <label className="chat-menu__toggle">
-              <span>Calls</span>
-              <input
-                type="checkbox"
-                checked={muteCall}
-                onChange={(event) => {
-                  const call = event.target.checked;
-                  setMuteCall(call);
-                  void run("Mute", async (client) => {
-                    await messagingApi.setMute(client, conversation.id, { call, msg: muteMsg });
-                  });
-                }}
-              />
-            </label>
-            <label className="chat-menu__toggle">
-              <span>Messages</span>
-              <input
-                type="checkbox"
-                checked={muteMsg}
-                onChange={(event) => {
-                  const msg = event.target.checked;
-                  setMuteMsg(msg);
-                  void run("Mute", async (client) => {
-                    await messagingApi.setMute(client, conversation.id, { call: muteCall, msg });
-                  });
-                }}
-              />
-            </label>
-            <p className="chat-menu__note">
-              Muting calls hides this chat&apos;s call buttons and silences the ring; muting
-              messages silences only the message tone — the phone&apos;s two halves.
-            </p>
+            <MuteChooser
+              callMuted={conversation.mutedCall}
+              msgMuted={conversation.mutedMsg}
+              onPick={(call, msg) =>
+                void run("Mute", async (client) => {
+                  await messagingApi.setMute(client, conversation.id, { call, msg });
+                })
+              }
+            />
           </>
         )}
 

@@ -228,6 +228,9 @@ export type MockWorker = {
   /** Slice AI: reset / restore-latest calls, for parity assertions. */
   aiResets: string[];
   aiRestores: string[];
+  /** Slice MS: multi-select deletes + mute picks, for parity assertions. */
+  deletedConversations: string[];
+  mutePicks: { id: string; call: boolean; msg: boolean }[];
   /** Slice AI: true between reset and restore-latest (transcript wiped). */
   aiWiped: boolean;
   createdConversations: string[];
@@ -818,6 +821,8 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
     aiResets: [],
     aiRestores: [],
     aiWiped: false,
+    deletedConversations: [],
+    mutePicks: [],
     scheduled: [],
     async install(page: Page) {
       const json = (route: Route, payload: unknown, status = 200) =>
@@ -1086,8 +1091,32 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
       await page.route("**/api/conversations/*", (route) => {
         const url = new URL(route.request().url());
         const conversationId = decodeURIComponent(url.pathname.split("/")[3] ?? "");
+        if (route.request().method() === "DELETE") {
+          worker.deletedConversations.push(conversationId);
+          const at = conversations.findIndex((item) => item.id === conversationId);
+          if (at >= 0) conversations.splice(at, 1);
+          return json(route, { ok: true });
+        }
         const row = conversations.find((item) => item.id === conversationId);
         return json(route, { conversation: row ?? null });
+      });
+
+      await page.route("**/api/conversations/*/mute", (route) => {
+        const conversationId = decodeURIComponent(
+          new URL(route.request().url()).pathname.split("/")[3] ?? "",
+        );
+        const body = route.request().postDataJSON() as Record<string, unknown>;
+        const call = Boolean(body.call);
+        const msg = Boolean(body.msg);
+        worker.mutePicks.push({ id: conversationId, call, msg });
+        const row = conversations.find((item) => item.id === conversationId) as
+          Record<string, unknown> | undefined;
+        if (row) {
+          row.mutedCall = call;
+          row.mutedMsg = msg;
+          row.muted = call || msg ? 1 : 0;
+        }
+        return json(route, { ok: true });
       });
 
       await page.route("**/api/messages/*/react", (route) => {
