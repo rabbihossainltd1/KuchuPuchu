@@ -67,16 +67,30 @@ export function GroupCreatePane({
   controller,
   api,
   navigate,
+  initialPeerIds = [],
   onClose,
 }: {
   controller: MessagingController;
   api: ApiClient | null;
   navigate: Navigate;
+  /** Slice MS: "Create group with X" rides the ticked 1:1 peers along. */
+  initialPeerIds?: readonly string[];
   onClose: () => void;
 }) {
   const [title, setTitle] = useState("");
   const [query, setQuery] = useState("");
-  const [picked, setPicked] = useState<readonly ConversationPeer[]>([]);
+  const [picked, setPicked] = useState<readonly ConversationPeer[]>(() => {
+    if (initialPeerIds.length === 0) return [];
+    const seen = new Set<string>();
+    const list: ConversationPeer[] = [];
+    for (const row of controller.conversations) {
+      const other = row.isGroup ? null : row.other;
+      if (!other || !initialPeerIds.includes(other.id) || seen.has(other.id)) continue;
+      seen.add(other.id);
+      list.push(other);
+    }
+    return list;
+  });
   const [extra, setExtra] = useState<readonly ConversationPeer[]>([]);
   const [searching, setSearching] = useState(false);
   const [busy, setBusy] = useState(false);

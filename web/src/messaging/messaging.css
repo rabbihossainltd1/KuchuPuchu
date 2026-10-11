@@ -4158,3 +4158,48 @@ button.attachment__expand {
   margin: 0;
   font-size: 0.8rem;
 }
+
+/* Slice MS — select mode (phone ListSelect) on the web. */
+.select-bar__count {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--kp-ink);
+  flex: 1;
+}
+.select-row {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+}
+.select-row__box {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 2px solid var(--kp-muted);
+  display: grid;
+  place-items: center;
+  color: #fff;
+}
+.select-row__box.on {
+  background: var(--kp-blue);
+  border-color: var(--kp-blue);
+}
+.select-row.is-ticked {
+  background: color-mix(in srgb, var(--kp-blue) 12%, transparent);
+  border-radius: 12px;
+}
+.mute-chooser {
+  display: grid;
+  gap: 2px;
+}
+.delete-dialog {
+  width: min(420px, 100%);
+  align-self: center;
+}

@@ -56,7 +56,8 @@ export type IconName =
   | "schedule"
   | "timer"
   | "pin"
-  | "archive";
+  | "archive"
+  | "bell";
 
 /* The glyphs below are the APP's own, not web lookalikes. Nav + composer copy
    the phone's original artwork point for point:
@@ -400,6 +401,14 @@ const shapes: Record<IconName, ReactNode> = {
       fill={F}
       stroke="none"
       d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 10 10 10-4.48 10-10S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"
+    />
+  ),
+  // Material `notifications` (filled) — the phone's unmute glyph.
+  bell: (
+    <path
+      fill={F}
+      stroke="none"
+      d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"
     />
   ),
   // Material `push_pin` (filled) — the phone's pinned-row glyph.
