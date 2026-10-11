@@ -178,11 +178,16 @@ export default function App() {
   const { route, navigate } = useBrowserRouter();
   const { status: authStatus, user, logout } = useAuth();
   const [sessionNotice, setSessionNotice] = useState("");
+  const [unreadChats, setUnreadChats] = useState(0);
   const isOnline = useConnectivity();
   const accountEnabled = isWebFeatureEnabled("accountIntegration");
   const messagingEnabled = isWebFeatureEnabled("messaging");
   const statusesEnabled = isWebFeatureEnabled("statuses");
   const callsEnabled = isWebFeatureEnabled("calls");
+
+  useEffect(() => {
+    if (!user || !messagingEnabled) setUnreadChats(0);
+  }, [messagingEnabled, user?.id]);
 
   // Slice H: a doorbell click on an ALREADY-OPEN window arrives as a
   // postMessage from the service worker (the click's own navigation would
@@ -333,12 +338,23 @@ export default function App() {
                 route={{ kind: "section", section: view.id }}
                 navigate={navigate}
                 className={`nav-button${activeViewId === view.id ? " is-active" : ""}`}
-                aria-label={view.label}
+                aria-label={
+                  view.id === "chats" && unreadChats > 0
+                    ? `Chats, ${unreadChats > 99 ? "99+" : unreadChats} unread chats`
+                    : view.label
+                }
                 aria-current={activeViewId === view.id ? "page" : undefined}
                 title={view.label}
               >
-                <Icon name={view.icon} size={21} />
-                <span>{view.label}</span>
+                <span className="nav-button__icon-wrap">
+                  <Icon name={view.icon} size={21} />
+                  {view.id === "chats" && unreadChats > 0 && (
+                    <span className="nav-unread-badge" aria-hidden="true">
+                      {unreadChats > 99 ? "99+" : unreadChats}
+                    </span>
+                  )}
+                </span>
+                <span className="nav-button__label">{view.label}</span>
               </RouteLink>
             ))}
           </nav>
@@ -391,7 +407,12 @@ export default function App() {
           </Suspense>
         ) : callsEnabled && isCallsArea ? null : messagingEnabled && isChatsArea ? (
           <Suspense fallback={<p className="welcome-card__body">Loading chats…</p>}>
-            <MessagingWorkspace route={route} navigate={navigate} isOnline={isOnline} />
+            <MessagingWorkspace
+              route={route}
+              navigate={navigate}
+              isOnline={isOnline}
+              onUnreadChatsChange={setUnreadChats}
+            />
           </Suspense>
         ) : (
           <>
@@ -647,10 +668,22 @@ export default function App() {
             route={{ kind: "section", section: view.id }}
             navigate={navigate}
             className={`mobile-nav__item${activeViewId === view.id ? " is-active" : ""}`}
+            aria-label={
+              view.id === "chats" && unreadChats > 0
+                ? `Chats, ${unreadChats > 99 ? "99+" : unreadChats} unread chats`
+                : view.label
+            }
             aria-current={activeViewId === view.id ? "page" : undefined}
           >
-            <Icon name={view.icon} size={20} />
-            <span>{view.label}</span>
+            <span className="mobile-nav__icon-wrap">
+              <Icon name={view.icon} size={20} />
+              {view.id === "chats" && unreadChats > 0 && (
+                <span className="nav-unread-badge" aria-hidden="true">
+                  {unreadChats > 99 ? "99+" : unreadChats}
+                </span>
+              )}
+            </span>
+            <span className="mobile-nav__label">{view.label}</span>
           </RouteLink>
         ))}
         <RouteLink

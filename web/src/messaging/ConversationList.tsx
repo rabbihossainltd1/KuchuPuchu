@@ -238,9 +238,6 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
               <p className="eyebrow">KUCHUPUCHU WEB</p>
               <h1 id="list-heading">Chats</h1>
             </div>
-            <span className="list-header__count" aria-live="polite">
-              {controller.totalUnread > 0 ? `${controller.totalUnread} unread` : "All read"}
-            </span>
             <button
               type="button"
               className="icon-button"

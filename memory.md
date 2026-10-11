@@ -1188,3 +1188,13 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - ConversationList home ⋮ now matches phone HomeMenuSheet copy + order: My Profile / New contact / All contacts / New group / Settings. My Profile + Settings route to the web Account & settings surface; New group opens GroupCreatePane.
 - Updated `shots/home-menu.png`; `home.spec.ts` 3 checks (row order, axe, Settings/My Profile routes).
 - Full `npm run ci` EXIT=0. MERGED code PR #126 + docs PR #127; prod BUILD_ID d4a3eefcbd0657c5 confirmed (previous 83df8a5f1305ad42).
+
+## Web messaging fix batch — 2026-10-11 (`fix/web-chat-send-history-layout`)
+- Scope: one Web batch for the reported send/history/unread/avatar/mobile-action issues; archive pull-to-open remains backlog and was not changed.
+- Send/E2EE: direct 1:1 sends now require a ready browser identity AND the peer's published public key. Without them, Send stays disabled with the secure-chat reason; no plaintext fallback or browser-minted identity. The e2ee-backup mock can simulate a missing phone backup; regression proves sealed history remains locked and drafts are not sent. Live-account/API diagnosis was not performed.
+- History: regression pages 75 mock rows through the real cursor query, scrolls the transcript to its top, and verifies the older page is rendered. Test route must match the query suffix (`messages*`) or the generic helper route will swallow pagination.
+- Unread: removed the list-header “N unread” label and moved unread-chat count to the Chats navigation icon badge (desktop and mobile); conversation-row unread badges remain.
+- Profile: account hero uses `avatarUrl` with a circular, contained image and initials fallback; added a photo-render test.
+- Mobile actions: reactions and message actions occupy separate horizontally scrollable rows above the bubble; geometry regression covers a 390px viewport.
+- Local verification: Prettier + TypeScript passed; 6 targeted Playwright regressions passed; full `npm run ci` exited 0 (including worker/backend tests, all Web E2E suites, production builds/service-worker verification, secret scan, Android validation). No deploy or production account probe in this batch.
+- Current handoff: changes are on local branch `fix/web-chat-send-history-layout`; create one code+memory PR, wait for/confirm green CI, then merge only after that gate. After main deploy, verify `public/sw.js` BUILD_ID rotation. Archive pull-to-open is still deferred.

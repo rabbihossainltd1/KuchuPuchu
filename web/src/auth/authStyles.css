@@ -457,10 +457,12 @@
   display: grid;
   width: 61px;
   height: 61px;
-  flex: 0 0 auto;
+  flex: 0 0 61px;
   place-items: center;
+  overflow: hidden;
   border: 1px solid rgba(140, 180, 247, 0.3);
-  border-radius: 19px;
+  border-radius: 50%;
+  aspect-ratio: 1;
   background: linear-gradient(145deg, #406eb3, #263d65);
   color: #eaf3ff;
   font-size: 17px;
@@ -920,7 +922,8 @@
   .account-avatar {
     width: 51px;
     height: 51px;
-    border-radius: 16px;
+    flex-basis: 51px;
+    border-radius: 50%;
   }
 
   .account-hero__identity {

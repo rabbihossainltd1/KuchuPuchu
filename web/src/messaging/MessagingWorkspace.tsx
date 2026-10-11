@@ -7,7 +7,7 @@
  * verified, which keeps the default build free of private API calls.
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useAuth } from "../auth/AuthContext";
 import type { AppRoute } from "../router";
 import type { Navigate } from "../useBrowserRouter";
@@ -24,9 +24,10 @@ type Props = {
   route: AppRoute;
   navigate: Navigate;
   isOnline: boolean;
+  onUnreadChatsChange: (count: number) => void;
 };
 
-export function MessagingWorkspace({ route, navigate, isOnline }: Props) {
+export function MessagingWorkspace({ route, navigate, isOnline, onUnreadChatsChange }: Props) {
   const { api, token, user } = useAuth();
   const meId = user?.id ?? "";
   const meName = user ? user.displayName || user.username : "";
@@ -43,6 +44,12 @@ export function MessagingWorkspace({ route, navigate, isOnline }: Props) {
     identity: identity.identity,
     selectedId,
   });
+
+  const unreadChats = controller.conversations.filter((row) => row.unread > 0).length;
+
+  useEffect(() => {
+    onUnreadChatsChange(unreadChats);
+  }, [onUnreadChatsChange, unreadChats]);
 
   const selected = useMemo(
     () => controller.conversations.find((row) => row.id === selectedId) ?? controller.selected,
