@@ -19,6 +19,8 @@
 }
 
 .list-state {
+  margin: auto;
+  width: 100%;
   padding: 28px 18px;
   text-align: center;
   color: var(--kp-muted);
