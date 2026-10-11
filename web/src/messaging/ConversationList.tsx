@@ -11,7 +11,9 @@ import type { ApiClient } from "../auth/authApi";
 import { Icon } from "../icons";
 import { RouteLink } from "../RouteLink";
 import type { Navigate } from "../useBrowserRouter";
+import { ArchivePane } from "./ArchivePane";
 import { ConversationAvatar } from "./Avatar";
+import { setArchivedFlag, setPinnedFlag, useConvFlags } from "./convFlags";
 import { GroupCreatePane } from "./GroupCreatePane";
 import {
   clockTime,
@@ -35,14 +37,23 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
   const [query, setQuery] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [rowMenu, setRowMenu] = useState<string | null>(null);
+  const flags = useConvFlags();
 
+  // The phone's main list hides archived chats and floats pinned ones to
+  // the top (ScreenStore order otherwise).
   const visible = useMemo(() => {
+    const rows = controller.conversations.filter((row) => !flags.archived.includes(row.id));
+    rows.sort((a, b) => Number(flags.pinned.includes(b.id)) - Number(flags.pinned.includes(a.id)));
     const needle = query.trim().toLowerCase();
-    if (!needle) return controller.conversations;
-    return controller.conversations.filter((row) =>
-      conversationTitle(row).toLowerCase().includes(needle),
-    );
-  }, [controller.conversations, query]);
+    if (!needle) return rows;
+    return rows.filter((row) => conversationTitle(row).toLowerCase().includes(needle));
+  }, [controller.conversations, query, flags]);
+
+  const archivedCount = controller.conversations.filter(
+    (row) => flags.archived.includes(row.id) && !row.hidden,
+  ).length;
 
   const unreadLabel = (row: ConversationRow) =>
     row.unread > 0 ? `, ${row.unread > 99 ? "more than 99" : row.unread} unread` : "";
@@ -152,6 +163,21 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
       </label>
 
       <div className="list-content">
+        <button type="button" className="archive-entry" onClick={() => setArchiveOpen(true)}>
+          <Icon name="archive" size={18} />
+          <span>Archived</span>
+          <span className="archive-entry__count">({archivedCount})</span>
+        </button>
+
+        {archiveOpen && (
+          <ArchivePane
+            controller={controller}
+            navigate={navigate}
+            api={api}
+            onClose={() => setArchiveOpen(false)}
+          />
+        )}
+
         {controller.listStatus === "loading" && controller.conversations.length === 0 && (
           <p className="list-state" role="status">
             Loading your chats…
@@ -194,14 +220,19 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
           <ul className="conversation-rows" aria-label="Conversations">
             {visible.map((row) => {
               const isSelected = row.id === selectedId;
+              const pinned = flags.pinned.includes(row.id);
               return (
-                <li key={row.id}>
+                <li key={row.id} className="conversation-rows__item">
                   <RouteLink
                     route={{ kind: "conversation", conversationId: row.id }}
                     navigate={navigate}
                     className={`conversation-row${isSelected ? " is-selected" : ""}`}
                     aria-current={isSelected ? "true" : undefined}
                     aria-label={`${conversationTitle(row)}${unreadLabel(row)}`}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setRowMenu((current) => (current === row.id ? null : row.id));
+                    }}
                   >
                     <ConversationAvatar
                       api={api}
@@ -210,7 +241,15 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
                     />
                     <span className="conversation-row__body">
                       <span className="conversation-row__line">
-                        <span className="conversation-row__name">{conversationTitle(row)}</span>
+                        <span className="conversation-row__name">
+                          {conversationTitle(row)}
+                          {pinned && (
+                            <span className="conversation-row__pin" title="Pinned">
+                              <Icon name="pin" size={13} />
+                              <span className="sr-only">Pinned</span>
+                            </span>
+                          )}
+                        </span>
                         <span className="conversation-row__time">
                           {clockTime(row.lastMessageAt)}
                         </span>
@@ -232,6 +271,58 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
                       </span>
                     </span>
                   </RouteLink>
+                  <button
+                    type="button"
+                    className="icon-button conversation-row__more"
+                    aria-label={`Options for ${conversationTitle(row)}`}
+                    aria-haspopup="menu"
+                    aria-expanded={rowMenu === row.id}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setRowMenu((current) => (current === row.id ? null : row.id));
+                    }}
+                  >
+                    <Icon name="more" size={18} />
+                  </button>
+                  {rowMenu === row.id && (
+                    <>
+                      <button
+                        type="button"
+                        className="menu-backdrop"
+                        aria-label="Close menu"
+                        tabIndex={-1}
+                        onClick={() => setRowMenu(null)}
+                      />
+                      <div
+                        className="list-menu row-menu"
+                        role="menu"
+                        aria-label={`Options for ${conversationTitle(row)}`}
+                      >
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setPinnedFlag(row.id, !pinned);
+                            setRowMenu(null);
+                          }}
+                        >
+                          <Icon name="pin" size={18} />
+                          {pinned ? "Unpin" : "Pin"}
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setArchivedFlag(row.id, true);
+                            setRowMenu(null);
+                          }}
+                        >
+                          <Icon name="archive" size={18} />
+                          Archive
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </li>
               );
             })}

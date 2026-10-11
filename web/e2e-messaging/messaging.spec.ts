@@ -275,6 +275,11 @@ test.describe("Web messaging", () => {
     await composer.fill("ডেলিভারি পরীক্ষা");
     await composer.press("Enter");
     await expect.poll(() => worker.sent.length).toBe(1);
+    // The ack must land first: the delivered frame keys the row by its
+    // server id, which only exists once the POST response remaps it.
+    await expect(
+      page.locator(".bubble", { hasText: "ডেলিভারি পরীক্ষা" }).locator(".bubble__tick--sent"),
+    ).toBeVisible();
     chatSocket!.send(
       JSON.stringify({ type: "delivered", messageIds: ["srv_1"], at: new Date().toISOString() }),
     );

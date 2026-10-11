@@ -54,7 +54,9 @@ export type IconName =
   | "personAdd"
   | "contactsBook"
   | "schedule"
-  | "timer";
+  | "timer"
+  | "pin"
+  | "archive";
 
 /* The glyphs below are the APP's own, not web lookalikes. Nav + composer copy
    the phone's original artwork point for point:
@@ -398,6 +400,22 @@ const shapes: Record<IconName, ReactNode> = {
       fill={F}
       stroke="none"
       d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 10 10 10-4.48 10-10S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"
+    />
+  ),
+  // Material `push_pin` (filled) — the phone's pinned-row glyph.
+  pin: (
+    <path
+      fill={F}
+      stroke="none"
+      d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5v6c0 .55.45 1 1 1h2c.55 0 1-.45 1-1v-6h5v-2c-1.66 0-3-1.34-3-3z"
+    />
+  ),
+  // Material `archive` (filled) — the phone's archive glyph.
+  archive: (
+    <path
+      fill={F}
+      stroke="none"
+      d="M20.54 5.23l-1.39-1.68C18.88 3.21 18.47 3 18 3H6c-.47 0-.88.21-1.15.55L3.46 5.23C3.17 5.57 3 6.01 3 6.5V19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6.5c0-.49-.17-.93-.46-1.27zM12 17.5L6.5 12H10v-2h4v2h3.5L12 17.5zM5.12 5l.82-1h12l.93 1H5.12z"
     />
   ),
   // Material `timer` (filled) — the phone's disappearing-messages glyph.
