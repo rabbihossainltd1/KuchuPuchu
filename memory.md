@@ -1136,3 +1136,14 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - LESSON: fresh sandboxes also wipe git identity (repo-local config again) and Playwright browsers.
 - TESTS contacts.spec.ts 7 (incl axe). CI green. MERGED PR #114; docs PR pending; BUILD_ID to confirm.
 - STILL ABSENT: message info sheet, scheduled + disappearing UI, full reaction picker, AI chat, archive/pin.
+
+## Web slice Y — scheduled + disappearing — 2026-10-11 (feat/web-y-schedule-disappear)
+- HOLD-TO-SCHEDULE: composer send button onPointerDown 450ms timer (draft non-empty, no attachments) → ChatMenu initialView="sendlater"; heldRef suppresses the follow-up click; title attr "Hold to schedule".
+- ChatMenu views += sendlater/scheduled/disappear; root rows: "Scheduled messages" (only when scheduledCount>0, phone rule) + "Disappearing messages" (1:1 non-bot, after Mute). Escape closes the sheet (new).
+- schedule.ts = scheduleStamp/quickPicks/customPick/DAY_OPTIONS port; worker: POST messages body.sendAt parks; GET /api/conversations/:id/scheduled {items}; DELETE /api/scheduled/:id.
+- useMessaging.scheduleSend: seal like send(), sendMessage with sendAt, no outbox/echo, clears draft; returns bool.
+- ConversationRow += disappearSeconds; ChatPane fetches scheduled on [api, selectedId, menuOpen] and renders chip above composer.
+- A11Y: <footer role=status> illegal → inner span.list-footer__live (display:contents); chip .is-on needed full blue (contrast).
+- FLAKY-LESSON: strict-mode locator throws IMMEDIATELY on >1 match mid-poll (regex matched sheet rows while POST in flight) — assert sheet toBeHidden first + class locator for chip; silent python-replace failures after prettier reformat (grep-verify!).
+- TESTS scheduled.spec.ts 5; CI green. MERGED PR #116; docs PR pending; BUILD_ID to confirm.
+- STILL ABSENT: message info sheet, full reaction picker, AI chat, archive/pin.
