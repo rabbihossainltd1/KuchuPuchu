@@ -69,6 +69,8 @@ export type ConversationRow = {
   readonly hidden: boolean;
   /** The SHA-256 hex of the secret key that reveals this hidden chat. */
   readonly hiddenKey: string;
+  /** 0 = off; the phone's DisappearDialog choices are 86400/604800/7776000. */
+  readonly disappearSeconds: number;
   /**
    * Slice I (chat-theme parity): the phone's per-chat theme — `darkblue`,
    * `default` (classic cream), `mint`, `rose`, `night`. Android's `cTheme()`
@@ -472,6 +474,7 @@ export function parseConversationRow(value: unknown): ConversationRow | null {
     ownerId: text(value.ownerId, 64),
     hidden: booleanish(value.hidden),
     hiddenKey: text(value.hiddenKey, 128),
+    disappearSeconds: Math.max(0, Number(value.disappearSeconds) || 0),
     muted: booleanish(value.muted),
     unread: Math.max(0, Math.trunc(number(value.unread))),
     lastMessageAt: isoTimestamp(value.lastMessageAt),

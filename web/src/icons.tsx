@@ -52,7 +52,9 @@ export type IconName =
   | "logout"
   | "bellOff"
   | "personAdd"
-  | "contactsBook";
+  | "contactsBook"
+  | "schedule"
+  | "timer";
 
 /* The glyphs below are the APP's own, not web lookalikes. Nav + composer copy
    the phone's original artwork point for point:
@@ -388,6 +390,22 @@ const shapes: Record<IconName, ReactNode> = {
       fill={F}
       stroke="none"
       d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"
+    />
+  ),
+  // Material `schedule` (filled clock) — the phone's schedule glyph.
+  schedule: (
+    <path
+      fill={F}
+      stroke="none"
+      d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 10 10 10-4.48 10-10S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"
+    />
+  ),
+  // Material `timer` (filled) — the phone's disappearing-messages glyph.
+  timer: (
+    <path
+      fill={F}
+      stroke="none"
+      d="M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61-1.42-1.42c-.43.43-1.12.43-1.55 0l-.06-.06c-.43-.43-.43-1.12 0-1.55.43-.43 1.12-.43 1.55 0l1.48 1.48c.43.43.43 1.12 0 1.55zM12 4c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9-4.03-9-9-9zm0 16c-3.86 0-7-3.14-7-7s3.14-7 7-7 7 3.14 7 7-3.14 7-7 7z"
     />
   ),
   // Material `contacts` (filled) — the phone's All-contacts glyph.

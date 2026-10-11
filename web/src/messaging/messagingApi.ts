@@ -34,6 +34,7 @@ import {
   type MessagesPage,
 } from "./protocol";
 import { parseMatchUsers, type ContactMatchUser } from "./contacts";
+import { parseScheduledRows, type ScheduledRow } from "./schedule";
 import { parseSharedMedia, type SharedMedia } from "./sharedMedia";
 
 export type MessagesQuery = {
@@ -61,6 +62,8 @@ export type SendMessagePayload = {
   imageData?: string;
   replyTo?: string;
   fileName?: string;
+  /** ISO instant: park this message in the worker's scheduled queue. */
+  sendAt?: string;
   fileType?: string;
   fileSize?: number;
   fileKey?: string;
@@ -187,6 +190,39 @@ export const messagingApi = {
    * tells us which of the given E.164 numbers are KuchuPuchu accounts and
    * forgets them immediately — nothing is stored server-side.
    */
+  /** The phone's `GET /api/conversations/:id/scheduled` (my pending sends). */
+  async listScheduled(
+    api: ApiClient,
+    conversationId: string,
+    signal?: AbortSignal,
+  ): Promise<readonly ScheduledRow[]> {
+    const payload = await api.request<unknown>(
+      conversationPath(conversationId, "/scheduled"),
+      ...(signal ? [{ signal }] : []),
+    );
+    return parseScheduledRows(payload);
+  },
+
+  /** The phone's `DELETE /api/scheduled/:id`. */
+  async cancelScheduled(api: ApiClient, scheduledId: string): Promise<void> {
+    await api.request<unknown>(`/api/scheduled/${encodeURIComponent(scheduledId)}`, {
+      method: "DELETE",
+    });
+  },
+
+  /** The phone's disappearing-messages PATCH. */
+  async setDisappearSeconds(
+    api: ApiClient,
+    conversationId: string,
+    seconds: number,
+  ): Promise<void> {
+    await api.request<unknown>(conversationPath(conversationId), {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ disappearSeconds: seconds }),
+    });
+  },
+
   async matchContacts(
     api: ApiClient,
     phones: readonly string[],
@@ -248,6 +284,8 @@ export const messagingApi = {
     if (payload.fileKey !== undefined) body.fileKey = payload.fileKey;
     if (payload.meta && Object.keys(payload.meta).length > 0) body.meta = payload.meta;
     if (payload.viewOnce) body.viewOnce = true;
+    // Slice Y: parked send — the worker's POST /messages accepts `sendAt`.
+    if (payload.sendAt) body.sendAt = payload.sendAt;
 
     const response = await postJson(api, conversationPath(conversationId, "/messages"), body);
     const record = (response ?? {}) as Record<string, unknown>;

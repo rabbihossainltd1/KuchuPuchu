@@ -239,24 +239,26 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
         )}
       </div>
 
-      <footer className="list-footer" role="status" aria-live="polite">
-        <span
-          className={`connection-indicator${
-            isOnline && controller.listSocket === "open" ? "" : " is-offline"
-          }`}
-        />
-        <span>
-          {!isOnline
-            ? "Browser offline"
-            : controller.listSocket === "open"
-              ? "Live"
-              : controller.listSocket === "reconnecting"
-                ? "Reconnecting…"
-                : "Connected"}
-        </span>
-        <span className="list-footer__spacer" />
-        <span className="footer-version">
-          {controller.durable ? "Drafts saved" : "Drafts in memory only"}
+      <footer className="list-footer">
+        <span className="list-footer__live" role="status" aria-live="polite">
+          <span
+            className={`connection-indicator${
+              isOnline && controller.listSocket === "open" ? "" : " is-offline"
+            }`}
+          />
+          <span>
+            {!isOnline
+              ? "Browser offline"
+              : controller.listSocket === "open"
+                ? "Live"
+                : controller.listSocket === "reconnecting"
+                  ? "Reconnecting…"
+                  : "Connected"}
+          </span>
+          <span className="list-footer__spacer" />
+          <span className="footer-version">
+            {controller.durable ? "Drafts saved" : "Drafts in memory only"}
+          </span>
         </span>
       </footer>
     </section>

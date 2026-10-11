@@ -156,6 +156,12 @@ check(
     webMessaging.includes("expiry also removes the local row directly"),
 );
 check(
+  "scheduled sends also strip slash syntax and preserve command metadata",
+  androidChat.includes("val command = ComposerCommands.parse(body)") &&
+    webMessaging.includes("const command = parseMessageCommand(composerText)") &&
+    webMessaging.includes("...(command ? { meta: { ...command.meta } } : {})"),
+);
+check(
   "conversation nicknames are shared through the Worker and editable in both Web and Android direct/group screens",
   worker.includes("conversation_nicknames") &&
     worker.includes('method === "PUT" || method === "DELETE"') &&

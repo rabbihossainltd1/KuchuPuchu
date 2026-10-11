@@ -132,6 +132,8 @@ export type MessagingActions = {
   setDraft: (text: string) => void;
   composerChanged: () => void;
   send: () => Promise<void>;
+  /** Park the typed draft at `atIso` (the phone's long-press-send flow). */
+  scheduleSend: (atIso: string) => Promise<boolean>;
   sendSticker: (glyph: string) => Promise<void>;
   sendAttachments: (items: readonly PendingAttachment[], caption: string) => Promise<void>;
   /** Upload and post a recorded voice note (`sendVoice` on the phone). */
@@ -806,6 +808,54 @@ export function useMessaging(options: Options): MessagingController {
 
     await attemptItem(item);
   }, [announce, api, attemptItem, draft, identity, meId, replyTo, stores.drafts, stores.outbox]);
+
+  /**
+   * Slice Y: the phone's `scheduleText` — the typed draft is sealed like any
+   * send, then posted with `sendAt` so the worker parks it in the scheduled
+   * queue instead of delivering it. No outbox, no echo: the row lives in the
+   * Scheduled sheet until it fires.
+   */
+  const scheduleSend = useCallback(
+    async (atIso: string): Promise<boolean> => {
+      const conversation = selectedRef.current;
+      const composerText = draft.trim();
+      const command = parseMessageCommand(composerText);
+      const plaintext = command ? command.text : composerText;
+      if (!conversation || !plaintext || !meId || !api) return false;
+      if (isOneWayConversation(conversation)) {
+        announce("This account only sends notifications; replies are not accepted.");
+        return false;
+      }
+      let wireBody: string;
+      try {
+        wireBody = await protectOutgoingBody(
+          plaintext,
+          { isGroup: conversation.isGroup, otherId: conversationPeerId(conversation) },
+          conversationPeerKey(conversation),
+          identity,
+        );
+      } catch (error) {
+        announce((error as Error).message || SECURE_CHAT_WAITING);
+        return false;
+      }
+      try {
+        await messagingApi.sendMessage(api, conversation.id, {
+          kind: "TEXT",
+          body: wireBody,
+          clientId: newClientId(),
+          sendAt: atIso,
+          ...(command ? { meta: { ...command.meta } } : {}),
+        });
+      } catch {
+        announce("That did not work. Check your connection and try again.");
+        return false;
+      }
+      setDraftState("");
+      await stores.drafts.clear(conversation.id);
+      return true;
+    },
+    [announce, api, draft, identity, meId, stores.drafts],
+  );
 
   /**
    * A sticker is a TEXT-shaped send with `kind: "STICKER"` and the glyph in the
@@ -1484,6 +1534,7 @@ export function useMessaging(options: Options): MessagingController {
     setDraft,
     composerChanged,
     send,
+    scheduleSend,
     sendSticker,
     sendAttachments,
     sendVoice,

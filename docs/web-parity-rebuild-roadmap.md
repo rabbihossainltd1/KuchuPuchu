@@ -421,3 +421,26 @@ The phone's `ContactsScreens.kt`, mirrored for the browser:
 - Icons: `personAdd` + `contactsBook` — the phone's Material glyphs.
 - Tests: `contacts.spec.ts` (7, axe included); helpers gained a
   configurable `POST /api/contacts/match` mock.
+
+## Slice Y — Scheduled sends + disappearing messages ✅
+
+The phone's `ScheduleSheet` / `ScheduledSheet` / `DisappearDialog`, mirrored:
+
+- **Schedule**: holding the send button (text typed) opens "Send later" —
+  the phone's four quick picks plus the custom picker (day chips, 1-12
+  hour and 5-minute wheels, AM/PM) with the live "Today 9:30 PM" stamp and
+  the "Pick a later time" guard. The draft is sealed through the normal
+  `protectOutgoingBody` path and posted with `sendAt`; the worker parks it
+  in `scheduled_messages` — it never enters the transcript.
+- **Surface**: the phone's chip above the composer ("2 · Tomorrow 8:00
+  AM") and the ⋮ "Scheduled messages" row (offered only while rows are
+  parked) open the "Scheduled" sheet; each row cancels over
+  `DELETE /api/scheduled/:id`.
+- **Disappearing**: ⋮ "Disappearing messages" (1:1 chats) — Off / 24 hours
+  / 7 days / 90 days with the current choice checked, PATCHing
+  `disappearSeconds` like the phone; `ConversationRow` now parses the
+  field.
+- a11y: the chat-list footer's live region moved off the `<footer>`
+  element; the ⋮ sheet closes on Escape.
+- Tests: `scheduled.spec.ts` (5, axe included); helpers serve the
+  scheduled routes and echo `sendAt`.

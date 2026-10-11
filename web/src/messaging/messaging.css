@@ -3784,3 +3784,125 @@ button.attachment__expand {
   color: #fff;
   font-weight: 600;
 }
+
+/* Slice Y — scheduled chip + schedule/disappear sheet bits. */
+.composer__sched-chip-row {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 10px 2px;
+}
+.composer__sched-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--kp-line);
+  border-radius: 14px;
+  background: var(--kp-card);
+  color: var(--kp-ink);
+  padding: 5px 10px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+.chat-menu__sched-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 12px 10px;
+}
+.chat-menu__sched-days,
+.chat-menu__sched-ampm {
+  display: flex;
+  gap: 6px;
+}
+.chat-menu__chip {
+  flex: 1;
+  border: 0;
+  border-radius: 12px;
+  background: var(--kp-card-raised);
+  color: var(--kp-ink);
+  padding: 8px 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+.chat-menu__chip.is-on {
+  background: var(--kp-blue);
+  color: #fff;
+  font-weight: 600;
+}
+.chat-menu__sched-clock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.chat-menu__wheel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+}
+.chat-menu__wheel button {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--kp-card-raised);
+  color: var(--kp-ink);
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chat-menu__wheel span {
+  padding: 4px 0;
+  font-size: 1.6rem;
+  font-weight: 600;
+  color: var(--kp-ink);
+}
+.chat-menu__sched-colon {
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--kp-ink);
+}
+.chat-menu__sched-ampm {
+  flex-direction: column;
+  flex: 0.8;
+}
+.chat-menu__sched-stamp {
+  margin: 2px 0;
+  text-align: center;
+  color: var(--kp-ink);
+  font-size: 0.78rem;
+}
+.chat-menu__sched-stamp.is-bad {
+  color: var(--kp-red);
+}
+.chat-menu__sched-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  color: var(--kp-muted);
+}
+.chat-menu__sched-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.chat-menu__sched-preview {
+  color: var(--kp-ink);
+  font-size: 0.875rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-menu__sched-stamp {
+  font-size: 0.75rem;
+}
+.chat-menu__sched-cancel {
+  color: var(--kp-red);
+}
+.list-footer__live {
+  display: contents;
+}
