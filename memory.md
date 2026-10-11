@@ -1187,4 +1187,4 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 ## Web slice HP — HomeMenuSheet parity — 2026-10-11 (feat/web-home-menu)
 - ConversationList home ⋮ now matches phone HomeMenuSheet copy + order: My Profile / New contact / All contacts / New group / Settings. My Profile + Settings route to the web Account & settings surface; New group opens GroupCreatePane.
 - Updated `shots/home-menu.png`; `home.spec.ts` 3 checks (row order, axe, Settings/My Profile routes).
-- Full `npm run ci` EXIT=0. MERGED code PR #126; docs PR pending; prod BUILD_ID pending confirmation.
+- Full `npm run ci` EXIT=0. MERGED code PR #126 + docs PR #127; prod BUILD_ID d4a3eefcbd0657c5 confirmed (previous 83df8a5f1305ad42).
