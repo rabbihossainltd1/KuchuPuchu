@@ -132,6 +132,10 @@ fun KpApp() {
     // socket is alive, so the push-only path was silent for online users.
     // Process-level: registered once, never removed.
     val appCtx = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    LaunchedEffect(authed, accountId) {
+        if (authed && accountId.isNotBlank()) LauncherShortcuts.restore(appCtx, accountId)
+        else LauncherShortcuts.clearDynamic(appCtx)
+    }
     // r66: every signed-in install publishes before opening ANY chat. A
     // temporary offline start retries, rather than disabling E2EE all session.
     LaunchedEffect(authed, Store.myId()) {
@@ -242,6 +246,26 @@ fun KpApp() {
         }
     }
 
+    // Long-press launcher shortcuts are retained across a cold start/login.
+    LaunchedEffect(authed) {
+        MainActivity.pendingLauncherShortcut.collect { shortcut ->
+            if (!authed || shortcut.isNullOrBlank()) return@collect
+            when (shortcut) {
+                "camera" -> runCatching { nav.navigate("launcher-camera") { launchSingleTop = true } }
+                "status" -> runCatching { nav.navigate("status") { launchSingleTop = true } }
+                "ai" -> {
+                    val conversationId = findKpAiConversationId()
+                    if (conversationId.isNullOrBlank()) {
+                        android.widget.Toast.makeText(appCtx, "KuchuPuchu AI is unavailable right now", android.widget.Toast.LENGTH_SHORT).show()
+                    } else {
+                        runCatching { nav.navigate("chat/$conversationId") { launchSingleTop = true } }
+                    }
+                }
+            }
+            MainActivity.pendingLauncherShortcut.value = null
+        }
+    }
+
     val modalActive = KpModalBlurState.isActive
     val modalWindowVisible = KpModalBlurState.hasVisibleWindow
     val modalBlur = remember { Animatable(0f) }
@@ -326,6 +350,7 @@ fun KpApp() {
                     popEnterTransition = { EnterTransition.None },
                     popExitTransition = { ExitTransition.None },
                 ) { ChatListScreen(nav, homeTab) }
+                composable("launcher-camera") { LauncherCameraScreen(nav) }
                 composable("newchat") { NewChatScreen(nav) }
                 // Owner round 32 (item 12): `with` = comma-separated user ids
                 // pre-picked as members ("Create group with …" from the list).
@@ -513,6 +538,22 @@ fun KpApp() {
         KpFocusedSheetHost()
         KpRootFocusOverlayHost()
     }
+}
+
+private suspend fun findKpAiConversationId(): String? {
+    ScreenStore.convs.firstOrNull { it.optJSONObject("other")?.optString("id") == "kp_ai_bot" }
+        ?.optString("id")
+        ?.takeIf { it.isNotBlank() }
+        ?.let { return it }
+    return runCatching {
+        val page = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            Api.get("/api/conversations", force = true)
+        }
+        page.arr("items").objects()
+            .firstOrNull { it.optJSONObject("other")?.optString("id") == "kp_ai_bot" }
+            ?.optString("id")
+            ?.takeIf { it.isNotBlank() }
+    }.getOrNull()
 }
 
 /**

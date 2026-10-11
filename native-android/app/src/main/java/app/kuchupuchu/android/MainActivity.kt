@@ -257,6 +257,9 @@ class MainActivity : ComponentActivity() {
         if (intent.getBooleanExtra("kp_return_call", false)) CallEngine.onRestoreIntent()
         if (intent.getBooleanExtra("kp_accept", false)) CallEngine.onAcceptIntent()
         intent.getStringExtra("kp_chat")?.let { pendingChat.value = it }
+        if (intent.action == LauncherShortcuts.ACTION) {
+            intent.getStringExtra(LauncherShortcuts.EXTRA_ACTION)?.let { pendingLauncherShortcut.value = it }
+        }
         // Missed-call "Call back" action: start the call right away — with the
         // same contextual mic/camera gate every other call entry point uses.
         intent.getStringExtra("kp_callback")?.let { otherId ->
@@ -394,6 +397,9 @@ class MainActivity : ComponentActivity() {
          *  landed before login on a cold start.
          */
         val pendingChat = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
+        /** Pending static launcher action, retained across cold start/login until KpApp handles it. */
+        val pendingLauncherShortcut = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
 
         /** Owner round 32 (item 36): content handed over by the system share
          *  sheet (see ShareActivity) — KpApp shows the chat picker for it. Same

@@ -90,6 +90,9 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
         <!-- Owner round 32 (item 36): the system share sheet target. Its own
              activity (not MainActivity): a SEND aimed at the singleTop launcher

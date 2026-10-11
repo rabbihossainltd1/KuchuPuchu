@@ -1,3 +1,9 @@
 <resources>
     <string name="app_name">KuchuPuchu</string>
+    <string name="shortcut_camera_short">Camera</string>
+    <string name="shortcut_camera_long">Open the camera to post a status</string>
+    <string name="shortcut_ai_short">Kuchu AI</string>
+    <string name="shortcut_ai_long">Open your KuchuPuchu AI chat</string>
+    <string name="shortcut_status_short">Status</string>
+    <string name="shortcut_status_long">View and share status updates</string>
 </resources>

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_camera"
+        android:shortcutId="launcher_camera"
+        android:shortcutLongLabel="@string/shortcut_camera_long"
+        android:shortcutShortLabel="@string/shortcut_camera_short">
+        <intent
+            android:action="app.kuchupuchu.android.action.OPEN_LAUNCHER_SHORTCUT"
+            android:targetPackage="app.kuchupuchu.android"
+            android:targetClass="app.kuchupuchu.android.MainActivity">
+            <extra android:name="kp_shortcut_action" android:value="camera" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_ai"
+        android:shortcutId="launcher_ai"
+        android:shortcutLongLabel="@string/shortcut_ai_long"
+        android:shortcutShortLabel="@string/shortcut_ai_short">
+        <intent
+            android:action="app.kuchupuchu.android.action.OPEN_LAUNCHER_SHORTCUT"
+            android:targetPackage="app.kuchupuchu.android"
+            android:targetClass="app.kuchupuchu.android.MainActivity">
+            <extra android:name="kp_shortcut_action" android:value="ai" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_status"
+        android:shortcutId="launcher_status"
+        android:shortcutLongLabel="@string/shortcut_status_long"
+        android:shortcutShortLabel="@string/shortcut_status_short">
+        <intent
+            android:action="app.kuchupuchu.android.action.OPEN_LAUNCHER_SHORTCUT"
+            android:targetPackage="app.kuchupuchu.android"
+            android:targetClass="app.kuchupuchu.android.MainActivity">
+            <extra android:name="kp_shortcut_action" android:value="status" />
+        </intent>
+    </shortcut>
+</shortcuts>

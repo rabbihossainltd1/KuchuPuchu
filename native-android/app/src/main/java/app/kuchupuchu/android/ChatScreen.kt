@@ -982,21 +982,28 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // to the bottom ("play seshe back korle last message e chole
                 // jai"). Empty layout now means "unknown, do NOT scroll". The
                 // initial landing is owned by didInitialScroll below.
-                val nearBottom = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let {
-                    it >= total - 2
-                } ?: false
+                // Album rows fold raw messages; compare against rendered LazyColumn items.
+                val refreshLayoutInfo = listState.layoutInfo
+                val nearBottom =
+                    ChatScrollPolicy.isNearTail(
+                        refreshLayoutInfo.visibleItemsInfo.lastOrNull()?.index,
+                        refreshLayoutInfo.totalItemsCount,
+                    )
                 // Round 24: the FIRST fetch of a session had prevTop == "",
                 // which made "newMessage" true for a plain load — scrolling
                 // right after entering yanked the user to the bottom
                 // ("first time scroll korle last message e niye jai").
                 // A real new message needs a known previous top.
                 val newMessage = prevTop.isNotBlank() && newTop.isNotBlank() && newTop != prevTop
+                // A polling tick must never acquire the scroll mutex while a
+                // finger/fling is moving the list; explicit sends still snap.
+                val followLiveArrival = ChatScrollPolicy.shouldFollowTail(nearBottom, listState.isScrollInProgress)
                 val pinned = android.os.SystemClock.uptimeMillis() < pinBottomUntil
                 // r53 (owner: "first scroll a kaj hoi na back kore abar niche
                 // niye chole ashe"): the 2.5 s open-pin only holds a reader who
                 // is still AT the bottom and not dragging - a first scroll up
                 // inside the window is the reader leaving, never a tug back.
-                if (total > 0 && (forceScroll || (pinned && nearBottom && !listState.isScrollInProgress) || (newMessage && nearBottom))) {
+                if (total > 0 && (forceScroll || (pinned && nearBottom && !listState.isScrollInProgress) || (newMessage && followLiveArrival))) {
                     // Owner round 32 (item 48): a scroll that a newer scroll
                     // interrupts throws here; the mark-read below must still run.
                     runCatching { listState.animateScrollToItem(total - 1) }
@@ -3173,6 +3180,20 @@ fun ChatScreen(nav: NavController, convId: String) {
                 w.equals("MD", true) || w.equals("M.D", true) || w.equals("Md.", true) ||
                     w.equals("Mohammad", true) || w.equals("Muhammad", true) || w == "মোঃ"
             }.firstOrNull() ?: rawTitle
+    // Track real chat opens for Android's launcher long-press shortcuts. Wait
+    // for the cached/detail title so a cold-open placeholder never becomes a
+    // launcher label; title refreshes do not inflate the usage count.
+    var shortcutRecordedFor by remember { mutableStateOf("") }
+    LaunchedEffect(convId, rawTitle) {
+        if (rawTitle.isNotBlank() && rawTitle != "…") {
+            if (shortcutRecordedFor != convId) {
+                LauncherShortcuts.recordChatOpened(ctx, Store.myId(), convId, rawTitle, otherUserId)
+                shortcutRecordedFor = convId
+            } else {
+                LauncherShortcuts.refreshTitle(ctx, Store.myId(), convId, rawTitle, otherUserId)
+            }
+        }
+    }
     // Owner round 31: groups carry their own picture (avatarRef "g:<id>@vN").
     val avatarUrl = if (isGroup) c?.optIso("avatarUrl") else c?.optJSONObject("other")?.optIso("avatarUrl")
     // r91-5 (owner r91 #5, r90 #5 "not fixed"): the clipboard watcher moved
@@ -3231,8 +3252,8 @@ fun ChatScreen(nav: NavController, convId: String) {
             val total = info.totalItemsCount
             if (total > 0) {
                 val nearBottom =
-                    info.visibleItemsInfo.lastOrNull()?.index?.let { it >= total - 3 } ?: true
-                if (nearBottom) {
+                    info.visibleItemsInfo.lastOrNull()?.index?.let { it >= total - 3 } ?: false
+                if (ChatScrollPolicy.shouldFollowTail(nearBottom, listState.isScrollInProgress)) {
                     runCatching { listState.animateScrollToItem(total - 1) }
                 }
             }
@@ -3308,7 +3329,9 @@ fun ChatScreen(nav: NavController, convId: String) {
         val info = listState.layoutInfo
         val nearBottom =
             info.visibleItemsInfo.lastOrNull()?.index?.let { it >= info.totalItemsCount - 2 } == true
-        if (nearBottom) runCatching { listState.scrollToItem(info.totalItemsCount - 1) }
+        if (ChatScrollPolicy.shouldFollowTail(nearBottom, listState.isScrollInProgress)) {
+            runCatching { listState.scrollToItem(info.totalItemsCount - 1) }
+        }
     }
 
     // r68-8: publish this chat for the route screens (video / document viewer),
@@ -3371,7 +3394,8 @@ fun ChatScreen(nav: NavController, convId: String) {
         if (aiLiveBody.isEmpty()) return@LaunchedEffect
         val info = listState.layoutInfo
         val last = info.totalItemsCount - 1
-        if (info.visibleItemsInfo.lastOrNull()?.index?.let { it >= last - 1 } == true) {
+        val nearBottom = info.visibleItemsInfo.lastOrNull()?.index?.let { it >= last - 1 } ?: false
+        if (ChatScrollPolicy.shouldFollowTail(nearBottom, listState.isScrollInProgress)) {
             listState.scrollToItem(last)
         }
     }
@@ -3396,7 +3420,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             // A user drag owns the scroll mutex, so this programmatic scroll
             // throws — the reveal must keep typing (and clear at the end)
             // instead of dying mid-word.
-            if (nearBottom) runCatching { listState.scrollToItem(info.totalItemsCount - 1) }
+            if (ChatScrollPolicy.shouldFollowTail(nearBottom, listState.isScrollInProgress)) {
+                runCatching { listState.scrollToItem(info.totalItemsCount - 1) }
+            }
             delay(16)
         }
         delay(250)
@@ -3512,7 +3538,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         val atBottomGeometric = tail != null && tail.index == info.totalItemsCount - 1 && tail.offset + tail.size <= info.viewportEndOffset + 24
         val atBottomIdx = tail != null && tail.index >= total - 1
         val atBottom = atBottomIdx || atBottomGeometric
-        val nearBottom = tail != null && tail.index >= total - 2
+        val nearBottom = ChatScrollPolicy.isNearTail(tail?.index, total)
         // Start of an open: snapshot where we were so close can restore exactly (any position)
         if (glideApplied == 0f && glidePx != 0) {
             savedIndex = listState.firstVisibleItemIndex
@@ -3586,7 +3612,6 @@ fun ChatScreen(nav: NavController, convId: String) {
     }
     LaunchedEffect(currentTailId) {
         if (currentTailId.isNotBlank() && didInitialScroll) {
-            val total = msgs.size + pending.size
             // r83-2 (owner r83 #2: back from the video player STILL lands at
             // the very bottom, instantly): this follow had no position guard.
             // Returning from a viewer refills the page, the tail id goes
@@ -3598,13 +3623,15 @@ fun ChatScreen(nav: NavController, convId: String) {
             // no-yank rule (r24 / r47 / r53) applies now: follow only when
             // the reader is actually at the tail - a send or a live arrival
             // finds the layout still parked at the old bottom (last visible
-            // == total - 2 once the row is appended), while a viewer-return
+            // == rendered count - 2 once the row is appended), while a viewer-return
             // refill starts from the top of history. An empty layout means
             // "unknown - do NOT scroll" (Round 24).
             val info = listState.layoutInfo
-            val nearBottom = info.visibleItemsInfo.lastOrNull()?.index?.let { it >= total - 2 } ?: false
-            if (total > 0 && nearBottom) {
-                runCatching { listState.scrollToItem(total - 1) }
+            val renderedTotal = info.totalItemsCount
+            val nearBottom =
+                ChatScrollPolicy.isNearTail(info.visibleItemsInfo.lastOrNull()?.index, renderedTotal)
+            if (renderedTotal > 0 && ChatScrollPolicy.shouldFollowTail(nearBottom, listState.isScrollInProgress)) {
+                runCatching { listState.scrollToItem(renderedTotal - 1) }
             }
         }
     }

@@ -2001,14 +2001,17 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 
   check(
-    'r83-2 (owner r83 #2: back from the video player STILL lands at the very bottom instantly): the r58 tail-follow had no position guard - a viewer return refills the page, the tail id goes "" -> last in one frame, and the follow yanked the freshly-restored spot (r82-2 runs earlier by declaration order) to the newest message; that is also what defeated the LazyListState saver all along. The no-yank rule (r24/r47/r53) now applies: follow only when the reader is actually at the tail (a send / live arrival finds the layout still parked at the old bottom), and an empty layout means unknown - no scroll. The chatmedia gallery exits record the spot too now',
+    "r83-2 follow keeps the r24/r47/r53 no-yank rule and checks the rendered LazyColumn tail (album rows fold multiple raw messages, so raw message counts cannot represent the visible bottom); an empty layout means unknown - no scroll. The chatmedia gallery exits record the spot too now",
     chat4.includes(
       "LaunchedEffect(currentTailId) {\n        if (currentTailId.isNotBlank() && didInitialScroll) {",
     ) &&
+      chat4.includes("val renderedTotal = info.totalItemsCount") &&
       chat4.includes(
-        "val nearBottom = info.visibleItemsInfo.lastOrNull()?.index?.let { it >= total - 2 } ?: false",
+        "ChatScrollPolicy.isNearTail(info.visibleItemsInfo.lastOrNull()?.index, renderedTotal)",
       ) &&
-      chat4.includes("if (total > 0 && nearBottom) {") &&
+      chat4.includes(
+        "if (renderedTotal > 0 && ChatScrollPolicy.shouldFollowTail(nearBottom, listState.isScrollInProgress)) {",
+      ) &&
       (chat4.match(/markViewerReturn\(\)/g) || []).length >= 6,
   );
 
