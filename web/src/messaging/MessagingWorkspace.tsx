@@ -12,7 +12,9 @@ import { useAuth } from "../auth/AuthContext";
 import type { AppRoute } from "../router";
 import type { Navigate } from "../useBrowserRouter";
 import { ChatPane } from "./ChatPane";
+import { ContactsPane } from "./ContactsPane";
 import { ConversationList } from "./ConversationList";
+import { NewContactPane } from "./NewContactPane";
 import { SearchPane } from "./SearchPane";
 import { useE2eeIdentity } from "./useE2eeIdentity";
 import { useMessaging } from "./useMessaging";
@@ -48,11 +50,17 @@ export function MessagingWorkspace({ route, navigate, isOnline }: Props) {
   );
 
   const isSearch = route.kind === "section" && route.section === "search";
+  const isContacts = route.kind === "section" && route.section === "contacts";
+  const isNewContact = route.kind === "section" && route.section === "newcontact";
 
   return (
     <>
       {isSearch ? (
         <SearchPane api={token ? api : null} navigate={navigate} controller={controller} />
+      ) : isContacts ? (
+        <ContactsPane api={token ? api : null} navigate={navigate} controller={controller} />
+      ) : isNewContact ? (
+        <NewContactPane api={token ? api : null} navigate={navigate} controller={controller} />
       ) : (
         <ConversationList
           controller={controller}

@@ -50,7 +50,7 @@ const CallsLayer = lazy(() =>
 );
 
 type View = {
-  id: Exclude<SectionId, "account">;
+  id: Exclude<SectionId, "account" | "contacts" | "newcontact">;
   label: string;
   icon: IconName;
 };
@@ -62,7 +62,10 @@ const views: View[] = [
   { id: "search", label: "Search", icon: "search" },
 ];
 
-const viewDescriptions: Record<Exclude<SectionId, "account">, string> = {
+const viewDescriptions: Record<
+  Exclude<SectionId, "account" | "contacts" | "newcontact">,
+  string
+> = {
   chats: "Messaging is not enabled in this Web rollout. No chats or messages are loaded here.",
   statuses: "Status feed and viewer integration remain disabled in this Web rollout.",
   calls: "Call history and browser calling remain disabled in this Web rollout.",
@@ -207,7 +210,11 @@ export default function App() {
   const isChatsArea =
     route.kind === "conversation" ||
     (route.kind === "section" &&
-      (route.section === "chats" || (messagingEnabled && route.section === "search")));
+      (route.section === "chats" ||
+        (messagingEnabled &&
+          (route.section === "search" ||
+            route.section === "contacts" ||
+            route.section === "newcontact"))));
   const isStatusArea = route.kind === "section" && route.section === "statuses";
   const isCallsArea = route.kind === "section" && route.section === "calls";
   // With messaging on, the chat list itself carries private data, so it needs a
