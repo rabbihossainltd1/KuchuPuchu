@@ -444,3 +444,21 @@ The phone's `ScheduleSheet` / `ScheduledSheet` / `DisappearDialog`, mirrored:
   element; the ⋮ sheet closes on Escape.
 - Tests: `scheduled.spec.ts` (5, axe included); helpers serve the
   scheduled routes and echo `sendAt`.
+
+## Slice Z — Message info + full reaction picker ✅
+
+- **Info** in the message actions opens the phone's r103-4 sheet:
+  "Message info" with Sent / Delivered / Seen (own rows, "Not yet" until
+  each lands) or Received (theirs), values in the phone's
+  "23 Sep, 10:45 AM" stamp (`infoStamp` port in `MessageSheets.tsx`).
+- The quick reaction bar is bilateral now (the phone's bar rides own
+  messages too), highlights my current reaction, and the phone's "+"
+  seat opens the full "React" picker — `EmojiSheetDialog`'s forty emojis
+  in five-per-row seats, posting through
+  `POST /api/messages/:id/react`.
+- Geometry fix: the hover rows live inside the row's own 24px top
+  padding (was a -16px overhang that escaped the bubble's hover surface
+  and dropped clicks); rows reveal while the row — not just the bubble —
+  is hovered. Sheets close on Escape.
+- Tests: `message-sheets.spec.ts` (4, axe included); themeMatrix
+  goldens follow the padding shift.
