@@ -1162,5 +1162,5 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - AiHistoryPane.tsx = AIHistoryScreen port: "AI History / Your past KuchuPuchu AI sessions", clock chip + prettyRange(infoStamp) + "N messages" + View; "Session / Read-only archive" capped bubbles (own blue right).
 - New chat = POST /api/conversations/:id/reset + controller.selectConversation reload; Incognito open = same reset; Close = POST …/restore-latest; local aiIncognito resets on chat switch.
 - messagingApi: resetAiConversation/restoreLatestAi/listAiSessions/getAiSession.
-- TESTS ai.spec.ts 5; CI green. MERGED PR #120; docs PR pending; BUILD_ID to confirm.
+- TESTS ai.spec.ts 5; CI green. MERGED PR #120 + docs PR #121; prod BUILD_ID 69bd95deb449a796 confirmed.
 - STILL ABSENT: archive/pin.
