@@ -217,6 +217,8 @@ export type MockWorker = {
   typingCalls: { conversationId: string; kind: string }[];
   deletedMessageIds: string[];
   reactions: { messageId: string; emoji: string }[];
+  /** Slice W: per-conversation hidden flag / key hash the list route merges. */
+  hideOverrides: Record<string, { hidden: number; hiddenKey: string | null }>;
   createdConversations: string[];
   addedMembers: string[];
   removedMembers: string[];
@@ -755,6 +757,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
     addedMembers: [],
     removedMembers: [],
     reactions: [],
+    hideOverrides: {},
     async install(page: Page) {
       const json = (route: Route, payload: unknown, status = 200) =>
         route.fulfill({
@@ -1137,7 +1140,13 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
       });
 
       await page.route("**/api/conversations", (route) => {
-        if (route.request().method() !== "POST") return json(route, { items: conversations });
+        if (route.request().method() !== "POST") {
+          const items = conversations.map((item) => {
+            const over = worker.hideOverrides[item.id];
+            return over ? { ...item, hidden: over.hidden, hiddenKey: over.hiddenKey } : item;
+          });
+          return json(route, { items });
+        }
         const body = route.request().postDataJSON() as Record<string, unknown>;
         const userId = String(body.userId ?? "");
         worker.createdConversations.push(userId);

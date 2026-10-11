@@ -4,6 +4,7 @@ import { Icon, type IconName } from "../icons";
 import type { Navigate } from "../useBrowserRouter";
 import { CAPABILITY_COPY } from "./chatCopy";
 import { chatThemeOr, CHAT_THEME_LABELS } from "./chatTheme";
+import { hiddenKeyHash } from "./e2ee";
 import { messagingApi } from "./messagingApi";
 import type { MessageRow } from "./protocol";
 import { searchSnippet } from "./SearchPane";
@@ -44,9 +45,11 @@ export function ChatMenu({
   meId: string;
   onJumpToMessage: (messageId: string) => void;
 }) {
-  const [view, setView] = useState<"root" | "mute" | "privacy" | "notes" | "theme" | "find">(
-    "root",
-  );
+  const [view, setView] = useState<
+    "root" | "mute" | "privacy" | "notes" | "theme" | "find" | "hide" | "delete"
+  >("root");
+  const [hideKey, setHideKey] = useState("");
+  const [alsoForThem, setAlsoForThem] = useState(false);
   const [findQuery, setFindQuery] = useState("");
   const [findResults, setFindResults] = useState<readonly MessageRow[]>([]);
   const findInputRef = useRef<HTMLInputElement>(null);
@@ -102,7 +105,7 @@ export function ChatMenu({
     <div className="chat-menu-overlay" role="presentation" onClick={onClose}>
       <div
         className="chat-menu"
-        role="menu"
+        role="dialog"
         aria-label={`Conversation options for ${conversationTitle(conversation)}`}
         onClick={(event) => event.stopPropagation()}
       >
@@ -152,22 +155,79 @@ export function ChatMenu({
                   },
                   { danger: true },
                 )
-              : row(
-                  "trash",
-                  confirm === "delete" ? "Delete chat — confirm" : "Delete chat",
-                  () => {
-                    if (confirm !== "delete") {
-                      setConfirm("delete");
-                      return;
-                    }
-                    void run("Delete", async (client) => {
-                      await messagingApi.hideConversation(client, conversation.id, true);
-                      onClose();
-                      backToChats();
-                    });
-                  },
-                  { danger: true },
-                )}
+              : null}
+            {!bot ? row("hide", "Hide chat", () => setView("hide")) : null}
+            {!conversation.isGroup && !bot
+              ? row("trash", "Delete chat", () => setView("delete"), { danger: true })
+              : null}
+          </>
+        )}
+
+        {view === "hide" && (
+          <>
+            <p className="chat-menu__title">Hide chat</p>
+            <p className="chat-menu__notes">
+              The chat leaves your list and returns only when its secret key is typed in Search. The
+              key is hashed on this device — it is never sent or stored as text.
+            </p>
+            <label className="search-field chat-menu__field">
+              <Icon name="lock" size={18} />
+              <input
+                value={hideKey}
+                maxLength={64}
+                placeholder="Secret key"
+                aria-label="Secret key"
+                onChange={(event) => setHideKey(event.target.value.slice(0, 64))}
+              />
+            </label>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={busy !== "" || hideKey.trim().length === 0}
+              onClick={() =>
+                void run("Hide", async (client) => {
+                  const hash = await hiddenKeyHash(hideKey);
+                  await messagingApi.hideConversation(client, conversation.id, true, hash);
+                  controller.announce("Chat hidden");
+                  onClose();
+                  backToChats();
+                })
+              }
+            >
+              Hide
+            </button>
+          </>
+        )}
+
+        {view === "delete" && (
+          <>
+            <p className="chat-menu__title">Delete Chat</p>
+            <p className="chat-menu__notes">
+              Permanently delete the chat with {conversationTitle(conversation)}?
+            </p>
+            <label className="chat-menu__toggle">
+              <span>Also delete for {conversationTitle(conversation)}</span>
+              <input
+                type="checkbox"
+                checked={alsoForThem}
+                onChange={(event) => setAlsoForThem(event.target.checked)}
+              />
+            </label>
+            <button
+              type="button"
+              className="primary-button chat-menu__danger"
+              disabled={busy !== ""}
+              onClick={() =>
+                void run("Delete", async (client) => {
+                  await messagingApi.deleteConversation(client, conversation.id, alsoForThem);
+                  controller.announce("Chat deleted");
+                  onClose();
+                  backToChats();
+                })
+              }
+            >
+              Delete Chat
+            </button>
           </>
         )}
 

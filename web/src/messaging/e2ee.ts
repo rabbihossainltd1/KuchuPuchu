@@ -64,6 +64,16 @@ export class SendRefusedError extends Error {
   }
 }
 
+/**
+ * The phone's `ScreenStore.hiddenKeyHash`: SHA-256 hex of the trimmed key —
+ * what a hide stores server-side and what Search compares the typed text
+ * with. The key itself never leaves the device.
+ */
+export async function hiddenKeyHash(key: string): Promise<string> {
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key.trim()));
+  return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
