@@ -1181,4 +1181,4 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - GroupCreatePane initialPeerIds prop (ticked 1:1 non-bot peers pre-picked).
 - helpers: DELETE /api/conversations/:id removes row + records; **/api/conversations/*/mute records + flips raw row flags.
 - LESSON: playwright glob `*` never crosses `/` — /mute needed its own route; axe page-one-h1: select bar count must stay an h1.
-- TESTS select.spec.ts 5; CI green EXIT=0. MERGED PR #124; docs PR pending; BUILD_ID to confirm.
+- TESTS select.spec.ts 5; CI green EXIT=0. MERGED PR #124 + docs PR #125; prod BUILD_ID 83df8a5f1305ad42 confirmed.
