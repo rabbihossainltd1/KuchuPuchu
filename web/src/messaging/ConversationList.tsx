@@ -12,6 +12,7 @@ import { Icon } from "../icons";
 import { RouteLink } from "../RouteLink";
 import type { Navigate } from "../useBrowserRouter";
 import { ConversationAvatar } from "./Avatar";
+import { GroupCreatePane } from "./GroupCreatePane";
 import {
   clockTime,
   conversationPreviewText,
@@ -32,6 +33,8 @@ type Props = {
 export function ConversationList({ controller, selectedId, navigate, isOnline, api }: Props) {
   const filterId = useId();
   const [query, setQuery] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -66,7 +69,53 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
         >
           <Icon name="plus" size={21} />
         </button>
+        {/* The phone's home ⋮ menu; only the entries the web has are offered. */}
+        <div className="list-header__menu">
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Menu"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((value) => !value)}
+          >
+            <Icon name="more" size={21} />
+          </button>
+          {menuOpen && (
+            <>
+              <button
+                type="button"
+                className="menu-backdrop"
+                aria-label="Close menu"
+                tabIndex={-1}
+                onClick={() => setMenuOpen(false)}
+              />
+              <div className="list-menu" role="menu" aria-label="Chat list menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setCreateOpen(true);
+                  }}
+                >
+                  <Icon name="group" size={18} />
+                  New group
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </header>
+
+      {createOpen && api && (
+        <GroupCreatePane
+          controller={controller}
+          api={api}
+          navigate={navigate}
+          onClose={() => setCreateOpen(false)}
+        />
+      )}
 
       <label className="search-field" htmlFor={filterId}>
         <Icon name="search" size={18} />
