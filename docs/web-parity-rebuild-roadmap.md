@@ -398,3 +398,26 @@ The phone's round-33 hidden-chat model, end to end:
   over `DELETE /api/conversations/:id`, instead of the old silent hide.
 - Tests: `hidden.spec.ts` (4) — hash-only payload, reveal + unhide round
   trip, the forEveryone contract, axe-clean sheet.
+
+## Slice X — Contacts: New contact + All contacts ✅
+
+The phone's `ContactsScreens.kt`, mirrored for the browser:
+
+- **Entry**: the home ⋮ menu now carries the phone's order — New contact,
+  All contacts, New group.
+- **All contacts**: "All contacts" with the live "N on KuchuPuchu"
+  subtitle (Syncing… while the list refreshes), the person-add shortcut,
+  refresh, the search pill, an "On KuchuPuchu" section of the user's 1:1
+  peers with Chat pills (`POST /api/conversations {userId}` open-or-create,
+  the phone's `openChatWith`), and the phone's empty/no-match copy. Hidden
+  chats stay concealed — the pane only sees `visibleConversations` rows.
+- **New contact**: name + phone pills with the live E.164 preview from a
+  point-for-point port of `PhoneBook.toE164` (Bengali / Arabic-Indic digits
+  included), the phone's error copy, Check against
+  `POST /api/contacts/match`, then either the match card ("@user · on
+  KuchuPuchu" with Chat) or "not on KuchuPuchu yet" with the WhatsApp-first
+  invite (`inviteUrl`). The phone-only Save (system contact editor) has no
+  browser analog and is deliberately absent.
+- Icons: `personAdd` + `contactsBook` — the phone's Material glyphs.
+- Tests: `contacts.spec.ts` (7, axe included); helpers gained a
+  configurable `POST /api/contacts/match` mock.

@@ -1126,3 +1126,13 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - Mock helpers got worker.hideOverrides merged into the list GET (route.fetch() does NOT continue the route chain — learned the hard way; empty body from vite preview 404).
 - TESTS hidden.spec.ts 4; CI 84/84 cases + suites green. MERGED PR #112; docs PR pending; BUILD_ID to confirm.
 - STILL ABSENT: contacts (New contact/All contacts), message info sheet, scheduled + disappearing UI, full reaction picker, AI chat, archive/pin.
+
+## Web slice X — contacts — 2026-10-11 (branch feat/web-x-contacts)
+- ANDROID moved to native-android/app/src/main/java/app/kuchupuchu/android/ (was dev/kuchupuchu/app in older notes); ContactsScreens.kt = AllContactsScreen(128) + NewContactScreen(300); HomeMenuSheet (ChatListScreen 2577): My Profile / New contact / All contacts / New group / Settings.
+- WEB: sections += contacts,newcontact (router.ts; App.tsx isChatsArea gate extended); ContactsPane + NewContactPane rendered by MessagingWorkspace; menu rows added in phone order.
+- All contacts source = controller.conversations 1:1 rows (hidden concealed); Chat pill = createConversation (POST /api/conversations {userId} idempotent) then navigate /chats/:id (route path is /chats NOT /chat!).
+- New contact: contacts.ts toE164 port + inviteUrl (wa.me); Check → messagingApi.matchContacts → match card / "not on KuchuPuchu yet" + Invite link. No Save (device-only).
+- Helpers: worker.matchUsers + matchCalls on POST **/api/contacts/match.
+- LESSON: fresh sandboxes also wipe git identity (repo-local config again) and Playwright browsers.
+- TESTS contacts.spec.ts 7 (incl axe). CI green. MERGED PR #114; docs PR pending; BUILD_ID to confirm.
+- STILL ABSENT: message info sheet, scheduled + disappearing UI, full reaction picker, AI chat, archive/pin.
