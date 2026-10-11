@@ -1173,3 +1173,12 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - themeMatrix: list+chat goldens shifted (new list entry) — regen targeted.
 - TESTS archive.spec.ts 5; CI green. MERGED PR #122 + docs PR #123; prod BUILD_ID 77eb9762ef33281b confirmed.
 - STILL ABSENT: nothing big — parity plan essentially complete; multi-select sheet not ported (out of scope).
+
+## Web slice MS — multi-select (ListSelect port) — 2026-10-11 (feat/web-multi-select)
+- ConversationList select mode: kebab "Select" → tick bar (X + "{n} selected" h1 + ⋮); rows role=checkbox; ⋮ sheet rows verbatim: Delete / Mute… / Pin|Unpin / Create group with {handle} / Select; Escape clears.
+- MuteChooser.tsx = KpMuteChooser 3 rows; now also used by ChatMenu mute view (old toggle+instructive note replaced — copy parity).
+- DeleteChatsDialog.tsx = ChatDeleteDialog copy single+multi ("Delete Chats", "Permanently delete these N chats?", "Also delete for everyone").
+- GroupCreatePane initialPeerIds prop (ticked 1:1 non-bot peers pre-picked).
+- helpers: DELETE /api/conversations/:id removes row + records; **/api/conversations/*/mute records + flips raw row flags.
+- LESSON: playwright glob `*` never crosses `/` — /mute needed its own route; axe page-one-h1: select bar count must stay an h1.
+- TESTS select.spec.ts 5; CI green EXIT=0. MERGED PR #124; docs PR pending; BUILD_ID to confirm.

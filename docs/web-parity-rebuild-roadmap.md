@@ -507,3 +507,25 @@ The phone's `ScheduleSheet` / `ScheduledSheet` / `DisappearDialog`, mirrored:
   (the frame keys the row by server id, which only exists after the
   POST ack remaps the optimistic bubble — the spec now waits for the
   sent tick before sending the frame).
+
+## Slice MS — Multi-select parity (ListSelect port) ✅
+
+- The row kebab's **Select** enters tick mode exactly like the phone's
+  long-press: the top bar swaps to X + "{n} selected" + ⋮ (Escape or X
+  leaves), rows become checkboxes, and the ⋮ sheet carries the phone's
+  `ChatRowSheet` rows verbatim: **Delete**, **Mute…/Unmute…**,
+  **Pin/Unpin** (all-pinned decides), **Create group with {handle}**
+  (single 1:1 non-bot target; every ticked 1:1 peer rides along as a
+  pre-picked member via `GroupCreatePane`'s new `initialPeerIds`),
+  **Select**.
+- **Mute…** opens the phone's `KpMuteChooser` — "Mute all / Unmute all",
+  "Mute calls / Unmute calls", "Mute messages / Unmute messages" — for
+  every ticked chat; the same chooser now also replaces the chat-menu's
+  old toggle view, so the ⋮ Mute… matches the phone copy for one chat
+  too.
+- **Delete** opens the phone's `ChatDeleteDialog` copy verbatim, single
+  and multi ("Delete Chats", "Permanently delete these N chats?",
+  "Also delete for everyone"), deleting each ticked chat over
+  `DELETE /api/conversations/:id`.
+- Tests: `select.spec.ts` (5, axe included); helpers record DELETE and
+  `/mute` picks and serve them back on the list refresh.
