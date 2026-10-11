@@ -223,6 +223,8 @@ export type MockWorker = {
   matchUsers: Record<string, unknown>[];
   /** Slice X: every `/api/contacts/match` body, for payload assertions. */
   matchCalls: Record<string, unknown>[];
+  /** Slice Y: parked `sendAt` sends, served by GET …/scheduled. */
+  scheduled: { id: string; conversationId: string; preview: string; sendAt: string }[];
   createdConversations: string[];
   addedMembers: string[];
   removedMembers: string[];
@@ -766,6 +768,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
     hideOverrides: {},
     matchUsers: [...(options.matchUsers ?? [])],
     matchCalls: [],
+    scheduled: [],
     async install(page: Page) {
       const json = (route: Route, payload: unknown, status = 200) =>
         route.fulfill({
@@ -872,6 +875,17 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         if (route.request().method() === "POST") {
           const body = route.request().postDataJSON() as Record<string, unknown>;
           worker.sent.push({ conversationId, body });
+          // Slice Y: a `sendAt` parks the row instead of delivering it.
+          if (typeof body.sendAt === "string" && body.sendAt) {
+            const row = {
+              id: `sch_${worker.scheduled.length + 1}`,
+              conversationId,
+              preview: String(body.body ?? ""),
+              sendAt: body.sendAt,
+            };
+            worker.scheduled.push(row);
+            return json(route, { scheduled: row }, 201);
+          }
           return json(
             route,
             {
@@ -1176,6 +1190,25 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         };
         if (!conversations.some((item) => item.id === "c_dir")) conversations.push(row);
         return json(route, { conversation: row });
+      });
+
+      await page.route("**/api/conversations/*/scheduled", (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        const conversationId = decodeURIComponent(
+          new URL(route.request().url()).pathname.split("/")[3] ?? "",
+        );
+        const items = worker.scheduled
+          .filter((item) => item.conversationId === conversationId)
+          .sort((a, b) => a.sendAt.localeCompare(b.sendAt))
+          .map(({ id, preview, sendAt }) => ({ id, preview, sendAt }));
+        return json(route, { items });
+      });
+
+      await page.route("**/api/scheduled/*", (route) => {
+        if (route.request().method() !== "DELETE") return route.fallback();
+        const id = decodeURIComponent(new URL(route.request().url()).pathname.split("/")[3] ?? "");
+        worker.scheduled = worker.scheduled.filter((item) => item.id !== id);
+        return json(route, { ok: true });
       });
 
       // Slice X: phone-book match — the web's New contact screen checks here.
