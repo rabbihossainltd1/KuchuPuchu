@@ -118,15 +118,17 @@ jobs:
           ./gradlew assembleRelease --no-daemon --stacktrace \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
       - name: Upload APK
+        if: ${{ github.event.repository.private }}
         uses: actions/upload-artifact@v4
         with:
           name: kuchupuchu-apk
           path: |
             native-android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
-      # Keep the private, build-matched R8 map so obfuscated Compose crashes can
-      # be retraced to the exact source callsite. The APK artifact remains separate.
+      # Keep the build-matched R8 map only on private repositories; artifacts
+      # from public repositories are not private. The APK artifact remains separate.
       - name: Upload release R8 mapping
+        if: ${{ github.event.repository.private }}
         uses: actions/upload-artifact@v4
         with:
           name: kuchupuchu-r8-mapping
