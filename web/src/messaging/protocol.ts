@@ -12,6 +12,7 @@
  */
 
 import { BOT_IDS, OFFICIAL_BOT_ID, isEnvelope } from "./e2ee";
+import { stripBoldMarkers } from "./messageText";
 import { parseStatusQuote, type StatusQuote } from "../status/statusQuote";
 
 export const MESSAGE_PAGE_SIZE = 50;
@@ -609,7 +610,7 @@ export function conversationPreviewText(conversation: ConversationRow): string {
   if (category !== "message") return label;
 
   if (isEnvelope(preview.body)) return label;
-  const body = preview.body.trim();
+  const body = stripBoldMarkers(preview.body).trim();
   if (!body) return label;
   return body.length > PREVIEW_BODY_LIMIT ? `${body.slice(0, PREVIEW_BODY_LIMIT)}…` : body;
 }

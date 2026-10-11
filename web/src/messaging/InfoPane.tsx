@@ -32,15 +32,12 @@ function MemberRow({
   isOwner,
   busy,
   onRemove,
-  onNickname,
 }: {
   member: ConversationMember;
   meId: string;
   isOwner: boolean;
   busy: string;
   onRemove: (userId: string) => void;
-  onNickname: (userId: string, displayName: string, nickname: string) => void;
-  confirmState?: unknown;
 }) {
   const [confirm, setConfirm] = useState(false);
   const url = useAvatar(null, member.user.avatarRef);
@@ -58,24 +55,13 @@ function MemberRow({
       </span>
       <span className="conversation-row__body">
         <span className="conversation-row__name">
-          {member.user.displayName}
+          {member.user.nickname || member.user.displayName}
           {self ? " (you)" : ""}
         </span>
         <span className="conversation-row__preview">
           {member.role === "owner" ? "owner" : member.role === "admin" ? "admin" : "member"}
         </span>
       </span>
-      <button
-        type="button"
-        className="icon-button"
-        disabled={busy !== ""}
-        aria-label={`${member.user.nickname ? "Change" : "Set"} nickname for ${member.user.displayName}`}
-        onClick={() =>
-          onNickname(member.user.id, member.user.displayName, member.user.nickname ?? "")
-        }
-      >
-        <Icon name="pencil" size={15} />
-      </button>
       {removable &&
         (confirm ? (
           <button
@@ -124,12 +110,6 @@ export function InfoPane({
   const [confirm, setConfirm] = useState("");
   const [addQuery, setAddQuery] = useState("");
   const [addResults, setAddResults] = useState<readonly ConversationPeer[]>([]);
-  const [nicknameDraft, setNicknameDraft] = useState("");
-  const [nicknameTarget, setNicknameTarget] = useState<{
-    userId: string;
-    displayName: string;
-    nickname: string;
-  } | null>(null);
 
   const person = conversation ? conversation.other : peer;
   const group = conversation?.isGroup ?? false;
@@ -146,11 +126,6 @@ export function InfoPane({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-
-  useEffect(() => {
-    setNicknameDraft(person?.nickname ?? "");
-    setNicknameTarget(null);
-  }, [conversation?.id, person?.id, person?.nickname]);
 
   useEffect(() => {
     if (!api || !group || !isOwner || addQuery.trim().length < 2) {
@@ -257,52 +232,6 @@ export function InfoPane({
         ) : null}
       </div>
 
-      {!group && conversation && person && !bot ? (
-        <section className="info-pane__nickname" aria-label="Conversation nickname">
-          <label htmlFor="conversation-nickname">Nickname in this chat</label>
-          <div className="info-pane__nickname-row">
-            <input
-              id="conversation-nickname"
-              value={nicknameDraft}
-              maxLength={40}
-              onChange={(event) => setNicknameDraft(event.target.value)}
-              placeholder={person.displayName}
-              disabled={busy !== ""}
-            />
-            <button
-              type="button"
-              className="text-button"
-              disabled={busy !== "" || !nicknameDraft.trim()}
-              onClick={() =>
-                void run("Nickname", async (client) => {
-                  await messagingApi.setNickname(client, conversation.id, person.id, nicknameDraft);
-                  controller?.announce("Nickname saved for this chat.");
-                })
-              }
-            >
-              {person.nickname ? "Save" : "Set"}
-            </button>
-            {person.nickname ? (
-              <button
-                type="button"
-                className="text-button"
-                disabled={busy !== ""}
-                onClick={() =>
-                  void run("Nickname", async (client) => {
-                    await messagingApi.setNickname(client, conversation.id, person.id, "");
-                    setNicknameDraft("");
-                    controller?.announce("Nickname cleared.");
-                  })
-                }
-              >
-                Clear
-              </button>
-            ) : null}
-          </div>
-          <p>Shared with the other person; it does not change either profile.</p>
-        </section>
-      ) : null}
-
       <div className="info-pane__actions">
         {!group && (
           <button type="button" className="text-button" onClick={openChat} disabled={busy !== ""}>
@@ -371,83 +300,9 @@ export function InfoPane({
                     controller?.announce("Removed from the group.");
                   })
                 }
-                onNickname={(userId, displayName, nickname) =>
-                  setNicknameTarget({ userId, displayName, nickname })
-                }
               />
             ))}
           </ul>
-
-          {nicknameTarget ? (
-            <section className="info-pane__nickname" aria-label="Group nickname editor">
-              <label htmlFor="group-member-nickname">
-                Nickname for {nicknameTarget.displayName} in this group
-              </label>
-              <div className="info-pane__nickname-row">
-                <input
-                  id="group-member-nickname"
-                  value={nicknameTarget.nickname}
-                  maxLength={40}
-                  onChange={(event) =>
-                    setNicknameTarget((current) =>
-                      current ? { ...current, nickname: event.target.value } : current,
-                    )
-                  }
-                  placeholder={nicknameTarget.displayName}
-                  disabled={busy !== ""}
-                />
-                <button
-                  type="button"
-                  className="text-button"
-                  disabled={busy !== "" || !nicknameTarget.nickname.trim()}
-                  onClick={() =>
-                    void run("Nickname", async (client) => {
-                      await messagingApi.setNickname(
-                        client,
-                        conversation.id,
-                        nicknameTarget.userId,
-                        nicknameTarget.nickname,
-                      );
-                      setNicknameTarget(null);
-                      controller?.announce("Nickname saved for this group.");
-                    })
-                  }
-                >
-                  Save
-                </button>
-                {nicknameTarget.nickname ? (
-                  <button
-                    type="button"
-                    className="text-button"
-                    disabled={busy !== ""}
-                    onClick={() =>
-                      void run("Nickname", async (client) => {
-                        await messagingApi.setNickname(
-                          client,
-                          conversation.id,
-                          nicknameTarget.userId,
-                          "",
-                        );
-                        setNicknameTarget(null);
-                        controller?.announce("Nickname cleared.");
-                      })
-                    }
-                  >
-                    Clear
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className="text-button"
-                  disabled={busy !== ""}
-                  onClick={() => setNicknameTarget(null)}
-                >
-                  Cancel
-                </button>
-              </div>
-              <p>Every current group member sees this alias, not the member’s profile name.</p>
-            </section>
-          ) : null}
 
           {isOwner && !conversation.privateGroup ? (
             <>

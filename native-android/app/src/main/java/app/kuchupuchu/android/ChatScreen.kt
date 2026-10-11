@@ -11,7 +11,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -57,6 +56,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
@@ -497,6 +497,7 @@ fun ChatScreen(nav: NavController, convId: String) {
     var showChatSearch by remember { mutableStateOf(false) }
     var showDisappear by remember { mutableStateOf(false) }
     var showTheme by remember { mutableStateOf(false) }
+    var showNicknames by remember { mutableStateOf(false) }
     // r71-18 (owner item 18): ⋮ → "Chat privacy" — three per-member switches.
     var showChatPrivacy by remember { mutableStateOf(false) }
     var privShot by remember(convId) { mutableStateOf(false) }
@@ -1888,6 +1889,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     fun sendText(body: String, kind: String = "TEXT", once: Boolean = false): Boolean {
         val command = if (kind == "TEXT") ComposerCommands.parse(body) else null
         val messageBody = command?.text ?: body
+        if (messageBody.length > MESSAGE_BODY_LIMIT) {
+            error = "Messages are limited to 4,000 characters."
+            return false
+        }
         if (messageBody.isBlank()) return false
         // r79-6/8: warm the glyph's Lottie before the echo is born (the
         // typing hook already warmed it; this covers paste-and-send).
@@ -2001,6 +2006,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     fun scheduleText(body: String, at: java.time.Instant, once: Boolean = false): Boolean {
         val command = ComposerCommands.parse(body)
         val messageBody = command?.text ?: body
+        if (messageBody.length > MESSAGE_BODY_LIMIT) {
+            error = "Messages are limited to 4,000 characters."
+            return false
+        }
         if (messageBody.isBlank()) return false
         val clientId = "c_${java.util.UUID.randomUUID()}"
         val payload =
@@ -3246,6 +3255,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     val peerShotOk = c?.optBoolean("peerShotOk", true) != false
     val peerRecOk = c?.optBoolean("peerRecOk", true) != false
     val isGroup = c?.optBoolean("isGroup") == true
+    val mentionCandidates = remember(c?.toString(), Store.myId()) {
+        ComposerMentions.forConversation(c, Store.myId())
+    }
     val otherUserId = c?.optJSONObject("other")?.optString("id") ?: ""
     // System accounts: full name in the header (no call buttons there, so
     // space is never a problem) and no call/block actions anywhere.
@@ -4055,6 +4067,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         if (groupAdmin && !privateGroup) {
                             KpSheetRow(Icons.Filled.PersonAdd, "Add Members") { menuOpen = false; showAddMembers = true }
                         }
+                        KpSheetRow(Icons.Filled.Edit, "Nicknames") { menuOpen = false; showNicknames = true }
                         if (!privateGroup) {
                             KpSheetRow(Icons.Filled.PermMedia, "Group Media") { menuOpen = false; markViewerReturn(); nav.navigate("chatmedia/$convId") }
                         }
@@ -4068,6 +4081,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                             KpSheetRow(Icons.Filled.Schedule, "Scheduled messages") { menuOpen = false; showScheduled = true }
                         }
                         KpSheetRow(Icons.Filled.GroupAdd, "New group") { menuOpen = false; nav.navigate("newgroup") }
+                        if (otherUserId.isNotBlank() && !botChat) {
+                            KpSheetRow(Icons.Filled.Edit, "Nickname") { menuOpen = false; showNicknames = true }
+                        }
                         if (otherUserId.isNotBlank()) {
                             // Owner round 30: "View contact" only when this person is
                             // already in the phone book; otherwise offer to add them
@@ -4105,6 +4121,20 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                 }
             }
+        }
+        if (showNicknames) {
+            ConversationNicknamesSheet(
+                conversationId = convId,
+                conversation = c,
+                meId = Store.myId(),
+                onDismiss = { showNicknames = false },
+                onSaved = { updated ->
+                    conv.value = updated
+                    ScreenStore.setConvDetail(convId, updated)
+                    ScreenStore.upsertConv(updated)
+                    ScreenStore.pokeInbox()
+                },
+            )
         }
         if (confirmLeave) {
             KpConfirmSheet(
@@ -5622,6 +5652,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             // Owner round 31 (item 17): the AI hears voice notes now (the
             // worker feeds the clip to Gemini), so the mic works here too.
             micEnabled = true,
+            mentionCandidates = mentionCandidates,
             theme = chatTheme,
             // The bar MUST pad itself (the weighted Box fills the whole
             // column — padding IT never lifts this sibling). The thread
@@ -6036,6 +6067,141 @@ fun ChatScreen(nav: NavController, convId: String) {
 
 /* ------------------------------------------------------------------ */
 
+private data class ChatNicknameMember(
+    val id: String,
+    val displayName: String,
+    val nickname: String,
+)
+
+/** Nickname editing lives in the conversation's ⋮ menu, not the profile screen. */
+@Composable
+private fun ConversationNicknamesSheet(
+    conversationId: String,
+    conversation: JSONObject?,
+    meId: String,
+    onDismiss: () -> Unit,
+    onSaved: (JSONObject) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val members = remember(conversationId, conversation?.toString(), meId) {
+        val result = mutableListOf<ChatNicknameMember>()
+        if (conversation?.optBoolean("isGroup") == true) {
+            val rows = conversation.optJSONArray("members")
+            if (rows != null) for (index in 0 until rows.length()) {
+                val user = rows.optJSONObject(index)?.optJSONObject("user") ?: continue
+                val id = user.optString("id")
+                if (id.isBlank() || id == meId) continue
+                result += ChatNicknameMember(
+                    id = id,
+                    displayName = user.optText("displayName").ifBlank { user.optText("username") },
+                    nickname = user.optText("nickname"),
+                )
+            }
+        } else {
+            val user = conversation?.optJSONObject("other")
+            val id = user?.optString("id").orEmpty()
+            if (user != null && id.isNotBlank() && id != meId) {
+                result += ChatNicknameMember(
+                    id = id,
+                    displayName = user.optText("displayName").ifBlank { user.optText("username") },
+                    nickname = user.optText("nickname"),
+                )
+            }
+        }
+        result
+    }
+    var target by remember(conversationId) { mutableStateOf<ChatNicknameMember?>(null) }
+    var draft by remember(conversationId) { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+
+    fun saveNickname(rawValue: String) {
+        val current = target ?: return
+        if (busy) return
+        val value = rawValue.trim().take(40)
+        scope.launch {
+            busy = true
+            error = ""
+            try {
+                val path = "/api/conversations/${Uri.encode(conversationId)}/nicknames/${Uri.encode(current.id)}"
+                val response = withContext(Dispatchers.IO) {
+                    if (value.isBlank()) Api.delete(path)
+                    else Api.put(path, JSONObject().put("nickname", value))
+                }
+                response.optJSONObject("conversation")?.let(onSaved)
+                ScreenStore.pokeInbox()
+                target = null
+                draft = ""
+            } catch (failure: Exception) {
+                error = failure.message?.takeIf { it.isNotBlank() } ?: "Could not save the nickname."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    KpSheet(onDismiss = { if (!busy) onDismiss() }, title = if (target == null) "Nicknames" else "Nickname") {
+        if (target == null) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
+                Text(
+                    "Aliases are shared only with people in this chat; profile names stay unchanged.",
+                    color = Muted,
+                    fontSize = 12.5.sp,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+                if (members.isEmpty()) {
+                    Text("No other chat members are available.", color = Muted, fontSize = 13.sp)
+                }
+            }
+            members.forEach { member ->
+                KpSheetRow(
+                    Icons.Filled.Edit,
+                    if (member.nickname.isNotBlank()) "${member.displayName} · ${member.nickname}" else member.displayName,
+                ) {
+                    target = member
+                    draft = member.nickname
+                    error = ""
+                }
+            }
+        } else {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp).imePadding()) {
+                Text("For ${target?.displayName ?: "this member"} in this chat.", color = Muted, fontSize = 12.5.sp)
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it.take(40) },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp),
+                    singleLine = true,
+                    enabled = !busy,
+                    shape = RoundedCornerShape(14.dp),
+                    label = { Text("Nickname") },
+                    placeholder = { Text(target?.displayName.orEmpty()) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = ActionBlue,
+                        unfocusedBorderColor = Line,
+                        cursorColor = ActionBlue,
+                        focusedTextColor = Ink,
+                        unfocusedTextColor = Ink,
+                    ),
+                )
+                if (error.isNotBlank()) {
+                    Text(error, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                }
+                Spacer(Modifier.height(10.dp))
+                GoldBtn(
+                    "Save",
+                    Modifier.fillMaxWidth(),
+                    enabled = !busy && draft.trim().isNotBlank(),
+                ) { saveNickname(draft) }
+                if (target?.nickname?.isNotBlank() == true) {
+                    KpSheetRow(null, "Clear nickname", tint = Red) { saveNickname("") }
+                }
+                KpSheetRow(null, "Cancel") { if (!busy) target = null }
+            }
+        }
+    }
+}
+
 /** Subtle scattered coins behind the conversation (locked design #7). */
 @Composable
 private fun CoinWallpaper() {
@@ -6108,6 +6274,7 @@ private fun Composer(
     voiceBinNonce: Int = 0,
     selectCount: Int = 0,
     onSendSelection: () -> Unit = {},
+    mentionCandidates: List<ComposerMention> = emptyList(),
     theme: String = "",
     // Owner round 33 (item 11c): false while an inline panel is open — the
     // panel carries the keyboard padding then (its search box opens the IME).
@@ -6168,18 +6335,21 @@ private fun Composer(
     }
     LaunchedEffect(swallowT.value) { RecorderAnchors.swallowV = swallowT.value }
     val commandOptions = ComposerCommands.suggestions(input)
+    val activeMention = ComposerMentions.active(input)
+    val mentionOptions = activeMention?.let { ComposerMentions.suggestions(it.query, mentionCandidates) }.orEmpty()
     Column(
         Modifier.fillMaxWidth().padding(bottom = padForIme),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         if (commandOptions.isNotEmpty() && !recording && !locked && selectCount == 0) {
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(7.dp),
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 commandOptions.forEach { command ->
                     Row(
                         Modifier
+                            .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
                             .background(Card)
                             .border(1.dp, Line.copy(alpha = 0.75f), RoundedCornerShape(12.dp))
@@ -6189,12 +6359,51 @@ private fun Composer(
                                 runCatching { inputFocus.requestFocus() }
                                 keyboard?.show()
                             }
-                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("/${command.name}", color = accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.width(7.dp))
-                        Text(command.hint, color = Muted, fontSize = 11.sp, maxLines = 1)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("/${command.name}", color = accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text(command.hint, color = Muted, fontSize = 11.sp, maxLines = 2)
+                        }
+                    }
+                }
+            }
+        }
+        if (activeMention != null && !recording && !locked && selectCount == 0) {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (mentionOptions.isEmpty()) {
+                    Text("No matching people", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 3.dp))
+                } else {
+                    mentionOptions.forEach { mention ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Card)
+                                .border(1.dp, Line.copy(alpha = 0.75f), RoundedCornerShape(12.dp))
+                                .clickable {
+                                    val next = ComposerMentions.insert(input, mention)
+                                    if (next != null) {
+                                        haptics.tap()
+                                        onInput(next)
+                                        runCatching { inputFocus.requestFocus() }
+                                        keyboard?.show()
+                                    }
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Filled.Person, null, tint = accent, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(9.dp))
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text("@${mention.username}", color = Ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                Text(mention.displayName, color = Muted, fontSize = 11.sp, maxLines = 1)
+                            }
+                        }
                     }
                 }
             }
@@ -6349,6 +6558,7 @@ private fun Composer(
                             }
                             BasicTextField(
                                 state = inputState,
+                                inputTransformation = InputTransformation.maxLength(MESSAGE_BODY_LIMIT),
                                 textStyle = TextStyle(color = Ink, fontSize = 14.sp, lineHeight = 20.sp),
                                 // Owner round 19: the caret follows the chat theme too.
                                 cursorBrush = androidx.compose.ui.graphics.SolidColor(accent),
@@ -8976,12 +9186,6 @@ private fun MessageRow(
                             else -> chatOtherFill(theme)
                         },
                     )
-                    .then(
-                        Modifier.magicMessageEffect(
-                            enabled = kind == "TEXT" && m.optJSONObject("meta")?.optBoolean("magic") == true && fxBorn,
-                            accent = chatAccent(theme),
-                        ),
-                    )
                     // r55: a smooth expand / collapse when the fold flips.
                     // r56 (owner: "smooth expand collapse animation"): spring damping ratio + stiffness tuned for buttery fold animation.
                     // r62: animateContentSize only on collapsible text bodies; voice notes keep exact original body dimensions with no resize.
@@ -9185,6 +9389,11 @@ private fun MessageRow(
                             }
                         } else {
                             val full = m.optText("body")
+                            val magicTextInk = magicMessageTextColor(
+                                enabled = kind == "TEXT" && m.optJSONObject("meta")?.optBoolean("magic") == true && fxBorn,
+                                base = bodyInk,
+                                accent = chatAccent(theme),
+                            )
                             val visibleFull = MessageMarkup.plain(full)
                             // Owner round 32 (item 32): a link in the text
                             // is a real link (underlined, tap opens it) and
@@ -9232,7 +9441,7 @@ private fun MessageRow(
                                         visibleFull.take(revealChars) + " ▍",
                                         fontSize = 14.5.sp,
                                         lineHeight = 19.sp,
-                                        color = bodyInk,
+                                        color = magicTextInk,
                                         maxLines = if (capped) BODY_COLLAPSE_LINES else Int.MAX_VALUE,
                                         overflow = if (capped) TextOverflow.Ellipsis else TextOverflow.Clip,
                                         onTextLayout = { countLines(it, { _ -> }) },
@@ -9242,7 +9451,7 @@ private fun MessageRow(
                                         linked,
                                         fontSize = 14.5.sp,
                                         lineHeight = 19.sp,
-                                        color = bodyInk,
+                                        color = magicTextInk,
                                         maxLines = if (capped) BODY_COLLAPSE_LINES else Int.MAX_VALUE,
                                         overflow = if (capped) TextOverflow.Ellipsis else TextOverflow.Clip,
                                         onTextLayout = { countLines(it, { _ -> }) },
@@ -9257,7 +9466,7 @@ private fun MessageRow(
                                         visibleFull,
                                         fontSize = 14.5.sp,
                                         lineHeight = 19.sp,
-                                        color = bodyInk,
+                                        color = magicTextInk,
                                         maxLines = if (capped) BODY_COLLAPSE_LINES else Int.MAX_VALUE,
                                         overflow = if (capped) TextOverflow.Ellipsis else TextOverflow.Clip,
                                         onTextLayout = { countLines(it, { _ -> }) },

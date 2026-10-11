@@ -17,7 +17,7 @@ internal data class ParsedComposerCommand(
 internal object ComposerCommands {
     val all: List<ComposerCommand> = listOf(
         ComposerCommand("silent", "No notification or sound", "silent"),
-        ComposerCommand("magic", "Sparkle effect on both sides", "magic"),
+        ComposerCommand("magic", "Animate the message text on both sides", "magic"),
         ComposerCommand("vanish", "Disappears one minute after first read", "vanish"),
     )
 

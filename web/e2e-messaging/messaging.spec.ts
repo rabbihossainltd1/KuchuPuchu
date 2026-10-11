@@ -123,6 +123,53 @@ test.describe("Web messaging", () => {
     await expect(composer).toHaveValue("");
   });
 
+  test("slash suggestions stack vertically and /magic animates only message text", async ({
+    page,
+  }) => {
+    await page.getByRole("link", { name: new RegExp(PEER_NAME) }).click();
+    const composer = page.getByLabel("Message text", { exact: true });
+    await composer.fill("/");
+
+    const suggestions = ["silent", "magic", "vanish"].map((name) =>
+      page.getByRole("button", { name: new RegExp(`Insert /${name}:`) }),
+    );
+    for (const suggestion of suggestions) await expect(suggestion).toBeVisible();
+    const boxes = await Promise.all(suggestions.map((suggestion) => suggestion.boundingBox()));
+    expect(boxes.every((box) => box !== null)).toBe(true);
+    expect(boxes[0]!.y).toBeLessThan(boxes[1]!.y);
+    expect(boxes[1]!.y).toBeLessThan(boxes[2]!.y);
+
+    await composer.fill("/magic bright text");
+    await composer.press("Enter");
+    await expect.poll(() => worker.sent.length).toBe(1);
+    expect(await openFrom(String(worker.sent[0]!.body.body), worker.me, worker.peer)).toBe(
+      "bright text",
+    );
+    expect((worker.sent[0]!.body.meta as Record<string, unknown>)?.magic).toBe(true);
+    const magicText = page.locator(".bubble__body--magic").last();
+    await expect(magicText).toContainText("bright text");
+    expect(
+      await magicText.evaluate((el) => el.closest("article")?.classList.contains("bubble--magic")),
+    ).toBe(false);
+  });
+
+  test("@ filters chat members and inserts the selected username", async ({ page }) => {
+    await page.getByRole("link", { name: /Squad/ }).click();
+    const composer = page.getByLabel("Message text", { exact: true });
+    await composer.fill("@ra");
+
+    await expect(page.getByLabel("Mention people")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Mention Rahi (@rahi)" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Mention Third Member (@third)" })).toHaveCount(
+      0,
+    );
+    await page.getByRole("button", { name: "Mention Rahi (@rahi)" }).click();
+    await expect(composer).toHaveValue("@rahi ");
+    await composer.press("Enter");
+    await expect.poll(() => worker.sent.length).toBe(1);
+    expect(worker.sent[0]!.body.body).toBe("@rahi");
+  });
+
   test("an unsent draft survives a page reload", async ({ page }) => {
     await page.getByRole("link", { name: new RegExp(PEER_NAME) }).click();
     await expect(page.getByText("এই মেসেজটি ফোন থেকে এনক্রিপ্টেড")).toBeVisible();

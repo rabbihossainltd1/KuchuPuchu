@@ -14,7 +14,7 @@ export const MESSAGE_COMMANDS: readonly {
   readonly hint: string;
 }[] = [
   { name: "silent", label: "Silent", hint: "No notification or sound" },
-  { name: "magic", label: "Magic", hint: "Sparkle effect on both sides" },
+  { name: "magic", label: "Magic", hint: "Animate the message text on both sides" },
   { name: "vanish", label: "Vanish", hint: "Disappears one minute after first read" },
 ];
 

@@ -20,6 +20,7 @@ import {
   RECOVERY_REQUEST_TTL_MS,
   SESSION_TTL_MS,
 } from "../shared/constants.js";
+import { completeAiText } from "./aiText.js";
 
 // Durable Object classes this worker exports (see wrangler.toml bindings).
 // Re-exported here because src/worker/index.ts is the upload entrypoint.
@@ -996,7 +997,14 @@ function checkedMessageBody(raw: string): string {
     if (raw.length > E2EE_BODY_MAX) fail(400, "Encrypted message is too long.", "MESSAGE_TOO_LONG");
     return raw;
   }
-  return raw.slice(0, MESSAGE_MAX_LENGTH);
+  if (raw.length > MESSAGE_MAX_LENGTH) {
+    fail(
+      400,
+      `Message is too long. Use ${MESSAGE_MAX_LENGTH.toLocaleString()} characters or fewer.`,
+      "MESSAGE_TOO_LONG",
+    );
+  }
+  return raw;
 }
 
 /** Expire unattended approval cards on the minute cron; never leave a stale code readable. */
@@ -1145,11 +1153,9 @@ async function hfChat(
         choices?: { message?: { content?: string | { type?: string; text?: string }[] } }[];
       };
       const content = data.choices?.[0]?.message?.content;
-      const text = (
-        typeof content === "string" ? content : (content ?? []).map((p) => p.text ?? "").join("")
-      )
-        .trim()
-        .slice(0, 600);
+      const text = completeAiText(
+        typeof content === "string" ? content : (content ?? []).map((p) => p.text ?? "").join(""),
+      );
       if (text) return text;
       lastErrs.push(`${model} empty`);
     } catch (e) {
@@ -1203,7 +1209,7 @@ async function cfAiChat(
         continue;
       }
       const data = (await res.json()) as { result?: { response?: string } };
-      const text = (data.result?.response ?? "").trim().slice(0, 600);
+      const text = completeAiText(data.result?.response ?? "");
       if (text) return text;
       errs.push(`${model} empty`);
     } catch (e) {
@@ -1272,11 +1278,9 @@ async function geminiParts(
     const data = (await res.json()) as {
       candidates?: { content?: { parts?: { text?: string }[] } }[];
     };
-    const text = (data.candidates?.[0]?.content?.parts ?? [])
-      .map((p) => p.text ?? "")
-      .join("")
-      .trim()
-      .slice(0, 600);
+    const text = completeAiText(
+      (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join(""),
+    );
     return text || null;
   } catch {
     return null;
@@ -1319,11 +1323,9 @@ async function geminiChat(
     const data = (await res.json()) as {
       candidates?: { content?: { parts?: { text?: string }[] } }[];
     };
-    const text = (data.candidates?.[0]?.content?.parts ?? [])
-      .map((p) => p.text ?? "")
-      .join("")
-      .trim()
-      .slice(0, 600);
+    const text = completeAiText(
+      (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join(""),
+    );
     return text || null;
   } catch {
     return null;
@@ -1486,15 +1488,15 @@ async function geminiStream(
               .join("");
             if (!piece) continue;
             text += piece;
-            // The cap is the contract every caller already relies on (600).
-            if (text.length <= 600) onChunk(text);
+            // Paint every complete prefix; do not silently stop a long reply mid-stream.
+            onChunk(text);
           } catch {
             // A half-written frame is not text yet — the next read completes it.
           }
         }
       }
     }
-    const out = text.trim().slice(0, 600);
+    const out = completeAiText(text);
     return out || null;
   } catch {
     return null;
@@ -10238,9 +10240,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       const when = scheduleTime(body.sendAt);
       if (!when) fail(400, "Pick a time within the next 30 days.", "BAD_SEND_AT");
       const { sendAt, ...payload } = body;
-      // Validate encrypted length NOW, not after parking a corrupt payload.
+      // Validate length NOW, not after parking a body the send route must refuse.
       const scheduledBody = String(payload.body || "");
-      if (scheduledBody.startsWith(E2EE_PREFIX)) checkedMessageBody(scheduledBody);
+      if (scheduledBody.trim()) checkedMessageBody(scheduledBody);
       if (!String(payload.body || "").trim() && !payload.imageData && !payload.fileKey)
         fail(400, "Write a message.");
       const sid = id();
@@ -13699,7 +13701,7 @@ function mentionsUsername(body: string, username: string): boolean {
 
 /** Remove supported bold markers from safe previews; clients format the full body. */
 function stripBoldMarkers(body: string): string {
-  return body.replace(/\*\*([\s\S]+?)\*\*/g, "$1").replace(/(?<!\*)\*([^*\n]+?)\*(?!\*)/g, "$1");
+  return body.replace(/\*{1,2}([^*\n]+?)\*{1,2}/g, "$1");
 }
 
 /** Chat-list preview text for a stored row — mirrors what the send path writes. */
@@ -13725,11 +13727,11 @@ function previewOf(row: MsgRow): string {
     case "STICKER":
       return "Sticker";
     case "IMAGE":
-      return once ? `Photo${once}` : e2ee ? "Photo" : row.body || "Photo";
+      return once ? `Photo${once}` : e2ee ? "Photo" : stripBoldMarkers(row.body || "Photo");
     case "VIDEO":
-      return e2ee ? "Video" : row.body || "Video";
+      return e2ee ? "Video" : stripBoldMarkers(row.body || "Video");
     case "FILE": {
-      if (row.body && !once && !e2ee) return row.body;
+      if (row.body && !once && !e2ee) return stripBoldMarkers(row.body);
       // r71-19b: a view-once voice note says so, exactly like the photo /
       // video previews — the chat list and the push never leak its content.
       if (meta.voice) return `Voice message${once}`;

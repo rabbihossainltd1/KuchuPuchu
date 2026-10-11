@@ -1995,11 +1995,7 @@ private fun RowScope.ActionSlot(
     }
 }
 
-/**
- * Chat-list preview: media never shows its raw file name — "voice_123.m4a"
- * becomes "Voice message", anything photo/video/doc likewise. Text passes
- * through untouched.
- */
+/** Supported bold markers are stripped in list and notification previews. */
 /**
  * Chat-list / notification preview for a stored `lastMessage` / push body.
  * Owner round 33 (item 12): media reads as what it is — Photo / Voice message
@@ -2007,7 +2003,7 @@ private fun RowScope.ActionSlot(
  * for new rows (previewOf) and this covers older rows + pushes the same way.
  */
 internal fun friendlyPreview(raw: String): String {
-    val t = raw.trim()
+    val t = MessageMarkup.plain(raw).trim()
     if (t.isBlank()) return "No messages yet"
     val lower = t.lowercase()
     val photoExts = listOf(".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic")

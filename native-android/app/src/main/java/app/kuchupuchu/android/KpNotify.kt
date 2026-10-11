@@ -45,7 +45,7 @@ object KpNotify {
 
     private class StkMsg(
         val from: String,
-        val body: String,
+        val body: CharSequence,
         val at: Long,
         val photo: Boolean,
         val avatar: android.graphics.Bitmap?,
@@ -360,7 +360,7 @@ object KpNotify {
     fun message(
         ctx: Context,
         from: String,
-        body: String,
+        body: CharSequence,
         convoId: String,
         muted: Boolean = false,
         mid: String? = null,

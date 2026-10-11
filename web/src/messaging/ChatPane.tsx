@@ -91,6 +91,12 @@ import {
 import { ChatMenu } from "./ChatMenu";
 import { InfoPane } from "./InfoPane";
 import { commandDraft, commandSuggestions } from "./messageCommands";
+import {
+  activeMentionQuery,
+  insertMention,
+  matchingMentionCandidates,
+  type MentionCandidate,
+} from "./messageMentions";
 import { parseMessageText, stripBoldMarkers } from "./messageText";
 import { ConversationAvatar } from "./Avatar";
 import {
@@ -224,6 +230,7 @@ export function ChatPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const [composerCaret, setComposerCaret] = useState(0);
   const [stickToBottom, setStickToBottom] = useState(true);
   const [confirmDeleteId, setConfirmDeleteId] = useState("");
   const [editingId, setEditingId] = useState("");
@@ -307,6 +314,25 @@ export function ChatPane({
   const originals = useRef<Map<string, { blob: Blob; width: number; height: number }>>(new Map());
 
   const conversation = controller.selected;
+  const mentionCandidates = useMemo<readonly MentionCandidate[]>(() => {
+    if (!conversation || isBotConversation(conversation)) return [];
+    const peers = conversation.isGroup
+      ? conversation.members.map((member) => member.user)
+      : conversation.other
+        ? [conversation.other]
+        : [];
+    return peers
+      .filter((peer) => peer.id !== meId)
+      .map((peer) => ({
+        id: peer.id,
+        displayName: peer.displayName || peer.username,
+        username: peer.username,
+      }));
+  }, [conversation, meId]);
+  const mentionQuery = activeMentionQuery(controller.draft, composerCaret);
+  const mentionChoices = mentionQuery
+    ? matchingMentionCandidates(mentionQuery.query, mentionCandidates)
+    : [];
   const isEditing = editingId !== "";
   const [vanishNow, setVanishNow] = useState(Date.now());
   const hasVanishCountdown = controller.messages.some(
@@ -1190,7 +1216,7 @@ export function ChatPane({
                     <article
                       className={`bubble${own ? " bubble--own" : ""}${
                         message.localState === "failed" ? " bubble--failed" : ""
-                      }${message.meta.magic === true ? " bubble--magic" : ""}${
+                      }${
                         message.kind === "STICKER" ? " bubble--sticker" : ""
                       }${isAttachmentKind(message.kind) ? " bubble--attachment" : ""}`}
                       aria-label={`${senderLabel(message, conversation, meId)} at ${clockTime(
@@ -1249,7 +1275,11 @@ export function ChatPane({
                           onSpent={() => controller.spendViewOnce(message.id)}
                         />
                       ) : (
-                        <p className="bubble__body">
+                        <p
+                          className={`bubble__body${
+                            message.meta.magic === true ? " bubble__body--magic" : ""
+                          }`}
+                        >
                           {isPlaceholder && <Icon name="lock" size={13} className="bubble__lock" />}
                           {textParts.map((part, index) => {
                             const visible = part.bold ? <strong>{part.text}</strong> : part.text;
@@ -1833,6 +1863,46 @@ export function ChatPane({
               </div>
             ) : null}
 
+            {!isEditing &&
+            pending.length === 0 &&
+            !oneWay &&
+            !recorder.recording &&
+            mentionQuery ? (
+              <div className="composer-mention-suggestions" aria-label="Mention people">
+                {mentionChoices.length > 0 ? (
+                  mentionChoices.map((candidate) => (
+                    <button
+                      key={candidate.id}
+                      type="button"
+                      className="composer-mention-suggestion"
+                      aria-label={`Mention ${candidate.displayName} (@${candidate.username})`}
+                      onClick={() => {
+                        const inserted = insertMention(
+                          controller.draft,
+                          candidate.username,
+                          composerCaret,
+                        );
+                        if (!inserted) return;
+                        controller.setDraft(inserted.value);
+                        controller.composerChanged();
+                        setComposerCaret(inserted.cursor);
+                        window.requestAnimationFrame(() => {
+                          const field = composerRef.current;
+                          field?.focus();
+                          field?.setSelectionRange(inserted.cursor, inserted.cursor);
+                        });
+                      }}
+                    >
+                      <strong>@{candidate.username}</strong>
+                      <span>{candidate.displayName}</span>
+                    </button>
+                  ))
+                ) : (
+                  <span className="composer-mention-empty">No matching people</span>
+                )}
+              </div>
+            ) : null}
+
             <p className="sr-only attach-limits">
               Photos are shrunk to a 2048 px long edge and re-encoded as JPEG before upload, exactly
               like the phone. Limits: 100 MB image, 2 GB video, 100 MB audio, 5 GB document.
@@ -1898,6 +1968,7 @@ export function ChatPane({
                     title="Enter sends, Shift+Enter adds a line"
                     maxLength={MESSAGE_BODY_LIMIT}
                     onChange={(event) => {
+                      setComposerCaret(event.currentTarget.selectionStart);
                       if (isEditing) {
                         setEditText(event.target.value);
                         return;
@@ -1905,6 +1976,7 @@ export function ChatPane({
                       controller.setDraft(event.target.value);
                       controller.composerChanged();
                     }}
+                    onSelect={(event) => setComposerCaret(event.currentTarget.selectionStart)}
                     onKeyDown={onComposerKeyDown}
                   />
 

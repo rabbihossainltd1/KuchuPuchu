@@ -236,6 +236,7 @@ export type MockWorker = {
   createdConversations: string[];
   addedMembers: string[];
   removedMembers: string[];
+  nicknames: { conversationId: string; userId: string; nickname: string }[];
   install(page: Page): Promise<void>;
 };
 
@@ -382,6 +383,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         id: PEER_ID,
         displayName: PEER_NAME,
         username: "rahi",
+        nickname: "",
         e2eePublicKey: peer.u,
         online: true,
         lastActiveAt: new Date().toISOString(),
@@ -407,10 +409,13 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
           role: options.ownGroup ? "owner" : "member",
         },
         {
-          user: { id: PEER_ID, displayName: PEER_NAME, username: "rahi" },
+          user: { id: PEER_ID, displayName: PEER_NAME, username: "rahi", nickname: "" },
           role: options.ownGroup ? "member" : "owner",
         },
-        { user: { id: "u_third", displayName: "Third Member", username: "third" }, role: "member" },
+        {
+          user: { id: "u_third", displayName: "Third Member", username: "third", nickname: "" },
+          role: "member",
+        },
       ],
     },
     {
@@ -814,6 +819,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
     createdConversations: [],
     addedMembers: [],
     removedMembers: [],
+    nicknames: [],
     reactions: [],
     hideOverrides: {},
     matchUsers: [...(options.matchUsers ?? [])],
@@ -1119,6 +1125,28 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         return json(route, { ok: true });
       });
 
+      await page.route("**/api/conversations/*/nicknames/*", (route) => {
+        const url = new URL(route.request().url());
+        const parts = url.pathname.split("/");
+        const conversationId = decodeURIComponent(parts[3] ?? "");
+        const userId = decodeURIComponent(parts[5] ?? "");
+        const row = conversations.find((item) => item.id === conversationId);
+        const nickname =
+          route.request().method() === "DELETE"
+            ? ""
+            : String(
+                (route.request().postDataJSON() as Record<string, unknown> | null)?.nickname ?? "",
+              );
+        if (row?.isGroup) {
+          const member = row.members?.find((item) => item.user.id === userId);
+          if (member) member.user.nickname = nickname;
+        } else if (row?.other?.id === userId) {
+          row.other.nickname = nickname;
+        }
+        worker.nicknames.push({ conversationId, userId, nickname });
+        return json(route, { ok: true, conversation: row ?? null });
+      });
+
       await page.route("**/api/messages/*/react", (route) => {
         const url = new URL(route.request().url());
         const body = route.request().postDataJSON() as Record<string, unknown>;
@@ -1151,6 +1179,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         id: "u_dir",
         displayName: "Directory Person",
         username: "dirperson",
+        nickname: "",
         e2eePublicKey: "BDIRKEY",
         avatarRef: "",
         online: true,

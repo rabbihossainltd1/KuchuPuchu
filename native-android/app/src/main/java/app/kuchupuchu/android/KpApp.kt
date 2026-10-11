@@ -472,7 +472,6 @@ fun KpApp() {
                     ProfileScreen(
                         nav,
                         entry.arguments?.getString("id") ?: "",
-                        conversationId = entry.arguments?.getString("conversationId") ?: "",
                     )
                 }
                 composable("aihistory") { AIHistoryScreen(nav) }

@@ -40,6 +40,7 @@ class ChatPreviewTextTest {
         assertEquals("Hello there", ChatPreviewText.seen("Hello there", "message", "\uD83D\uDD12"))
         assertEquals("My photo caption", ChatPreviewText.seen("My photo caption", "photo", "Photo"))
         assertEquals("two lines", ChatPreviewText.seen("two\nlines", "message", "Message"))
+        assertEquals("Bold preview", ChatPreviewText.seen("**Bold** preview", "message", "Message"))
     }
 
     @Test

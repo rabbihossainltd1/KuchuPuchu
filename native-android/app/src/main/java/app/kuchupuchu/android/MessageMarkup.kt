@@ -1,5 +1,9 @@
 package app.kuchupuchu.android
 
+import android.graphics.Typeface
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.StyleSpan
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
@@ -28,12 +32,25 @@ private data class MarkRange(
 
 /** Lightweight message formatting: `*bold*`, `**bold**`, links and optional 1:1 mentions. */
 internal object MessageMarkup {
-    private val boldMarkers = Regex("\\*\\*([\\s\\S]+?)\\*\\*|(?<!\\*)\\*([^*\\n]+?)\\*(?!\\*)")
+    private val boldMarkers = Regex("\\*{1,2}([^*\\n]+?)\\*{1,2}")
     private val mentionPattern = Regex("(^|[^A-Za-z0-9_])@([A-Za-z0-9_]{3,30})(?![A-Za-z0-9_])")
     private val urlPattern = Regex("(?:https?://|www\\.)[^\\s<>\\\"']+", RegexOption.IGNORE_CASE)
 
     fun plain(value: String): String = parts(value, clickableMentions = false)
         .joinToString(separator = "") { it.text }
+
+    /** Android notification previews support platform spans, not Compose annotations. */
+    fun notification(value: String): CharSequence {
+        val out = SpannableStringBuilder()
+        parts(value).forEach { part ->
+            val start = out.length
+            out.append(part.text)
+            if (part.bold && out.length > start) {
+                out.setSpan(StyleSpan(Typeface.BOLD), start, out.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+        }
+        return out
+    }
 
     fun formatted(value: String): AnnotatedString = buildAnnotatedString {
         parts(value).forEach { part ->

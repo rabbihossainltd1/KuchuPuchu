@@ -904,24 +904,51 @@ async function main() {
     const long = await h.call(
       "POST",
       `/api/conversations/${cid}/messages`,
-      { kind: "TEXT", body: "x".repeat(MESSAGE_MAX_LENGTH + 900), clientId: "m1" },
+      { kind: "TEXT", body: "x".repeat(MESSAGE_MAX_LENGTH), clientId: "m1" },
       B.token,
     );
     check(
-      "send truncates to MESSAGE_MAX_LENGTH",
-      long.json.message.body.length === MESSAGE_MAX_LENGTH,
-      `${long.json.message.body.length}`,
+      "a message exactly at MESSAGE_MAX_LENGTH is stored in full",
+      long.status === 201 && long.json.message?.body === "x".repeat(MESSAGE_MAX_LENGTH),
+      `${long.json.message?.body?.length}`,
+    );
+    const overSend = await h.call(
+      "POST",
+      `/api/conversations/${cid}/messages`,
+      { kind: "TEXT", body: "x".repeat(MESSAGE_MAX_LENGTH + 900), clientId: "m1-over" },
+      B.token,
+    );
+    check(
+      "an over-limit send is rejected, not truncated",
+      overSend.status === 400 && overSend.json.error?.code === "MESSAGE_TOO_LONG",
+      `${overSend.status} ${overSend.json.error?.code}`,
     );
     const edit = await h.call(
       "PATCH",
       `/api/messages/${long.json.message.id}`,
-      { body: "y".repeat(MESSAGE_MAX_LENGTH + 900) },
+      { body: "y".repeat(MESSAGE_MAX_LENGTH) },
       B.token,
     );
     check(
-      "edit truncates to the SAME constant (no second limit to drift)",
-      edit.json.message.body.length === MESSAGE_MAX_LENGTH,
-      `${edit.json.message.body.length}`,
+      "an edit exactly at MESSAGE_MAX_LENGTH is stored in full",
+      edit.status === 200 && edit.json.message?.body === "y".repeat(MESSAGE_MAX_LENGTH),
+      `${edit.status} ${edit.json.message?.body?.length}`,
+    );
+    const overEdit = await h.call(
+      "PATCH",
+      `/api/messages/${long.json.message.id}`,
+      { body: "z".repeat(MESSAGE_MAX_LENGTH + 900) },
+      B.token,
+    );
+    const bodyAfterRejectedEdit = h.env.DB._db
+      .prepare("SELECT body FROM messages WHERE id = ?")
+      .get(long.json.message.id)?.body;
+    check(
+      "an over-limit edit is rejected atomically without truncating the saved message",
+      overEdit.status === 400 &&
+        overEdit.json.error?.code === "MESSAGE_TOO_LONG" &&
+        bodyAfterRejectedEdit === "y".repeat(MESSAGE_MAX_LENGTH),
+      `${overEdit.status} ${overEdit.json.error?.code} saved=${bodyAfterRejectedEdit?.length}`,
     );
 
     const markerA = (await h.call("GET", `/api/conversations/${cid}/messages`, undefined, A.token))

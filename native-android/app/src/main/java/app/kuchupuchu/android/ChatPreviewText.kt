@@ -19,7 +19,7 @@ internal object ChatPreviewText {
 
     /** [plain] is locally decrypted or known plaintext, never the wire envelope. */
     fun seen(plain: String?, category: String, fallback: String): String {
-        if (!plain.isNullOrBlank()) return plain.replace('\n', ' ').replace('\r', ' ').take(120)
+        if (!plain.isNullOrBlank()) return MessageMarkup.plain(plain).replace('\n', ' ').replace('\r', ' ').take(120)
         val safe = fallback.trim()
         // Legacy server placeholders and undecodable envelopes are not icons
         // or raw ciphertext in the list. A real user-typed lock in [plain]

@@ -10,7 +10,7 @@ export type MessageTextPart = {
 type Range = { start: number; end: number };
 type MentionRange = Range & { username: string };
 
-const BOLD_MARKERS = /\*\*([\s\S]+?)\*\*|(?<!\*)\*([^*\n]+?)\*(?!\*)/g;
+const BOLD_MARKERS = /\*{1,2}([^*\n]+?)\*{1,2}/g;
 const USERNAME_MENTION = /(^|[^A-Za-z0-9_])@([A-Za-z0-9_]{3,30})(?![A-Za-z0-9_])/g;
 const URL_TOKEN = /(?:https?:\/\/|www\.)[^\s<>"']+/gi;
 

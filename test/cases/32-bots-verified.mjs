@@ -8032,14 +8032,15 @@ const convBetween = (db, a, b) =>
         fp.includes("val fileLike = !t.contains(\"://\") && !t.contains('\\n')") &&
         !fp.includes('"🎬 Video"') &&
         !fp.includes('"📄 Document"') &&
-        cl.includes('friendlyPreview(conv.optText("lastMessage"))') &&
+        /friendlyPreview\(\w+\.optString\("lastMessage"\)\)/.test(cl) &&
         cl.includes("ChatPreviewText.seen(") &&
         cl.includes("KpNotify.message(") &&
         cl.includes("unreadMessages = unreadMessages,") &&
         // r67-2: the card's text comes from the seal path (opened plaintext,
         // else a neutral label) and still passes through friendlyPreview.
         kt("KpPush.kt").includes('PushSeal.cardText(plan, opened, data["body"])') &&
-        kt("KpPush.kt").includes("friendlyPreview(cardText),") &&
+        kt("KpPush.kt").includes("val listPreview = friendlyPreview(cardText)") &&
+        kt("KpPush.kt").includes("MessageMarkup.notification(cardText)") &&
         (kt("SearchScreen.kt").match(/conversationSearchPreview\(/g) || []).length === 2,
     );
   }
@@ -10601,15 +10602,21 @@ const convBetween = (db, a, b) =>
         );
       }
 
-      // The plaintext cap is untouched for open messages.
+      // The plaintext cap is enforced without silently altering the body.
       const plainOver = await send({ kind: "TEXT", body: "z".repeat(4500), clientId: "e2ee_4" });
       const plainStored = k.db._db
         .prepare("SELECT body FROM messages WHERE client_id = ?")
         .get("e2ee_4")?.body;
       check(
-        "r64-e2ee: the PLAINTEXT cap is untouched — a 4500-char open message is still cut at 4000",
-        plainStored === "z".repeat(4000),
-        JSON.stringify({ len: plainStored?.length }),
+        "r64-e2ee: an over-limit open message is refused instead of being silently cut at 4000",
+        plainOver.r.status === 400 &&
+          plainOver.r.json.error?.code === "MESSAGE_TOO_LONG" &&
+          plainStored === undefined,
+        JSON.stringify({
+          status: plainOver.r.status,
+          code: plainOver.r.json.error?.code,
+          len: plainStored?.length,
+        }),
       );
       // Edit path: an edited sealed message is re-sealed on the phone. The
       // edited row is the CONVERSATION'S newest, so the chat-list preview must

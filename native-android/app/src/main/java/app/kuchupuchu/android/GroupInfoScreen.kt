@@ -82,8 +82,6 @@ fun GroupInfoScreen(nav: NavController, convId: String) {
     var error by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var memberSheet by remember { mutableStateOf<JSONObject?>(null) }
-    var nicknameTarget by remember { mutableStateOf<JSONObject?>(null) }
-    var nicknameDraft by remember { mutableStateOf("") }
     var confirmKick by remember { mutableStateOf<JSONObject?>(null) }
     var confirmLeave by remember { mutableStateOf(false) }
     var rename by remember { mutableStateOf(false) }
@@ -130,31 +128,6 @@ fun GroupInfoScreen(nav: NavController, convId: String) {
             }.onFailure { error = it.message ?: "Could not save." }
             busy = false
             onDone()
-        }
-    }
-
-    fun saveNickname(target: JSONObject, rawValue: String) {
-        val userId = target.optString("id")
-        if (userId.isBlank() || busy) return
-        val value = rawValue.trim().take(40)
-        scope.launch {
-            busy = true
-            error = ""
-            runCatching {
-                val path = "/api/conversations/${android.net.Uri.encode(convId)}/nicknames/${android.net.Uri.encode(userId)}"
-                val data = withContext(Dispatchers.IO) {
-                    if (value.isBlank()) Api.delete(path)
-                    else Api.put(path, JSONObject().put("nickname", value))
-                }
-                data.optJSONObject("conversation")?.let {
-                    conv = it
-                    ScreenStore.setConvDetail(convId, it)
-                    ScreenStore.upsertConv(it)
-                }
-                nicknameTarget = null
-                ScreenStore.pokeInbox()
-            }.onFailure { error = it.message ?: "Could not save the nickname." }
-            busy = false
         }
     }
 
@@ -289,8 +262,8 @@ fun GroupInfoScreen(nav: NavController, convId: String) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 when {
-                                    uid != myId -> u.optText("displayName").ifBlank { "User" }
-                                    u.optText("nickname").isNotBlank() -> "${u.optText("displayName")} (you)"
+                                    uid != myId -> u.optText("nickname").ifBlank { u.optText("displayName").ifBlank { "User" } }
+                                    u.optText("nickname").isNotBlank() -> "${u.optText("nickname")} (you)"
                                     else -> "You"
                                 },
                                 fontSize = 15.sp,
@@ -360,11 +333,6 @@ fun GroupInfoScreen(nav: NavController, convId: String) {
     memberSheet?.let { u ->
         val uid = u.optString("id")
         KpSheet(onDismiss = { memberSheet = null }, title = u.optText("displayName").ifBlank { "Member" }) {
-            KpSheetRow(Icons.Filled.Edit, if (u.optText("nickname").isBlank()) "Set nickname" else "Change nickname") {
-                memberSheet = null
-                nicknameTarget = JSONObject(u.toString())
-                nicknameDraft = u.optText("nickname")
-            }
             if (uid != myId) {
                 KpSheetRow(Icons.Filled.Person, "View profile") {
                     memberSheet = null
@@ -376,41 +344,6 @@ fun GroupInfoScreen(nav: NavController, convId: String) {
                     memberSheet = null
                     confirmKick = u
                 }
-            }
-        }
-    }
-    nicknameTarget?.let { target ->
-        KpSheet(
-            onDismiss = { if (!busy) nicknameTarget = null },
-            title = if (target.optText("nickname").isBlank()) "Set group nickname" else "Change group nickname",
-        ) {
-            Column(Modifier.padding(horizontal = 14.dp).imePadding()) {
-                Text(
-                    "Every member of this group sees this nickname. It does not change the member’s profile name.",
-                    color = Muted,
-                    fontSize = 12.5.sp,
-                    modifier = Modifier.padding(bottom = 10.dp),
-                )
-                CompactSearchBar(
-                    nicknameDraft,
-                    { nicknameDraft = it.take(40) },
-                    placeholder = target.optText("displayName").ifBlank { "Nickname" },
-                    icon = Icons.Filled.Edit,
-                    imeAction = ImeAction.Done,
-                )
-                if (error.isNotBlank()) {
-                    Text(error, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
-                }
-                Spacer(Modifier.height(10.dp))
-                GoldBtn(
-                    "Save",
-                    Modifier.fillMaxWidth(),
-                    enabled = !busy && nicknameDraft.trim().isNotBlank() && nicknameDraft.trim() != target.optText("nickname"),
-                ) { saveNickname(target, nicknameDraft) }
-                if (target.optText("nickname").isNotBlank()) {
-                    KpSheetRow(null, "Clear nickname", tint = Red) { saveNickname(target, "") }
-                }
-                KpSheetRow(null, "Cancel") { if (!busy) nicknameTarget = null }
             }
         }
     }

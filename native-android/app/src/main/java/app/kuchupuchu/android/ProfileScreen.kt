@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -63,7 +62,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -79,7 +77,6 @@ fun ProfileScreen(
     userId: String,
     onBack: (() -> Unit)? = null,
     showHomeNav: Boolean = false,
-    conversationId: String = "",
 ) {
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
@@ -99,43 +96,6 @@ fun ProfileScreen(
     // meant an already-blocked contact showed "Block"; tapping it POSTed a second
     // block and the UI said "blocked" while the server said nothing changed.
     var blocked by remember { mutableStateOf(user?.optBoolean("blocked") == true) }
-    var chatNickname by remember(userId, conversationId) { mutableStateOf("") }
-    var nicknameDraft by remember(userId, conversationId) { mutableStateOf("") }
-    var nicknameSheet by remember { mutableStateOf(false) }
-    var nicknameBusy by remember { mutableStateOf(false) }
-    var nicknameError by remember { mutableStateOf("") }
-
-    fun nicknameFrom(detail: JSONObject?): String {
-        if (detail == null) return ""
-        val other = detail.optJSONObject("other")
-        if (other?.optString("id") == userId) return other.optText("nickname")
-        val members = detail.optJSONArray("members")
-        if (members != null) for (i in 0 until members.length()) {
-            val member = members.optJSONObject(i) ?: continue
-            val peer = member.optJSONObject("user") ?: continue
-            if (peer.optString("id") == userId) return peer.optText("nickname")
-        }
-        return ""
-    }
-
-    LaunchedEffect(userId, conversationId) {
-        if (conversationId.isBlank()) {
-            chatNickname = ""
-            return@LaunchedEffect
-        }
-        val cached = ScreenStore.convDetailOf(conversationId)
-            ?: ScreenStore.convs.firstOrNull { it.optString("id") == conversationId }
-        cached?.let { chatNickname = nicknameFrom(it) }
-        runCatching {
-            withContext(Dispatchers.IO) { Api.get("/api/conversations/$conversationId", true) }
-                .optJSONObject("conversation")
-        }.getOrNull()?.let { detail ->
-            ScreenStore.setConvDetail(conversationId, detail)
-            ScreenStore.upsertConv(detail)
-            chatNickname = nicknameFrom(detail)
-        }
-    }
-
     // Owner round 31 (item 18): re-read when a live "profile" frame lands.
     LaunchedEffect(userId, ScreenStore.profileVersion) {
         runCatching {
@@ -197,36 +157,6 @@ fun ProfileScreen(
                         ScreenStore.convIdForUser[userId] = cid
                         block(cid)
                     }
-                }
-            }
-        }
-        fun saveChatNickname(rawValue: String) {
-            val value = rawValue.trim().take(40)
-            if (conversationId.isBlank() || nicknameBusy) return
-            scope.launch {
-                nicknameBusy = true
-                nicknameError = ""
-                try {
-                    val path = "/api/conversations/${android.net.Uri.encode(conversationId)}/nicknames/${android.net.Uri.encode(userId)}"
-                    val response = withContext(Dispatchers.IO) {
-                        if (value.isBlank()) Api.delete(path)
-                        else Api.put(path, JSONObject().put("nickname", value))
-                    }
-                    val detail = response.optJSONObject("conversation")
-                    if (detail != null) {
-                        ScreenStore.setConvDetail(conversationId, detail)
-                        ScreenStore.upsertConv(detail)
-                        chatNickname = nicknameFrom(detail)
-                    } else {
-                        chatNickname = value
-                    }
-                    nicknameDraft = chatNickname
-                    nicknameSheet = false
-                    ScreenStore.pokeInbox()
-                } catch (failure: Exception) {
-                    nicknameError = failure.message?.takeIf { it.isNotBlank() } ?: "Could not save the nickname."
-                } finally {
-                    nicknameBusy = false
                 }
             }
         }
@@ -677,49 +607,6 @@ fun ProfileScreen(
                 }
             }
             Spacer(Modifier.height(12.dp))
-        }
-        if (!isMe && !isKpBot(userId) && conversationId.isNotBlank()) {
-            ProfileEditRow(
-                Icons.Filled.Edit,
-                "Nickname in this chat",
-                chatNickname.ifBlank { "Not set" },
-            ) {
-                nicknameDraft = chatNickname
-                nicknameError = ""
-                nicknameSheet = true
-            }
-        }
-        if (nicknameSheet) {
-            KpSheet(onDismiss = { if (!nicknameBusy) nicknameSheet = false }, title = "Nickname in this chat") {
-                Column(Modifier.padding(horizontal = 14.dp).imePadding()) {
-                    Text(
-                        "Only you and this person see this name. Their profile name stays unchanged.",
-                        color = Muted,
-                        fontSize = 12.5.sp,
-                        modifier = Modifier.padding(bottom = 10.dp),
-                    )
-                    CompactSearchBar(
-                        nicknameDraft,
-                        { nicknameDraft = it.take(40) },
-                        placeholder = "Nickname",
-                        icon = Icons.Filled.Edit,
-                        imeAction = ImeAction.Done,
-                    )
-                    if (nicknameError.isNotBlank()) {
-                        Text(nicknameError, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    GoldBtn(
-                        "Save",
-                        Modifier.fillMaxWidth(),
-                        enabled = !nicknameBusy && nicknameDraft.trim().isNotBlank() && nicknameDraft.trim() != chatNickname,
-                    ) { saveChatNickname(nicknameDraft) }
-                    if (chatNickname.isNotBlank()) {
-                        KpSheetRow(null, "Clear nickname", tint = Red) { saveChatNickname("") }
-                    }
-                    KpSheetRow(null, "Cancel") { nicknameSheet = false }
-                }
-            }
         }
         // Owner round 31: the call / search buttons take this chat's theme
         // accent (the in-chat theme used to stop at the chat screen).

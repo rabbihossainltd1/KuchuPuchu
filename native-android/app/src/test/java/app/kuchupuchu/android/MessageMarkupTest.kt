@@ -18,6 +18,14 @@ class MessageMarkupTest {
     }
 
     @Test
+    fun mixedSingleAndDoubleMarkersStillFormatWithoutLeakingAsterisks() {
+        assertEquals("example", MessageMarkup.plain("*example**"))
+        assertEquals("example", MessageMarkup.plain("**example*"))
+        assertEquals("example**", MessageMarkup.plain("example**"))
+        assertTrue(MessageMarkup.parts("*example**").any { it.text == "example" && it.bold })
+    }
+
+    @Test
     fun oneToOneMentionIsClickableButGroupMentionsStayPlain() {
         val source = "Hi @rahi, email a@b.com"
         val direct = MessageMarkup.parts(source, clickableMentions = true)

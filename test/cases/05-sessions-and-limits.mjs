@@ -104,13 +104,13 @@ async function mk() {
     .conversation.id;
   const long = "x".repeat(5000);
   const sent = await k.call("POST", `/api/conversations/${cid}/messages`, { body: long }, a.token);
-  const stored = k.db._db
-    .prepare("SELECT body FROM messages WHERE id = ?")
-    .get(sent.json.message.id).body;
+  const stored = sent.json.message?.id
+    ? k.db._db.prepare("SELECT body FROM messages WHERE id = ?").get(sent.json.message.id)?.body
+    : undefined;
   check(
-    "message body is capped at MESSAGE_MAX_LENGTH (4000)",
-    stored.length === 4000,
-    String(stored.length),
+    "a message over MESSAGE_MAX_LENGTH (4000) is rejected without truncation",
+    sent.status === 400 && sent.json.error?.code === "MESSAGE_TOO_LONG" && stored === undefined,
+    JSON.stringify({ status: sent.status, code: sent.json.error?.code, stored: stored?.length }),
   );
 
   const me = await k.call("PATCH", "/api/me", { about: "y".repeat(500) }, a.token);

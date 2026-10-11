@@ -512,6 +512,10 @@ class KpPushService : FirebaseMessagingService() {
         // r67-2: the opened plaintext, else a neutral label — a sealed body is
         // never printed (neither ciphertext nor a bare lock icon).
         val cardText = PushSeal.cardText(plan, opened, data["body"])
+        val listPreview = friendlyPreview(cardText)
+        val plainCardText = MessageMarkup.plain(cardText).trim()
+        val notificationBody: CharSequence =
+            if (listPreview == plainCardText) MessageMarkup.notification(cardText) else listPreview
         // Background (process alive): message card WITH Reply / Like / Mark-as-read.
         // Badge jumps instantly; the next list refresh confirms the same number.
         ScreenStore.bumpUnread(convoId, cardText)
@@ -552,7 +556,7 @@ class KpPushService : FirebaseMessagingService() {
             // reply deoa jeto ekhono same hobe") — [cardText] is the OPENED
             // plaintext for a sealed 1:1 message; Reply still rides below it and
             // still seals on the way out (Api.request → E2eeMsg.prepareOutgoing).
-            friendlyPreview(cardText),
+            notificationBody,
             convoId,
             muted = muted,
             mid = mid,
