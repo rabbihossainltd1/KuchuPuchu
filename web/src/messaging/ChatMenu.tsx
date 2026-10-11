@@ -38,6 +38,9 @@ export function ChatMenu({
   onJumpToMessage,
   scheduledCount = 0,
   initialView = "root",
+  aiIncognito = false,
+  onToggleIncognito,
+  onOpenHistory,
 }: {
   api: ApiClient | null;
   conversation: ConversationRow;
@@ -52,6 +55,10 @@ export function ChatMenu({
   scheduledCount?: number;
   /** The composer's long-press opens the sheet straight on the schedule view. */
   initialView?: "root" | "sendlater" | "scheduled";
+  /** Slice AI: the phone's AI-chat menu state. */
+  aiIncognito?: boolean;
+  onToggleIncognito?: () => void;
+  onOpenHistory?: () => void;
 }) {
   const [view, setView] = useState<
     | "root"
@@ -109,6 +116,7 @@ export function ChatMenu({
   const muted = conversation.mutedCall || conversation.mutedMsg;
   const peerId = conversationPeerId(conversation);
   const bot = isBotConversation(conversation);
+  const ai = peerId === "kp_ai_bot";
 
   const themeLabel =
     CHAT_THEME_LABELS.find((option) => option.value === chatThemeOr(conversation.theme))?.label ??
@@ -156,7 +164,37 @@ export function ChatMenu({
         aria-label={`Conversation options for ${conversationTitle(conversation)}`}
         onClick={(event) => event.stopPropagation()}
       >
-        {view === "root" && (
+        {view === "root" && ai && (
+          <>
+            <p className="chat-menu__title">{conversationTitle(conversation)}</p>
+            {scheduledCount > 0
+              ? row("schedule", "Scheduled messages", () => setView("scheduled"))
+              : null}
+            {row("schedule", "History", () => {
+              onClose();
+              onOpenHistory?.();
+            })}
+            {row(
+              "chats",
+              "New chat",
+              () =>
+                void run("New", async (client) => {
+                  await messagingApi.resetAiConversation(client, conversation.id);
+                  await controller.selectConversation(conversation.id);
+                  onClose();
+                }),
+            )}
+            {row("bellOff", muted ? "Unmute…" : "Mute…", () => setView("mute"))}
+            {row("palette", "Chat theme", () => setView("theme"))}
+            {row("hide", aiIncognito ? "Close incognito mode" : "Incognito mode", () => {
+              onClose();
+              onToggleIncognito?.();
+            })}
+            {row("search", "Search in chat", () => setView("find"))}
+          </>
+        )}
+
+        {view === "root" && !ai && (
           <>
             <p className="chat-menu__title">{conversationTitle(conversation)}</p>
             {row(

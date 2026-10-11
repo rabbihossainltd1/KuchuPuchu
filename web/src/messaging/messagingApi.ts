@@ -210,6 +210,62 @@ export const messagingApi = {
     });
   },
 
+  /** Slice AI: the phone's AI-chat "New chat" wipe. */
+  async resetAiConversation(api: ApiClient, conversationId: string): Promise<void> {
+    await api.request<unknown>(conversationPath(conversationId, "/reset"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+  },
+
+  /** Slice AI: "Close incognito mode" — archive the run, bring the last one back. */
+  async restoreLatestAi(api: ApiClient, conversationId: string): Promise<void> {
+    await api.request<unknown>(conversationPath(conversationId, "/restore-latest"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+  },
+
+  /** Slice AI: the phone's AI History session list. */
+  async listAiSessions(
+    api: ApiClient,
+  ): Promise<readonly { id: string; startedAt: string; endedAt: string; messages: number }[]> {
+    const payload = (await api.request<unknown>("/api/ai/sessions")) as {
+      sessions?: unknown;
+    };
+    if (!payload || !Array.isArray(payload.sessions)) return [];
+    return payload.sessions
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+      .map((item) => ({
+        id: String(item.id ?? ""),
+        startedAt: String(item.startedAt ?? ""),
+        endedAt: String(item.endedAt ?? ""),
+        messages: Number(item.messages ?? 0),
+      }))
+      .filter((row) => row.id !== "");
+  },
+
+  /** Slice AI: one archived session, read-only. */
+  async getAiSession(
+    api: ApiClient,
+    sessionId: string,
+  ): Promise<readonly { senderId: string; kind: string; body: string; createdAt: string }[]> {
+    const payload = (await api.request<unknown>(
+      `/api/ai/sessions/${encodeURIComponent(sessionId)}`,
+    )) as { messages?: unknown };
+    if (!payload || !Array.isArray(payload.messages)) return [];
+    return payload.messages
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+      .map((item) => ({
+        senderId: String(item.senderId ?? ""),
+        kind: String(item.kind ?? ""),
+        body: String(item.body ?? ""),
+        createdAt: String(item.createdAt ?? ""),
+      }));
+  },
+
   /** The phone's disappearing-messages PATCH. */
   async setDisappearSeconds(
     api: ApiClient,

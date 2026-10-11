@@ -225,6 +225,11 @@ export type MockWorker = {
   matchCalls: Record<string, unknown>[];
   /** Slice Y: parked `sendAt` sends, served by GET …/scheduled. */
   scheduled: { id: string; conversationId: string; preview: string; sendAt: string }[];
+  /** Slice AI: reset / restore-latest calls, for parity assertions. */
+  aiResets: string[];
+  aiRestores: string[];
+  /** Slice AI: true between reset and restore-latest (transcript wiped). */
+  aiWiped: boolean;
   createdConversations: string[];
   addedMembers: string[];
   removedMembers: string[];
@@ -242,6 +247,7 @@ export const CHAT_ID = "c_direct";
 export const GROUP_ID = "c_group";
 export const HIDDEN_ID = "c_hidden";
 export const BOT_ID = "c_official";
+export const AI_CHAT_ID = "c_ai";
 
 /** The rows the voice-note and document specs drive. */
 export const VOICE_PEER_ID = "voice_peer";
@@ -324,6 +330,8 @@ export type MockWorkerOptions = {
   ownGroup?: boolean;
   /** Slice X: users `POST /api/contacts/match` reports as KuchuPuchu accounts. */
   matchUsers?: readonly Record<string, unknown>[];
+  /** Slice AI: add the KuchuPuchu AI chat + serve the AI routes. */
+  withAi?: boolean;
 };
 
 export async function createMockWorker(options: MockWorkerOptions = {}): Promise<MockWorker> {
@@ -334,6 +342,25 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
   const sealedOnceText = await sealFor("গোপন মেসেজ", peer, me);
 
   const conversations = [
+    ...(options.withAi
+      ? [
+          {
+            id: AI_CHAT_ID,
+            isGroup: false,
+            unread: 0,
+            hidden: 0,
+            muted: 0,
+            lastMessageAt: new Date().toISOString(),
+            lastMessagePreview: {
+              kind: "TEXT",
+              category: "message",
+              body: "Hi! I'm your KuchuPuchu AI.",
+              createdAt: new Date().toISOString(),
+            },
+            other: { id: "kp_ai_bot", displayName: "KuchuPuchu AI" },
+          },
+        ]
+      : []),
     {
       id: CHAT_ID,
       isGroup: false,
@@ -416,6 +443,26 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
   const docZipBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00]);
 
   const messagesFor = (conversationId: string) => {
+    if (conversationId === AI_CHAT_ID && options.withAi) {
+      if (worker.aiWiped) return [];
+      return [
+        {
+          id: "ai_m1",
+          senderId: "kp_ai_bot",
+          senderName: "KuchuPuchu AI",
+          kind: "TEXT",
+          body: "Hi! I'm your KuchuPuchu AI.",
+          createdAt: new Date(Date.now() - 60_000).toISOString(),
+          rowid: 1,
+          replyTo: null,
+          fileName: null,
+          fileType: null,
+          fileSize: null,
+          fileKey: null,
+          meta: null,
+        },
+      ];
+    }
     if (conversationId === CHAT_ID) {
       const voice = options.withVoice
         ? [
@@ -768,6 +815,9 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
     hideOverrides: {},
     matchUsers: [...(options.matchUsers ?? [])],
     matchCalls: [],
+    aiResets: [],
+    aiRestores: [],
+    aiWiped: false,
     scheduled: [],
     async install(page: Page) {
       const json = (route: Route, payload: unknown, status = 200) =>
@@ -1210,6 +1260,57 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         worker.scheduled = worker.scheduled.filter((item) => item.id !== id);
         return json(route, { ok: true });
       });
+
+      if (options.withAi) {
+        await page.route("**/api/conversations/*/reset", (route) => {
+          if (route.request().method() !== "POST") return route.fallback();
+          worker.aiResets.push(
+            decodeURIComponent(new URL(route.request().url()).pathname.split("/")[3] ?? ""),
+          );
+          worker.aiWiped = true;
+          return json(route, { ok: true });
+        });
+        await page.route("**/api/conversations/*/restore-latest", (route) => {
+          if (route.request().method() !== "POST") return route.fallback();
+          worker.aiRestores.push(
+            decodeURIComponent(new URL(route.request().url()).pathname.split("/")[3] ?? ""),
+          );
+          worker.aiWiped = false;
+          return json(route, { ok: true });
+        });
+        await page.route("**/api/ai/sessions", (route) => {
+          if (route.request().method() !== "GET") return route.fallback();
+          return json(route, {
+            sessions: [
+              {
+                id: "s_arch1",
+                startedAt: new Date(Date.now() - 7_200_000).toISOString(),
+                endedAt: new Date(Date.now() - 3_600_000).toISOString(),
+                messages: 2,
+              },
+            ],
+          });
+        });
+        await page.route("**/api/ai/sessions/*", (route) => {
+          if (route.request().method() !== "GET") return route.fallback();
+          return json(route, {
+            messages: [
+              {
+                senderId: ME.id,
+                kind: "TEXT",
+                body: "hello ai",
+                createdAt: new Date(Date.now() - 7_000_000).toISOString(),
+              },
+              {
+                senderId: "kp_ai_bot",
+                kind: "TEXT",
+                body: "Hello! Ask me anything.",
+                createdAt: new Date(Date.now() - 6_900_000).toISOString(),
+              },
+            ],
+          });
+        });
+      }
 
       // Slice X: phone-book match — the web's New contact screen checks here.
       await page.route("**/api/contacts/match", (route) => {
