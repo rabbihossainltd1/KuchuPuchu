@@ -1164,3 +1164,12 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - messagingApi: resetAiConversation/restoreLatestAi/listAiSessions/getAiSession.
 - TESTS ai.spec.ts 5; CI green. MERGED PR #120 + docs PR #121; prod BUILD_ID 69bd95deb449a796 confirmed.
 - STILL ABSENT: archive/pin.
+
+## Web slice AP — archive + pin — 2026-10-11 (feat/web-archive-pin)
+- convFlags.ts: device-local pinned/archived sets (localStorage kp_web_conv_flags_v1) = phone ScreenStore parity; useSyncExternalStore hook.
+- ConversationList: archived hidden, pinned float top + pin glyph; kebab on row (hover/focus/right-click) → Pin/Unpin + Archive; "Archived (n)" entry opens ArchivePane (ArchiveScreen port: "No archived chats" / "Swipe a chat right to archive it", row kebab → Unarchive).
+- icons: pin (Material push_pin) + archive glyphs.
+- FLAKY FIX messaging.spec live-socket test: delivered frame must wait for POST ack (sent tick) or srv_1 unknown → lost frame; wait .bubble__tick--sent inside the composer bubble first.
+- themeMatrix: list+chat goldens shifted (new list entry) — regen targeted.
+- TESTS archive.spec.ts 5; CI green. MERGED PR #122; docs PR pending; BUILD_ID to confirm.
+- STILL ABSENT: nothing big — parity plan essentially complete; multi-select sheet not ported (out of scope).
