@@ -39,6 +39,7 @@ import {
 } from "react";
 import { Icon } from "../icons";
 import { messagingApi } from "./messagingApi";
+import { MessageInfoSheet, ReactionPickerSheet } from "./MessageSheets";
 import { scheduleStamp, type ScheduledRow } from "./schedule";
 import { RouteLink } from "../RouteLink";
 import type { Navigate } from "../useBrowserRouter";
@@ -237,6 +238,8 @@ export function ChatPane({
    *  view-once toggles can re-prepare without asking for the file again. */
   const fileFor = useRef(new Map<string, File>());
   const [menuOpen, setMenuOpen] = useState(false);
+  const [infoFor, setInfoFor] = useState<MessageRow | null>(null);
+  const [reactFor, setReactFor] = useState("");
   const [menuView, setMenuView] = useState<"root" | "sendlater" | "scheduled">("root");
   const [scheduledRows, setScheduledRows] = useState<readonly ScheduledRow[]>([]);
 
@@ -1326,6 +1329,17 @@ export function ChatPane({
                           >
                             Copy
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => setInfoFor(message)}
+                            aria-label={`Message info for ${senderLabel(
+                              message,
+                              conversation,
+                              meId,
+                            )} message`}
+                          >
+                            Info
+                          </button>
                           {forwardVerdict.allowed ? (
                             <button
                               type="button"
@@ -1377,19 +1391,29 @@ export function ChatPane({
                         </div>
                       )}
 
-                      {!own && message.kind !== "DELETED" && (
+                      {message.kind !== "DELETED" && (
                         <div className="reaction-bar" aria-label="Quick reactions">
                           {QUICK_REACTIONS.map((reaction: QuickReaction) => (
                             <button
                               key={reaction.emoji}
                               type="button"
+                              className={message.reactions[meId] === reaction.emoji ? "is-on" : ""}
                               onClick={() => void controller.react(message.id, reaction.emoji)}
                               aria-label={`React ${reaction.label}`}
+                              aria-pressed={message.reactions[meId] === reaction.emoji}
                               title={reaction.label}
                             >
                               <span aria-hidden="true">{reaction.emoji}</span>
                             </button>
                           ))}
+                          <button
+                            type="button"
+                            className="reaction-bar__more"
+                            onClick={() => setReactFor(message.id)}
+                            aria-label="More emojis"
+                          >
+                            <Icon name="plus" size={16} />
+                          </button>
                         </div>
                       )}
 
@@ -2019,6 +2043,22 @@ export function ChatPane({
       <p className="sr-only" role="status" aria-live="polite">
         {`Signed in as ${meName}. ${controller.messages.length} messages loaded.`}
       </p>
+
+      {infoFor && (
+        <MessageInfoSheet
+          message={infoFor}
+          meId={meId}
+          otherReadAt={controller.otherReadAt}
+          onClose={() => setInfoFor(null)}
+        />
+      )}
+
+      {reactFor && (
+        <ReactionPickerSheet
+          onClose={() => setReactFor("")}
+          onPick={(emoji) => void controller.react(reactFor, emoji)}
+        />
+      )}
 
       {galleryOpen && (
         <div className="gallery-overlay">
