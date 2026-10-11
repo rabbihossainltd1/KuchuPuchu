@@ -4075,3 +4075,86 @@ button.attachment__expand {
   background: var(--kp-blue);
   color: #fff;
 }
+
+/* Slice AP — pin + archive (phone ScreenStore flags on the web). */
+.archive-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--kp-ink);
+  padding: 10px 14px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.archive-entry:hover {
+  background: var(--kp-card-raised);
+}
+.archive-entry__count {
+  color: var(--kp-muted);
+  font-weight: 500;
+  font-size: 0.8rem;
+}
+.conversation-rows__item {
+  position: relative;
+}
+.conversation-row__pin {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  color: var(--kp-muted);
+}
+.conversation-row__more {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  opacity: 0;
+  z-index: 2;
+}
+.conversation-rows__item:hover .conversation-row__more,
+.conversation-rows__item:focus-within .conversation-row__more,
+.archive-row:hover .conversation-row__more,
+.archive-row:focus-within .conversation-row__more {
+  opacity: 1;
+}
+.row-menu {
+  position: absolute;
+  right: 8px;
+  top: 34px;
+  z-index: 56;
+}
+.archive-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.archive-row .conversation-row {
+  flex: 1;
+  min-width: 0;
+}
+.archive-row__menu {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+}
+.archive-pane__rows {
+  margin: 4px 0 0;
+}
+.archive-empty {
+  text-align: center;
+  color: var(--kp-muted);
+  padding: 48px 16px;
+}
+.archive-empty h2 {
+  color: var(--kp-ink);
+  font-size: 1rem;
+  margin: 12px 0 4px;
+}
+.archive-empty p {
+  margin: 0;
+  font-size: 0.8rem;
+}
