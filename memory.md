@@ -1090,3 +1090,12 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - PARALLEL SESSION ee3534a ("Fix Android notification avatars, nav reorder, and call recovery") landed mid-turn and broke contract pins 62/77; I refreshed them, then the parallel session pushed its own refresh (04d93d2) — merged with -X theirs (owner-approved parallel work wins on its own pins; both suites green).
 - CI: full npm run ci green. MERGED as PR #103; live sw BUILD_ID rotated to c7c30168301356c0.
 - SKIPPED (disclosed as absent, not stubbed): hidden-chat secret-key reveal, profile peek, call/media-related search categories.
+
+## Web slice T — profile & group info drawer — 2026-10-11 (branch feat/web-t-info, base main @ 2a1d258-ish post-#103)
+- WHAT: the phone's profile / group-info screens as a right-hand drawer (InfoPane.tsx), over EXISTING Worker routes (no server change): chat header identity is now a real button that opens it; search person rows open the same card pre-chat.
+- PERSON CARD: picture, name + verified tag, @username, presence line (peerPresence() extracted from headerSubtitle so one phone-parity line serves both), about; Message (create with request:true when no chat), Mute messages, two-step Block/Unblock.
+- GROUP CARD: title, N members, private-group state; member list with owner/admin labels; owner-only Add member (directory search reusing /api/search, already-members filtered) and two-step Remove; two-step Leave for every member. Worker refusals surface verbatim via announce.
+- PROTOCOL: ConversationRow.members (user+role) parsed from the detail payload; ConversationPeer += about/verified.
+- TESTS: info.spec.ts 4 tests. Mock group ownership became an option (ownGroup) because hardening's non-owner theme-lock suite needs a group I do NOT own while the add/remove tests need one I do.
+- CI green; MERGED as PR #105; live sw BUILD_ID rotated to 892a36ba6ace9e39.
+- STILL ABSENT (honestly, not stubbed): E2EE safety-code/key verification in the profile, shared-media strip inside the drawer, phone number display.
