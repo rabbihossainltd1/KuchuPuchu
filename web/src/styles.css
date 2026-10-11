@@ -374,6 +374,7 @@ input:disabled {
   justify-content: flex-start;
   padding: 6px 10px 54px;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
 }
 
 .empty-list-icon {
