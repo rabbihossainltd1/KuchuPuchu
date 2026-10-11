@@ -448,6 +448,7 @@ input:disabled {
 }
 
 .conversation-pane {
+  position: relative;
   display: flex;
   min-width: 0;
   min-height: 0;
@@ -1171,4 +1172,51 @@ a:focus-visible {
 
 :root[data-kp-theme="light"] .conversation-header__copy p {
   color: var(--kp-muted);
+}
+
+/* Attach strip: the phone-style options the old sheet carried, now inline. */
+.composer__attach-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  padding: 6px 14px 0;
+}
+.composer__attach-options input[type="checkbox"] {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--kp-accent, #51a33c);
+}
+.composer__attach-options label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--kp-muted, #9aa3b2);
+  cursor: pointer;
+}
+.composer-attachment__icon {
+  display: inline-flex;
+  color: var(--kp-muted, #9aa3b2);
+}
+
+/* Drag & drop: a soft veil over the pane while files hover. */
+.conversation-pane.dragging {
+  outline: 2px dashed var(--kp-accent, #51a33c);
+  outline-offset: -6px;
+}
+.drop-hint {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--kp-bg, #0d1524) 88%, transparent);
+  color: var(--kp-ink, #e8ecf3);
+  font-size: 0.95rem;
 }

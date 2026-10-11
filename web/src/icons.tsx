@@ -41,6 +41,7 @@ export type IconName =
   | "callOut"
   | "speaker"
   | "attach"
+  | "camera"
   | "mood"
   | "tickSent"
   | "tickAll"
@@ -182,6 +183,12 @@ const shapes: Record<IconName, ReactNode> = {
     <>
       <path d="M5.5 7.5h13M10 7.5V5h4v2.5" />
       <path d="M7 7.5 8 20h8l1-12.5M10.5 11v5.5M13.5 11v5.5" />
+    </>
+  ),
+  camera: (
+    <>
+      <path d="M4 7.5h3l1.5-2.2h7L17 7.5h3v11H4z" />
+      <circle cx="12" cy="12.6" r="3.1" />
     </>
   ),
   photo: (

@@ -320,36 +320,35 @@ test.describe("Web messaging", () => {
     ).toBeEnabled();
   });
 
-  test("attach tiles that cannot work in a browser say why", async ({ page }) => {
+  test("surfaces that cannot work in a browser say why, and the picker is direct", async ({
+    page,
+  }) => {
     await page.getByRole("link", { name: new RegExp(PEER_NAME) }).click();
     await expect(page.getByText("এই মেসেজটি ফোন থেকে এনক্রিপ্টেড")).toBeVisible();
 
+    // The attach button hands straight to the device picker — no tile sheet.
     await page.getByRole("button", { name: "Attach a photo, video or document" }).click();
+    await expect(page.getByRole("group", { name: "Attach something" })).toHaveCount(0);
+    await expect(page.locator('input[data-attach="picker"]')).toHaveCount(1);
+    await expect(page.locator('input[data-attach="camera"]')).toHaveAttribute(
+      "capture",
+      "environment",
+    );
 
-    // The live tiles open a real file input.
-    for (const label of ["Gallery", "Camera", "Video", "Document"]) {
-      await expect(page.getByRole("button", { name: label, exact: true })).toBeEnabled();
-    }
-
-    // The inert ones are disabled AND carry a spoken reason: an icon that does
-    // nothing is the failure mode this guards against.
-    const inert: [string, RegExp][] = [
-      ["Location", /location provider/],
-      ["Contact", /contacts app/],
-      ["Poll", /coming soon on Android too/],
-      ["Event", /coming soon on Android too/],
-      ["AI images", /coming soon on Android too/],
+    // The surfaces that need the phone are disclosed out loud instead of being
+    // stubbed: one screen-reader note keeps every reason the old tiles carried.
+    const note = page.locator(".attach-limits");
+    const reasons: RegExp[] = [
+      /location provider/,
+      /contacts app/,
+      /coming soon on Android too/,
+      /2048 px/,
+      /2 GB video/,
+      /5 GB document/,
     ];
-    for (const [label, reason] of inert) {
-      const tile = page.getByRole("button", { name: label, exact: true });
-      await expect(tile).toBeDisabled();
-      const describedBy = await tile.getAttribute("aria-describedby");
-      expect(describedBy).toBeTruthy();
-      await expect(page.locator(`#${describedBy}`)).toHaveText(reason);
+    for (const reason of reasons) {
+      await expect(note).toContainText(reason);
     }
-
-    await expect(page.getByText("Send as a document")).toBeVisible();
-    await page.getByRole("button", { name: "Close attach menu" }).click();
   });
 
   test("the signed-out shell makes no conversation requests", async ({ page, context }) => {

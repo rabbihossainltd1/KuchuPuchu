@@ -81,6 +81,35 @@ export function nextAttachmentId(
   return `att_${counter}_${random()}`;
 }
 
+/** Where the bytes came from — the camera tile keeps its capture attribute. */
+export type AttachSource = "gallery" | "camera" | "video" | "document";
+
+/** The Android attach-sheet surfaces; the web build keeps the same roster. */
+export const ATTACH_TILE_IDS: readonly string[] = Object.freeze([
+  "gallery",
+  "camera",
+  "video",
+  "document",
+  "location",
+  "contact",
+  "poll",
+  "event",
+  "ai-images",
+]);
+
+/** Surfaces that need the phone carry their reason verbatim, for the UI note. */
+export const ATTACH_TILE_UNAVAILABLE: Readonly<Record<string, string>> = Object.freeze({
+  location:
+    "Location sharing uses the phone's own location provider and is not available in a browser build.",
+  contact: "Sharing a contact needs the device's contacts app, which a browser cannot reach.",
+  poll: "Polls are coming soon on Android too — not built here.",
+  event: "Events are coming soon on Android too — not built here.",
+  "ai-images": "AI images are coming soon on Android too — not built here.",
+});
+
+export const ATTACH_LIMIT_NOTE =
+  "Photos are shrunk to a 2048 px long edge and re-encoded as JPEG before upload, exactly like the phone. Limits: 100 MB image, 2 GB video, 100 MB audio, 5 GB document.";
+
 export function isImageIntent(intent: AttachmentIntent): boolean {
   return intent === "photo";
 }
@@ -143,7 +172,11 @@ export async function prepareAttachments(
       continue;
     }
 
-    const asDocument = options.asDocument === true;
+    // A non-media file is a document on every client; the old Document tile
+    // forced the flag, the unified picker keeps the same contract.
+    const asDocument =
+      options.asDocument === true ||
+      classifyAttachment(file.type || "", file.name || "") === "document";
     const intent: AttachmentIntent = asDocument
       ? "document"
       : classifyAttachment(file.type || "", file.name || "");
