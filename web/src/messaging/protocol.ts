@@ -65,6 +65,8 @@ export type ConversationRow = {
   readonly isGroup: boolean;
   readonly title: string;
   readonly hidden: boolean;
+  /** The SHA-256 hex of the secret key that reveals this hidden chat. */
+  readonly hiddenKey: string;
   /**
    * Slice I (chat-theme parity): the phone's per-chat theme — `darkblue`,
    * `default` (classic cream), `mint`, `rose`, `night`. Android's `cTheme()`
@@ -465,6 +467,7 @@ export function parseConversationRow(value: unknown): ConversationRow | null {
     theme: text(value.theme, 20) || "darkblue",
     ownerId: text(value.ownerId, 64),
     hidden: booleanish(value.hidden),
+    hiddenKey: text(value.hiddenKey, 128),
     muted: booleanish(value.muted),
     unread: Math.max(0, Math.trunc(number(value.unread))),
     lastMessageAt: isoTimestamp(value.lastMessageAt),
@@ -515,10 +518,13 @@ export function parseConversationList(payload: unknown): readonly ConversationRo
   // so the suites stayed green while a real server would have rendered an
   // empty chat list (the exact bug hotfix PR #90 shipped for the legacy PWA).
   if (!isRecord(payload) || !Array.isArray(payload.items)) return [];
-  const rows = payload.items
+  return payload.items
     .map(parseConversationRow)
     .filter((row): row is ConversationRow => row !== null);
-  // Hidden chats must not leak into the list, its counts or its notifications.
+}
+
+/** Hidden chats must not leak into the list, its counts or its notifications. */
+export function visibleConversations(rows: readonly ConversationRow[]): readonly ConversationRow[] {
   return rows.filter((row) => !row.hidden);
 }
 

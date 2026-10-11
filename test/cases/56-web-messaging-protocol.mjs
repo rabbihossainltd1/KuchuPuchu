@@ -48,6 +48,7 @@ import {
   parseConversationDetail,
   parseConversationList,
   parseMessageRow,
+  visibleConversations,
   parseMessagesPage,
   parseSocketFrame,
   prependOlderPage,
@@ -92,13 +93,17 @@ const conversationPayload = {
 };
 
 const list = parseConversationList(conversationPayload);
+// Slice W: the parser keeps hidden rows (Search needs them for the secret-key
+// reveal); the LIST surface filters them through visibleConversations().
+const visible = visibleConversations(list);
 check(
-  "hidden conversations never reach the list",
-  list.every((row) => row.id !== "c_hidden"),
+  "hidden conversations are parsed with their flag, but never reach the visible list",
+  list.some((row) => row.id === "c_hidden" && row.hidden) &&
+    visible.every((row) => row.id !== "c_hidden"),
 );
 check(
   "rows without an id are dropped, not rendered blank",
-  list.length === 3 && list.every((row) => row.id),
+  visible.length === 3 && visible.every((row) => row.id),
 );
 check(
   "a group is recognised from either isGroup or kind",
@@ -108,8 +113,8 @@ check(
   "unread is coerced to a non-negative integer",
   list.find((row) => row.id === "c_1").unread === 3,
 );
-check("total unread sums the visible rows only", totalUnread(list) === 4);
-check("list order is newest activity first", list[0].id === "c_1");
+check("total unread sums the visible rows only", totalUnread(visible) === 4);
+check("list order is newest activity first", visible[0].id === "c_1");
 check(
   "a hostile payload yields an empty list instead of throwing",
   parseConversationList(null).length === 0 && parseConversationList({ items: "nope" }).length === 0,

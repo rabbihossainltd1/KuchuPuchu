@@ -52,7 +52,7 @@ export function MessagingWorkspace({ route, navigate, isOnline }: Props) {
   return (
     <>
       {isSearch ? (
-        <SearchPane api={token ? api : null} navigate={navigate} />
+        <SearchPane api={token ? api : null} navigate={navigate} controller={controller} />
       ) : (
         <ConversationList
           controller={controller}

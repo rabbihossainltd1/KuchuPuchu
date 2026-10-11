@@ -305,9 +305,28 @@ export const messagingApi = {
     await api.request<unknown>(`/api/blocks/${encodeURIComponent(userId)}`, { method: "DELETE" });
   },
 
-  async hideConversation(api: ApiClient, conversationId: string, hidden: boolean): Promise<void> {
+  async hideConversation(
+    api: ApiClient,
+    conversationId: string,
+    hidden: boolean,
+    keyHash?: string,
+  ): Promise<void> {
     await postJson(api, `/api/conversations/${encodeURIComponent(conversationId)}/hide`, {
       hidden: hidden ? 1 : 0,
+      ...(hidden && keyHash ? { key: keyHash } : {}),
+    });
+  },
+
+  /** The phone's Delete Chat: forEveryone ticked removes both copies. */
+  async deleteConversation(
+    api: ApiClient,
+    conversationId: string,
+    forEveryone: boolean,
+  ): Promise<void> {
+    await api.request<unknown>(`/api/conversations/${encodeURIComponent(conversationId)}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ forEveryone }),
     });
   },
 

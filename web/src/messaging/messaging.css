@@ -3552,3 +3552,12 @@ button.attachment__expand {
 .group-create__row.on .conversation-row__preview {
   color: var(--kp-ink);
 }
+
+/* Hide-chat key sheet + delete view inside the ⋮ menu. */
+.chat-menu__field {
+  margin: 4px 0;
+}
+.chat-menu__danger {
+  background: var(--kp-red);
+  color: #fff;
+}
