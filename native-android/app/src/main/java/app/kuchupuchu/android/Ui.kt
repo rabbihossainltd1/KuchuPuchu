@@ -1452,42 +1452,19 @@ fun Modifier.pressScale(interactionSource: MutableInteractionSource): Modifier {
 }
 
 /**
- * Broadcast-style status glyph drawn on canvas: a ring with four short
- * bracket arcs floating around it (N/S/E/W). Matches the app's custom
- * status icon artwork. (Owner, 2026-09-13: replaced the ring-with-a-dot;
- * the old tab icon before that was Icons.Filled.Circle — just a dot.)
+ * Broadcast-style status glyph: a ring with four short bracket arcs floating
+ * around it (N/S/E/W). The shared vector is used by both the app and the
+ * launcher shortcut. (Owner, 2026-09-13: replaced the ring-with-a-dot; the old
+ * tab icon before that was Icons.Filled.Circle — just a dot.)
  */
 @Composable
 fun StatusGlyphIcon(tint: Color, size: Dp) {
-    androidx.compose.foundation.Canvas(Modifier.size(size)) {
-        val s = size.toPx()
-        val stroke = s / 10f
-        val ringR = s * 0.22f
-        val arcR = ringR * 2f
-        val strokeStyle = androidx.compose.ui.graphics.drawscope.Stroke(
-            width = stroke,
-            cap = androidx.compose.ui.graphics.StrokeCap.Round,
-        )
-        val center = androidx.compose.ui.geometry.Offset(s / 2f, s / 2f)
-
-        drawCircle(color = tint, radius = ringR, style = strokeStyle, center = center)
-
-        val span = 72.06f
-        val half = span / 2f
-        val topLeft = androidx.compose.ui.geometry.Offset(center.x - arcR, center.y - arcR)
-        val arcSize = androidx.compose.ui.geometry.Size(arcR * 2f, arcR * 2f)
-        for (cardinal in floatArrayOf(270f, 90f, 180f, 0f)) {
-            drawArc(
-                color = tint,
-                startAngle = cardinal - half,
-                sweepAngle = span,
-                useCenter = false,
-                style = strokeStyle,
-                topLeft = topLeft,
-                size = arcSize,
-            )
-        }
-    }
+    Icon(
+        painter = painterResource(R.drawable.ic_status_glyph),
+        contentDescription = null,
+        tint = tint,
+        modifier = Modifier.size(size),
+    )
 }
 
 /**

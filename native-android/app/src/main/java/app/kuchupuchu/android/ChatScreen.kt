@@ -8226,12 +8226,26 @@ private fun Modifier.messageReplySwipe(
                     break
                 }
                 val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                // The LazyColumn sees Initial-pass events first. If it has
+                // already consumed this movement, let the vertical scroll own
+                // the gesture instead of starting a second, horizontal drag.
+                if (change.isConsumed) {
+                    cancelled = true
+                    break
+                }
                 if (change.uptimeMillis - down.uptimeMillis >= viewConfiguration.longPressTimeoutMillis) {
                     cancelled = true
                     break
                 }
                 val dx = change.position.x - down.position.x
                 val dy = change.position.y - down.position.y
+                // Yield as soon as vertical intent is clear. This also unlocks
+                // a diagonal gesture whose first few pixels had horizontal
+                // noise; reply swipes only claim a decisive horizontal lead.
+                if (MessageReplySwipePolicy.isVerticalIntent(dx, dy, viewConfiguration.touchSlop)) {
+                    cancelled = true
+                    break
+                }
                 if (MessageReplySwipePolicy.isHorizontalIntent(dx, dy, viewConfiguration.touchSlop)) claimed = true
                 if (claimed) {
                     change.consume()

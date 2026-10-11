@@ -1,0 +1,14 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Shared status glyph: central 22% ring plus four 72.06-degree brackets. -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M17.28,12A5.28,5.28 0,0 1 6.72,12A5.28,5.28 0,0 1 17.28,12Z M5.79,3.46A10.56,10.56 0,0 1 18.21,3.46 M18.21,20.54A10.56,10.56 0,0 1 5.79,20.54 M3.46,18.21A10.56,10.56 0,0 1 3.46,5.79 M20.54,5.79A10.56,10.56 0,0 1 20.54,18.21"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2.4" />
+</vector>

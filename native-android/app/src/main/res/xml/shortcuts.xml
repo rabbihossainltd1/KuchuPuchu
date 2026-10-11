@@ -28,7 +28,7 @@
     </shortcut>
     <shortcut
         android:enabled="true"
-        android:icon="@drawable/ic_shortcut_status"
+        android:icon="@drawable/ic_status_glyph"
         android:shortcutId="launcher_status"
         android:shortcutLongLabel="@string/shortcut_status_long"
         android:shortcutShortLabel="@string/shortcut_status_short">

@@ -27,10 +27,19 @@ class MessageReplySwipePolicyTest {
     }
 
     @Test
-    fun `horizontal intent waits for touch slop and vertical scrolling stays unclaimed`() {
+    fun `horizontal intent must beat cross-axis drift by more than one touch slop`() {
         assertFalse(MessageReplySwipePolicy.isHorizontalIntent(deltaX = 8f, deltaY = 0f, touchSlopPx = 10f))
+        assertFalse(MessageReplySwipePolicy.isHorizontalIntent(deltaX = 12f, deltaY = 10f, touchSlopPx = 10f))
+        assertFalse(MessageReplySwipePolicy.isHorizontalIntent(deltaX = 20f, deltaY = 12f, touchSlopPx = 10f))
         assertFalse(MessageReplySwipePolicy.isHorizontalIntent(deltaX = 20f, deltaY = 24f, touchSlopPx = 10f))
         assertTrue(MessageReplySwipePolicy.isHorizontalIntent(deltaX = 20f, deltaY = 8f, touchSlopPx = 10f))
+    }
+
+    @Test
+    fun `strong vertical intent can cancel a previously noisy diagonal`() {
+        assertFalse(MessageReplySwipePolicy.isVerticalIntent(deltaX = 12f, deltaY = 10f, touchSlopPx = 10f))
+        assertTrue(MessageReplySwipePolicy.isVerticalIntent(deltaX = 8f, deltaY = 20f, touchSlopPx = 10f))
+        assertFalse(MessageReplySwipePolicy.isVerticalIntent(deltaX = 20f, deltaY = 8f, touchSlopPx = 10f))
     }
 
     @Test
