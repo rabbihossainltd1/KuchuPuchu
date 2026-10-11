@@ -1156,3 +1156,11 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - themeMatrix: 2 goldens shifted (row padding) — regen targeted only.
 - TESTS message-sheets.spec.ts 4; CI green. MERGED PR #118; docs PR pending; BUILD_ID to confirm.
 - STILL ABSENT: AI chat, archive/pin.
+
+## Web slice AI — AI chat parity — 2026-10-11 (feat/web-ai-parity)
+- ChatMenu AI branch (peer kp_ai_bot): phone order [Scheduled], History, New chat, Mute…, Chat theme, Incognito mode/Close incognito mode, Search in chat; no solo rows.
+- AiHistoryPane.tsx = AIHistoryScreen port: "AI History / Your past KuchuPuchu AI sessions", clock chip + prettyRange(infoStamp) + "N messages" + View; "Session / Read-only archive" capped bubbles (own blue right).
+- New chat = POST /api/conversations/:id/reset + controller.selectConversation reload; Incognito open = same reset; Close = POST …/restore-latest; local aiIncognito resets on chat switch.
+- messagingApi: resetAiConversation/restoreLatestAi/listAiSessions/getAiSession.
+- TESTS ai.spec.ts 5; CI green. MERGED PR #120; docs PR pending; BUILD_ID to confirm.
+- STILL ABSENT: archive/pin.
