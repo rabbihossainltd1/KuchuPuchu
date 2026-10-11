@@ -105,7 +105,7 @@ import {
 } from "../../web/src/messaging/attachments.ts";
 import { uploadFile } from "../../web/src/messaging/filesApi.ts";
 import { createLocalAttachmentEcho } from "../../web/src/messaging/protocol.ts";
-import { ATTACH_TILE_IDS, ATTACH_TILE_UNAVAILABLE } from "../../web/src/messaging/AttachMenu.tsx";
+import { ATTACH_TILE_IDS, ATTACH_TILE_UNAVAILABLE } from "../../web/src/messaging/attachments.ts";
 
 const lines = [];
 const check = (name, condition, detail = "") =>

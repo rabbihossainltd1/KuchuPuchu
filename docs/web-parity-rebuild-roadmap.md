@@ -326,3 +326,98 @@ The phone's profile / group-info screens as a right-hand drawer
 - Tests: `web/e2e-messaging/info.spec.ts` (4 tests); the mock group's
   ownership is an option (`ownGroup`) so the non-owner theme lock keeps its
   suite.
+
+## Slice U — Direct attach picker, drag-and-drop, strip options ✅
+
+The emoji tile sheet is gone. The paperclip fires a hidden multi-file input
+(`image/*,video/*,audio/*` plus common document types) so the desktop opens
+its own media/documents picker in one click; a separate input with
+`capture=environment` is the camera substitute, behind its own icon button.
+
+- **Drag-and-drop**: files dropped on the conversation run through the same
+  `prepareAttachments` prep (photos shrink to 2048 px, limits enforced) with a
+  drop veil while hovering; a `dragover` without files does nothing.
+- **Strip options**: "View once" and "Send as a document" (the phone's caption
+  screen options, verbatim) sit on the composer strip once media is queued;
+  they are mutually exclusive, re-prepare from the original bytes, and an
+  optimistic mirror keeps the controlled boxes from flickering mid-re-prepare.
+- **Disclosure kept**: the limits line and every phone-only surface's reason
+  (location, contact, poll, event, AI images) moved from the sheet into a
+  screen-reader note composed from `ATTACH_TILE_IDS` /
+  `ATTACH_TILE_UNAVAILABLE`, now exported by `attachments.ts` as the single
+  source of truth (case 57 imports them from there).
+- Chip glyphs are `Icon` strokes, not emoji; the attach roster, the direct
+  picker and the drop path are pinned by `attachments.spec.ts` (15 tests,
+  including a `DataTransfer` drop and a native-click probe proving the
+  paperclip hands straight to the OS picker).
+
+## Slice V — New group creation ✅
+
+The phone's `CreateGroupScreen.kt` on the web (`GroupCreatePane.tsx`), entered
+from the chat list's ⋮ menu — the home menu on the phone — whose only offered
+entry is one that works (contacts screens arrive in a later slice, never
+stubbed):
+
+- **Seed list**: every 1:1 peer of the loaded chat list, once each, system
+  bots excluded — the same seed `ScreenStore.convs` gives the phone. Typing
+  filters them and, at two characters, adds directory matches off
+  `GET /api/users?q=` (the phone's endpoint), debounced and abortable.
+- **Picks**: chip row with the phone's "N members" count and per-chip
+  `Remove <name>`; rows carry `aria-pressed` and Add/Deselect labels; the
+  50-member ceiling and the 50-char title cap mirror the Worker's gates.
+- **States**: "No contacts yet / Search a name to add members" when the list
+  is empty, "No one found" for a dry search, "Creating…" while the POST runs.
+- **Create**: `POST /api/conversations/group {title, memberIds}` and the fresh
+  group opens exactly like the phone's `navigate("chat/$id")`. Worker refusals
+  surface through the web's fixed copy (`apiErrorMessage`) — raw server text
+  never renders.
+- Tests: `group-create.spec.ts` (4) — payload parity against the phone's
+  exact body, directory pick + no-results, refusal surfacing, and an
+  axe-clean sheet.
+
+## Slice W — Hidden chats: secret key hide, search reveal, real delete ✅
+
+The phone's round-33 hidden-chat model, end to end:
+
+- **Hide** (⋮ sheet → "Hide chat"): one field ("Secret key", 64 chars) and a
+  "Hide" button, exactly the phone's `HideKeySheet`. The key is hashed on the
+  device (`hiddenKeyHash()` = SHA-256 hex of the trimmed key, the phone's
+  `ScreenStore.hiddenKeyHash`) and only the hash travels —
+  `POST /api/conversations/:id/hide {hidden:1, key}`.
+- **Reveal**: Search hashes whatever is typed — one character included,
+  before the two-character server search — and any hidden row whose stored
+  hash matches renders under a "Hidden" section with the phone's "Unhide"
+  action (`{hidden:0}`); every other hidden chat stays concealed across the
+  People/Chats/Messages groups, the same `concealed()` rule as the phone.
+- **Parser split**: `parseConversationList` keeps hidden rows; the new
+  `visibleConversations()` is what the list, unread counts and notifications
+  see (case 56 re-pinned). The controller exposes `hiddenConversations` so
+  Search can reveal without re-fetching.
+- **Delete is delete now**: the 1:1 "Delete chat" entry is the phone's dialog
+  ("Permanently delete the chat with X?" + "Also delete for X" checkbox)
+  over `DELETE /api/conversations/:id`, instead of the old silent hide.
+- Tests: `hidden.spec.ts` (4) — hash-only payload, reveal + unhide round
+  trip, the forEveryone contract, axe-clean sheet.
+
+## Slice X — Contacts: New contact + All contacts ✅
+
+The phone's `ContactsScreens.kt`, mirrored for the browser:
+
+- **Entry**: the home ⋮ menu now carries the phone's order — New contact,
+  All contacts, New group.
+- **All contacts**: "All contacts" with the live "N on KuchuPuchu"
+  subtitle (Syncing… while the list refreshes), the person-add shortcut,
+  refresh, the search pill, an "On KuchuPuchu" section of the user's 1:1
+  peers with Chat pills (`POST /api/conversations {userId}` open-or-create,
+  the phone's `openChatWith`), and the phone's empty/no-match copy. Hidden
+  chats stay concealed — the pane only sees `visibleConversations` rows.
+- **New contact**: name + phone pills with the live E.164 preview from a
+  point-for-point port of `PhoneBook.toE164` (Bengali / Arabic-Indic digits
+  included), the phone's error copy, Check against
+  `POST /api/contacts/match`, then either the match card ("@user · on
+  KuchuPuchu" with Chat) or "not on KuchuPuchu yet" with the WhatsApp-first
+  invite (`inviteUrl`). The phone-only Save (system contact editor) has no
+  browser analog and is deliberately absent.
+- Icons: `personAdd` + `contactsBook` — the phone's Material glyphs.
+- Tests: `contacts.spec.ts` (7, axe included); helpers gained a
+  configurable `POST /api/contacts/match` mock.

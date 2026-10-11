@@ -34,20 +34,17 @@ const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47];
 const startsWith = (bytes: Uint8Array, magic: readonly number[]) =>
   magic.every((value, index) => bytes[index] === value);
 
-/** The hidden `input[type=file]` belonging to one attach tile. */
-const tileInput = (page: Page, label: string): Locator =>
-  page
-    .locator(".attach-tile", { has: page.getByRole("button", { name: label, exact: true }) })
-    .locator('input[type="file"]');
+/** The attach button opens the device's own picker — the hidden input behind
+ *  it is the only handle Playwright can reach, exactly like a native pick. */
+const pickerInput = (page: Page): Locator => page.locator('input[data-attach="picker"]');
+const cameraInput = (page: Page): Locator => page.locator('input[data-attach="camera"]');
+
+const pickFiles = (page: Page, files: Parameters<Locator["setInputFiles"]>[0]) =>
+  pickerInput(page).setInputFiles(files);
 
 const openChat = async (page: Page) => {
   await page.getByRole("link", { name: new RegExp(PEER_NAME) }).click();
   await expect(page.getByText("এই মেসেজটি ফোন থেকে এনক্রিপ্টেড")).toBeVisible();
-};
-
-const openAttachMenu = async (page: Page) => {
-  await page.getByRole("button", { name: "Attach a photo, video or document" }).click();
-  await expect(page.getByRole("group", { name: "Attach something" })).toBeVisible();
 };
 
 test.beforeEach(async ({ page }) => {
@@ -72,8 +69,7 @@ test.beforeEach(async ({ page }) => {
 
 test.describe("Web attachments", () => {
   test("a photo is shrunk to a 2048 px long edge and uploaded as JPEG", async ({ page }) => {
-    await openAttachMenu(page);
-    await tileInput(page, "Gallery").setInputFiles({
+    await pickFiles(page, {
       name: "big.png",
       mimeType: "image/png",
       buffer: Buffer.from(makePng(3000, 2000, [210, 60, 60])),
@@ -133,8 +129,7 @@ test.describe("Web attachments", () => {
   });
 
   test("a caption is sealed while the media metadata stays readable", async ({ page }) => {
-    await openAttachMenu(page);
-    await tileInput(page, "Gallery").setInputFiles({
+    await pickFiles(page, {
       name: "small.png",
       mimeType: "image/png",
       buffer: Buffer.from(makePng(400, 300, [30, 140, 90])),
@@ -173,8 +168,7 @@ test.describe("Web attachments", () => {
   });
 
   test("several photos share one album id and one send", async ({ page }) => {
-    await openAttachMenu(page);
-    await tileInput(page, "Gallery").setInputFiles([
+    await pickFiles(page, [
       {
         name: "a.png",
         mimeType: "image/png",
@@ -207,9 +201,8 @@ test.describe("Web attachments", () => {
   });
 
   test("a document keeps its own name, type and bytes", async ({ page }) => {
-    await openAttachMenu(page);
     const notes = Buffer.from("KuchuPuchu release notes\n");
-    await tileInput(page, "Document").setInputFiles({
+    await pickFiles(page, {
       name: "notes.txt",
       mimeType: "text/plain",
       buffer: notes,
@@ -220,7 +213,7 @@ test.describe("Web attachments", () => {
     await expect(chip.locator("strong")).toHaveText("notes.txt");
     // No thumbnail is invented for a document.
     await expect(chip.locator(".composer-attachment__thumb")).toHaveCount(0);
-    await expect(chip.locator(".composer-attachment__icon")).toHaveText("📄");
+    await expect(chip.locator(".composer-attachment__icon svg")).toHaveCount(1);
     // There is no photo editor for a document either.
     await expect(page.getByRole("button", { name: /^Edit photo/ })).toHaveCount(0);
 
@@ -239,17 +232,17 @@ test.describe("Web attachments", () => {
   });
 
   test("'send as a document' uploads a photo's original bytes, unre-encoded", async ({ page }) => {
-    await openAttachMenu(page);
-    await page.getByText("Send as a document").click();
-    await expect(page.getByRole("checkbox", { name: /Send as a document/ })).toBeChecked();
-
     const png = makePng(2600, 1800, [10, 90, 160]);
-    await tileInput(page, "Document").setInputFiles({
+    await pickFiles(page, {
       name: "camera.png",
       mimeType: "image/png",
       buffer: Buffer.from(png),
     });
 
+    // The phone-style options now live on the composer strip once media is
+    // queued; checking "as document" re-prepares the original bytes.
+    await page.getByRole("checkbox", { name: /Send as a document/ }).check();
+    await expect(page.getByRole("checkbox", { name: /Send as a document/ })).toBeChecked();
     await expect(page.locator(".composer-attachment strong")).toHaveText("camera.png");
     await page.getByRole("button", { name: "Send 1 attachment" }).click();
 
@@ -269,8 +262,7 @@ test.describe("Web attachments", () => {
   });
 
   test("the photo editor rotates what is actually uploaded", async ({ page }) => {
-    await openAttachMenu(page);
-    await tileInput(page, "Gallery").setInputFiles({
+    await pickFiles(page, {
       name: "wide.png",
       mimeType: "image/png",
       buffer: Buffer.from(makePng(1200, 800, [240, 180, 40])),
@@ -309,8 +301,7 @@ test.describe("Web attachments", () => {
   });
 
   test("removing an attachment before sending drops it from the message", async ({ page }) => {
-    await openAttachMenu(page);
-    await tileInput(page, "Gallery").setInputFiles([
+    await pickFiles(page, [
       { name: "keep.png", mimeType: "image/png", buffer: Buffer.from(makePng(120, 90, [1, 2, 3])) },
       { name: "drop.png", mimeType: "image/png", buffer: Buffer.from(makePng(90, 120, [4, 5, 6])) },
     ]);
@@ -389,13 +380,16 @@ test.describe("Web attachments", () => {
     await expect(page.getByRole("group", { name: "Attach something" })).toHaveCount(0);
   });
 
-  test("the attach sheet, sticker picker and editor have no axe violations", async ({ page }) => {
-    await openAttachMenu(page);
+  test("the attach strip, sticker picker and editor have no axe violations", async ({ page }) => {
+    await pickFiles(page, {
+      name: "menu.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(makePng(300, 200, [40, 120, 200])),
+    });
     const menuResults = await new AxeBuilder({ page })
       .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
       .analyze();
     expect(menuResults.violations).toEqual([]);
-    await page.getByRole("button", { name: "Close attach menu" }).click();
 
     await page.getByRole("button", { name: "Send a sticker" }).click();
     const stickerResults = await new AxeBuilder({ page })
@@ -404,8 +398,7 @@ test.describe("Web attachments", () => {
     expect(stickerResults.violations).toEqual([]);
     await page.getByRole("button", { name: "Close stickers" }).click();
 
-    await openAttachMenu(page);
-    await tileInput(page, "Gallery").setInputFiles({
+    await pickFiles(page, {
       name: "axe.png",
       mimeType: "image/png",
       buffer: Buffer.from(makePng(600, 400, [80, 80, 200])),
@@ -419,21 +412,18 @@ test.describe("Web attachments", () => {
   });
 
   test("view once can be sent, and it is the only thing that can be", async ({ page }) => {
-    await openAttachMenu(page);
-
-    // The two options contradict each other, so the sheet resolves it instead of
-    // letting the reader pick something the Worker would silently drop.
-    await page.getByRole("checkbox", { name: /View once/ }).check();
-    await page.getByRole("checkbox", { name: /Send as a document/ }).check();
-    await expect(page.getByRole("checkbox", { name: /View once/ })).not.toBeChecked();
-    await page.getByRole("checkbox", { name: /Send as a document/ }).uncheck();
-    await page.getByRole("checkbox", { name: /View once/ }).check();
-
-    await tileInput(page, "Gallery").setInputFiles({
+    await pickFiles(page, {
       name: "once.png",
       mimeType: "image/png",
       buffer: Buffer.from(makePng(500, 400, [120, 30, 160])),
     });
+
+    // The two options contradict each other, so the composer resolves it
+    // instead of letting the reader pick something the Worker would drop.
+    await page.getByRole("checkbox", { name: /Send as a document/ }).check();
+    await expect(page.getByRole("checkbox", { name: /View once/ })).not.toBeChecked();
+    await page.getByRole("checkbox", { name: /View once/ }).check();
+    await expect(page.getByRole("checkbox", { name: /Send as a document/ })).not.toBeChecked();
 
     // The chip says what is about to be sent, out loud.
     await expect(page.locator(".composer-attachment").locator(".sr-only")).toContainText(
@@ -458,18 +448,75 @@ test.describe("Web attachments", () => {
     expect(worker.viewOnceReports).toEqual([]);
   });
 
-  test("the attach sheet states its limits instead of hiding them", async ({ page }) => {
-    await openAttachMenu(page);
-    await expect(page.locator(".attach-menu__note")).toContainText("2048 px");
-    await expect(page.locator(".attach-menu__note")).toContainText("2 GB video");
-    await expect(page.locator(".attach-menu__note")).toContainText("5 GB document");
-    // The camera tile is a browser substitute and says so through its input.
-    await expect(tileInput(page, "Camera")).toHaveAttribute("capture", "environment");
-    await expect(tileInput(page, "Gallery")).toHaveAttribute("multiple", "");
+  test("the composer states the attach limits instead of hiding them", async ({ page }) => {
+    await expect(page.locator(".attach-limits")).toContainText("2048 px");
+    await expect(page.locator(".attach-limits")).toContainText("2 GB video");
+    await expect(page.locator(".attach-limits")).toContainText("5 GB document");
+    // The camera button is a browser substitute and says so through its input.
+    await expect(cameraInput(page)).toHaveAttribute("capture", "environment");
+    await expect(pickerInput(page)).toHaveAttribute("multiple", "");
     // Deferred surfaces point at the roadmap rather than pretending to work;
     // the roadmap copy lives in the ⋮ sheet's Privacy notes view.
     await page.getByRole("button", { name: "More options" }).click();
     await page.getByRole("button", { name: "Privacy notes" }).click();
     await expect(page.locator(".chat-menu__notes")).toContainText("arrive in a later slice");
+  });
+
+  test("the attach button opens the device picker directly, with no sheet", async ({ page }) => {
+    // No intermediate tile sheet: clicking Attach must hand straight over to
+    // the OS file picker (the hidden input's native click in a browser).
+    await expect(page.getByRole("group", { name: "Attach something" })).toHaveCount(0);
+    await expect(page.locator(".attach-tile")).toHaveCount(0);
+
+    await page.evaluate(() => {
+      const clicked: string[] = [];
+      HTMLInputElement.prototype.click = function () {
+        clicked.push(this.dataset.attach ?? "?");
+      };
+      (window as unknown as { __pickerClicks: string[] }).__pickerClicks = clicked;
+    });
+    await page.getByRole("button", { name: "Attach a photo, video or document" }).click();
+    expect(
+      await page.evaluate(() => (window as unknown as { __pickerClicks: string[] }).__pickerClicks),
+    ).toEqual(["picker"]);
+    // And the camera substitute sits on its own button, capture attribute intact.
+    await expect(cameraInput(page)).toHaveAttribute("capture", "environment");
+  });
+
+  test("files dragged onto the conversation are attached like a pick", async ({ page }) => {
+    const png = makePng(220, 160, [12, 80, 140]);
+
+    // Hovering with files shows the drop veil…
+    await page.evaluate(() => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([new Uint8Array([7, 7])], "hover.txt", { type: "text/plain" }));
+      document
+        .querySelector(".conversation-pane")!
+        .dispatchEvent(
+          new DragEvent("dragover", { dataTransfer: dt, bubbles: true, cancelable: true }),
+        );
+    });
+    await expect(page.locator(".drop-hint")).toBeVisible();
+
+    // …and dropping feeds the same prep path the picker uses.
+    await page.evaluate((bytes) => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([new Uint8Array(bytes)], "dragged.png", { type: "image/png" }));
+      document
+        .querySelector(".conversation-pane")!
+        .dispatchEvent(
+          new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }),
+        );
+    }, Array.from(png));
+
+    const chip = page.locator(".composer-attachment");
+    await expect(chip).toHaveCount(1);
+    await expect(chip.locator("strong")).toHaveText("dragged.png");
+    await expect(page.locator(".drop-hint")).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Send 1 attachment" }).click();
+    await expect.poll(() => worker.sent.length).toBe(1);
+    expect(worker.sent[0]!.body.kind).toBe("FILE");
+    expect(worker.sent[0]!.body.fileName).toBe("dragged.png");
   });
 });

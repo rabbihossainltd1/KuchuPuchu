@@ -52,7 +52,6 @@ import type { EditModel } from "../media/imageEdit";
 import { attachmentCategory, formatBytes, isAttachmentKind } from "../media/uploadContract";
 import { useAppTheme } from "../theme/appTheme";
 import { CHAT_THEME_LABELS, chatThemeCssVars, chatThemeOr, chatThemeStyle } from "./chatTheme";
-import { AttachMenu, type AttachSource } from "./AttachMenu";
 import { AlbumGrid, AttachmentRow } from "./AttachmentRow";
 import { OnceText } from "./OnceText";
 import { VoiceRecorderBar } from "./VoiceRecorderBar";
@@ -74,11 +73,14 @@ import { mediaSourceKey, useMediaUrls } from "./mediaUrl";
 import { isViewOnce, viewOnceSpent } from "./viewOnce";
 import { rowsForTab, visibleMedia, type SharedMediaTab } from "./sharedMedia";
 import {
+  ATTACH_LIMIT_NOTE,
+  ATTACH_TILE_UNAVAILABLE,
   applyRenderedEdit,
   describeAttachment,
   hasEdits,
   prepareAttachments,
   revokeAttachment,
+  type AttachSource,
   type AttachmentRejection,
   type PendingAttachment,
 } from "./attachments";
@@ -227,7 +229,12 @@ export function ChatPane({
   const [unlockBusy, setUnlockBusy] = useState(false);
   const [unlockError, setUnlockError] = useState("");
   const [pending, setPending] = useState<readonly PendingAttachment[]>([]);
-  const [attachOpen, setAttachOpen] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const pickerRef = useRef<HTMLInputElement | null>(null);
+  const cameraRef = useRef<HTMLInputElement | null>(null);
+  /** Original picked bytes per queued item, so the strip's document /
+   *  view-once toggles can re-prepare without asking for the file again. */
+  const fileFor = useRef(new Map<string, File>());
   const [menuOpen, setMenuOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [stickerOpen, setStickerOpen] = useState(false);
@@ -453,7 +460,7 @@ export function ChatPane({
     setConfirmDeleteId("");
     setEditingId("");
     setEditText("");
-    setAttachOpen(false);
+    setDragOver(false);
     setStickerOpen(false);
     setEditorTarget(null);
     setRejections([]);
@@ -561,10 +568,55 @@ export function ChatPane({
           });
         }
       });
+      const byName = new Map<string, File>();
+      files.forEach((file) => {
+        if (!byName.has(file.name)) byName.set(file.name, file);
+      });
+      result.items.forEach((item) => {
+        const file = byName.get(item.pickedName);
+        if (file) fileFor.current.set(item.id, file);
+      });
       setPending((current) => [...current, ...result.items]);
     },
     [pending.length],
   );
+
+  const mediaQueued = pending.filter((item) => {
+    const file = fileFor.current.get(item.id);
+    return file !== undefined && (file.type.startsWith("image/") || file.type.startsWith("video/"));
+  });
+  const hasMediaQueued = mediaQueued.length > 0;
+  const onceOn = hasMediaQueued && mediaQueued.every((item) => item.viewOnce);
+  const docOn = hasMediaQueued && mediaQueued.every((item) => item.asDocument);
+  /** Optimistic mirror of the two flags while a re-prepare is in flight, so a
+   *  controlled box never flickers back to its old state mid-render. */
+  const [flagFlip, setFlagFlip] = useState<{ once: boolean; doc: boolean } | null>(null);
+  const onceShown = flagFlip ? flagFlip.once : onceOn;
+  const docShown = flagFlip ? flagFlip.doc : docOn;
+
+  /** Re-run the phone's prep over the queued media with new flags; documents
+   *  and audio stay untouched. */
+  const reprepareMedia = async (opts: { asDocument: boolean; viewOnce: boolean }) => {
+    if (!mediaQueued.length) return;
+    const files = mediaQueued.map((item) => fileFor.current.get(item.id)!);
+    const rest = pending.filter((item) => !mediaQueued.includes(item));
+    const result = await prepareAttachments(files, {
+      ...opts,
+      alreadyQueued: rest.length,
+    });
+    setRejections(result.rejected);
+    mediaQueued.forEach((item) => fileFor.current.delete(item.id));
+    const byName = new Map<string, File>();
+    files.forEach((file) => {
+      if (!byName.has(file.name)) byName.set(file.name, file);
+    });
+    result.items.forEach((item) => {
+      const file = byName.get(item.pickedName);
+      if (file) fileFor.current.set(item.id, file);
+    });
+    setPending([...rest, ...result.items]);
+    setFlagFlip(null);
+  };
 
   const removeAttachment = useCallback((id: string) => {
     setPending((current) => {
@@ -750,11 +802,36 @@ export function ChatPane({
 
   return (
     <main
-      className={`conversation-pane${selectedId ? " is-mobile-visible" : ""}`}
+      className={`conversation-pane${selectedId ? " is-mobile-visible" : ""}${
+        dragOver ? " dragging" : ""
+      }`}
       aria-labelledby="conversation-heading"
       style={chatPaneStyle}
+      onDragOver={(event) => {
+        if (oneWay || !event.dataTransfer.types.includes("Files")) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+        setDragOver(true);
+      }}
+      onDragLeave={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+        setDragOver(false);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        setDragOver(false);
+        if (oneWay) return;
+        const files = Array.from(event.dataTransfer.files);
+        if (files.length) void onPickFiles(files, "gallery", false, false);
+      }}
       data-chat-theme={chatThemeOr(conversation.theme)}
     >
+      {dragOver && (
+        <div className="drop-hint" aria-hidden="true">
+          <Icon name="attach" size={26} />
+          <span>Drop files to attach them</span>
+        </div>
+      )}
       <header className="conversation-header">
         <div className="conversation-header__identity">
           <RouteLink
@@ -1535,6 +1612,44 @@ export function ChatPane({
           )}
 
           {pending.length > 0 && (
+            <div className="composer__attach-options">
+              {hasMediaQueued ? (
+                <>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={onceShown}
+                      disabled={oneWay}
+                      onChange={(event) => {
+                        setFlagFlip({ once: event.target.checked, doc: false });
+                        void reprepareMedia({ viewOnce: event.target.checked, asDocument: false });
+                      }}
+                    />
+                    <span>
+                      View once — the reader opens a photo or clip exactly once, then it is gone for
+                      both of you. A document cannot be view-once.
+                    </span>
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={docShown}
+                      disabled={oneWay}
+                      onChange={(event) => {
+                        setFlagFlip({ once: false, doc: event.target.checked });
+                        void reprepareMedia({ asDocument: event.target.checked, viewOnce: false });
+                      }}
+                    />
+                    <span>
+                      Send as a document — keeps a photo or clip's own bytes and name, with no
+                      re-encoding.
+                    </span>
+                  </label>
+                </>
+              ) : null}
+            </div>
+          )}
+          {pending.length > 0 && (
             <ul className="composer__attachments" aria-label="Attachments ready to send">
               {pending.map((item) => (
                 <li key={item.id} className="composer-attachment">
@@ -1542,7 +1657,16 @@ export function ChatPane({
                     <img className="composer-attachment__thumb" src={item.previewUrl} alt="" />
                   ) : (
                     <span className="composer-attachment__icon" aria-hidden="true">
-                      {item.intent === "video" ? "🎬" : item.intent === "audio" ? "🎵" : "📄"}
+                      <Icon
+                        name={
+                          item.intent === "video"
+                            ? "video"
+                            : item.intent === "audio"
+                              ? "mic"
+                              : "file"
+                        }
+                        size={18}
+                      />
                     </span>
                   )}
                   <span className="composer-attachment__copy">
@@ -1602,6 +1726,14 @@ export function ChatPane({
             </div>
           ) : null}
 
+          <p className="sr-only attach-limits">
+            Photos are shrunk to a 2048 px long edge and re-encoded as JPEG before upload, exactly
+            like the phone. Limits: 100 MB image, 2 GB video, 100 MB audio, 5 GB document. Location
+            sharing uses the phone's own location provider and is not available in a browser build.
+            Sharing a contact needs the device's contacts app, which a browser cannot reach. Polls,
+            events and AI images are coming soon on Android too.
+          </p>
+
           {recorder.recording ? (
             <VoiceRecorderBar controller={recorder} onAnnounce={controller.announce} />
           ) : (
@@ -1617,10 +1749,7 @@ export function ChatPane({
                     aria-label="Send a sticker"
                     aria-expanded={stickerOpen}
                     disabled={oneWay}
-                    onClick={() => {
-                      setAttachOpen(false);
-                      setStickerOpen((value) => !value);
-                    }}
+                    onClick={() => setStickerOpen((value) => !value)}
                   >
                     <Icon name="mood" size={20} />
                   </button>
@@ -1673,29 +1802,51 @@ export function ChatPane({
                 />
 
                 <div className="composer__attach">
+                  {/* Attach opens the device's own picker straight away — no
+                      intermediate sheet. The camera substitute keeps its own
+                      capture input, the way a phone browser would. */}
+                  <input
+                    ref={cameraRef}
+                    data-attach="camera"
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="sr-only"
+                    tabIndex={-1}
+                    aria-hidden="true"
+                    onChange={(event) => {
+                      const files = event.target.files ? Array.from(event.target.files) : [];
+                      event.target.value = "";
+                      if (files.length) void onPickFiles(files, "camera", false, false);
+                    }}
+                  />
+                  <input
+                    ref={pickerRef}
+                    data-attach="picker"
+                    type="file"
+                    multiple
+                    accept="image/*,video/*,audio/*,.pdf,.txt,.md,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar"
+                    className="sr-only"
+                    tabIndex={-1}
+                    aria-hidden="true"
+                    onChange={(event) => {
+                      const files = event.target.files ? Array.from(event.target.files) : [];
+                      event.target.value = "";
+                      if (files.length) void onPickFiles(files, "gallery", false, false);
+                    }}
+                  />
                   <button
                     type="button"
                     className="icon-button"
                     aria-label="Attach a photo, video or document"
-                    aria-expanded={attachOpen}
-                    aria-haspopup="dialog"
                     disabled={oneWay}
                     onClick={() => {
                       setStickerOpen(false);
-                      setAttachOpen((value) => !value);
+                      pickerRef.current?.click();
                     }}
                   >
                     <Icon name="attach" size={20} />
                   </button>
-                  <AttachMenu
-                    open={attachOpen && !oneWay}
-                    onClose={() => setAttachOpen(false)}
-                    onFiles={(files, source, asDocument, viewOnce) =>
-                      void onPickFiles(files, source, asDocument, viewOnce)
-                    }
-                    disabled={oneWay}
-                    onAnnounce={controller.announce}
-                  />
                 </div>
               </div>
 

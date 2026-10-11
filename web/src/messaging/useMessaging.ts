@@ -40,6 +40,7 @@ import {
   prependOlderPage,
   reconcileMessagePage,
   upsertConversation,
+  visibleConversations,
   type ConversationRow,
   type MessageRow,
   type ReplyTarget,
@@ -87,6 +88,7 @@ export type LoadStatus = "idle" | "loading" | "ready" | "error";
 
 export type MessagingState = {
   conversations: readonly ConversationRow[];
+  hiddenConversations: readonly ConversationRow[];
   listStatus: LoadStatus;
   listError: string;
   totalUnread: number;
@@ -184,6 +186,7 @@ export function useMessaging(options: Options): MessagingController {
   }, []);
 
   const [conversations, setConversations] = useState<readonly ConversationRow[]>([]);
+  const [hiddenConversations, setHiddenConversations] = useState<readonly ConversationRow[]>([]);
   const [vanishingIds, setVanishingIds] = useState<readonly string[]>([]);
   const [hiddenMessageIds, setHiddenMessageIds] = useState<readonly string[]>([]);
   const [sharedMedia, setSharedMedia] = useState<SharedMedia>(EMPTY_SHARED_MEDIA);
@@ -246,7 +249,8 @@ export function useMessaging(options: Options): MessagingController {
     setListStatus((current) => (current === "ready" ? "ready" : "loading"));
     try {
       const rows = await messagingApi.listConversations(api);
-      setConversations(rows);
+      setConversations(visibleConversations(rows));
+      setHiddenConversations(rows.filter((row) => row.hidden));
       setListError("");
       setListStatus("ready");
       // Keep the open chat's header in step with the refreshed row.
@@ -1445,6 +1449,7 @@ export function useMessaging(options: Options): MessagingController {
 
   return {
     conversations,
+    hiddenConversations,
     listStatus,
     listError,
     totalUnread,

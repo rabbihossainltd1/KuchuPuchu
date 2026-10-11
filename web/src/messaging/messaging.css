@@ -19,6 +19,8 @@
 }
 
 .list-state {
+  margin: auto;
+  width: 100%;
   padding: 28px 18px;
   text-align: center;
   color: var(--kp-muted);
@@ -3509,4 +3511,276 @@ button.attachment__expand {
 
 .search-pane {
   position: relative;
+}
+
+/* Chat-list ⋮ menu — the phone's home menu; only built entries are offered. */
+.list-header__menu {
+  position: relative;
+}
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  border: 0;
+  background: transparent;
+  cursor: default;
+}
+.list-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 56;
+  display: grid;
+  gap: 2px;
+  min-width: 180px;
+  padding: 8px;
+  border: 1px solid var(--kp-line);
+  border-radius: 14px;
+  background: var(--kp-card-raised, var(--kp-card));
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+.list-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--kp-ink);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.list-menu button:hover {
+  background: color-mix(in srgb, var(--kp-blue) 14%, transparent);
+}
+
+/* Group creation sheet over the list pane (phone's CreateGroupScreen). */
+.group-create {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 14px;
+  background: var(--kp-bg);
+}
+.group-create__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+}
+.group-create__bar h2 {
+  margin: 0;
+  color: var(--kp-ink);
+  font-size: 1.15rem;
+}
+.group-create__title,
+.group-create__search {
+  margin: 0 16px;
+}
+.group-create__chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+}
+.group-create__count {
+  color: var(--kp-muted);
+  font-size: 0.78rem;
+}
+.group-create__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px 4px 10px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--kp-blue) 22%, transparent);
+  color: var(--kp-ink);
+  font-size: 0.8rem;
+}
+.group-create__chip-x {
+  display: inline-flex;
+  padding: 2px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.group-create__list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 4px 12px;
+  overflow-y: auto;
+  list-style: none;
+}
+.group-create__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--kp-card);
+  color: var(--kp-ink);
+  text-align: left;
+  cursor: pointer;
+}
+.group-create__row.on {
+  background: color-mix(in srgb, var(--kp-blue) 18%, var(--kp-card));
+}
+.group-create__avatar {
+  width: 42px;
+  height: 42px;
+}
+.group-create__tick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--kp-line);
+  color: var(--kp-ink);
+}
+.group-create__row.on .group-create__tick {
+  background: var(--kp-blue);
+  color: #fff;
+}
+.group-create__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 40px 20px;
+  color: var(--kp-muted);
+}
+.group-create__empty strong {
+  color: var(--kp-ink);
+}
+.group-create__none {
+  padding: 20px;
+  color: var(--kp-muted);
+  text-align: center;
+}
+.group-create__error {
+  margin: 0 20px;
+  color: var(--kp-red);
+  font-size: 0.82rem;
+}
+.group-create__create {
+  margin: 4px 20px 0;
+}
+.group-create__row.on .conversation-row__preview {
+  color: var(--kp-ink);
+}
+
+/* Hide-chat key sheet + delete view inside the ⋮ menu. */
+.chat-menu__field {
+  margin: 4px 0;
+}
+.chat-menu__danger {
+  background: var(--kp-red);
+  color: #fff;
+}
+
+/* Slice X — All contacts / New contact (the phone's ContactsScreens). */
+.contacts-pane__back {
+  transform: rotate(180deg);
+}
+.contacts-pane__titles {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin-right: auto;
+}
+.contacts-pane__subtitle {
+  margin: 0;
+  color: var(--kp-muted);
+  font-size: 0.75rem;
+}
+.contacts-pane__filter {
+  margin: 4px 12px;
+}
+.contacts-pane__section {
+  margin: 8px 6px 2px;
+  color: var(--kp-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.contacts-pane__rows {
+  margin-top: 0;
+}
+.contact-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.contact-row .conversation-row__body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.contact-row__action {
+  margin-left: auto;
+}
+.contact-row__action {
+  flex: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 16px;
+  background: var(--kp-blue);
+  color: #fff;
+  font-size: 0.81rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+.contact-row__action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.contact-row__action--invite {
+  background: color-mix(in srgb, var(--kp-blue) 14%, transparent);
+  color: var(--kp-blue);
+}
+.new-contact__form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 20px 24px;
+}
+.new-contact__e164 {
+  margin: -4px 0 0 16px;
+  color: var(--kp-muted);
+  font-size: 0.75rem;
+}
+.new-contact__error {
+  margin: 0;
+  color: var(--kp-red);
+  font-size: 0.78rem;
+}
+.new-contact__check {
+  align-self: flex-start;
+}
+.new-contact__result {
+  margin-top: 8px;
+}
+.new-contact__avatar {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(145deg, var(--kp-blue), #1d4ed8);
+  color: #fff;
+  font-weight: 600;
 }

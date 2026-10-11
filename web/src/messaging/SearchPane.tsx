@@ -13,7 +13,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { ApiClient } from "../auth/authApi";
 import type { Navigate } from "../useBrowserRouter";
+import type { MessagingController } from "./useMessaging";
 import { useAvatar } from "./avatars";
+import { hiddenKeyHash } from "./e2ee";
 import { messagingApi, type SearchMessageRow } from "./messagingApi";
 import {
   clockTime,
@@ -116,7 +118,15 @@ function PersonRow({
   );
 }
 
-export function SearchPane({ api, navigate }: { api: ApiClient | null; navigate: Navigate }) {
+export function SearchPane({
+  api,
+  navigate,
+  controller,
+}: {
+  api: ApiClient | null;
+  navigate: Navigate;
+  controller: MessagingController;
+}) {
   const [query, setQuery] = useState("");
   const [users, setUsers] = useState<readonly ConversationPeer[]>([]);
   const [chats, setChats] = useState<readonly ConversationRow[]>([]);
@@ -124,10 +134,39 @@ export function SearchPane({ api, navigate }: { api: ApiClient | null; navigate:
   const [status, setStatus] = useState("");
   const [searching, setSearching] = useState(false);
   const [profilePeer, setProfilePeer] = useState<ConversationPeer | null>(null);
+  const [revealed, setRevealed] = useState<readonly ConversationRow[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const needle = query.trim();
+
+  // The phone compares the SHA-256 of whatever is typed — one character
+  // included — against every hidden chat's stored hash, before the
+  // two-character server search starts.
+  useEffect(() => {
+    let live = true;
+    if (!needle) {
+      setRevealed([]);
+      return;
+    }
+    void hiddenKeyHash(needle).then((hash) => {
+      if (!live) return;
+      setRevealed(controller.hiddenConversations.filter((row) => row.hiddenKey === hash));
+    });
+    return () => {
+      live = false;
+    };
+  }, [needle, controller.hiddenConversations]);
+
+  const revealedIds = new Set(revealed.map((row) => row.id));
+  const concealedPeerIds = new Set(
+    controller.hiddenConversations
+      .filter((row) => !revealedIds.has(row.id))
+      .map((row) => (row.isGroup ? "" : (row.other?.id ?? "")))
+      .filter(Boolean),
+  );
+  const concealedConvo = (id: string) =>
+    controller.hiddenConversations.some((row) => row.id === id) && !revealedIds.has(id);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -159,10 +198,12 @@ export function SearchPane({ api, navigate }: { api: ApiClient | null; navigate:
       void (async () => {
         try {
           const results = await messagingApi.search(api, needle, controller.signal);
-          setUsers(results.users);
-          setChats(results.chats);
+          setUsers(results.users.filter((user) => !concealedPeerIds.has(user.id)));
+          setChats(results.chats.filter((row) => !concealedConvo(row.id)));
           // View-once never surfaces through search, matching the phone.
-          setMessages(results.messages.filter((row) => !row.viewOnce));
+          setMessages(
+            results.messages.filter((row) => !row.viewOnce && !concealedConvo(row.convoId)),
+          );
           setStatus("");
         } catch (error) {
           if (controller.signal.aborted) return;
@@ -181,13 +222,32 @@ export function SearchPane({ api, navigate }: { api: ApiClient | null; navigate:
     };
   }, [api, needle]);
 
+  const unhide = (row: ConversationRow) => {
+    if (!api) return;
+    void (async () => {
+      try {
+        await messagingApi.hideConversation(api, row.id, false);
+        controller.announce("Chat unhidden");
+        setRevealed((current) => current.filter((item) => item.id !== row.id));
+        await controller.refreshList();
+      } catch {
+        controller.announce("That did not work. Check your connection and try again.");
+      }
+    })();
+  };
+
   const openMessage = (row: SearchMessageRow) => {
     setPendingMessageJump(row.id);
     navigate({ kind: "conversation", conversationId: row.convoId });
   };
 
   const empty =
-    needle.length >= 2 && !searching && !users.length && !chats.length && !messages.length;
+    needle.length >= 2 &&
+    !searching &&
+    !users.length &&
+    !chats.length &&
+    !messages.length &&
+    !revealed.length;
 
   return (
     <section className="list-pane search-pane" aria-labelledby="search-heading">
@@ -233,6 +293,42 @@ export function SearchPane({ api, navigate }: { api: ApiClient | null; navigate:
           </>
         ) : (
           <>
+            {revealed.length > 0 && (
+              <>
+                <h2 className="search-group">Hidden</h2>
+                <ul className="conversation-rows" aria-label="Hidden chats revealed by this key">
+                  {revealed.map((row) => (
+                    <li key={row.id} className="search-row">
+                      <RouteLink
+                        route={{ kind: "conversation", conversationId: row.id }}
+                        navigate={navigate}
+                        className="conversation-row search-row__profile"
+                      >
+                        <ConversationAvatar
+                          api={api}
+                          conversation={row}
+                          className="conversation-row__avatar"
+                        />
+                        <span className="conversation-row__body">
+                          <span className="conversation-row__name">{conversationTitle(row)}</span>
+                          <span className="conversation-row__preview">
+                            {conversationPreviewText(row)}
+                          </span>
+                        </span>
+                      </RouteLink>
+                      <button
+                        type="button"
+                        className="text-button search-row__open"
+                        aria-label={`Unhide ${conversationTitle(row)}`}
+                        onClick={() => unhide(row)}
+                      >
+                        Unhide
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
             {chats.length > 0 && (
               <>
                 <h2 className="search-group">Chats</h2>

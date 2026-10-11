@@ -16,6 +16,9 @@
  *   DELETE /api/messages/:id            (permanent delete)
  *   GET    /api/e2ee/backup  ·  PUT /api/e2ee/backup
  *   PATCH  /api/me
+ *   POST   /api/contacts/match   (which E.164 numbers are KuchuPuchu users)
+ *   DELETE /api/conversations/:id · POST /api/conversations/:id/hide
+ *   POST   /api/conversations       ({userId} — idempotent 1:1 open/create)
  */
 
 import type { ApiClient } from "../auth/authApi";
@@ -30,6 +33,7 @@ import {
   type MessageRow,
   type MessagesPage,
 } from "./protocol";
+import { parseMatchUsers, type ContactMatchUser } from "./contacts";
 import { parseSharedMedia, type SharedMedia } from "./sharedMedia";
 
 export type MessagesQuery = {
@@ -176,6 +180,25 @@ export const messagingApi = {
       ...(options?.signal ? { signal: options.signal } : {}),
     });
     return parseConversationDetail(payload);
+  },
+
+  /**
+   * Phone-book match, the phone's `POST /api/contacts/match`: the worker
+   * tells us which of the given E.164 numbers are KuchuPuchu accounts and
+   * forgets them immediately — nothing is stored server-side.
+   */
+  async matchContacts(
+    api: ApiClient,
+    phones: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<readonly ContactMatchUser[]> {
+    const payload = await api.request<unknown>("/api/contacts/match", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ phones: [...phones] }),
+      ...(signal ? { signal } : {}),
+    });
+    return parseMatchUsers(payload);
   },
 
   async getMessages(
@@ -358,9 +381,28 @@ export const messagingApi = {
     await api.request<unknown>(`/api/blocks/${encodeURIComponent(userId)}`, { method: "DELETE" });
   },
 
-  async hideConversation(api: ApiClient, conversationId: string, hidden: boolean): Promise<void> {
+  async hideConversation(
+    api: ApiClient,
+    conversationId: string,
+    hidden: boolean,
+    keyHash?: string,
+  ): Promise<void> {
     await postJson(api, `/api/conversations/${encodeURIComponent(conversationId)}/hide`, {
       hidden: hidden ? 1 : 0,
+      ...(hidden && keyHash ? { key: keyHash } : {}),
+    });
+  },
+
+  /** The phone's Delete Chat: forEveryone ticked removes both copies. */
+  async deleteConversation(
+    api: ApiClient,
+    conversationId: string,
+    forEveryone: boolean,
+  ): Promise<void> {
+    await api.request<unknown>(`/api/conversations/${encodeURIComponent(conversationId)}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ forEveryone }),
     });
   },
 
@@ -375,6 +417,32 @@ export const messagingApi = {
       `/api/conversations/${encodeURIComponent(conversationId)}/members/${encodeURIComponent(userId)}`,
       { method: "DELETE" },
     );
+  },
+
+  /** Directory search the phone's group-creation screen uses. */
+  async findPeople(
+    api: ApiClient,
+    query: string,
+    signal?: AbortSignal,
+  ): Promise<readonly ConversationPeer[]> {
+    const payload = await api.request<unknown>(`/api/users?q=${encodeURIComponent(query)}`, {
+      signal,
+    });
+    const raw = (payload ?? {}) as { users?: unknown };
+    return Array.isArray(raw.users)
+      ? raw.users.map(parsePeer).filter((peer): peer is ConversationPeer => peer !== null)
+      : [];
+  },
+
+  /** POST /api/conversations/group — the phone's CreateGroupScreen endpoint. */
+  async createGroup(api: ApiClient, title: string, memberIds: readonly string[]): Promise<string> {
+    const payload = (await postJson(api, "/api/conversations/group", {
+      title,
+      memberIds: [...memberIds],
+    })) as { conversation?: { id?: string } } | null;
+    const id = payload?.conversation?.id;
+    if (!id) throw new Error("Could not create the group. Try again.");
+    return id;
   },
 
   async leaveGroup(api: ApiClient, conversationId: string, userId: string): Promise<void> {

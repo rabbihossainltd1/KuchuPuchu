@@ -41,6 +41,8 @@ export type IconName =
   | "callOut"
   | "speaker"
   | "attach"
+  | "camera"
+  | "group"
   | "mood"
   | "tickSent"
   | "tickAll"
@@ -48,7 +50,9 @@ export type IconName =
   | "palette"
   | "block"
   | "logout"
-  | "bellOff";
+  | "bellOff"
+  | "personAdd"
+  | "contactsBook";
 
 /* The glyphs below are the APP's own, not web lookalikes. Nav + composer copy
    the phone's original artwork point for point:
@@ -182,6 +186,19 @@ const shapes: Record<IconName, ReactNode> = {
     <>
       <path d="M5.5 7.5h13M10 7.5V5h4v2.5" />
       <path d="M7 7.5 8 20h8l1-12.5M10.5 11v5.5M13.5 11v5.5" />
+    </>
+  ),
+  camera: (
+    <>
+      <path d="M4 7.5h3l1.5-2.2h7L17 7.5h3v11H4z" />
+      <circle cx="12" cy="12.6" r="3.1" />
+    </>
+  ),
+  group: (
+    <>
+      <circle cx="9" cy="8.5" r="3" />
+      <path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5" />
+      <path d="M15.5 6.2a2.6 2.6 0 1 1 0 4.9M17 14.4c2 .5 3.2 2 3.6 4.1" />
     </>
   ),
   photo: (
@@ -364,6 +381,22 @@ const shapes: Record<IconName, ReactNode> = {
       />
       <path d="M4 4l16 16" strokeWidth="2" />
     </>
+  ),
+  // Material `person_add` (filled) — the phone's New-contact glyph.
+  personAdd: (
+    <path
+      fill={F}
+      stroke="none"
+      d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"
+    />
+  ),
+  // Material `contacts` (filled) — the phone's All-contacts glyph.
+  contactsBook: (
+    <path
+      fill={F}
+      stroke="none"
+      d="M20 0H4v2h16V0zM4 24h16v-2H4v2zM20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 2.75c1.24 0 2.25 1.01 2.25 2.25s-1.01 2.25-2.25 2.25S9.75 10.24 9.75 9 10.76 6.75 12 6.75zM17 17H7v-1.5c0-1.67 3.33-2.5 5-2.5s5 .83 5 2.5V17z"
+    />
   ),
 };
 

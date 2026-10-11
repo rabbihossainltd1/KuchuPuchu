@@ -1099,3 +1099,40 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - TESTS: info.spec.ts 4 tests. Mock group ownership became an option (ownGroup) because hardening's non-owner theme-lock suite needs a group I do NOT own while the add/remove tests need one I do.
 - CI green; MERGED as PR #105; live sw BUILD_ID rotated to 892a36ba6ace9e39.
 - STILL ABSENT (honestly, not stubbed): E2EE safety-code/key verification in the profile, shared-media strip inside the drawer, phone number display.
+
+## Web slice U — direct attach picker, drag-and-drop, strip options — 2026-10-11 (branch feat/web-u-direct-attach)
+- USER ORDER: paperclip must open the desktop OS media/documents picker DIRECTLY (the emoji tile sheet was rejected), desktop drag-and-drop must work, and finish remaining web parity work across turns.
+- WHAT: AttachMenu.tsx DELETED. Paperclip clicks a hidden multi-file input (media+docs accept list); camera substitute = own icon button + capture=environment input. Files dropped on .conversation-pane run through prepareAttachments with a .drop-hint veil. "View once" / "Send as a document" (phone caption-screen copy verbatim) now live on the composer strip once media is queued; mutually exclusive; re-prepare from original File bytes kept in a fileFor ref; optimistic flagFlip mirror stops controlled-checkbox flicker (check() race).
+- CONTRACT: prepareAttachments now forces asDocument for classified documents (old Document tile forced it; unified picker keeps meta.document:true). ATTACH_TILE_IDS / ATTACH_TILE_UNAVAILABLE / ATTACH_LIMIT_NOTE moved to attachments.ts (case 57 imports from there); the sr-only .attach-limits note composes limits + phone-only reasons verbatim.
+- CHIPS: emoji spans replaced by Icon strokes (video/mic/file).
+- TESTS: attachments.spec re-flowed to hidden inputs (15 tests incl. direct-picker native-click probe and DataTransfer drop); messaging.spec tile-disclosure test rewritten to the sr-only note; voice.spec unlabeled-control test waits for first button (CI-load race). themeMatrix 390x844 LIST goldens regenerated — fresh headless chromium 153 after npm install shifted text antialiasing (~2% pixels); open-chat goldens untouched and passing.
+- CI: full npm run ci green. MERGED as PR #107; BUILD_ID rotation pending check (live was still 892a36ba6ace9e39 at merge time).
+- STILL ABSENT (next turns): hidden-chat secret-key reveal, group creation, contacts, message info sheet, scheduled + disappearing UI, full reaction picker, AI chat, archive/pin/hide.
+
+## Web slice V — New group creation — 2026-10-11 (branch feat/web-v-group-create)
+- WHAT: phone's CreateGroupScreen.kt as GroupCreatePane.tsx over the list pane; entry = chat-list ⋮ menu (home menu on phone) offering ONLY working entries (New group); contacts screens still absent, not stubbed.
+- FLOW: seed = 1:1 peers of loaded chats (bots excluded); typing filters + adds GET /api/users?q= matches (250ms debounce, abortable); chips with "N members" + Remove <name>; caps 50 members / 50-char title mirror Worker; Create posts {title, memberIds} then navigate(conversation) like phone's navigate(chat/$id); refusals via apiErrorMessage fixed copy (web never paints raw Worker text — discovered ApiError.message is internal-only).
+- TESTS: group-create.spec.ts 4 tests: payload parity ({title, memberIds:[PEER_ID]}), directory pick + "No one found", 400 NO_MEMBERS surfaces "The request could not be completed. Please try again." with sheet staying open, axe-clean.
+- a11y gotchas fixed: MemberRow aria-label Add/Deselect (chip Remove stays unique); selected-row muted @username failed 4.5:1 on the blue tint → .on preview uses --kp-ink.
+- CI: full npm run ci green. MERGED as PR #109; BUILD_ID rotation to confirm post-deploy.
+- STILL ABSENT: hidden-chat secret-key reveal, contacts (New contact/All contacts), message info sheet, scheduled + disappearing UI, full reaction picker, AI chat, archive/pin/hide.
+
+## Web slice W — hidden chats secret key — 2026-10-11 (branch feat/web-w-hidden)
+- ALSO FIRST (owner screenshot): chat list rows floated vertically centered — .list-content centered children for the empty state. Fixed: rows top-aligned full width; empty states margin:auto. PR #111; themeMatrix goldens regenerated.
+- HIDE: ⋮ → "Hide chat" sheet (phone HideKeySheet copy verbatim); hiddenKeyHash() in e2ee.ts = SHA-256 hex trimmed (== phone ScreenStore.hiddenKeyHash); POST /hide {hidden:1,key:hash}; announce "Chat hidden".
+- REVEAL: Search hashes ANY typed length before the 2-char server search; hiddenConversations (new controller field; parseConversationList now keeps hidden rows, visibleConversations() filters list/counts — case 56 re-pinned) matched by hiddenKey; "Hidden" section + Unhide ({hidden:0}, "Chat unhidden"); concealed() hides hidden people/chats/messages from other groups.
+- DELETE: 1:1 "Delete chat" now phone dialog — "Permanently delete the chat with X?" + "Also delete for X" checkbox → DELETE /api/conversations/:id {forEveryone}; was silently hiding before (contract mismatch fixed).
+- ChatMenu role menu→dialog (axe aria-required-children).
+- Mock helpers got worker.hideOverrides merged into the list GET (route.fetch() does NOT continue the route chain — learned the hard way; empty body from vite preview 404).
+- TESTS hidden.spec.ts 4; CI 84/84 cases + suites green. MERGED PR #112; docs PR pending; BUILD_ID to confirm.
+- STILL ABSENT: contacts (New contact/All contacts), message info sheet, scheduled + disappearing UI, full reaction picker, AI chat, archive/pin.
+
+## Web slice X — contacts — 2026-10-11 (branch feat/web-x-contacts)
+- ANDROID moved to native-android/app/src/main/java/app/kuchupuchu/android/ (was dev/kuchupuchu/app in older notes); ContactsScreens.kt = AllContactsScreen(128) + NewContactScreen(300); HomeMenuSheet (ChatListScreen 2577): My Profile / New contact / All contacts / New group / Settings.
+- WEB: sections += contacts,newcontact (router.ts; App.tsx isChatsArea gate extended); ContactsPane + NewContactPane rendered by MessagingWorkspace; menu rows added in phone order.
+- All contacts source = controller.conversations 1:1 rows (hidden concealed); Chat pill = createConversation (POST /api/conversations {userId} idempotent) then navigate /chats/:id (route path is /chats NOT /chat!).
+- New contact: contacts.ts toE164 port + inviteUrl (wa.me); Check → messagingApi.matchContacts → match card / "not on KuchuPuchu yet" + Invite link. No Save (device-only).
+- Helpers: worker.matchUsers + matchCalls on POST **/api/contacts/match.
+- LESSON: fresh sandboxes also wipe git identity (repo-local config again) and Playwright browsers.
+- TESTS contacts.spec.ts 7 (incl axe). CI green. MERGED PR #114; docs PR pending; BUILD_ID to confirm.
+- STILL ABSENT: message info sheet, scheduled + disappearing UI, full reaction picker, AI chat, archive/pin.

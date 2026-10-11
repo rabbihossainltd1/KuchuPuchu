@@ -217,6 +217,12 @@ export type MockWorker = {
   typingCalls: { conversationId: string; kind: string }[];
   deletedMessageIds: string[];
   reactions: { messageId: string; emoji: string }[];
+  /** Slice W: per-conversation hidden flag / key hash the list route merges. */
+  hideOverrides: Record<string, { hidden: number; hiddenKey: string | null }>;
+  /** Slice X: mutable match list for `POST /api/contacts/match`. */
+  matchUsers: Record<string, unknown>[];
+  /** Slice X: every `/api/contacts/match` body, for payload assertions. */
+  matchCalls: Record<string, unknown>[];
   createdConversations: string[];
   addedMembers: string[];
   removedMembers: string[];
@@ -314,6 +320,8 @@ export type MockWorkerOptions = {
   /** Slice T: I own the mock group (add/remove member rights); default off so
    *  the non-owner theme lock keeps its suite. */
   ownGroup?: boolean;
+  /** Slice X: users `POST /api/contacts/match` reports as KuchuPuchu accounts. */
+  matchUsers?: readonly Record<string, unknown>[];
 };
 
 export async function createMockWorker(options: MockWorkerOptions = {}): Promise<MockWorker> {
@@ -755,6 +763,9 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
     addedMembers: [],
     removedMembers: [],
     reactions: [],
+    hideOverrides: {},
+    matchUsers: [...(options.matchUsers ?? [])],
+    matchCalls: [],
     async install(page: Page) {
       const json = (route: Route, payload: unknown, status = 200) =>
         route.fulfill({
@@ -1137,7 +1148,13 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
       });
 
       await page.route("**/api/conversations", (route) => {
-        if (route.request().method() !== "POST") return json(route, { items: conversations });
+        if (route.request().method() !== "POST") {
+          const items = conversations.map((item) => {
+            const over = worker.hideOverrides[item.id];
+            return over ? { ...item, hidden: over.hidden, hiddenKey: over.hiddenKey } : item;
+          });
+          return json(route, { items });
+        }
         const body = route.request().postDataJSON() as Record<string, unknown>;
         const userId = String(body.userId ?? "");
         worker.createdConversations.push(userId);
@@ -1159,6 +1176,13 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         };
         if (!conversations.some((item) => item.id === "c_dir")) conversations.push(row);
         return json(route, { conversation: row });
+      });
+
+      // Slice X: phone-book match — the web's New contact screen checks here.
+      await page.route("**/api/contacts/match", (route) => {
+        if (route.request().method() !== "POST") return route.fallback();
+        worker.matchCalls.push(route.request().postDataJSON() as Record<string, unknown>);
+        return json(route, { users: worker.matchUsers });
       });
     },
   };
