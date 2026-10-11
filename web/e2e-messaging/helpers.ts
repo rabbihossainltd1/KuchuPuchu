@@ -218,6 +218,8 @@ export type MockWorker = {
   deletedMessageIds: string[];
   reactions: { messageId: string; emoji: string }[];
   createdConversations: string[];
+  addedMembers: string[];
+  removedMembers: string[];
   install(page: Page): Promise<void>;
 };
 
@@ -309,6 +311,9 @@ export type MockWorkerOptions = {
   withDocuments?: boolean;
   /** The peer turned off "Media Save permission" for the direct chat (r71-18). */
   peerSaveOff?: boolean;
+  /** Slice T: I own the mock group (add/remove member rights); default off so
+   *  the non-owner theme lock keeps its suite. */
+  ownGroup?: boolean;
 };
 
 export async function createMockWorker(options: MockWorkerOptions = {}): Promise<MockWorker> {
@@ -340,6 +345,8 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         e2eePublicKey: peer.u,
         online: true,
         lastActiveAt: new Date().toISOString(),
+        about: "tea & stickers",
+        verified: false,
       },
       // r76-18: the server answers with the EFFECTIVE value, so a switched-off
       // permission arrives as an explicit false rather than as a missing flag.
@@ -353,10 +360,17 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
       hidden: 0,
       lastMessageAt: new Date(Date.now() - 3_600_000).toISOString(),
       lastMessagePreview: { kind: "TEXT", category: "message", body: "group plaintext" },
+      ownerId: options.ownGroup ? ME.id : PEER_ID,
       members: [
-        { user: { id: ME.id, displayName: ME.displayName } },
-        { user: { id: PEER_ID, displayName: PEER_NAME } },
-        { user: { id: "u_third", displayName: "Third Member" } },
+        {
+          user: { id: ME.id, displayName: ME.displayName },
+          role: options.ownGroup ? "owner" : "member",
+        },
+        {
+          user: { id: PEER_ID, displayName: PEER_NAME, username: "rahi" },
+          role: options.ownGroup ? "member" : "owner",
+        },
+        { user: { id: "u_third", displayName: "Third Member", username: "third" }, role: "member" },
       ],
     },
     {
@@ -738,6 +752,8 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
     typingCalls: [],
     deletedMessageIds: [],
     createdConversations: [],
+    addedMembers: [],
+    removedMembers: [],
     reactions: [],
     async install(page: Page) {
       const json = (route: Route, payload: unknown, status = 200) =>
@@ -1035,6 +1051,8 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         avatarRef: "",
         online: true,
         lastActiveAt: new Date().toISOString(),
+        about: "",
+        verified: false,
         privateProfile: false,
       };
 
@@ -1103,6 +1121,19 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
               ]
             : [];
         return json(route, { items });
+      });
+
+      await page.route(/\/api\/conversations\/[^/]+\/members(\?|$)/, (route) => {
+        const url = new URL(route.request().url());
+        const body = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
+        worker.addedMembers.push(String(body.userId ?? ""));
+        return json(route, { ok: true });
+      });
+
+      await page.route(/\/api\/conversations\/[^/]+\/members\/[^/]+$/, (route) => {
+        const url = new URL(route.request().url());
+        worker.removedMembers.push(decodeURIComponent(url.pathname.split("/").pop() ?? ""));
+        return json(route, { ok: true });
       });
 
       await page.route("**/api/conversations", (route) => {

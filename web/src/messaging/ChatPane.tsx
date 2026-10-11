@@ -83,6 +83,7 @@ import {
   type PendingAttachment,
 } from "./attachments";
 import { ChatMenu } from "./ChatMenu";
+import { InfoPane } from "./InfoPane";
 import { ConversationAvatar } from "./Avatar";
 import {
   takePendingMessageJump,
@@ -225,6 +226,7 @@ export function ChatPane({
   const [pending, setPending] = useState<readonly PendingAttachment[]>([]);
   const [attachOpen, setAttachOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
   const [stickerOpen, setStickerOpen] = useState(false);
   const [editorTarget, setEditorTarget] = useState<PendingAttachment | null>(null);
   const [galleryOpen, setGalleryOpen] = useState(false);
@@ -716,21 +718,28 @@ export function ChatPane({
           >
             <Icon name="arrow" size={19} />
           </RouteLink>
-          <ConversationAvatar
-            api={api}
-            conversation={conversation}
-            className="conversation-avatar"
-          />
-          <div className="conversation-header__copy">
-            <h2 id="conversation-heading">{conversationTitle(conversation)}</h2>
-            <p>
-              {controller.typingActive
-                ? controller.typingKind === "voice"
-                  ? "recording a voice note…"
-                  : "typing…"
-                : headerSubtitle(conversation)}
-            </p>
-          </div>
+          <button
+            type="button"
+            className="conversation-header__identity-button"
+            aria-label={`Open ${conversationTitle(conversation)} profile`}
+            onClick={() => setInfoOpen((value) => !value)}
+          >
+            <ConversationAvatar
+              api={api}
+              conversation={conversation}
+              className="conversation-avatar"
+            />
+            <div className="conversation-header__copy">
+              <h2 id="conversation-heading">{conversationTitle(conversation)}</h2>
+              <p>
+                {controller.typingActive
+                  ? controller.typingKind === "voice"
+                    ? "recording a voice note…"
+                    : "typing…"
+                  : headerSubtitle(conversation)}
+              </p>
+            </div>
+          </button>
         </div>
         <div className="conversation-actions" aria-label="Conversation actions">
           {/* The phone's two header glyphs. Disabled-with-reason for a group,
@@ -804,6 +813,18 @@ export function ChatPane({
           navigate={navigate}
           meId={meId}
           onJumpToMessage={jumpToMessage}
+        />
+      ) : null}
+
+      {infoOpen ? (
+        <InfoPane
+          api={api}
+          conversation={conversation}
+          peer={null}
+          meId={meId}
+          controller={controller}
+          onClose={() => setInfoOpen(false)}
+          navigate={navigate}
         />
       ) : null}
 

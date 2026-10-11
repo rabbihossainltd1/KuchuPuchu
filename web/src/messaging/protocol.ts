@@ -37,6 +37,10 @@ export type ConversationPeer = {
    */
   readonly online: boolean;
   readonly lastActiveAt: string;
+  /** The profile's own words (privacy-walled server-side; "" when withheld). */
+  readonly about: string;
+  /** Official-account badge, the way the phone draws verified accounts. */
+  readonly verified: boolean;
   /**
    * Owner round 31 item 21: a private profile's chat, calls, pictures and
    * videos are screenshot-blocked and NOT saveable / forwardable on the other
@@ -112,6 +116,11 @@ export type ConversationRow = {
   readonly blockedMe: boolean;
   /** The phone's header subtitle for a group is "<N> members". */
   readonly memberCount: number;
+  /**
+   * Slice T: the group's member list with roles, straight from the detail
+   * payload (empty for solo chats and for list payloads that omit it).
+   */
+  readonly members: readonly ConversationMember[];
   /**
    * r71-18: MY switches for this chat (the phone's ⋮ → Chat privacy sheet).
    * `allowShot` / `allowRec` decide what the OTHER side may do with what I
@@ -412,9 +421,16 @@ export function parsePeer(value: unknown): ConversationPeer | null {
     avatarRef: text(value.avatarRef, 128),
     online: booleanish(value.online),
     lastActiveAt: isoTimestamp(value.lastActiveAt),
+    about: text(value.about, 240),
+    verified: booleanish(value.verified),
     privateProfile: booleanish(value.privateProfile),
   };
 }
+
+export type ConversationMember = {
+  readonly user: ConversationPeer;
+  readonly role: string;
+};
 
 function parsePreview(value: unknown): ConversationPreview | null {
   if (!isRecord(value)) return null;
@@ -468,6 +484,16 @@ export function parseConversationRow(value: unknown): ConversationRow | null {
     blockedByMe: booleanish(value.blockedByMe),
     blockedMe: booleanish(value.blockedMe),
     memberCount: Array.isArray(value.members) ? value.members.length : 0,
+    members: Array.isArray(value.members)
+      ? value.members
+          .map((entry: unknown) => {
+            if (!isRecord(entry)) return null;
+            const user = parsePeer(entry.user);
+            if (!user) return null;
+            return { user, role: text(entry.role, 32) };
+          })
+          .filter((entry: unknown): entry is ConversationMember => entry !== null)
+      : [],
     privacy: (() => {
       const p = isRecord(value.privacy) ? value.privacy : {};
       return {
@@ -634,7 +660,11 @@ export function headerSubtitle(conversation: ConversationRow): string {
   if (conversation.isGroup) return `${conversation.memberCount} members`;
   if (isBotConversation(conversation)) return "Official account";
   if (conversation.requestPending) return "";
-  const peer = conversation.other;
+  return peerPresence(conversation.other);
+}
+
+/** The person half of the header subtitle, reusable by the profile drawer. */
+export function peerPresence(peer: ConversationPeer | null): string {
   if (!peer) return "";
   if (peer.online) return "online";
   const parsed = Date.parse(peer.lastActiveAt);

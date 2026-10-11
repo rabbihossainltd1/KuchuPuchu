@@ -3235,3 +3235,148 @@ button.attachment__expand {
   outline-offset: 2px;
   transition: outline-color 0.4s ease;
 }
+
+/* ------------------------------------------------- slice T: profile drawer */
+
+.info-pane {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(360px, 92vw);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px 20px;
+  overflow-y: auto;
+  background: var(--kp-bg, #0b1220);
+  border-left: 1px solid var(--kp-line);
+  box-shadow: -12px 0 32px rgb(0 0 0 / 0.35);
+}
+
+.info-pane__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.info-pane__header h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.info-pane__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 8px;
+  text-align: center;
+}
+
+.info-pane__avatar {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+  background: var(--kp-card);
+  overflow: hidden;
+}
+
+.info-pane__avatar .avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.info-pane__name {
+  margin: 6px 0 0;
+  font-size: 17px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.info-pane__line {
+  margin: 0;
+  color: var(--kp-muted);
+  font-size: 13px;
+}
+
+.info-pane__about {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+.info-pane__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  padding: 4px 0 8px;
+  border-top: 1px solid var(--kp-line);
+}
+
+.info-pane__members {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.info-pane__member {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+}
+
+.info-pane__member .text-button {
+  margin-left: auto;
+}
+
+.info-pane__add-field {
+  margin: 4px 0 8px;
+}
+
+.search-row__profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+
+.conversation-header__identity-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: none;
+  border: 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 10px;
+}
+
+.conversation-header__identity-button:hover {
+  background: var(--kp-card);
+}
+
+.search-pane {
+  position: relative;
+}
