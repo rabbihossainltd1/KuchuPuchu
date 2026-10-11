@@ -433,6 +433,9 @@ test.describe("Web voice notes", () => {
     // Every control in a voice bubble has an accessible name.
     for (const id of [VOICE_PEER_ID, VOICE_OWN_ID]) {
       const buttons = note(page, id).locator("button");
+      // The bubble mounts a beat before its controls under CI load; wait for
+      // the first one instead of racing count().
+      await expect(buttons.first()).toBeVisible();
       const count = await buttons.count();
       expect(count).toBeGreaterThan(0);
       for (let index = 0; index < count; index += 1) {
