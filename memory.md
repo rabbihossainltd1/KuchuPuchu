@@ -1099,3 +1099,12 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - TESTS: info.spec.ts 4 tests. Mock group ownership became an option (ownGroup) because hardening's non-owner theme-lock suite needs a group I do NOT own while the add/remove tests need one I do.
 - CI green; MERGED as PR #105; live sw BUILD_ID rotated to 892a36ba6ace9e39.
 - STILL ABSENT (honestly, not stubbed): E2EE safety-code/key verification in the profile, shared-media strip inside the drawer, phone number display.
+
+## Web slice U — direct attach picker, drag-and-drop, strip options — 2026-10-11 (branch feat/web-u-direct-attach)
+- USER ORDER: paperclip must open the desktop OS media/documents picker DIRECTLY (the emoji tile sheet was rejected), desktop drag-and-drop must work, and finish remaining web parity work across turns.
+- WHAT: AttachMenu.tsx DELETED. Paperclip clicks a hidden multi-file input (media+docs accept list); camera substitute = own icon button + capture=environment input. Files dropped on .conversation-pane run through prepareAttachments with a .drop-hint veil. "View once" / "Send as a document" (phone caption-screen copy verbatim) now live on the composer strip once media is queued; mutually exclusive; re-prepare from original File bytes kept in a fileFor ref; optimistic flagFlip mirror stops controlled-checkbox flicker (check() race).
+- CONTRACT: prepareAttachments now forces asDocument for classified documents (old Document tile forced it; unified picker keeps meta.document:true). ATTACH_TILE_IDS / ATTACH_TILE_UNAVAILABLE / ATTACH_LIMIT_NOTE moved to attachments.ts (case 57 imports from there); the sr-only .attach-limits note composes limits + phone-only reasons verbatim.
+- CHIPS: emoji spans replaced by Icon strokes (video/mic/file).
+- TESTS: attachments.spec re-flowed to hidden inputs (15 tests incl. direct-picker native-click probe and DataTransfer drop); messaging.spec tile-disclosure test rewritten to the sr-only note; voice.spec unlabeled-control test waits for first button (CI-load race). themeMatrix 390x844 LIST goldens regenerated — fresh headless chromium 153 after npm install shifted text antialiasing (~2% pixels); open-chat goldens untouched and passing.
+- CI: full npm run ci green. MERGED as PR #107; BUILD_ID rotation pending check (live was still 892a36ba6ace9e39 at merge time).
+- STILL ABSENT (next turns): hidden-chat secret-key reveal, group creation, contacts, message info sheet, scheduled + disappearing UI, full reaction picker, AI chat, archive/pin/hide.
