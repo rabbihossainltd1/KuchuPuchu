@@ -1171,5 +1171,5 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - icons: pin (Material push_pin) + archive glyphs.
 - FLAKY FIX messaging.spec live-socket test: delivered frame must wait for POST ack (sent tick) or srv_1 unknown → lost frame; wait .bubble__tick--sent inside the composer bubble first.
 - themeMatrix: list+chat goldens shifted (new list entry) — regen targeted.
-- TESTS archive.spec.ts 5; CI green. MERGED PR #122; docs PR pending; BUILD_ID to confirm.
+- TESTS archive.spec.ts 5; CI green. MERGED PR #122 + docs PR #123; prod BUILD_ID 77eb9762ef33281b confirmed.
 - STILL ABSENT: nothing big — parity plan essentially complete; multi-select sheet not ported (out of scope).
