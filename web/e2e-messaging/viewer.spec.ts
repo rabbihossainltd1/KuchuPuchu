@@ -1,6 +1,14 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
-import { CHAT_ID, GROUP_ID, PEER_NAME, createMockWorker, signIn, type MockWorker } from "./helpers";
+import {
+  CHAT_ID,
+  GROUP_ID,
+  PEER_ID,
+  PEER_NAME,
+  createMockWorker,
+  signIn,
+  type MockWorker,
+} from "./helpers";
 
 /**
  * Viewers, shared media and view-once end-to-end (slice E1), against a mocked
@@ -246,6 +254,53 @@ test.describe("Web media viewers", () => {
     // The marker is an instruction, never a bubble of its own.
     await expect(page.locator(".transcript")).not.toContainText("VANISHED");
     await expect(page.getByRole("button", { name: "View once — open" })).toHaveCount(0);
+  });
+
+  test("an expired vanish row is removed locally even if its websocket frame is lost", async ({
+    page,
+  }) => {
+    let expiryCalls = 0;
+    const expiredRow = {
+      id: "vanish_expired",
+      senderId: PEER_ID,
+      senderName: PEER_NAME,
+      kind: "TEXT",
+      body: "local expiry fallback",
+      createdAt: new Date(Date.now() - 60_000).toISOString(),
+      rowid: 901,
+      meta: { vanish: true, vanishExpiresAt: new Date(Date.now() - 1_000).toISOString() },
+    };
+    await page.route(`**/api/conversations/${CHAT_ID}/messages*`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: [expiredRow],
+          readAt: new Date().toISOString(),
+          typingAt: "",
+          typingKind: "",
+          marker: "mk-vanish-expiry",
+          oldest: { createdAt: expiredRow.createdAt, rowid: expiredRow.rowid },
+          hasMore: false,
+          priv: {},
+        }),
+      }),
+    );
+    await page.route(`**/api/messages/${expiredRow.id}/expire`, (route) => {
+      expiryCalls += 1;
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, expired: true }),
+      });
+    });
+
+    await openChat(page);
+    await expect(page.getByText("local expiry fallback")).toBeVisible();
+    await expect.poll(() => expiryCalls, { timeout: 5_000 }).toBe(1);
+    await expect(page.getByText("local expiry fallback")).toHaveCount(0, { timeout: 5_000 });
+    // No VANISHED frame was sent; the successful expiry response still drops the row.
+    expect(chatSocket, "the test deliberately sends no vanish socket frame").not.toBeNull();
   });
 
   test("a view-once text reveals for five seconds and then reports", async ({ page }) => {

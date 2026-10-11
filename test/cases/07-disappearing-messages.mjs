@@ -162,6 +162,121 @@ async function mk() {
   );
 }
 
+// `/vanish` is per-message: a sender reading their own row does not start it;
+// the first other member does, and later group readers cannot extend it.
+{
+  const k = await mk();
+  const A = await k.reg("vanish-a@x.com", "vanisha");
+  const B = await k.reg("vanish-b@x.com", "vanishb");
+  const C = await k.reg("vanish-c@x.com", "vanishc");
+  const cid = await k.solo(A, B.user.id);
+  const sent = await k.call(
+    "POST",
+    `/api/conversations/${cid}/messages`,
+    { kind: "TEXT", body: "one-minute note", meta: { vanish: true } },
+    A.token,
+  );
+  const messageId = sent.json.message?.id;
+  const beforeRead = k.db._db.prepare("SELECT meta_json FROM messages WHERE id = ?").get(messageId);
+  const senderRead = await k.call("POST", `/api/conversations/${cid}/read`, {}, A.token);
+  const afterSenderRead = JSON.parse(
+    k.db._db.prepare("SELECT meta_json FROM messages WHERE id = ?").get(messageId).meta_json,
+  );
+  const firstRecipientRead = await k.call("POST", `/api/conversations/${cid}/read`, {}, B.token);
+  const startedRow = k.db._db.prepare("SELECT meta_json FROM messages WHERE id = ?").get(messageId);
+  const startedMeta = JSON.parse(startedRow.meta_json);
+  const startedMs = Date.parse(startedMeta.vanishStartedAt);
+  const expiryMs = Date.parse(startedMeta.vanishExpiresAt);
+  const earlyExpire = await k.call("POST", `/api/messages/${messageId}/expire`, {}, A.token);
+  await k.call("POST", `/api/conversations/${cid}/read`, {}, B.token);
+  const rereadMeta = JSON.parse(
+    k.db._db.prepare("SELECT meta_json FROM messages WHERE id = ?").get(messageId).meta_json,
+  );
+
+  check(
+    "a sender opening their own /vanish message does not start the clock; the first recipient read starts exactly one minute",
+    senderRead.status === 200 &&
+      senderRead.json.vanishStarted === 0 &&
+      !afterSenderRead.vanishExpiresAt &&
+      firstRecipientRead.status === 200 &&
+      firstRecipientRead.json.vanishStarted === 1 &&
+      Number.isFinite(startedMs) &&
+      Math.abs(expiryMs - startedMs - 60_000) < 2_000,
+    JSON.stringify({
+      senderRead: senderRead.json,
+      recipientRead: firstRecipientRead.json,
+      meta: startedMeta,
+      beforeRead: beforeRead?.meta_json,
+    }),
+  );
+  check(
+    "the expiration endpoint waits for the shared deadline and rereading does not extend it",
+    earlyExpire.status === 200 &&
+      earlyExpire.json.expired === false &&
+      rereadMeta.vanishExpiresAt === startedMeta.vanishExpiresAt,
+    JSON.stringify({ earlyExpire: earlyExpire.json, after: rereadMeta.vanishExpiresAt }),
+  );
+
+  const past = new Date(Date.now() - 1_000).toISOString();
+  startedMeta.vanishExpiresAt = past;
+  k.db._db
+    .prepare("UPDATE messages SET meta_json = ? WHERE id = ?")
+    .run(JSON.stringify(startedMeta), messageId);
+  const expired = await k.call("POST", `/api/messages/${messageId}/expire`, {}, B.token);
+  const senderRows = await k.msgs(A, cid);
+  const recipientRows = await k.msgs(B, cid);
+  check(
+    "at the deadline /expire deletes for both participants without leaving a tombstone",
+    expired.status === 200 &&
+      expired.json.expired === true &&
+      !senderRows.some((row) => row.id === messageId) &&
+      !recipientRows.some((row) => row.id === messageId) &&
+      k.db._db.prepare("SELECT COUNT(*) n FROM messages WHERE id = ?").get(messageId).n === 0,
+    JSON.stringify({
+      status: expired.status,
+      expired: expired.json.expired,
+      senderRows: senderRows.map((row) => row.id),
+      recipientRows: recipientRows.map((row) => row.id),
+    }),
+  );
+
+  const group = (
+    await k.call(
+      "POST",
+      "/api/conversations/group",
+      { title: "First reader", memberIds: [B.user.id, C.user.id] },
+      A.token,
+    )
+  ).json.conversation.id;
+  const groupSend = await k.call(
+    "POST",
+    `/api/conversations/${group}/messages`,
+    { kind: "TEXT", body: "group vanish", meta: { vanish: true } },
+    A.token,
+  );
+  const groupId = groupSend.json.message?.id;
+  const firstGroupRead = await k.call("POST", `/api/conversations/${group}/read`, {}, B.token);
+  const groupExpiry = JSON.parse(
+    k.db._db.prepare("SELECT meta_json FROM messages WHERE id = ?").get(groupId).meta_json,
+  ).vanishExpiresAt;
+  const secondGroupRead = await k.call("POST", `/api/conversations/${group}/read`, {}, C.token);
+  const groupExpiryAfter = JSON.parse(
+    k.db._db.prepare("SELECT meta_json FROM messages WHERE id = ?").get(groupId).meta_json,
+  ).vanishExpiresAt;
+  check(
+    "a group uses the first recipient's read as the shared start; another member cannot restart the one-minute timer",
+    firstGroupRead.json.vanishStarted === 1 &&
+      secondGroupRead.json.vanishStarted === 0 &&
+      groupExpiry === groupExpiryAfter,
+    JSON.stringify({
+      first: firstGroupRead.json,
+      second: secondGroupRead.json,
+      groupExpiry,
+      groupExpiryAfter,
+    }),
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`\n--- ${lines.length - broken} ok / ${broken} broken ---`);

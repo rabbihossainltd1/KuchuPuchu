@@ -36,8 +36,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes('replyId?.let { payload.put("replyTo", it) }') &&
       chat.includes('// r70-13 (owner: "send sending sent a ekhono problem ache jemon reply') &&
       // r71-20: the once flag rides its own `.also` between them.
+      chat.includes('val command = if (kind == "TEXT") ComposerCommands.parse(body) else null') &&
+      chat.includes("val messageBody = command?.text ?: body") &&
       chat.includes(
-        '.put("body", body)\n                // r71-20: the echo is a once-text from its first frame — veiled',
+        '.put("body", messageBody)\n                // Flags ride the optimistic row so the sender sees magic and',
       ) &&
       chat.includes(
         '.also { if (replyId != null) it.put("replyTo", replyId) }\n                .put("createdAt", java.time.Instant.now().toString()),',
@@ -405,6 +407,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
 {
   const chat = main("ChatScreen.kt");
   const list = main("ChatListScreen.kt");
+  const sendVoice = chat.slice(
+    chat.indexOf("fun sendVoice(file: File, seconds: Int"),
+    chat.indexOf("fun handleImagePicked("),
+  );
   check(
     "r71-19b: the locked seat's SECOND tap is the view-once send — combinedClickable's own double-tap window holds the plain tap, so one tap still sends a normal note and two send it once",
     chat.includes("onSendVoiceOnce: () -> Unit = {},") &&
@@ -420,7 +426,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
       "fun sendVoice(file: File, seconds: Int, name: String, waveform: List<Int> = emptyList(), once: Boolean = false) {",
     ) &&
       // meta builder + optimistic echo + queued payload
-      (chat.match(/\.also \{ if \(once\) it\.put\("viewOnce", true\) \}/g) || []).length === 3 &&
+      (sendVoice.match(/\.also \{ if \(once\) it\.put\("viewOnce", true\) \}/g) || []).length ===
+        3 &&
       chat.includes("// r71-19b: a locked note sent with a double tap on Send goes") &&
       chat.includes('.also { if (once) it.put("viewOnce", true) }'),
   );
@@ -474,7 +481,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     "r71-20 + r76-17: the once-text lives in the SCHEDULE sheet now (owner: double tap remove, schedule er vetor once icon) — the sheet's View-once toggle rides scheduleText's once flag into the stored payload; the seat's tap is instant (no double-tap seat), and `sendText` still takes the flag through the meta, the payload and the optimistic echo",
     chat.includes(
-      "fun scheduleText(body: String, at: java.time.Instant, once: Boolean = false) {",
+      "fun scheduleText(body: String, at: java.time.Instant, once: Boolean = false): Boolean {",
     ) &&
       chat.includes("withOnce = true,") &&
       chat.includes("scheduleText(input, at, once)") &&
@@ -484,13 +491,14 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes('sendText(input, "TEXT", once = true)') &&
       chat.includes("CenteredOnceIcon(30.dp)") &&
       !chat.includes("input.isNotBlank() -> onSendTextOnce") &&
-      chat.includes('fun sendText(body: String, kind: String = "TEXT", once: Boolean = false) {') &&
       chat.includes(
-        'if (once) payload.put("meta", JSONObject().put("viewOnce", true)).put("viewOnce", true)',
+        'fun sendText(body: String, kind: String = "TEXT", once: Boolean = false): Boolean {',
       ) &&
-      chat.includes(
-        '.also { if (once) it.put("viewOnce", true).put("meta", JSONObject().put("viewOnce", true)) }',
-      ),
+      chat.includes('if (once) put("viewOnce", true)') &&
+      chat.includes('if (meta.length() > 0) payload.put("meta", meta)') &&
+      chat.includes('if (once) payload.put("viewOnce", true)') &&
+      chat.includes('.also { if (once) it.put("viewOnce", true) }') &&
+      chat.includes('.also { if (meta.length() > 0) it.put("meta", JSONObject(meta.toString())) }'),
   );
   check(
     "r71-20: the once-text row is dispatched to its own bubble (never the blurred-photo tile), and that row keeps the reply swipe, the long press and the heart",
@@ -1357,7 +1365,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
     anim.includes("internal object NotoEmojiWarm {") &&
       anim.includes("fun preload(ctx: android.content.Context, body: String)") &&
       chat.includes("NotoEmojiWarm.preload(ctx, v)") &&
-      chat.includes('if (kind == "TEXT") NotoEmojiWarm.preload(ctx, body)') &&
+      chat.includes('if (kind == "TEXT") NotoEmojiWarm.preload(ctx, messageBody)') &&
       chat.includes(
         'if (liveMsg.optString("kind") == "TEXT") NotoEmojiWarm.preload(ctx, liveMsg.optText("body"))',
       ) &&

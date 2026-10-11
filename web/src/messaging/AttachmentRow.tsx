@@ -35,6 +35,7 @@ import { fetchFileBlob } from "./filesApi";
 import { mediaSourceKey, useMediaUrl, useMediaUrls } from "./mediaUrl";
 import type { MessageRow } from "./protocol";
 import { VoiceBubble } from "./VoiceBubble";
+import { parseMessageText } from "./messageText";
 import type { VoicePlayer } from "./useVoicePlayer";
 import { isViewOnce, openingCostsFetch, viewOnceSpent } from "./viewOnce";
 
@@ -216,6 +217,18 @@ export function AttachmentRow({
   const meta = (message.meta ?? {}) as Record<string, unknown>;
   const category = attachmentCategory(message.fileType, meta);
   const caption = locked ? "" : body;
+  const captionParts = caption ? parseMessageText(caption) : [];
+  const captionContent = caption ? (
+    <span className="attachment__caption">
+      {captionParts.map((part, index) =>
+        part.bold ? (
+          <strong key={`caption-bold-${index}`}>{part.text}</strong>
+        ) : (
+          <span key={`caption-${index}`}>{part.text}</span>
+        ),
+      )}
+    </span>
+  ) : null;
 
   if (message.kind === "STICKER") {
     // Android draws a sticker with no bubble at all; the glyph is the message.
@@ -261,7 +274,7 @@ export function AttachmentRow({
         ) : (
           <MediaFigure message={message} api={api} category="audio" onOpen={onOpen} />
         )}
-        {caption ? <span className="attachment__caption">{caption}</span> : null}
+        {captionContent}
       </span>
     );
   }
@@ -315,7 +328,7 @@ export function AttachmentRow({
           <Icon name="lock" size={12} /> View once
         </span>
       ) : null}
-      {caption ? <span className="attachment__caption">{caption}</span> : null}
+      {captionContent}
     </span>
   );
 }

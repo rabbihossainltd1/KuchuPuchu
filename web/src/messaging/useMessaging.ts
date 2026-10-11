@@ -22,6 +22,7 @@ import {
   type E2eeIdentity,
 } from "./e2ee";
 import { messagingApi } from "./messagingApi";
+import { parseMessageCommand } from "./messageCommands";
 import {
   applyDeliveredFrame,
   applyMessageFrame,
@@ -304,6 +305,66 @@ export function useMessaging(options: Options): MessagingController {
       vanishTimers.current.set(`hide:${id}`, timer);
     });
   }, []);
+
+  // Vanish deadlines arrive in message metadata when the first recipient reads.
+  // The client enforces the exact minute while a chat is open; the Worker cron
+  // remains the fallback for devices that are offline at that moment. Successful
+  // expiry also removes the local row directly, so it does not depend on the
+  // websocket VANISHED frame arriving.
+  useEffect(() => {
+    const timerPrefix = "expire:";
+    for (const [key, timer] of vanishTimers.current) {
+      if (key.startsWith(timerPrefix)) {
+        window.clearTimeout(timer);
+        vanishTimers.current.delete(key);
+      }
+    }
+    if (!enabled || !selectedId) return;
+
+    const rows = messages.filter(
+      (row) =>
+        row.meta.vanish === true &&
+        typeof row.meta.vanishExpiresAt === "string" &&
+        Number.isFinite(Date.parse(row.meta.vanishExpiresAt)),
+    );
+    for (const row of rows) {
+      const key = `${timerPrefix}${selectedId}:${row.id}`;
+      const deadline = String(row.meta.vanishExpiresAt);
+      const schedule = (at: string) => {
+        const wait = Math.max(0, Date.parse(at) - Date.now()) + 350;
+        const timer = window.setTimeout(() => {
+          void messagingApi
+            .expireVanish(api, row.id)
+            .then((result) => {
+              if (result.expired) {
+                hideMessages([row.id]);
+                void refreshList();
+                vanishTimers.current.delete(key);
+                return;
+              }
+              schedule(result.expiresAt || at);
+            })
+            .catch(() => {
+              // The server query already hides overdue vanish rows; animate the
+              // local removal too if this device is offline at the exact deadline.
+              hideMessages([row.id]);
+              vanishTimers.current.delete(key);
+              void refreshList();
+            });
+        }, wait);
+        vanishTimers.current.set(key, timer);
+      };
+      schedule(deadline);
+    }
+    return () => {
+      for (const [key, timer] of vanishTimers.current) {
+        if (key.startsWith(timerPrefix)) {
+          window.clearTimeout(timer);
+          vanishTimers.current.delete(key);
+        }
+      }
+    };
+  }, [api, enabled, hideMessages, messages, refreshList, selectedId]);
 
   /* ---------------------------------------------------------- shared media */
 
@@ -625,6 +686,7 @@ export function useMessaging(options: Options): MessagingController {
           body: item.wireBody,
           clientId: item.clientId,
           replyTo: item.replyToId || undefined,
+          ...(item.meta ? { meta: { ...item.meta } } : {}),
         });
         await stores.outbox.remove(item.clientId);
         setOutbox((current) => current.filter((row) => row.clientId !== item.clientId));
@@ -690,7 +752,9 @@ export function useMessaging(options: Options): MessagingController {
 
   const send = useCallback(async () => {
     const conversation = selectedRef.current;
-    const plaintext = draft.trim();
+    const composerText = draft.trim();
+    const command = parseMessageCommand(composerText);
+    const plaintext = command ? command.text : composerText;
     if (!conversation || !plaintext || !meId) return;
     if (isOneWayConversation(conversation)) {
       announce("This account only sends notifications; replies are not accepted.");
@@ -711,12 +775,14 @@ export function useMessaging(options: Options): MessagingController {
       return;
     }
 
+    const meta = command?.meta;
     const item = createOutboxItem({
       clientId,
       accountId: meId,
       conversationId: conversation.id,
-      plaintext,
+      plaintext: composerText,
       wireBody,
+      ...(meta ? { meta } : {}),
       replyToId: replyTo?.id ?? "",
       replyTo,
     });
@@ -724,7 +790,7 @@ export function useMessaging(options: Options): MessagingController {
     await stores.outbox.put(item);
     setOutbox((current) => [...current, item]);
     setMessages((current) =>
-      [...current, createLocalEcho({ clientId, senderId: meId, plaintext, replyTo })].sort(
+      [...current, createLocalEcho({ clientId, senderId: meId, plaintext, meta, replyTo })].sort(
         compareMessages,
       ),
     );

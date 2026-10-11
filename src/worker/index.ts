@@ -3462,6 +3462,14 @@ async function ensureSchema(db: D1Database) {
       joined_at TEXT NOT NULL, last_read_at TEXT, muted INTEGER NOT NULL DEFAULT 0, unread INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (conv_id, user_id)
     )`,
+    // Shared aliases are scoped to one conversation, never written into the
+    // user's global profile. SOLO aliases are visible only to that pair; group
+    // aliases are visible to everyone still in the group.
+    `CREATE TABLE IF NOT EXISTS conversation_nicknames (
+      conv_id TEXT NOT NULL, user_id TEXT NOT NULL, nickname TEXT NOT NULL,
+      setter_id TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (conv_id, user_id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_conversation_nicknames_user ON conversation_nicknames(user_id, conv_id)`,
     `CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY, conv_id TEXT NOT NULL, sender_id TEXT NOT NULL,
       kind TEXT NOT NULL DEFAULT 'TEXT', body TEXT, media TEXT, meta_json TEXT,
@@ -3652,6 +3660,14 @@ async function ensureSchema(db: D1Database) {
     // scans only rows that are STILL undelivered — a partial index keeps that
     // scan proportional to the backlog, never to the table.
     `CREATE INDEX IF NOT EXISTS idx_messages_undelivered ON messages(conv_id, created_at) WHERE delivered_at IS NULL`,
+    // Vanish commands are started once, by the first non-sender read. Keep the
+    // pending lookup proportional to pending vanish rows, not chat history.
+    `CREATE INDEX IF NOT EXISTS idx_messages_vanish_pending ON messages(conv_id, created_at)
+       WHERE kind = 'TEXT' AND json_extract(meta_json, '$.vanish') = 1
+         AND json_extract(meta_json, '$.vanishExpiresAt') IS NULL`,
+    `CREATE INDEX IF NOT EXISTS idx_messages_vanish_expired
+       ON messages(json_extract(meta_json, '$.vanishExpiresAt'), conv_id)
+       WHERE kind = 'TEXT' AND json_extract(meta_json, '$.vanish') = 1`,
     // Owner round 32 (item 18): hold Send → "send later". The message body waits
     // here (never in `messages`) until its minute; the cron posts it through the
     // ordinary send path. `status`: PENDING → SENDING (claimed) → gone.
@@ -4436,6 +4452,7 @@ async function membersOf(db: D1Database, convId: string) {
   // push, so a chat muted for calls only still rings the message tone.
   return all<{
     user_id: string;
+    username: string | null;
     muted: number;
     muted_msg: number | null;
     hidden: number | null;
@@ -4445,6 +4462,7 @@ async function membersOf(db: D1Database, convId: string) {
   }>(
     db,
     `SELECT user_id, muted, muted_msg, hidden,
+            (SELECT username FROM users WHERE id = members.user_id) AS username,
             (SELECT last_active_at FROM users WHERE id = members.user_id) AS last_active,
             (SELECT priv_messages FROM users WHERE id = members.user_id) AS priv_messages,
             (SELECT EXISTS(SELECT 1 FROM devices WHERE devices.user_id = members.user_id)) AS has_device
@@ -4470,12 +4488,13 @@ async function requireMember(db: D1Database, convId: string, userId: string) {
     request_from: string | null;
     private_group: number | null;
     priv_read_receipts: number | null;
+    last_read_at: string | null;
     role: string | null;
   }>(
     db,
     `SELECT c.id, c.kind, c.title, c.owner_id, c.hidden_json,
             c.disappear_seconds, c.disappear_since, c.request_from, c.private_group,
-            m.priv_read_receipts, m.role
+            m.priv_read_receipts, m.last_read_at, m.role
        FROM conversations c
        LEFT JOIN members m ON m.conv_id = c.id AND m.user_id = ?
       WHERE c.id = ?`,
@@ -4496,7 +4515,7 @@ async function requireMember(db: D1Database, convId: string, userId: string) {
     private_group: Number(row.private_group ?? 0) === 1,
     priv_read_receipts: row.priv_read_receipts ?? null,
   };
-  const member = { user_id: userId, role: row.role };
+  const member = { user_id: userId, role: row.role, last_read_at: row.last_read_at };
   return { conv, member };
 }
 
@@ -4701,6 +4720,7 @@ async function pokeUserConversation(
   conversationId: string,
   at: string,
   senderId?: string,
+  silent = false,
 ): Promise<number> {
   if (!env.CHAT_ROOM) return -1;
   try {
@@ -4709,10 +4729,16 @@ async function pokeUserConversation(
       method: "POST",
       headers: { "content-type": "application/json" },
       // msg:1 is what the app's process-level listener needs to play the
-      // in-app message sound. The MAIN send path never set it — only the
-      // bot/login paths did — exactly why the sound stayed silent for normal
-      // messages (owner round 13). senderId lets a client skip its own sends.
-      body: JSON.stringify({ type: "conv", conversationId, at, msg: 1, senderId }),
+      // in-app message sound. senderId lets a client skip its own sends;
+      // /silent still delivers the list poke but suppresses this alert.
+      body: JSON.stringify({
+        type: "conv",
+        conversationId,
+        at,
+        msg: silent ? 0 : 1,
+        senderId,
+        ...(silent ? { silent: true } : {}),
+      }),
     });
     const body = (await res.json().catch(() => null)) as { sent?: number } | null;
     if (typeof body?.sent !== "number") return -1;
@@ -6346,6 +6372,11 @@ export default {
           dispatched,
         }),
       );
+      // Vanish rows have a one-minute shared deadline. Sweep them after the
+      // fixed-shape reap log so this bounded cleanup cannot push its contract
+      // outside test 27's source window. The minute cron is the offline fallback;
+      // open clients also call /expire at the exact deadline.
+      ctx.waitUntil(sweepExpiredVanishMessages(env, env.DB).catch(() => 0));
       // Owner round 39 (item 2): HF warmup — the chat + vision providers
       // scale to zero when idle, so the first user turn of a quiet stretch
       // pays cold-start seconds ("reply aste onek somoy ney"). Every 10th
@@ -8144,7 +8175,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       convId,
       target,
     );
-    const askRow = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", mid);
+    const askRow = await one<MsgRow>(
+      db,
+      "SELECT *, rowid AS rowid FROM messages WHERE id = ?",
+      mid,
+    );
     ctx.waitUntil(afterMessageChanged(env, db, convId, askRow ? msgFrom(askRow) : null));
     // afterMessageChanged skips the sender's own rooms — but the
     // requester's composer must flip to the spent state too (its Request
@@ -8459,7 +8494,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       }
       for (const m of await all<ConvMemberRow>(
         db,
-        `SELECT ${MEMBER_COLS} FROM members WHERE conv_id IN (${inSql(group.length)})`,
+        `SELECT ${MEMBER_COLS},
+                (SELECT nickname FROM conversation_nicknames n
+                  WHERE n.conv_id = members.conv_id AND n.user_id = members.user_id) AS nickname
+           FROM members WHERE conv_id IN (${inSql(group.length)})`,
         ...group,
       )) {
         const bucket = membersByConv.get(m.conv_id!);
@@ -8580,9 +8618,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           // r32-28: a delivery / read stamp on the newest message changes the
           // row's tick, so it must move the marker too.
           c.lastMessageDeliveredAt,
-          (c.members as Array<{ lastReadAt?: string | null }> | undefined)?.map(
-            (m) => m.lastReadAt ?? null,
-          ),
+          (
+            c.members as
+              Array<{ lastReadAt?: string | null; user?: { nickname?: string } }> | undefined
+          )?.map((m) => [m.lastReadAt ?? null, m.user?.nickname ?? ""]),
           c.unread,
           // r32-38: Accept flips the row from a request to a chat.
           c.requestFrom,
@@ -8608,6 +8647,56 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const clientMarker = url.searchParams.get("marker");
     if (clientMarker && clientMarker === marker) return json({ marker, unchanged: true });
     return json({ items: list, marker });
+  }
+
+  const nicknameMatch = path.match(/^\/api\/conversations\/([^/]+)\/nicknames\/([^/]+)$/);
+  if (nicknameMatch && (method === "PUT" || method === "DELETE")) {
+    const convId = nicknameMatch[1]!;
+    const targetId = nicknameMatch[2]!;
+    await requireMember(db, convId, uid);
+    const target = await one<{ user_id: string }>(
+      db,
+      "SELECT user_id FROM members WHERE conv_id = ? AND user_id = ?",
+      convId,
+      targetId,
+    );
+    if (!target) fail(404, "Member not found in this conversation.", "NOT_MEMBER");
+    rateLimit(`nickname:${uid}`, 30, 60);
+    const nickname =
+      method === "DELETE"
+        ? ""
+        : String(body.nickname ?? "")
+            .trim()
+            .replace(/[\u0000-\u001f\u007f]/g, "")
+            .slice(0, 40);
+    if (nickname) {
+      await run(
+        db,
+        `INSERT INTO conversation_nicknames (conv_id, user_id, nickname, setter_id, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (conv_id, user_id) DO UPDATE SET
+           nickname = excluded.nickname, setter_id = excluded.setter_id, updated_at = excluded.updated_at`,
+        convId,
+        targetId,
+        nickname,
+        uid,
+        nowIso(),
+      );
+    } else {
+      await run(
+        db,
+        "DELETE FROM conversation_nicknames WHERE conv_id = ? AND user_id = ?",
+        convId,
+        targetId,
+      );
+    }
+    ctx.waitUntil(fanOutConversationChange(env, db, convId));
+    return json({
+      ok: true,
+      userId: targetId,
+      nickname: nickname || null,
+      conversation: await conversationDetail(db, convId, uid),
+    });
   }
 
   const convMatch = path.match(/^\/api\/conversations\/([^/]+)$/);
@@ -8717,7 +8806,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   const reactMatch = path.match(/^\/api\/messages\/([^/]+)\/react$/);
   if (reactMatch && method === "POST") {
     const msgId = reactMatch[1]!;
-    const row = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msgId);
+    const row = await one<MsgRow>(db, "SELECT *, rowid AS rowid FROM messages WHERE id = ?", msgId);
     if (!row) fail(404, "Message not found.");
     // Round 27: an unsent message is gone (owner rule) — the app hides the
     // bubble, but the API still took reactions on the row and the recipient's
@@ -8761,9 +8850,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (q.length < 2) return json({ items: [] });
     const rows = await all<MsgRow>(
       db,
-      `SELECT * FROM messages WHERE conv_id = ? AND kind IN ('TEXT','IMAGE','FILE') AND LOWER(IFNULL(body,'')) LIKE ?${ESCAPED_LIKE}
+      `SELECT * FROM messages WHERE conv_id = ? AND kind IN ('TEXT','IMAGE','FILE')
+         AND (json_extract(meta_json, '$.vanishExpiresAt') IS NULL OR json_extract(meta_json, '$.vanishExpiresAt') > ?)
+         AND LOWER(IFNULL(body,'')) LIKE ?${ESCAPED_LIKE}
        ORDER BY created_at DESC, rowid DESC LIMIT 40`,
       convId,
+      nowIso(),
       likeTerm(q),
     );
     return json({ items: rows.map((row) => msgFrom(row)) });
@@ -8789,10 +8881,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const mediaMark = watermarkFor(parseJson<HiddenMap>(mediaConv.hidden_json ?? "{}", {}), uid);
     const rows = await all<MsgRow>(
       db,
-      `SELECT * FROM messages WHERE conv_id = ?${
-        mediaMark ? (mediaMark.row >= 0 ? " AND rowid > ?" : " AND created_at >= ?") : ""
-      } ORDER BY created_at DESC LIMIT 400`,
+      `SELECT * FROM messages WHERE conv_id = ?
+        AND (json_extract(meta_json, '$.vanishExpiresAt') IS NULL OR json_extract(meta_json, '$.vanishExpiresAt') > ?)${
+          mediaMark ? (mediaMark.row >= 0 ? " AND rowid > ?" : " AND created_at >= ?") : ""
+        } ORDER BY created_at DESC LIMIT 400`,
       convId,
+      nowIso(),
       ...(mediaMark ? [mediaMark.row >= 0 ? mediaMark.row : mediaMark.at] : []),
     );
     const images: ReturnType<typeof msgFrom>[] = [];
@@ -8905,8 +8999,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   const readMatch = path.match(/^\/api\/conversations\/([^/]+)\/read$/);
   if (readMatch && method === "POST") {
-    const { conv: readConv } = await requireMember(db, readMatch[1]!, uid);
+    const { conv: readConv, member: readMember } = await requireMember(db, readMatch[1]!, uid);
     const at = nowIso();
+    const previousReadAt = readMember.last_read_at;
     await run(
       db,
       "UPDATE members SET last_read_at = ?, unread = 0 WHERE conv_id = ? AND user_id = ?",
@@ -8914,10 +9009,61 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       readMatch[1]!,
       uid,
     );
+    // The first recipient to read starts the ONE shared timer. Later readers
+    // cannot extend it because the conditional update only sees rows with no
+    // vanishExpiresAt. The partial index keeps this read cheap in old chats.
+    let vanishStarted = 0;
+    const pendingWhere = previousReadAt ? " AND created_at >= ?" : "";
+    while (true) {
+      const pendingVanish = await all<MsgRow>(
+        db,
+        `SELECT * FROM messages
+          WHERE conv_id = ? AND kind = 'TEXT' AND sender_id != ?
+            AND json_extract(meta_json, '$.vanish') = 1
+            AND json_extract(meta_json, '$.vanishExpiresAt') IS NULL${pendingWhere}
+          ORDER BY created_at, rowid LIMIT 100`,
+        readMatch[1]!,
+        uid,
+        ...(previousReadAt ? [previousReadAt] : []),
+      );
+      if (!pendingVanish.length) break;
+      for (const group of chunked(pendingVanish.map((row) => row.id))) {
+        const expiresAt = new Date(Date.parse(at) + 60_000).toISOString();
+        await run(
+          db,
+          `UPDATE messages
+              SET meta_json = json_set(meta_json, '$.vanishStartedAt', ?, '$.vanishExpiresAt', ?)
+            WHERE id IN (${inSql(group.length)})
+              AND json_extract(meta_json, '$.vanish') = 1
+              AND json_extract(meta_json, '$.vanishExpiresAt') IS NULL`,
+          at,
+          expiresAt,
+          ...group,
+        );
+        const updated = await all<MsgRow>(
+          db,
+          `SELECT * FROM messages WHERE id IN (${inSql(group.length)})
+            AND json_extract(meta_json, '$.vanishExpiresAt') = ?`,
+          ...group,
+          expiresAt,
+        );
+        vanishStarted += updated.length;
+        for (const message of updated) {
+          ctx.waitUntil(
+            broadcastRoomEvent(env, readMatch[1]!, {
+              type: "message",
+              conversationId: readMatch[1]!,
+              message: msgFrom(message),
+            }),
+          );
+        }
+      }
+      if (pendingVanish.length < 100) break;
+    }
     // Receipts are conversation-local. In groups, each member controls only
     // their own receipt; direct chats keep the mutual-privacy rule (either side
     // Off hides receipts both ways).
-    if (!readReceiptsOnForChat(readConv)) return json({ ok: true });
+    if (!readReceiptsOnForChat(readConv)) return json({ ok: true, vanishStarted });
     if (readConv.kind === "SOLO") {
       const peer = await one<{ priv_read_receipts: number | null }>(
         db,
@@ -8926,7 +9072,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         uid,
       );
       if (!readReceiptsOnForChat({ priv_read_receipts: peer?.priv_read_receipts }))
-        return json({ ok: true });
+        return json({ ok: true, vanishStarted });
     }
     // Realtime: the sender's ticks flip blue the moment this lands, not on
     // their next poll. (WS only — the poll fallback still reads it from the
@@ -8939,7 +9085,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         at,
       }),
     );
-    return json({ ok: true });
+    return json({ ok: true, vanishStarted });
   }
 
   // Owner round 31 (item 26): "Hide chat" — a per-member flag like mute. A
@@ -9780,6 +9926,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         : "AND created_at >= ?"
       : "";
     const liveArgs = expiry ? (disappearSince ? [expiry, disappearSince] : [expiry]) : [];
+    const vanishClause =
+      "AND (json_extract(meta_json, '$.vanishExpiresAt') IS NULL OR json_extract(meta_json, '$.vanishExpiresAt') > ?)";
+    const vanishArgs = [nowIso()];
     // §39 cursor: `created_at` alone is ambiguous (ms resolution), so the client
     // pages back with (createdAt, rowid) and `PAGE + 1` rows are read to learn
     // whether anything older exists. A COUNT(*) probe would cost the same read on
@@ -9802,23 +9951,25 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const rows = before
       ? await all<MsgRow & { kp_rowid?: number }>(
           db,
-          `SELECT *, rowid AS kp_rowid FROM messages WHERE conv_id = ? ${sinceClause} ${liveClause}
+          `SELECT *, rowid AS kp_rowid FROM messages WHERE conv_id = ? ${sinceClause} ${liveClause} ${vanishClause}
              AND (created_at < ? OR (created_at = ? AND rowid < ?))
            ORDER BY created_at DESC, rowid DESC LIMIT ${PAGE + 1}`,
           convId,
           ...sinceArgs,
           ...liveArgs,
+          ...vanishArgs,
           before,
           before,
           Number(url.searchParams.get("beforeRowid") || 0) || Number.MAX_SAFE_INTEGER,
         )
       : await all<MsgRow & { kp_rowid?: number }>(
           db,
-          `SELECT *, rowid AS kp_rowid FROM messages WHERE conv_id = ? ${sinceClause} ${liveClause}
+          `SELECT *, rowid AS kp_rowid FROM messages WHERE conv_id = ? ${sinceClause} ${liveClause} ${vanishClause}
            ORDER BY created_at DESC, rowid DESC LIMIT ${PAGE + 1}`,
           convId,
           ...sinceArgs,
           ...liveArgs,
+          ...vanishArgs,
         );
     const hasMore = rows.length > PAGE;
     if (hasMore) rows.pop();
@@ -9831,12 +9982,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // trips — every one of them edge→primary latency on the caller.
     const names = new Map<string, string>();
     for (const group of chunked([...new Set(rows.map((r) => r.sender_id).filter(Boolean))])) {
-      const sent = await all<{ id: string; display_name: string }>(
+      const sent = await all<{ id: string; display_name: string; nickname: string | null }>(
         db,
-        `SELECT id, display_name FROM users WHERE id IN (${inSql(group.length)})`,
+        `SELECT users.id, users.display_name,
+                (SELECT nickname FROM conversation_nicknames n
+                  WHERE n.conv_id = ? AND n.user_id = users.id) AS nickname
+           FROM users WHERE users.id IN (${inSql(group.length)})`,
+        convId,
         ...group,
       );
-      for (const u of sent) names.set(u.id, u.display_name);
+      for (const u of sent) names.set(u.id, u.nickname || u.display_name);
     }
     const items = rows
       .reverse()
@@ -9982,7 +10137,14 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // participates in the check - including repeat edits of the same row.
     const marker = hashSig(
       JSON.stringify([
-        items.map((m) => [m.id, m.body, m.edited, m.deliveredAt, m.viewedAt]),
+        items.map((m) => [
+          m.id,
+          m.body,
+          m.edited,
+          m.deliveredAt,
+          m.viewedAt,
+          m.meta?.vanishExpiresAt ?? null,
+        ]),
         readAt,
         typingAt,
         typingKind,
@@ -10216,6 +10378,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (foreignOnce) fail(403, "This was sent as view once.", "VIEW_ONCE");
     const mid = id();
     const incomingMeta = (body.meta as Record<string, unknown> | undefined) ?? {};
+    const silent = kind === "TEXT" && incomingMeta.silent === true;
     const dims = imageDims(kind, imageData ?? fileKey, incomingMeta);
     // v163: the poster the sender measured off the clip (see the media rules).
     // Opaque key, shape-checked, never trusted as a URL.
@@ -10256,8 +10419,23 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       ...(fetchedSrc ? { src: fetchedSrc } : {}),
       ...(album && !viewOnce ? { album } : {}),
       ...(viewOnce ? { viewOnce: true } : {}),
+      ...(kind === "TEXT" && incomingMeta.silent === true ? { silent: true } : {}),
+      ...(kind === "TEXT" && incomingMeta.magic === true ? { magic: true } : {}),
+      ...(kind === "TEXT" && incomingMeta.vanish === true ? { vanish: true } : {}),
       ...(await statusQuote(db, kind, incomingMeta)),
     };
+    const mentionedUserIds =
+      conv.kind === "GROUP" && kind === "TEXT" && !text.startsWith(E2EE_PREFIX)
+        ? members
+            .filter(
+              (member) =>
+                member.user_id !== uid &&
+                !!member.username &&
+                mentionsUsername(text, member.username),
+            )
+            .map((member) => member.user_id)
+        : [];
+    if (mentionedUserIds.length) metaObj.mentions = mentionedUserIds;
     if (clientId) metaObj.clientId = clientId;
     const meta = Object.keys(metaObj).length ? JSON.stringify(metaObj) : null;
     // Owner round 32 (item 35): the preview is derived from the stored shape
@@ -10422,17 +10600,30 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       if (memberId.user_id === uid) continue;
       ctx.waitUntil(
         (async () => {
-          const live = await pokeUserConversation(env, memberId.user_id, convId, created, uid);
+          const live = await pokeUserConversation(
+            env,
+            memberId.user_id,
+            convId,
+            created,
+            uid,
+            silent,
+          );
           // Owner round 31 (item 26): a chat this member HID is silent — no
           // push at all (not even the tray-card fallback for a dead process).
           // The list poke above still lands so the hidden screen stays current.
           if (Number(memberId.hidden ?? 0) === 1) return;
-          await pushMessageToMember(memberId, live);
+          const mentioned = mentionedUserIds.includes(memberId.user_id);
+          await pushMessageToMember(memberId, live, mentioned, silent);
         })(),
       );
     }
     // Hoisted below so the poke + the push stay one fire-and-forget unit.
-    async function pushMessageToMember(memberId: (typeof members)[number], live: number) {
+    async function pushMessageToMember(
+      memberId: (typeof members)[number],
+      live: number,
+      mentioned = false,
+      silent = false,
+    ) {
       // E2EE and photo messages must be data-only: if a system notification
       // payload is present while the app is backgrounded, Play services draws
       // it without calling onMessageReceived, so the phone cannot decrypt the
@@ -10500,6 +10691,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         await stampDelivered();
         stamped = true;
       }
+      // /silent has already updated the message, unread count, list poke and
+      // live room above. A live device counts as delivered, but no shade card,
+      // Web Push, heads-up or app sound is produced.
+      if (silent) return;
       const needsDeviceRendering = (!!sealedBody && !message.viewOnce) || !!pictureUrl;
       const fallbackNote = needsDeviceRendering
         ? undefined
@@ -10536,7 +10731,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           // r69: the MESSAGE half silences a message card — a chat muted for
           // calls only keeps its message tone (owner: "jeta korbe otay mute
           // hobe"). `members.muted` stays the OR of both for icons/lists.
-          muted: memberId.muted_msg === 1 ? "1" : "0",
+          muted: memberId.muted_msg === 1 && !mentioned ? "1" : "0",
+          ...(mentioned ? { mention: "1" } : {}),
           ...(pictureUrl ? { kp_media: pictureUrl } : {}),
           // r67-2 (owner: "massage phone a asha matroi decrypt hoye jabe"): a
           // sealed 1:1 body is opaque to the server, so the phone must open it
@@ -10558,19 +10754,19 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         },
         fallbackNote,
       );
-      // Slice H web doorbell: browsers with NO live socket are the only ones
-      // that need a push — an open tab already got the WS poke. The payload is
-      // generic (see webPushToUser): never a preview, never a name, so a muted
-      // chat can still ring silently without leaking why. Hidden chats were
-      // already short-circuited above (no push of any kind).
-      if (live <= 0) {
+      // Slice H web doorbell: browsers with NO live socket normally need the
+      // push, since an open tab already got the WS frame. A group mention is
+      // the exception: even a muted chat must alert its target, and a connected
+      // background tab may not be visible to its reader. The payload stays
+      // generic (never a preview or name); silent/hidden chats remain withheld.
+      if (live <= 0 || mentioned) {
         await webPushToUser(
           env,
           db,
           memberId.user_id,
           "kp.msg",
           WEB_PUSH_TTL_MESSAGE_S,
-          memberId.muted_msg === 1,
+          memberId.muted_msg === 1 && !mentioned,
         );
       }
       // N4 -> r84-4 (owner r84 #4: "massage delivered double tick er system a
@@ -10657,7 +10853,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   const msgDeleteMatch = path.match(/^\/api\/messages\/([^/]+)$/);
   if (msgDeleteMatch && method === "PATCH") {
     // Edit: sender only, text only, within one minute of sending.
-    const msg = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msgDeleteMatch[1]!);
+    const msg = await one<MsgRow>(
+      db,
+      "SELECT *, rowid AS rowid FROM messages WHERE id = ?",
+      msgDeleteMatch[1]!,
+    );
     if (!msg) fail(404, "Message not found.");
     if (msg.sender_id !== uid) fail(403, "You can only edit your own messages.");
     if (msg.kind !== "TEXT") fail(400, "Only text messages can be edited.");
@@ -10677,7 +10877,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       JSON.stringify(meta),
       msg.id,
     );
-    const fresh = (await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msg.id))!;
+    const fresh = (await one<MsgRow>(
+      db,
+      "SELECT *, rowid AS rowid FROM messages WHERE id = ?",
+      msg.id,
+    ))!;
     // An edit used to rewrite only the message row: the chat list kept showing
     // the pre-edit text forever (its preview is a denormalised column), and the
     // other side's open chat only caught up on its next poll.
@@ -10686,7 +10890,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     return json({ message: msgFrom(fresh) });
   }
   if (msgDeleteMatch && method === "DELETE") {
-    const row = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msgDeleteMatch[1]!);
+    const row = await one<MsgRow>(
+      db,
+      "SELECT *, rowid AS rowid FROM messages WHERE id = ?",
+      msgDeleteMatch[1]!,
+    );
     if (!row) fail(404, "Message not found.");
     if (row.sender_id !== uid) {
       // r68-8 (owner: "1:1 chat a user tar massage delete korte geleo ei popup
@@ -11246,7 +11454,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   const msgMediaMatch = path.match(/^\/api\/messages\/([^/]+)\/media$/);
   if (msgMediaMatch && method === "GET") {
-    const row = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msgMediaMatch[1]!);
+    const row = await one<MsgRow>(
+      db,
+      "SELECT *, rowid AS rowid FROM messages WHERE id = ?",
+      msgMediaMatch[1]!,
+    );
     if (!row || !row.media) fail(404, "Media not found.");
     await requireMember(db, row.conv_id, uid);
     // H3 (audit 2026-09-21): a view-once opening is spent by the fetch
@@ -11320,9 +11532,31 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   // spend it; the delete is conditional, so two devices racing the same
   // opening cannot both win (the loser sees 410; taps after the vanish see
   // 404 — the row is gone).
+  const msgExpireMatch = path.match(/^\/api\/messages\/([^/]+)\/expire$/);
+  if (msgExpireMatch && method === "POST") {
+    const row = await one<MsgRow>(
+      db,
+      "SELECT *, rowid AS rowid FROM messages WHERE id = ?",
+      msgExpireMatch[1]!,
+    );
+    if (!row || row.kind === "DELETED") fail(404, "Message not found.");
+    await requireMember(db, row.conv_id, uid);
+    const meta = parseJson<Record<string, unknown>>(row.meta_json, {});
+    if (meta.vanish !== true) fail(400, "Not a vanish message.", "NOT_VANISH");
+    const expiresAt = typeof meta.vanishExpiresAt === "string" ? meta.vanishExpiresAt : "";
+    if (!expiresAt) fail(409, "The vanish timer has not started.", "NOT_STARTED");
+    if (Date.parse(expiresAt) > Date.now()) return json({ ok: true, expired: false, expiresAt });
+    const expired = await expireVanishMessage(env, db, row);
+    return json({ ok: true, expired });
+  }
+
   const msgViewMatch = path.match(/^\/api\/messages\/([^/]+)\/view$/);
   if (msgViewMatch && method === "POST") {
-    const row = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msgViewMatch[1]!);
+    const row = await one<MsgRow>(
+      db,
+      "SELECT *, rowid AS rowid FROM messages WHERE id = ?",
+      msgViewMatch[1]!,
+    );
     if (!row || row.kind === "DELETED") fail(404, "Message not found.");
     await requireMember(db, row.conv_id, uid);
     const meta = parseJson<Record<string, unknown>>(row.meta_json, {});
@@ -11371,7 +11605,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // second sustained), which bounds what one account can broadcast without
     // ever swallowing a human thumb.
     rateLimit(`fx:${uid}`, 80, 180);
-    const row = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msgFxMatch[1]!);
+    const row = await one<MsgRow>(
+      db,
+      "SELECT *, rowid AS rowid FROM messages WHERE id = ?",
+      msgFxMatch[1]!,
+    );
     if (!row || row.kind === "DELETED") fail(404, "Message not found.");
     await requireMember(db, row.conv_id, uid);
     if (row.kind !== "TEXT" && row.kind !== "STICKER")
@@ -12317,7 +12555,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         convs.set(c.id, c);
       for (const m of await all<ConvMemberRow>(
         db,
-        `SELECT ${MEMBER_COLS} FROM members WHERE conv_id IN (${inSql(group.length)})`,
+        `SELECT ${MEMBER_COLS},
+                (SELECT nickname FROM conversation_nicknames n
+                  WHERE n.conv_id = members.conv_id AND n.user_id = members.user_id) AS nickname
+           FROM members WHERE conv_id IN (${inSql(group.length)})`,
         ...group,
       )) {
         const bucket = membersByConv.get(m.conv_id!);
@@ -12371,6 +12612,7 @@ type MsgRow = {
   created_at: string;
   delivered_at?: string | null;
   reply_to?: string | null;
+  rowid?: number;
 };
 
 type ScheduledRow = {
@@ -12663,6 +12905,12 @@ function msgFrom(row: MsgRow) {
     otp?: string;
     otpLocked?: number;
     viewOnce?: boolean;
+    silent?: boolean;
+    magic?: boolean;
+    vanish?: boolean;
+    vanishStartedAt?: string;
+    vanishExpiresAt?: string;
+    mentions?: string[];
     viewedAt?: string;
     viewedBy?: string;
   }>(row.meta_json, {});
@@ -13024,6 +13272,7 @@ async function convHiddenFor(
 type ConvMemberRow = {
   conv_id?: string;
   user_id: string;
+  nickname?: string | null;
   role: string;
   muted: number;
   // r69: which half of the mute the member chose (see the mute route).
@@ -13140,6 +13389,8 @@ function conversationPreview(conv: ConvRow, uid: string) {
   )
     return null;
   const meta = parseJson<Record<string, unknown>>(row.meta_json, {});
+  if (typeof meta.vanishExpiresAt === "string" && Date.parse(meta.vanishExpiresAt) <= Date.now())
+    return null;
   if (viewOnceSpent(meta)) return null;
   const once = meta.viewOnce === true;
   return {
@@ -13153,7 +13404,7 @@ function conversationPreview(conv: ConvRow, uid: string) {
       ? null
       : row.body?.startsWith(E2EE_PREFIX)
         ? row.body
-        : (row.body || "").slice(0, 120),
+        : stripBoldMarkers(row.body || "").slice(0, 120),
     viewOnce: once,
   };
 }
@@ -13222,27 +13473,102 @@ async function syncPreviewAfterDelete(db: D1Database, row: MsgRow) {
     row.sender_id,
     row.created_at,
   );
-  const conv = await one<{ last_message_at: string | null }>(
+  const now = nowIso();
+  const newest = await one<{ created_at: string; rowid: number }>(
     db,
-    "SELECT last_message_at FROM conversations WHERE id = ?",
+    `SELECT created_at, rowid FROM messages
+      WHERE conv_id = ? AND kind != 'DELETED'
+        AND (json_extract(meta_json, '$.vanishExpiresAt') IS NULL
+             OR json_extract(meta_json, '$.vanishExpiresAt') > ?)
+      ORDER BY created_at DESC, rowid DESC LIMIT 1`,
     row.conv_id,
+    now,
   );
-  if (!conv || conv.last_message_at !== row.created_at) return;
-  const prev = await one<MsgRow>(
+  const deletedRowid = Number(row.rowid ?? 0);
+  // Deleting an older row must not roll the chat preview backwards. Timestamps
+  // are millisecond-resolution, so rowid is the required same-time tie-breaker.
+  if (
+    newest &&
+    (newest.created_at > row.created_at ||
+      (newest.created_at === row.created_at && (deletedRowid === 0 || newest.rowid > deletedRowid)))
+  )
+    return;
+
+  const prev = await one<MsgRow & { rowid: number }>(
     db,
-    `SELECT * FROM messages
-      WHERE conv_id = ? AND kind != 'DELETED' AND created_at < ?
-      ORDER BY created_at DESC LIMIT 1`,
+    `SELECT *, rowid AS rowid FROM messages
+      WHERE conv_id = ? AND kind != 'DELETED'
+        AND (created_at < ? OR (created_at = ? AND rowid < ?))
+        AND (json_extract(meta_json, '$.vanishExpiresAt') IS NULL
+             OR json_extract(meta_json, '$.vanishExpiresAt') > ?)
+      ORDER BY created_at DESC, rowid DESC LIMIT 1`,
     row.conv_id,
     row.created_at,
+    row.created_at,
+    deletedRowid || Number.MAX_SAFE_INTEGER,
+    now,
   );
+  // Guard the write against a new send racing the recomputation. If a newer
+  // visible row appeared after the SELECT, leave its own preview untouched.
   await run(
     db,
-    "UPDATE conversations SET last_message = ?, last_message_at = ? WHERE id = ?",
+    `UPDATE conversations
+        SET last_message = ?, last_message_at = ?
+      WHERE id = ? AND NOT EXISTS (
+        SELECT 1 FROM messages
+         WHERE conv_id = ? AND kind != 'DELETED'
+           AND (json_extract(meta_json, '$.vanishExpiresAt') IS NULL
+                OR json_extract(meta_json, '$.vanishExpiresAt') > ?)
+           AND (created_at > ? OR (created_at = ? AND rowid > ?))
+      )`,
     prev ? previewOf(prev) : null,
     prev ? prev.created_at : null,
     row.conv_id,
+    row.conv_id,
+    now,
+    prev?.created_at ?? "",
+    prev?.created_at ?? "",
+    Number(prev?.rowid ?? 0),
   );
+}
+
+async function expireVanishMessage(env: Env, db: D1Database, row: MsgRow): Promise<boolean> {
+  const now = nowIso();
+  const deleted = await run(
+    db,
+    `DELETE FROM messages WHERE id = ? AND kind = 'TEXT'
+      AND json_extract(meta_json, '$.vanish') = 1
+      AND json_extract(meta_json, '$.vanishExpiresAt') <= ?`,
+    row.id,
+    now,
+  );
+  if (!deleted) return false;
+  await syncPreviewAfterDelete(db, row);
+  const marker = { id: row.id, senderId: row.sender_id, kind: "VANISHED" };
+  await Promise.all([
+    afterMessageChanged(env, db, row.conv_id, marker),
+    broadcastRoomEvent(env, `user:${row.sender_id}`, {
+      type: "conv",
+      conversationId: row.conv_id,
+    }),
+  ]);
+  return true;
+}
+
+async function sweepExpiredVanishMessages(env: Env, db: D1Database): Promise<number> {
+  const rows = await all<MsgRow>(
+    db,
+    `SELECT *, rowid AS rowid FROM messages
+      WHERE kind = 'TEXT' AND json_extract(meta_json, '$.vanish') = 1
+        AND json_extract(meta_json, '$.vanishExpiresAt') <= ?
+      ORDER BY json_extract(meta_json, '$.vanishExpiresAt'), rowid LIMIT 200`,
+    nowIso(),
+  );
+  let removed = 0;
+  for (const row of rows) {
+    if (await expireVanishMessage(env, db, row)) removed++;
+  }
+  return removed;
 }
 
 /**
@@ -13362,6 +13688,20 @@ async function sweepExpiredStatuses(env: Env, db: D1Database): Promise<number> {
   return expired.length;
 }
 
+function mentionsUsername(body: string, username: string): boolean {
+  if (!body || !username) return false;
+  // A URL path/query can contain `@username`; it is not a chat mention and
+  // must not bypass a muted group through the mention-alert exception.
+  const withoutUrls = body.replace(/(?:https?:\/\/|www\.)[^\s<>"']+/gi, " ");
+  const escaped = username.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^A-Za-z0-9_])@${escaped}(?![A-Za-z0-9_])`, "i").test(withoutUrls);
+}
+
+/** Remove supported bold markers from safe previews; clients format the full body. */
+function stripBoldMarkers(body: string): string {
+  return body.replace(/\*\*([\s\S]+?)\*\*/g, "$1").replace(/(?<!\*)\*([^*\n]+?)\*(?!\*)/g, "$1");
+}
+
 /** Chat-list preview text for a stored row — mirrors what the send path writes. */
 function previewOf(row: MsgRow): string {
   // E2EE (owner round 64): a sealed body is an opaque envelope — server-side
@@ -13413,7 +13753,7 @@ function previewOf(row: MsgRow): string {
     case "CALL":
       return row.body || "Call";
     default:
-      return e2ee ? E2EE_PREVIEW : (row.body || "Message").slice(0, 120);
+      return e2ee ? E2EE_PREVIEW : stripBoldMarkers(row.body || "Message").slice(0, 120);
   }
 }
 
@@ -13465,7 +13805,7 @@ async function fanOutConversationChange(env: Env, db: D1Database, convId: string
 async function clearAskCards(env: Env, db: D1Database, convId: string, requesterId: string) {
   const rows = await all<MsgRow>(
     db,
-    "SELECT * FROM messages WHERE conv_id = ? AND kind = 'UNBLOCK_ASK' AND sender_id = ?",
+    "SELECT *, rowid AS rowid FROM messages WHERE conv_id = ? AND kind = 'UNBLOCK_ASK' AND sender_id = ?",
     convId,
     requesterId,
   );
@@ -13577,19 +13917,24 @@ function buildConvDetail(
     // through here, so the header, the list row and its online dot all go
     // dark together. Groups are untouched: a block is between two people.
     const walled = solo && row.user_id !== uid && !!block.ids?.has(row.user_id);
-    const memberUser = walled
-      ? {
-          id: user.id,
-          username: user.username,
-          displayName: user.display_name,
-          about: null,
-          online: false,
-          lastActiveAt: null,
-          avatarUrl: null,
-          avatarRef: null,
-          blocked: true,
-        }
-      : shaped;
+    const memberUser = {
+      ...(walled
+        ? {
+            id: user.id,
+            username: user.username,
+            displayName: user.display_name,
+            about: null,
+            online: false,
+            lastActiveAt: null,
+            avatarUrl: null,
+            avatarRef: null,
+            blocked: true,
+          }
+        : shaped),
+      ...(row.nickname && !walled
+        ? { nickname: row.nickname, displayName: row.nickname }
+        : { nickname: "" }),
+    };
     const memberReceipts = readReceiptsOnForChat(row);
     members.push({
       user: memberUser,
@@ -13634,7 +13979,14 @@ function buildConvDetail(
     ownerId: conv.owner_id,
     createdAt: conv.created_at,
     lastMessageAt: conv.last_message_at,
-    lastMessage: conv.last_message,
+    lastMessage:
+      conv.preview_row &&
+      parseJson<Record<string, unknown>>(conv.preview_row.meta_json, {}).vanishExpiresAt &&
+      Date.parse(
+        String(parseJson<Record<string, unknown>>(conv.preview_row.meta_json, {}).vanishExpiresAt),
+      ) <= Date.now()
+        ? ""
+        : conv.last_message,
     lastMessagePreview: conversationPreview(conv, uid),
     unreadPreviewKind: unreadPreviewKind(conv, unread),
     // Owner round 32 (item 38): a 1:1 chat a stranger opened. `requestFrom`
@@ -13711,7 +14063,10 @@ async function conversationDetail(db: D1Database, convId: string, uid: string) {
   if (!conv) fail(404, "Conversation not found.");
   const memberRows = await all<ConvMemberRow>(
     db,
-    `SELECT ${MEMBER_COLS} FROM members WHERE conv_id = ?`,
+    `SELECT ${MEMBER_COLS},
+            (SELECT nickname FROM conversation_nicknames n
+              WHERE n.conv_id = members.conv_id AND n.user_id = members.user_id) AS nickname
+       FROM members WHERE conv_id = ?`,
     convId,
   );
   // Owner round 32 (item 28): the single-chat detail is what the list merges

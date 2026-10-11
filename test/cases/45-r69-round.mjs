@@ -41,15 +41,32 @@ const pushOf = (sent, type, userId) =>
     (p) => (p.message?.android?.data?.type ?? "") === type && p.message?.token === `tok-${userId}`,
   );
 
-async function mk() {
+async function mk(withChatRoom = false) {
   const worker = await freshWorker();
   const db = makeD1();
+  const pokes = [];
   const env = {
     DB: db,
     MEDIA: makeR2(),
     FCM_CREDENTIALS,
     GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
   };
+  if (withChatRoom) {
+    env.CHAT_ROOM = {
+      idFromName: (name) => name,
+      get: () => ({
+        fetch: async (_url, init) => {
+          try {
+            pokes.push(JSON.parse(init.body));
+          } catch {}
+          return new Response(JSON.stringify({ sent: 1 }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        },
+      }),
+    };
+  }
   const ctx = makeCtx();
   const sent = [];
   const realFetch = globalThis.fetch;
@@ -94,6 +111,7 @@ async function mk() {
     env,
     ctx,
     sent,
+    pokes,
     call,
     reg: makeReg(call),
     restore: () => (globalThis.fetch = realFetch),
@@ -251,6 +269,86 @@ const detail = (k, who, convId) =>
   }
 }
 
+// Group username mentions override a MESSAGE mute. /silent still preserves
+// storage, unread counts and the list poke while suppressing every alert path.
+{
+  const k = await mk(true);
+  try {
+    const a = await k.reg("mention-a@x.com", "mentiona");
+    const b = await k.reg("mention-b@x.com", "mentionb");
+    await k.call("POST", "/api/devices", { token: `tok-${a.user.id}` }, a.token);
+    await k.call("POST", "/api/devices", { token: `tok-${b.user.id}` }, b.token);
+    const created = await k.call(
+      "POST",
+      "/api/conversations/group",
+      { title: "Mention alerts", memberIds: [b.user.id] },
+      a.token,
+    );
+    const convId = created.json.conversation?.id;
+    await mute(k, b, convId, { call: false, msg: true });
+
+    k.sent.length = 0;
+    k.pokes.length = 0;
+    const mention = await k.call(
+      "POST",
+      `/api/conversations/${convId}/messages`,
+      { kind: "TEXT", body: `Hello @${b.user.username}` },
+      a.token,
+    );
+    const mentionPush = pushOf(k.sent, "message", b.user.id);
+    check(
+      "group @username mentions override that recipient's message mute and mark the push as a mention",
+      mention.status === 201 &&
+        mention.json.message?.meta?.mentions?.includes(b.user.id) &&
+        mentionPush?.message?.android?.data?.mention === "1" &&
+        mentionPush?.message?.android?.data?.muted === "0",
+      JSON.stringify({
+        status: mention.status,
+        mentions: mention.json.message?.meta?.mentions,
+        push: mentionPush?.message?.android?.data,
+      }),
+    );
+
+    const unreadBefore = k.db._db
+      .prepare("SELECT unread FROM members WHERE conv_id = ? AND user_id = ?")
+      .get(convId, b.user.id).unread;
+    k.sent.length = 0;
+    k.pokes.length = 0;
+    const silent = await k.call(
+      "POST",
+      `/api/conversations/${convId}/messages`,
+      { kind: "TEXT", body: "Quiet but unread", meta: { silent: true } },
+      a.token,
+    );
+    const unreadAfter = k.db._db
+      .prepare("SELECT unread FROM members WHERE conv_id = ? AND user_id = ?")
+      .get(convId, b.user.id).unread;
+    const silentPoke = k.pokes.find(
+      (poke) => poke.type === "conv" && poke.conversationId === convId && poke.silent === true,
+    );
+    check(
+      "/silent stores and counts the message normally, but sends no push or in-app alert poke",
+      silent.status === 201 &&
+        silent.json.message?.body === "Quiet but unread" &&
+        silent.json.message?.meta?.silent === true &&
+        unreadAfter === unreadBefore + 1 &&
+        k.db._db.prepare("SELECT COUNT(*) n FROM messages WHERE id = ?").get(silent.json.message.id)
+          .n === 1 &&
+        !pushOf(k.sent, "message", b.user.id) &&
+        silentPoke?.msg === 0,
+      JSON.stringify({
+        status: silent.status,
+        unreadBefore,
+        unreadAfter,
+        pushCount: k.sent.length,
+        poke: silentPoke,
+      }),
+    );
+  } finally {
+    k.restore();
+  }
+}
+
 // ── B. app: the chooser, the glyph, the silent paths ────────────────────────
 {
   const kt = (f) =>
@@ -319,8 +417,12 @@ const detail = (k, who, convId) =>
   );
   check(
     "r69 mute: a message card is silenced by the MESSAGE half (and a call-mute never silences it) on both sides of the wire",
-    src.includes('muted: memberId.muted_msg === 1 ? "1" : "0",') &&
-      push.includes('data["muted"] == "1" || ScreenStore.isMsgMuted(convoId)'),
+    src.includes('muted: memberId.muted_msg === 1 && !mentioned ? "1" : "0",') &&
+      src.includes('...(mentioned ? { mention: "1" } : {}),') &&
+      push.includes('val mentioned = data["mention"] == "1"') &&
+      push.includes(
+        'val muted = !mentioned && (data["muted"] == "1" || ScreenStore.isMsgMuted(convoId))',
+      ),
   );
   check(
     "r69 mute: a muted chat posts NO card at all — the badge/list still move, but nothing lands in the shade (the silent channel still drew one), and a call-muted chat's missed-call card is withheld too (the ring never happened)",

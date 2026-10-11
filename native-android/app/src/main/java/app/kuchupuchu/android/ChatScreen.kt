@@ -11,6 +11,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -772,6 +773,20 @@ fun ChatScreen(nav: NavController, convId: String) {
         msgs.addAll(next)
     }
 
+    fun beginVanish(messageId: String) {
+        if (messageId.isBlank() || msgs.none { it.optString("id") == messageId }) return
+        if (messageId in vanishingIds || messageId in dustLatched) return
+        vanishingIds.add(messageId)
+        vanishedOnce.add(messageId)
+        ScreenStore.latchDust(messageId)
+        scope.launch {
+            delay(DeleteAnim.GRACE_MS)
+            msgs.removeAll { it.optString("id") == messageId }
+            vanishingIds.remove(messageId)
+            ScreenStore.pokeInbox()
+        }
+    }
+
     fun refreshMeta() {
         scope.launch {
             runCatching {
@@ -1030,6 +1045,55 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
+    val vanishRows = msgs.filter { row ->
+        row.optString("kind") == "TEXT" &&
+            row.optJSONObject("meta")?.optBoolean("vanish") == true &&
+            row.optJSONObject("meta")?.optString("vanishExpiresAt").orEmpty().isNotBlank()
+    }
+    val vanishScheduleKey = vanishRows
+        .map { "${it.optString("id")}:${it.optJSONObject("meta")?.optString("vanishExpiresAt").orEmpty()}" }
+        .sorted()
+        .joinToString("|")
+    // The first recipient read stamps one shared server deadline. Each open
+    // Android client counts down to it and asks the Worker to remove the row;
+    // the minute cron remains the offline fallback.
+    LaunchedEffect(convId, vanishScheduleKey) {
+        vanishRows.forEach { row ->
+            launch {
+                val messageId = row.optString("id")
+                val meta = row.optJSONObject("meta") ?: return@launch
+                var deadline = runCatching {
+                    java.time.Instant.parse(meta.optString("vanishExpiresAt")).toEpochMilli()
+                }.getOrDefault(0L)
+                if (messageId.isBlank() || deadline <= 0L) return@launch
+                while (true) {
+                    val wait = (deadline - System.currentTimeMillis()).coerceAtLeast(0L)
+                    if (wait > 0L) delay(wait)
+                    if (msgs.none { it.optString("id") == messageId }) return@launch
+                    val result = runCatching {
+                        withContext(Dispatchers.IO) {
+                            Api.post("/api/messages/${android.net.Uri.encode(messageId)}/expire", JSONObject())
+                        }
+                    }.getOrNull()
+                    if (result == null) {
+                        beginVanish(messageId)
+                        refreshMessages(forceNetwork = true)
+                        return@launch
+                    }
+                    if (result.optBoolean("expired")) {
+                        beginVanish(messageId)
+                        return@launch
+                    }
+                    deadline = runCatching {
+                        java.time.Instant.parse(result.optString("expiresAt")).toEpochMilli()
+                    }.getOrDefault(0L)
+                    if (deadline <= 0L) return@launch
+                    if (deadline <= System.currentTimeMillis()) delay(350L)
+                }
+            }
+        }
+    }
+
     // r66: metadata can arrive after rows. Re-open preserved envelopes when
     // the peer key appears/changes, without waiting for another message.
     // r76-12: same when our OWN roaming identity lands on a fresh install.
@@ -1250,21 +1314,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                             // GONE server-side — the row plays the vanish show
                             // and leaves, no tombstone, on both sides.
                             if (liveMsg.optString("kind") == "VANISHED" && liveId.isNotBlank()) {
-                                if (msgs.any { it.optString("id") == liveId } && liveId !in vanishingIds && liveId !in dustLatched) {
-                                    vanishingIds.add(liveId)
-                                    vanishedOnce.add(liveId)
-                                    ScreenStore.latchDust(liveId)
-                                    scope.launch {
-                                        delay(DeleteAnim.GRACE_MS)
-                                        msgs.removeAll { it.optString("id") == liveId }
-                                        vanishingIds.remove(liveId)
-                                        ScreenStore.pokeInbox()
-                                    }
-                                }
+                                beginVanish(liveId)
                                 return@let
                             }
                             val fresh = msgs.none { it.optString("id") == liveId }
-                            if (fromOther && fresh) runCatching { KpSounds.receive(ctx) }
+                            if (fromOther && fresh && liveMsg.optJSONObject("meta")?.optBoolean("silent") != true) {
+                                runCatching { KpSounds.receive(ctx) }
+                            }
                             val liveCid = liveMsg.optString("clientId")
                             // Owner round 32 (item 18): a parked message the
                             // cron just sent — its chip row forgets it.
@@ -1795,19 +1851,60 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    fun sendText(body: String, kind: String = "TEXT", once: Boolean = false) {
-        if (body.isBlank()) return
+    fun openMentionChat(rawUsername: String) {
+        val username = rawUsername.trim().removePrefix("@").lowercase(java.util.Locale.ROOT)
+        if (!Regex("^[a-z0-9_]{3,30}$").matches(username)) return
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val user = Api.get("/api/users/username/$username", true).optJSONObject("user")
+                        ?: error("That username could not be found.")
+                    val userId = user.optString("id")
+                    if (userId.isBlank()) error("That username could not be found.")
+                    if (userId == Store.myId()) error("That is your username.")
+                    Api.post("/api/conversations", JSONObject().put("userId", userId))
+                        .optJSONObject("conversation") ?: error("The chat could not be opened.")
+                }
+            }.onSuccess { conversation ->
+                val targetId = conversation.optString("id")
+                val peerId = conversation.optJSONObject("other")?.optString("id").orEmpty()
+                if (targetId.isBlank()) {
+                    android.widget.Toast.makeText(ctx, "The chat could not be opened.", android.widget.Toast.LENGTH_SHORT).show()
+                } else {
+                    if (peerId.isNotBlank()) ScreenStore.convIdForUser[peerId] = targetId
+                    ScreenStore.upsertConv(conversation)
+                    nav.navigate("chat/$targetId") { launchSingleTop = true }
+                }
+            }.onFailure { failure ->
+                android.widget.Toast.makeText(
+                    ctx,
+                    failure.message?.takeIf { it.isNotBlank() } ?: "That username could not be opened.",
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
+    }
+
+    fun sendText(body: String, kind: String = "TEXT", once: Boolean = false): Boolean {
+        val command = if (kind == "TEXT") ComposerCommands.parse(body) else null
+        val messageBody = command?.text ?: body
+        if (messageBody.isBlank()) return false
         // r79-6/8: warm the glyph's Lottie before the echo is born (the
         // typing hook already warmed it; this covers paste-and-send).
-        if (kind == "TEXT") NotoEmojiWarm.preload(ctx, body)
+        if (kind == "TEXT") NotoEmojiWarm.preload(ctx, messageBody)
         val clientId = "c_${java.util.UUID.randomUUID()}"
         // r64 E2EE: the PAYLOAD carries the sealed envelope (TEXT only —
         // stickers are local ids, never sealed); the pending echo below keeps
         // the plaintext, so the optimistic bubble reads as typed.
-        val payload = JSONObject().put("kind", kind).put("body", if (kind == "TEXT") sealOut(body) else body).put("clientId", clientId)
-        // r71-20: a view-once text — the flag rides in meta (the sealed body
-        // stays sealed; the worker only needs the flag).
-        if (once) payload.put("meta", JSONObject().put("viewOnce", true)).put("viewOnce", true)
+        val payload = JSONObject().put("kind", kind).put("body", if (kind == "TEXT") sealOut(messageBody) else messageBody).put("clientId", clientId)
+        // Slash-command and view-once flags are metadata, not part of the
+        // encrypted/plaintext body, so both Android peers render the same effect.
+        val meta = JSONObject().apply {
+            if (once) put("viewOnce", true)
+            command?.let { put(it.command.metaKey, true) }
+        }
+        if (meta.length() > 0) payload.put("meta", meta)
+        if (once) payload.put("viewOnce", true)
         // Owner round 13: attach the quoted message when replying.
         // r70-13 (owner: "send sending sent a ekhono problem ache jemon reply
         // massage send korle first a normal vabe jai tarpor reply massage
@@ -1826,10 +1923,11 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("clientId", clientId)
                 .put("senderId", Store.myId())
                 .put("kind", kind)
-                .put("body", body)
-                // r71-20: the echo is a once-text from its first frame — veiled
-                // for the far side, plain for me (I wrote it).
-                .also { if (once) it.put("viewOnce", true).put("meta", JSONObject().put("viewOnce", true)) }
+                .put("body", messageBody)
+                // Flags ride the optimistic row so the sender sees magic and
+                // the same metadata contract as the server-confirmed row.
+                .also { if (once) it.put("viewOnce", true) }
+                .also { if (meta.length() > 0) it.put("meta", JSONObject(meta.toString())) }
                 .also { if (replyId != null) it.put("replyTo", replyId) }
                 .put("createdAt", java.time.Instant.now().toString()),
         )
@@ -1851,7 +1949,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         runCatching {
             when {
                 kind == "STICKER" -> KpSounds.stickerSend(ctx)
-                kind == "TEXT" && emojiOnlyCount(body) > 0 -> KpSounds.emojiSend(ctx)
+                kind == "TEXT" && emojiOnlyCount(messageBody) > 0 -> KpSounds.emojiSend(ctx)
                 else -> KpSounds.send(ctx)
             }
         }
@@ -1885,6 +1983,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         // text is owned by the server row or by the queue file (and if the
         // queue refuses it for good, that text comes back to the composer).
         Drafts.clear(convId)
+        return true
     }
 
     // Owner round 32 (item 18): the chat's parked "send later" rows — mine
@@ -1899,16 +1998,21 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    fun scheduleText(body: String, at: java.time.Instant, once: Boolean = false) {
-        if (body.isBlank()) return
+    fun scheduleText(body: String, at: java.time.Instant, once: Boolean = false): Boolean {
+        val command = ComposerCommands.parse(body)
+        val messageBody = command?.text ?: body
+        if (messageBody.isBlank()) return false
         val clientId = "c_${java.util.UUID.randomUUID()}"
         val payload =
             // r64 E2EE: the scheduled body is sealed like any other TEXT —
             // the cron later posts the stored envelope through the same path.
-            JSONObject().put("kind", "TEXT").put("body", sealOut(body)).put("clientId", clientId).put("sendAt", at.toString())
-        // r76-17 (owner): the schedule sheet's view-once toggle — the flag
-        // rides the stored payload exactly like a live once-text.
-        if (once) payload.put("meta", JSONObject().put("viewOnce", true)).put("viewOnce", true)
+            JSONObject().put("kind", "TEXT").put("body", sealOut(messageBody)).put("clientId", clientId).put("sendAt", at.toString())
+        val meta = JSONObject().apply {
+            if (once) put("viewOnce", true)
+            command?.let { put(it.command.metaKey, true) }
+        }
+        if (meta.length() > 0) payload.put("meta", meta)
+        if (once) payload.put("viewOnce", true)
         // r70-13: the same one-value shape as every other send — a send-later
         // text answers its quote as well (it already did) and clears the bar.
         val replyId = replyTo?.optString("id")?.takeIf { it.isNotBlank() }
@@ -1931,6 +2035,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 if (input.isBlank()) input = body
             }
         }
+        return true
     }
 
     /** r76-18 (owner item 6): "gif hisabe jai ar download hoye na jai direct
@@ -3717,7 +3822,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     IconButton(onClick = {
                         val text = selectedMessages()
                             .filter { it.optString("kind") == "TEXT" }
-                            .joinToString("\n") { it.optText("body") }
+                            .joinToString("\n") { MessageMarkup.plain(it.optText("body")) }
                         val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                         cm.setPrimaryClip(android.content.ClipData.newPlainText("KuchuPuchu", text))
                         haptics.confirm()
@@ -3775,7 +3880,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                 Modifier.weight(1f).clickable { requestAttachExit {
                     // Owner round 31: a group header opens the group profile.
                     if (isGroup) nav.navigate("group/$convId")
-                    else if (otherId.isNotBlank()) nav.navigate("profile/$otherId")
+                    else if (otherId.isNotBlank()) {
+                        nav.navigate("chatprofile/${android.net.Uri.encode(convId)}/${android.net.Uri.encode(otherId)}")
+                    }
                 } },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -4398,6 +4505,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             onMessageOwner = { ownerId -> openChatWithUser(ownerId) },
                             theme = chatTheme,
                             onJumpTo = { jumpTo(it) },
+                            onOpenMention = { username -> openMentionChat(username) },
                             askName = rawTitle,
                             onCancelSend = ::cancelSend,
                             // r71-21: double tap = ❤️ (every row kind).
@@ -4511,6 +4619,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             onOpenAlbum = { msg -> albumMsg = msg },
                             quoteFor = { rid -> (msgs + pending).firstOrNull { it.optString("id") == rid } },
                             onJumpTo = { jumpTo(it) },
+                            onOpenMention = { username -> openMentionChat(username) },
                             onCancelSend = ::cancelSend,
                             // r71-21: double tap = ❤️ (every row kind).
                             onDoubleTapHeart = ::heartReact,
@@ -4752,7 +4861,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     KpSheetRow(Icons.Filled.ContentCopy, "Copy") {
                         close {
                             val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                            cm.setPrimaryClip(android.content.ClipData.newPlainText("KuchuPuchu", m.optText("body")))
+                            cm.setPrimaryClip(android.content.ClipData.newPlainText("KuchuPuchu", MessageMarkup.plain(m.optText("body"))))
                             android.widget.Toast.makeText(ctx, "Copied", android.widget.Toast.LENGTH_SHORT).show()
                         }
                     }
@@ -4989,16 +5098,14 @@ fun ChatScreen(nav: NavController, convId: String) {
                     haptics.confirm()
                     showAttach = false
                     showStickers = false
-                    sendText(input, "TEXT", once = true)
-                    input = ""
+                    if (sendText(input, "TEXT", once = true)) input = ""
                 },
                 onPick = { at, once ->
                     showSchedule = false
                     haptics.confirm()
                     showAttach = false
                     showStickers = false
-                    scheduleText(input, at, once)
-                    input = ""
+                    if (scheduleText(input, at, once)) input = ""
                 },
             )
         }
@@ -5503,8 +5610,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 haptics.confirm()
                 showAttach = false
                 showStickers = false
-                sendText(input)
-                input = ""
+                if (sendText(input)) input = ""
             } },
             // Owner round 32 (item 18): hold Send → pick a time. r76-17: the
             // once-text moved INTO the schedule sheet (owner), so the seat's
@@ -6012,6 +6118,7 @@ private fun Composer(
     // the fly-send clone launches from exactly what the user touched.
 ) {
     val accent = chatAccent(theme)
+    val haptics = rememberHaptics()
     // Attach/sticker MUST close the keyboard first — otherwise both the IME
     // and the inline panel push the composer up at once, which read as a
     // layout "jump" ("upore uthe jai") instead of a clean keyboard->panel swap.
@@ -6060,17 +6167,48 @@ private fun Composer(
         RecorderAnchors.swallowOn = binPlaying && !recording
     }
     LaunchedEffect(swallowT.value) { RecorderAnchors.swallowV = swallowT.value }
-    Row(
-        Modifier
-            .fillMaxWidth()
-            // Owner round 15: the bar itself is TRANSPARENT — only the pill
-            // has a fill. Mic keeps its ring.
-            // v203: explicit Transparent background so wallpaper shows through like WhatsApp
-            .background(Color.Transparent)
-            .padding(bottom = padForIme)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    val commandOptions = ComposerCommands.suggestions(input)
+    Column(
+        Modifier.fillMaxWidth().padding(bottom = padForIme),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        if (commandOptions.isNotEmpty() && !recording && !locked && selectCount == 0) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                commandOptions.forEach { command ->
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Card)
+                            .border(1.dp, Line.copy(alpha = 0.75f), RoundedCornerShape(12.dp))
+                            .clickable {
+                                haptics.tap()
+                                onInput(ComposerCommands.draft(command))
+                                runCatching { inputFocus.requestFocus() }
+                                keyboard?.show()
+                            }
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("/${command.name}", color = accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.width(7.dp))
+                        Text(command.hint, color = Muted, fontSize = 11.sp, maxLines = 1)
+                    }
+                }
+            }
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                // Owner round 15: the bar itself is TRANSPARENT — only the pill
+                // has a fill. Mic keeps its ring.
+                // v203: explicit Transparent background so wallpaper shows through like WhatsApp
+                .background(Color.Transparent)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
         if (binPlaying && !recording) {
             // r76-1 (the rebuild): the swallow scene keeps the HOLD bar alive —
             // the clock's spot is the small dustbin's (its lid rides the
@@ -6358,6 +6496,7 @@ private fun Composer(
             }
         }
     }
+}
 }
 
 /**
@@ -7693,7 +7832,7 @@ internal fun quoteKind(m: JSONObject): String {
 /** The quote's words: the body for text, the media word (plus its caption
  *  when there is one) for media, "Sticker" for a custom sticker. */
 internal fun quoteText(m: JSONObject): String {
-    val body = m.optText("body")
+    val body = MessageMarkup.plain(m.optText("body"))
     if (m.optString("kind") == "STICKER" && EmojiRepo.isCustomId(body)) return "Sticker"
     val kind = quoteKind(m)
     if (kind.isBlank()) return body.ifBlank { "Message" }
@@ -8331,6 +8470,7 @@ private fun MessageRow(
     onOpenAlbum: (JSONObject) -> Unit = {},
     onOpenDoc: (JSONObject) -> Unit = {},
     onJumpTo: (String) -> Unit = {},
+    onOpenMention: (String) -> Unit = {},
     onUnblockAsk: (JSONObject) -> Unit = {},
     onIgnoreAsk: (JSONObject) -> Unit = {},
     askName: String = "",
@@ -8344,6 +8484,26 @@ private fun MessageRow(
 ) {
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
+    val vanishMeta = m.optJSONObject("meta")
+    val vanishExpiry = if (kind == "TEXT" && vanishMeta?.optBoolean("vanish") == true) {
+        vanishMeta.optString("vanishExpiresAt")
+    } else ""
+    val vanishDeadlineMs = remember(vanishExpiry) {
+        runCatching { java.time.Instant.parse(vanishExpiry).toEpochMilli() }.getOrDefault(0L)
+    }
+    var vanishNowMs by remember(vanishDeadlineMs) { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(vanishDeadlineMs) {
+        if (vanishDeadlineMs <= 0L) return@LaunchedEffect
+        while (true) {
+            val now = System.currentTimeMillis()
+            vanishNowMs = now
+            if (now >= vanishDeadlineMs) break
+            delay(minOf(1_000L, vanishDeadlineMs - now))
+        }
+    }
+    val vanishSecondsLeft = if (vanishDeadlineMs > 0L) {
+        ((vanishDeadlineMs - vanishNowMs + 999L) / 1_000L).coerceAtLeast(0L)
+    } else 0L
     val revealStamp = rememberUpdatedState(onRevealStamp)
     // Owner round 21: event sounds (reply swipe) play from the row itself.
     val ctx = LocalContext.current
@@ -8816,6 +8976,12 @@ private fun MessageRow(
                             else -> chatOtherFill(theme)
                         },
                     )
+                    .then(
+                        Modifier.magicMessageEffect(
+                            enabled = kind == "TEXT" && m.optJSONObject("meta")?.optBoolean("magic") == true && fxBorn,
+                            accent = chatAccent(theme),
+                        ),
+                    )
                     // r55: a smooth expand / collapse when the fold flips.
                     // r56 (owner: "smooth expand collapse animation"): spring damping ratio + stiffness tuned for buttery fold animation.
                     // r62: animateContentSize only on collapsible text bodies; voice notes keep exact original body dimensions with no resize.
@@ -9019,20 +9185,30 @@ private fun MessageRow(
                             }
                         } else {
                             val full = m.optText("body")
+                            val visibleFull = MessageMarkup.plain(full)
                             // Owner round 32 (item 32): a link in the text
                             // is a real link (underlined, tap opens it) and
                             // the first one gets a preview card above the
                             // text. In select mode taps stay with the bubble.
                             val selecting = selectedIds.isNotEmpty()
                             val linked =
-                                remember(full, bodyInk, selecting) {
-                                    if (selecting) null
-                                    else Links.annotate(full, bodyInk) { u ->
-                                        revealStamp.value()
-                                        Links.open(ctx, u)
-                                    }
+                                remember(full, bodyInk, selecting, isGroup, theme, onOpenMention) {
+                                    if (selecting) {
+                                        if (visibleFull == full) null
+                                        else androidx.compose.ui.text.AnnotatedString(visibleFull)
+                                    } else MessageMarkup.annotate(
+                                        value = full,
+                                        linkInk = chatAccent(theme),
+                                        mentionInk = chatAccent(theme),
+                                        allowMentions = !isGroup,
+                                        openUrl = { url ->
+                                            revealStamp.value()
+                                            Links.open(ctx, url)
+                                        },
+                                        openMention = { username -> onOpenMention(username) },
+                                    )
                                 }
-                            val firstLink = remember(full) { Links.first(full) }
+                            val firstLink = remember(visibleFull) { Links.first(visibleFull) }
                             if (firstLink != null) {
                                 LinkPreviewCard(
                                     url = firstLink,
@@ -9053,7 +9229,7 @@ private fun MessageRow(
                                     // The AI reply is still typing itself out —
                                     // reveal up to the current word + a caret.
                                     Text(
-                                        full.take(revealChars) + " ▍",
+                                        visibleFull.take(revealChars) + " ▍",
                                         fontSize = 14.5.sp,
                                         lineHeight = 19.sp,
                                         color = bodyInk,
@@ -9078,7 +9254,7 @@ private fun MessageRow(
                                         // remove koro"): the letter-by-letter
                                         // reveal is gone - a message paints
                                         // whole at once, sent or received.
-                                        full,
+                                        visibleFull,
                                         fontSize = 14.5.sp,
                                         lineHeight = 19.sp,
                                         color = bodyInk,
@@ -9088,6 +9264,16 @@ private fun MessageRow(
                                     )
                                 }
                         }
+                    }
+                    if (vanishDeadlineMs > 0L) {
+                        val mm = vanishSecondsLeft / 60L
+                        val ss = (vanishSecondsLeft % 60L).toString().padStart(2, '0')
+                        Text(
+                            "Vanishes in $mm:$ss",
+                            color = if (mine) Color(0xA8FFFFFF) else Muted,
+                            fontSize = 10.5.sp,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
                     }
                     // r54 (owner: "see more ekhono removed ache"): the toggle
                     // and the fold state are BACK in the bubble, byte-for-byte
@@ -11541,7 +11727,7 @@ private fun MediaCaption(body: String, mine: Boolean, theme: String) {
             .widthIn(max = 240.dp),
     ) {
         Text(
-            body,
+            MessageMarkup.formatted(body),
             color = if (mine) Color(0xE6FFFFFF) else Ink,
             fontSize = 12.sp,
             lineHeight = 14.sp,

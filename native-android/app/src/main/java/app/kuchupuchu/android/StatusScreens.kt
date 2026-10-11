@@ -139,7 +139,16 @@ fun StatusScreen(nav: NavController, fabBottom: androidx.compose.ui.unit.Dp = 74
     // newest contact row is index 2: keep the head in view when it changes.
     KpKeepTop(statusList, others.firstOrNull()?.optJSONObject("user")?.optString("id"))
 
-    Box(Modifier.fillMaxSize().background(Cream)) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Cream)
+            // The launcher shortcut navigates straight to `status`, outside
+            // ChatListScreen's inset owner. Keep the feed below system bars;
+            // nested home-tab use consumes these insets in its parent.
+            .statusBarsPadding()
+            .displayCutoutPadding(),
+    ) {
         Column(Modifier.fillMaxSize()) {
             LazyColumn(
                 Modifier.fillMaxSize(),

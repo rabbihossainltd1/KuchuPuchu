@@ -67,7 +67,7 @@ check(
 );
 check(
   "link text, link-preview, and See more/less taps reveal the same message before opening or expanding",
-  /Links\.annotate\(full, bodyInk\)\s*\{\s*u ->\s*revealStamp\.value\(\)\s*Links\.open\(ctx, u\)\s*\}/.test(
+  /MessageMarkup\.annotate\(\s*value = full,[\s\S]*?openUrl = \{ url ->\s*revealStamp\.value\(\)\s*Links\.open\(ctx, url\)/.test(
     messageRow,
   ) &&
     /onOpen\s*=\s*if \(selecting\)\s*\{\s*null\s*\}\s*else\s*\{\s*\{\s*revealStamp\.value\(\)\s*Links\.open\(ctx, firstLink\)\s*\}\s*\}/.test(

@@ -37,6 +37,8 @@ export type OutboxItem = {
   readonly plaintext: string;
   /** What goes on the wire (a KP1 envelope in a personal chat). */
   readonly wireBody: string;
+  /** Worker-visible message flags (silent, magic, vanish), kept across retries. */
+  readonly meta?: Readonly<Record<string, unknown>>;
   readonly replyToId: string;
   readonly replyTo: ReplyTarget | null;
   readonly createdAt: string;
@@ -100,6 +102,7 @@ export function createOutboxItem(input: {
   conversationId: string;
   plaintext: string;
   wireBody: string;
+  meta?: Readonly<Record<string, unknown>>;
   replyToId?: string;
   replyTo?: ReplyTarget | null;
   createdAt?: string;
@@ -110,6 +113,7 @@ export function createOutboxItem(input: {
     conversationId: input.conversationId,
     plaintext: input.plaintext.slice(0, DRAFT_MAX_LENGTH),
     wireBody: input.wireBody,
+    ...(input.meta && Object.keys(input.meta).length > 0 ? { meta: input.meta } : {}),
     replyToId: input.replyToId ?? "",
     replyTo: input.replyTo ?? null,
     createdAt: input.createdAt ?? new Date().toISOString(),

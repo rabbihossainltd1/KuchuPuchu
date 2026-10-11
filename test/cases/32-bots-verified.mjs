@@ -884,8 +884,10 @@ const convBetween = (db, a, b) =>
   );
   check(
     "in-app sound: the MAIN send path pokes msg:1 + senderId",
-    src.includes('{ type: "conv", conversationId, at, msg: 1, senderId }') &&
-      src.includes("pokeUserConversation(env, memberId.user_id, convId, created, uid)"),
+    /msg: silent \? 0 : 1,\s+senderId/.test(src) &&
+      /pokeUserConversation\(\s*env,\s*memberId\.user_id,\s*convId,\s*created,\s*uid,\s*silent,?\s*\)/.test(
+        src,
+      ),
   );
   check(
     "own sends never trigger the in-app sound",
@@ -2026,7 +2028,9 @@ const convBetween = (db, a, b) =>
     readFileSync(
       "native-android/app/src/main/java/app/kuchupuchu/android/ChatScreen.kt",
       "utf8",
-    ).includes("if (fromOther && fresh) runCatching { KpSounds.receive(ctx) }") &&
+    ).includes(
+      'if (fromOther && fresh && liveMsg.optJSONObject("meta")?.optBoolean("silent") != true) {',
+    ) &&
       (
         readFileSync(
           "native-android/app/src/main/java/app/kuchupuchu/android/ChatScreen.kt",
@@ -5232,7 +5236,9 @@ const convBetween = (db, a, b) =>
     chat32.indexOf("fun handleImagePicked("),
   );
   const sendTextBody = chat32.slice(
-    chat32.indexOf('fun sendText(body: String, kind: String = "TEXT", once: Boolean = false) {'),
+    chat32.indexOf(
+      'fun sendText(body: String, kind: String = "TEXT", once: Boolean = false): Boolean {',
+    ),
     chat32.indexOf("fun sendImage("),
   );
   check(
@@ -6315,10 +6321,10 @@ const convBetween = (db, a, b) =>
     );
     check(
       "r32-32: the TEXT bubble annotates its body (plain Text again in select mode so taps go to the bubble) and shows LinkPreviewCard for the first link above the text",
-      /else Links\.annotate\(full, bodyInk\) \{ u ->\s*revealStamp\.value\(\)\s*Links\.open\(ctx, u\)\s*\}/.test(
+      /else MessageMarkup\.annotate\(\s*value = full,[\s\S]*?openUrl = \{ url ->\s*revealStamp\.value\(\)\s*Links\.open\(ctx, url\)/.test(
         chat,
       ) &&
-        chat.includes("val firstLink = remember(full) { Links.first(full) }") &&
+        chat.includes("val firstLink = remember(visibleFull) { Links.first(visibleFull) }") &&
         /onOpen\s*=\s*if \(selecting\)\s*\{\s*null\s*\}\s*else\s*\{\s*\{\s*revealStamp\.value\(\)\s*Links\.open\(ctx, firstLink\)\s*\}\s*\}/.test(
           chat,
         ) &&
@@ -6631,7 +6637,7 @@ const convBetween = (db, a, b) =>
         src.includes('fileKey: row.kind === "FILE" && !spent ? row.media : undefined,') &&
         src.includes("viewOnce: meta.viewOnce === true ? true : undefined,") &&
         src.includes("viewedAt: spent ? meta.viewedAt : undefined,") &&
-        src.includes("items.map((m) => [m.id, m.body, m.edited, m.deliveredAt, m.viewedAt]),"),
+        src.includes("m.meta?.vanishExpiresAt ?? null"),
     );
     check(
       "E3f: a view-once send keeps its true ratio end to end — the worker stores the sender's dims on once-rows (no !viewOnce strip), the photo payload carries w/h under the once flag, and the live file payload carries the measured box (clipMeta preferred over the bare flag)",
@@ -6745,8 +6751,10 @@ const convBetween = (db, a, b) =>
         icon.includes('"kp-viewonce-blur-v1"') &&
         icon.includes("repeat(3) { boxBlurPass(pix, sw, sh, 4) }") &&
         chat.includes('if (liveMsg.optString("kind") == "VANISHED" && liveId.isNotBlank()) {') &&
-        chat.includes("vanishingIds.add(liveId)") &&
-        chat.includes('msgs.removeAll { it.optString("id") == liveId }') &&
+        chat.includes("beginVanish(liveId)") &&
+        chat.includes("fun beginVanish(messageId: String)") &&
+        chat.includes("vanishingIds.add(messageId)") &&
+        chat.includes('msgs.removeAll { it.optString("id") == messageId }') &&
         chat.includes("ScreenStore.pokeInbox()"),
     );
     check(
@@ -6917,12 +6925,10 @@ const convBetween = (db, a, b) =>
         ) &&
         chat.includes('GoldBtn(\n                "Schedule",') &&
         chat.includes(
-          "fun scheduleText(body: String, at: java.time.Instant, once: Boolean = false) {",
+          "fun scheduleText(body: String, at: java.time.Instant, once: Boolean = false): Boolean {",
         ) &&
         chat.includes('.put("clientId", clientId).put("sendAt", at.toString())') &&
-        chat.includes(
-          '                    scheduleText(input, at, once)\n                    input = ""',
-        ) &&
+        chat.includes('if (scheduleText(input, at, once)) input = ""') &&
         chat.includes("if (input.isBlank()) input = body") &&
         // the sheet is a bottom sheet, no dialog anywhere in it
         !chat
@@ -7054,7 +7060,7 @@ const convBetween = (db, a, b) =>
         // batch) — a land-in-place animation must never cost a send.
         (chat.match(/pending\.add\(/g) || []).length >= 4 &&
         chat.includes(
-          'fun sendText(body: String, kind: String = "TEXT", once: Boolean = false) {',
+          'fun sendText(body: String, kind: String = "TEXT", once: Boolean = false): Boolean {',
         ) &&
         chat.includes("suspend fun sendFile(") &&
         chat.includes("fun sendImage(") &&
@@ -7607,7 +7613,9 @@ const convBetween = (db, a, b) =>
     );
     const chat33 = kt("ChatScreen.kt");
     const sendText33 = chat33.slice(
-      chat33.indexOf('fun sendText(body: String, kind: String = "TEXT", once: Boolean = false) {'),
+      chat33.indexOf(
+        'fun sendText(body: String, kind: String = "TEXT", once: Boolean = false): Boolean {',
+      ),
       chat33.indexOf("fun loadScheduled() {"),
     );
     const flush33 = cache.slice(
@@ -9796,7 +9804,7 @@ const convBetween = (db, a, b) =>
         chat.includes(
           'revealChars = if (m.optString("id") == aiRevealId) aiRevealChars else null,',
         ) &&
-        chat.includes('full.take(revealChars) + " ▍"') &&
+        chat.includes('visibleFull.take(revealChars) + " ▍"') &&
         chat.includes('m.optString("kind") == "TEXT"') &&
         !chat.includes("Box(Modifier.fillMaxWidth().riseIn(born)) {") &&
         chat.includes("DeleteRowShell(") &&
@@ -10984,7 +10992,9 @@ const convBetween = (db, a, b) =>
         src.includes("const e2ee = !!row.body && row.body.startsWith(E2EE_PREFIX);") &&
         src.includes('const E2EE_PREVIEW = "New message";') &&
         // r67-2: the neutral label is reused by chat-list and fallback previews.
-        src.includes('return e2ee ? E2EE_PREVIEW : (row.body || "Message").slice(0, 120);') &&
+        src.includes(
+          'return e2ee ? E2EE_PREVIEW : stripBoldMarkers(row.body || "Message").slice(0, 120);',
+        ) &&
         src.includes("(c.other as Record<string, unknown>).e2eePublicKey ?? null,") &&
         // the worker never learns to open an envelope — no crypto in the file
         !src.includes("createCipheriv") &&
@@ -11028,8 +11038,8 @@ const convBetween = (db, a, b) =>
         e2.includes('KpSheet(onDismiss = onClose, title = "End-to-end encrypted")') &&
         chat.includes("val e2eePeerKey by remember {") &&
         chat.includes("fun sealOut(plain: String): String") &&
-        chat.includes('if (kind == "TEXT") sealOut(body) else body') &&
-        chat.includes('.put("body", sealOut(body))') &&
+        chat.includes('if (kind == "TEXT") sealOut(messageBody) else messageBody') &&
+        chat.includes('.put("body", sealOut(messageBody))') &&
         chat.includes(".map { unseal(it) }") &&
         chat.includes("val liveMsg = unseal(rawMsg)") &&
         chat.includes("pending.add(unseal(row))") &&

@@ -434,6 +434,66 @@ async function main() {
     );
     await call("POST", `/api/conversations/${convId}/mute`, { msg: false }, a.token);
 
+    /* -------------------------------- muted group mention ⇒ alert, even with a live room */
+
+    const mentionGroup = await call(
+      "POST",
+      "/api/conversations/group",
+      { title: "Mention notification", memberIds: [a.user.id] },
+      b.token,
+    );
+    const mentionGroupId = mentionGroup.json.conversation?.id;
+    await call("POST", `/api/conversations/${mentionGroupId}/mute`, { msg: true }, a.token);
+    const savedChatRoom = env.CHAT_ROOM;
+    env.CHAT_ROOM = {
+      idFromName: (name) => name,
+      get: () => ({
+        fetch: async () =>
+          new Response(JSON.stringify({ sent: 1 }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      }),
+    };
+    captured.length = 0;
+    await call(
+      "POST",
+      `/api/conversations/${mentionGroupId}/messages`,
+      { kind: "TEXT", body: `Hello @${a.user.username}` },
+      b.token,
+    );
+    const mentionKnocks = captured.filter((entry) => entry.which === 10);
+    const mentionText =
+      mentionKnocks.length === 1 ? await decryptWebPush(mentionKnocks[0].body, subDelivery) : "";
+    const mentionStored = db._db
+      .prepare("SELECT meta_json FROM messages WHERE conv_id = ? ORDER BY rowid DESC LIMIT 1")
+      .all(mentionGroupId)[0]?.meta_json;
+    check(
+      "a muted group mention still gets a generic Web Push even when its room socket is live",
+      mentionText === '{"t":"kp.msg"}' &&
+        JSON.parse(mentionStored || "{}").mentions?.includes(a.user.id),
+      JSON.stringify({ mentionText, meta: mentionStored }),
+    );
+
+    captured.length = 0;
+    await call(
+      "POST",
+      `/api/conversations/${mentionGroupId}/messages`,
+      { kind: "TEXT", body: `Link https://example.test/@${a.user.username}` },
+      b.token,
+    );
+    const urlMentionPush = captured.filter((entry) => entry.which === 10);
+    const urlMentionStored = db._db
+      .prepare("SELECT meta_json FROM messages WHERE conv_id = ? ORDER BY rowid DESC LIMIT 1")
+      .all(mentionGroupId)[0]?.meta_json;
+    env.CHAT_ROOM = savedChatRoom;
+    check(
+      "a username-looking URL path is not treated as a muted group mention",
+      urlMentionPush.length === 0 &&
+        !JSON.parse(urlMentionStored || "{}").mentions?.includes(a.user.id),
+      JSON.stringify({ pushes: urlMentionPush.length, meta: urlMentionStored }),
+    );
+
     /* ------------------------------------------------ hidden ⇒ no knock at all */
 
     await call("POST", `/api/conversations/${convId}/hide`, { hidden: true }, a.token);

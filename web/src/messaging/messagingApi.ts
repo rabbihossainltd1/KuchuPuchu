@@ -94,6 +94,14 @@ async function postJson(api: ApiClient, path: string, body: Record<string, unkno
   });
 }
 
+async function putJson(api: ApiClient, path: string, body: Record<string, unknown>) {
+  return api.request<unknown>(path, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 export type SearchMessageRow = MessageRow & {
   readonly convoId: string;
   readonly convTitle: string;
@@ -120,6 +128,31 @@ export const messagingApi = {
     signal?: AbortSignal,
   ): Promise<ConversationRow | null> {
     const payload = await api.request<unknown>(conversationPath(conversationId), { signal });
+    return parseConversationDetail(payload);
+  },
+
+  /** Resolve a visible username using the Worker’s privacy/block-aware lookup. */
+  async getUserByUsername(api: ApiClient, username: string): Promise<ConversationPeer | null> {
+    const normalized = username.trim().replace(/^@/, "").toLowerCase();
+    if (!/^[a-z0-9_]{3,30}$/.test(normalized)) return null;
+    const payload = await api.request<unknown>(
+      `/api/users/username/${encodeURIComponent(normalized)}`,
+    );
+    return parsePeer((payload as Record<string, unknown> | null)?.user);
+  },
+
+  /** Shared alias for one conversation; an empty value clears the alias. */
+  async setNickname(
+    api: ApiClient,
+    conversationId: string,
+    targetUserId: string,
+    nickname: string,
+  ): Promise<ConversationRow | null> {
+    const path = conversationPath(conversationId, `/nicknames/${encodeURIComponent(targetUserId)}`);
+    const value = nickname.trim().slice(0, 40);
+    const payload = value
+      ? await putJson(api, path, { nickname: value })
+      : await api.request<unknown>(path, { method: "DELETE" });
     return parseConversationDetail(payload);
   },
 
@@ -256,6 +289,26 @@ export const messagingApi = {
       headers: { "content-type": "application/json" },
       body: "{}",
     });
+  },
+
+  /** Remove a started vanish message once its shared server deadline passes. */
+  async expireVanish(
+    api: ApiClient,
+    messageId: string,
+  ): Promise<{
+    expired: boolean;
+    expiresAt: string;
+  }> {
+    const response = await postJson(
+      api,
+      `/api/messages/${encodeURIComponent(messageId)}/expire`,
+      {},
+    );
+    const record = (response ?? {}) as Record<string, unknown>;
+    return {
+      expired: record.expired === true,
+      expiresAt: typeof record.expiresAt === "string" ? record.expiresAt : "",
+    };
   },
 
   async publishPublicKey(api: ApiClient, e2eePublicKey: string): Promise<void> {

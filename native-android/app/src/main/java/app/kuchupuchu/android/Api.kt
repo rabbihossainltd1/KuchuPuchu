@@ -128,6 +128,12 @@ object Api {
         return data
     }
 
+    fun put(path: String, body: JSONObject): JSONObject {
+        val data = request(path, "PUT", body)
+        bustFor(path)
+        return data
+    }
+
     // r68-7: DELETE carries a body when the caller has something to say about
     // the SCOPE of the delete (the chat-delete popup's checkbox). Server-side
     // routes that never read a body are unaffected.

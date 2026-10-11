@@ -24,6 +24,8 @@ export type ConversationPeer = {
   readonly id: string;
   readonly displayName: string;
   readonly username: string;
+  /** Optional alias shared only within the conversation that supplied this peer. */
+  readonly nickname?: string;
   readonly e2eePublicKey: string;
   /**
    * Stable per-avatar token (`id@vN`) from the worker's user shape. Null on
@@ -328,6 +330,7 @@ export function createLocalEcho(input: {
   clientId: string;
   senderId: string;
   plaintext: string;
+  meta?: Readonly<Record<string, unknown>>;
   replyTo?: ReplyTarget | null;
   createdAt?: string;
 }): MessageRow {
@@ -347,7 +350,7 @@ export function createLocalEcho(input: {
     fileSize: 0,
     mediaWidth: 0,
     mediaHeight: 0,
-    meta: {},
+    meta: input.meta ?? {},
     reactions: {},
     createdAt: input.createdAt ?? new Date().toISOString(),
     rowid: 0,
@@ -417,6 +420,7 @@ export function parsePeer(value: unknown): ConversationPeer | null {
     id,
     displayName: text(value.displayName, 120),
     username: text(value.username, 64),
+    ...(text(value.nickname, 40) ? { nickname: text(value.nickname, 40) } : {}),
     e2eePublicKey: text(value.e2eePublicKey, 4096),
     avatarRef: text(value.avatarRef, 128),
     online: booleanish(value.online),

@@ -84,6 +84,9 @@ import {
 } from "./attachments";
 import { ChatMenu } from "./ChatMenu";
 import { InfoPane } from "./InfoPane";
+import { messagingApi } from "./messagingApi";
+import { commandDraft, commandSuggestions } from "./messageCommands";
+import { parseMessageText, stripBoldMarkers } from "./messageText";
 import { ConversationAvatar } from "./Avatar";
 import {
   takePendingMessageJump,
@@ -246,6 +249,51 @@ export function ChatPane({
 
   const conversation = controller.selected;
   const isEditing = editingId !== "";
+  const [vanishNow, setVanishNow] = useState(Date.now());
+  const hasVanishCountdown = controller.messages.some(
+    (message) =>
+      message.meta.vanish === true &&
+      typeof message.meta.vanishExpiresAt === "string" &&
+      Number.isFinite(Date.parse(message.meta.vanishExpiresAt)),
+  );
+
+  useEffect(() => {
+    if (!hasVanishCountdown) return;
+    setVanishNow(Date.now());
+    const timer = window.setInterval(() => setVanishNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [hasVanishCountdown, selectedId]);
+
+  const openMentionChat = useCallback(
+    async (username: string) => {
+      if (!api) return;
+      try {
+        const peer = await messagingApi.getUserByUsername(api, username);
+        if (!peer) {
+          controller.announce(`@${username} could not be found.`);
+          return;
+        }
+        if (peer.id === meId) {
+          controller.announce("That is your username.");
+          return;
+        }
+        const target = await messagingApi.createConversation(api, peer.id);
+        if (!target) {
+          controller.announce("The chat could not be opened.");
+          return;
+        }
+        void controller.refreshList();
+        navigate({ kind: "conversation", conversationId: target.id });
+      } catch (error) {
+        controller.announce(
+          error instanceof Error && error.message
+            ? error.message
+            : "That username could not be opened. Check your connection and try again.",
+        );
+      }
+    },
+    [api, controller, meId, navigate],
+  );
 
   // Slice I chat themes: the palette rides on CSS custom properties scoped to
   // this pane, so two open conversations can never leak colours into each
@@ -964,6 +1012,14 @@ export function ChatPane({
                   message.fileType,
                   (message.meta ?? {}) as Record<string, unknown>,
                 );
+                const textParts = parseMessageText(body, !conversation.isGroup && !isPlaceholder);
+                const vanishDeadline =
+                  message.meta.vanish === true && typeof message.meta.vanishExpiresAt === "string"
+                    ? Date.parse(message.meta.vanishExpiresAt)
+                    : Number.NaN;
+                const vanishSeconds = Number.isFinite(vanishDeadline)
+                  ? Math.max(0, Math.ceil((vanishDeadline - vanishNow) / 1_000))
+                  : -1;
 
                 return (
                   <li
@@ -997,9 +1053,9 @@ export function ChatPane({
                     <article
                       className={`bubble${own ? " bubble--own" : ""}${
                         message.localState === "failed" ? " bubble--failed" : ""
-                      }${message.kind === "STICKER" ? " bubble--sticker" : ""}${
-                        isAttachmentKind(message.kind) ? " bubble--attachment" : ""
-                      }`}
+                      }${message.meta.magic === true ? " bubble--magic" : ""}${
+                        message.kind === "STICKER" ? " bubble--sticker" : ""
+                      }${isAttachmentKind(message.kind) ? " bubble--attachment" : ""}`}
                       aria-label={`${senderLabel(message, conversation, meId)} at ${clockTime(
                         message.createdAt,
                       )}`}
@@ -1022,7 +1078,13 @@ export function ChatPane({
                           <span className="bubble__reply-body">
                             {message.replyTo.body.startsWith("KP1.")
                               ? LOCKED_BODY_PLACEHOLDER
-                              : message.replyTo.body}
+                              : parseMessageText(message.replyTo.body).map((part, index) =>
+                                  part.bold ? (
+                                    <strong key={`reply-bold-${index}`}>{part.text}</strong>
+                                  ) : (
+                                    <span key={`reply-text-${index}`}>{part.text}</span>
+                                  ),
+                                )}
                           </span>
                         </blockquote>
                       )}
@@ -1052,7 +1114,22 @@ export function ChatPane({
                       ) : (
                         <p className="bubble__body">
                           {isPlaceholder && <Icon name="lock" size={13} className="bubble__lock" />}
-                          {body}
+                          {textParts.map((part, index) => {
+                            const visible = part.bold ? <strong>{part.text}</strong> : part.text;
+                            return part.mention ? (
+                              <button
+                                key={`${part.mention}-${index}`}
+                                type="button"
+                                className="message-mention"
+                                aria-label={`Open chat with @${part.mention}`}
+                                onClick={() => void openMentionChat(part.mention!)}
+                              >
+                                {visible}
+                              </button>
+                            ) : (
+                              <span key={`text-${index}`}>{visible}</span>
+                            );
+                          })}
                         </p>
                       )}
 
@@ -1070,6 +1147,15 @@ export function ChatPane({
                       )}
 
                       <footer className="bubble__meta">
+                        {vanishSeconds >= 0 && (
+                          <span
+                            className="bubble__vanish-timer"
+                            aria-label={`Vanishes in ${vanishSeconds} seconds`}
+                          >
+                            Vanishes in {Math.floor(vanishSeconds / 60)}:
+                            {String(vanishSeconds % 60).padStart(2, "0")}
+                          </span>
+                        )}
                         {message.edited && <span>Edited</span>}
                         {message.localState === "pending" && (
                           <span>
@@ -1126,7 +1212,7 @@ export function ChatPane({
                           </button>
                           <button
                             type="button"
-                            onClick={() => void copyText(body)}
+                            onClick={() => void copyText(stripBoldMarkers(body))}
                             disabled={isPlaceholder}
                             aria-label={`Copy message from ${senderLabel(
                               message,
@@ -1307,7 +1393,7 @@ export function ChatPane({
               type="button"
               className="text-button"
               onClick={() => {
-                void copyText(selection.copyText);
+                void copyText(stripBoldMarkers(selection.copyText));
                 clearSelection();
               }}
             >
@@ -1490,6 +1576,31 @@ export function ChatPane({
               ))}
             </ul>
           )}
+
+          {!isEditing &&
+          pending.length === 0 &&
+          !oneWay &&
+          !recorder.recording &&
+          commandSuggestions(controller.draft).length > 0 ? (
+            <div className="composer-command-suggestions" aria-label="Message commands">
+              {commandSuggestions(controller.draft).map((command) => (
+                <button
+                  key={command.name}
+                  type="button"
+                  className="composer-command-suggestion"
+                  aria-label={`Insert /${command.name}: ${command.hint}`}
+                  onClick={() => {
+                    controller.setDraft(commandDraft(command.name));
+                    controller.composerChanged();
+                    window.setTimeout(() => composerRef.current?.focus(), 0);
+                  }}
+                >
+                  <strong>/{command.name}</strong>
+                  <span>{command.hint}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
 
           {recorder.recording ? (
             <VoiceRecorderBar controller={recorder} onAnnounce={controller.announce} />

@@ -285,7 +285,7 @@ fun SearchScreen(nav: NavController) {
                                 Icon(Icons.Filled.Photo, "Photo", tint = ActionBlue, modifier = Modifier.size(28.dp))
                                 Spacer(Modifier.width(12.dp))
                                 Column {
-                                    Text(m.optString("body").ifBlank { "Photo" }, fontSize = 13.5.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(MessageMarkup.formatted(m.optString("body").ifBlank { "Photo" }), fontSize = 13.5.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     Text(
                                         (m.optString("convTitle").ifBlank { "Chat" }) + " · " + listStamp(m.optString("createdAt")),
                                         fontSize = 11.5.sp,
@@ -321,7 +321,7 @@ fun SearchScreen(nav: NavController) {
                             items(textMessages, key = { "t" + it.optString("id") }) { m ->
                                 ResultCard(onClick = { nav.navigate("chat/${m.optString("convoId")}") { popUpTo("main") } }) {
                                     Column {
-                                        Highlight(m.optString("body"), query)
+                                        Highlight(MessageMarkup.plain(m.optString("body")), query)
                                         Text(
                                             (m.optString("convTitle").ifBlank { "Chat" }) + " · " + listStamp(m.optString("createdAt")),
                                             fontSize = 11.5.sp,

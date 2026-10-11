@@ -27,6 +27,7 @@ import { RouteLink } from "../RouteLink";
 import { InfoPane } from "./InfoPane";
 import { ConversationAvatar } from "./Avatar";
 import { Icon } from "../icons";
+import { stripBoldMarkers } from "./messageText";
 
 export function searchSnippet(
   row: SearchMessageRow | { kind: string; body: string; fileName?: string },
@@ -34,7 +35,7 @@ export function searchSnippet(
   if (row.body.startsWith("KP1.")) return "Message";
   switch (row.kind) {
     case "TEXT":
-      return row.body;
+      return stripBoldMarkers(row.body);
     case "IMAGE":
       return "Photo";
     case "VIDEO":

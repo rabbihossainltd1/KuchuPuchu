@@ -458,7 +458,8 @@ class KpPushService : FirebaseMessagingService() {
         // the next list refresh — the flag the server saw was already stale).
         // r69: the MESSAGE half governs a message card — a chat muted for calls
         // only still notifies normally.
-        val muted = data["muted"] == "1" || ScreenStore.isMsgMuted(convoId)
+        val mentioned = data["mention"] == "1"
+        val muted = !mentioned && (data["muted"] == "1" || ScreenStore.isMsgMuted(convoId))
         // Owner round 31 (item 26): a HIDDEN chat is silent on this device —
         // no card or tone. A racing push still syncs the authoritative total
         // unread-message badge because the launcher count spans every chat.
