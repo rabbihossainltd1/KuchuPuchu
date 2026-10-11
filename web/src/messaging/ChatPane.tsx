@@ -39,6 +39,7 @@ import {
 } from "react";
 import { Icon } from "../icons";
 import { messagingApi } from "./messagingApi";
+import { AiHistoryPane } from "./AiHistoryPane";
 import { MessageInfoSheet, ReactionPickerSheet } from "./MessageSheets";
 import { scheduleStamp, type ScheduledRow } from "./schedule";
 import { RouteLink } from "../RouteLink";
@@ -240,6 +241,32 @@ export function ChatPane({
   const [menuOpen, setMenuOpen] = useState(false);
   const [infoFor, setInfoFor] = useState<MessageRow | null>(null);
   const [reactFor, setReactFor] = useState("");
+  const [aiIncognito, setAiIncognito] = useState(false);
+  const [aiHistoryOpen, setAiHistoryOpen] = useState(false);
+
+  useEffect(() => {
+    setAiIncognito(false);
+    setAiHistoryOpen(false);
+  }, [selectedId]);
+
+  const toggleIncognito = () => {
+    if (!api || !selectedId) return;
+    const id = selectedId;
+    void (async () => {
+      try {
+        if (!aiIncognito) {
+          setAiIncognito(true);
+          await messagingApi.resetAiConversation(api, id);
+        } else {
+          await messagingApi.restoreLatestAi(api, id);
+          setAiIncognito(false);
+        }
+        await controller.selectConversation(id);
+      } catch {
+        controller.announce("That did not work. Check your connection and try again.");
+      }
+    })();
+  };
   const [menuView, setMenuView] = useState<"root" | "sendlater" | "scheduled">("root");
   const [scheduledRows, setScheduledRows] = useState<readonly ScheduledRow[]>([]);
 
@@ -968,6 +995,9 @@ export function ChatPane({
           onJumpToMessage={jumpToMessage}
           scheduledCount={scheduledRows.length}
           initialView={menuView}
+          aiIncognito={aiIncognito}
+          onToggleIncognito={toggleIncognito}
+          onOpenHistory={() => setAiHistoryOpen(true)}
         />
       ) : null}
 
@@ -2051,6 +2081,10 @@ export function ChatPane({
           otherReadAt={controller.otherReadAt}
           onClose={() => setInfoFor(null)}
         />
+      )}
+
+      {aiHistoryOpen && (
+        <AiHistoryPane api={api} meId={meId} onClose={() => setAiHistoryOpen(false)} />
       )}
 
       {reactFor && (
