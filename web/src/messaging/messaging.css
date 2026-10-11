@@ -296,6 +296,7 @@
 
 .bubble-row {
   position: relative;
+  padding-top: 24px;
   display: flex;
   list-style: none;
 }
@@ -536,19 +537,23 @@
 /* The hover rows ride the row's opposite top corners (reactions left,
    actions right), clear of the bubble body so they never sit on top of the
    text or the play button. */
+/* Slice Z: the hover rows live INSIDE the row's own top padding (the row
+   yields 24px), so the reveal zone never leaves the row's hover surface. */
 .message-actions {
-  top: -16px;
+  top: 0;
   right: 6px;
   z-index: 3;
 }
 
 .reaction-bar {
-  top: -16px;
+  top: 0;
   left: 6px;
 }
 
 .bubble:hover .message-actions,
 .bubble:hover .reaction-bar,
+.bubble-row:hover .message-actions,
+.bubble-row:hover .reaction-bar,
 .bubble:focus-within .message-actions,
 .bubble:focus-within .reaction-bar {
   opacity: 1;
@@ -3775,4 +3780,52 @@ button.attachment__expand {
 }
 .list-footer__live {
   display: contents;
+}
+
+/* Slice Z — full reaction picker + message info sheet. */
+.reaction-bar .is-on {
+  background: color-mix(in srgb, var(--kp-blue) 22%, transparent);
+  border-radius: 50%;
+}
+.reaction-bar__more {
+  flex: none;
+  width: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--kp-blue) 14%, transparent);
+  color: var(--kp-blue);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.react-picker__row {
+  display: flex;
+  justify-content: space-evenly;
+  padding: 2px 4px;
+}
+.react-picker__row button {
+  border: 0;
+  background: transparent;
+  border-radius: 50%;
+  padding: 8px;
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.react-picker__row button:hover {
+  background: var(--kp-card-raised);
+}
+.info-sheet__row {
+  display: flex;
+  padding: 9px 16px;
+  font-size: 0.84rem;
+}
+.info-sheet__row span:first-child {
+  width: 96px;
+  flex: none;
+  color: var(--kp-muted);
+}
+.info-sheet__row span:last-child {
+  color: var(--kp-ink);
+  font-weight: 500;
 }
