@@ -1147,3 +1147,12 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - FLAKY-LESSON: strict-mode locator throws IMMEDIATELY on >1 match mid-poll (regex matched sheet rows while POST in flight) — assert sheet toBeHidden first + class locator for chip; silent python-replace failures after prettier reformat (grep-verify!).
 - TESTS scheduled.spec.ts 5; CI green. MERGED PR #116; docs PR pending; BUILD_ID to confirm.
 - STILL ABSENT: message info sheet, full reaction picker, AI chat, archive/pin.
+
+## Web slice Z — message info + full reaction picker — 2026-10-11 (feat/web-z-message-sheets)
+- MessageSheets.tsx: ReactionPickerSheet ("React", 40 emojis 5/row — extracted programmatically from ChatScreen.kt because hand-typed emojis drop glyphs; store as \u{...} escapes) + MessageInfoSheet (Sent/Delivered|Seen "Not yet"/Received; infoStamp "11 Oct, 11:33 AM").
+- ChatPane: Info button in message-actions; reaction bar now on OWN messages too + is-on highlight (message.reactions[meId]) + reaction-bar__more "+" → picker; reactFor/infoFor state; both sheets Escape-close.
+- HOVER-REVEAL GEOMETRY FIX: overlay rows moved top:0 inside .bubble-row padding-top:24px (old top:-16 overhang escaped hover surface → Playwright li-intercepts); added .bubble-row:hover reveal rules.
+- FLAKY/STRICT LESSONS: strict-mode locator throws instantly on >1 match (use .first() or class locators); silent python-replace failures when file formatting differs — always re-read target lines.
+- themeMatrix: 2 goldens shifted (row padding) — regen targeted only.
+- TESTS message-sheets.spec.ts 4; CI green. MERGED PR #118; docs PR pending; BUILD_ID to confirm.
+- STILL ABSENT: AI chat, archive/pin.
