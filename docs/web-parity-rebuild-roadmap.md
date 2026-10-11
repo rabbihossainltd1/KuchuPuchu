@@ -462,3 +462,27 @@ The phone's `ScheduleSheet` / `ScheduledSheet` / `DisappearDialog`, mirrored:
   is hovered. Sheets close on Escape.
 - Tests: `message-sheets.spec.ts` (4, axe included); themeMatrix
   goldens follow the padding shift.
+
+## Slice AI — AI chat parity: menu, History pane, New chat, incognito ✅
+
+- When the open chat's peer is `kp_ai_bot`, the ⋮ sheet becomes the
+  phone's AI menu, in the phone's order: Scheduled (when parked sends
+  exist), **History**, **New chat**, Mute…, Chat theme,
+  **Incognito mode / Close incognito mode**, Search in chat — no
+  solo-chat rows leak in.
+- **History** opens `AiHistoryPane.tsx`, the web port of
+  `AIHistoryScreen.kt`: "AI History / Your past KuchuPuchu AI sessions"
+  lists the archived runs (clock chip, "11 Oct, 12:50 PM", "N messages",
+  "View") over `GET /api/ai/sessions`; a row opens
+  "Session / Read-only archive" over `GET /api/ai/sessions/:id` with the
+  phone's capped bubbles (mine blue right, AI card left).
+- **New chat** posts `POST /api/conversations/:id/reset` (the phone's
+  wipe) and reloads the transcript; **Incognito mode** does the same
+  wipe locally, **Close incognito mode** posts
+  `…/restore-latest` to bring the last archived run back — exactly the
+  phone's round-7/11 flow.
+- The AI reply flow already renders through the normal message frames
+  (the worker inserts the typing row and replies server-side); no web
+  change needed there.
+- Tests: `ai.spec.ts` (5, axe included); helpers grow the AI chat row
+  and the reset / restore-latest / sessions routes.
