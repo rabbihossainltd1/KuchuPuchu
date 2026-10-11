@@ -1,4 +1,12 @@
-export const SECTIONS = ["chats", "statuses", "calls", "search", "account"] as const;
+export const SECTIONS = [
+  "chats",
+  "statuses",
+  "calls",
+  "search",
+  "contacts",
+  "newcontact",
+  "account",
+] as const;
 
 export type SectionId = (typeof SECTIONS)[number];
 

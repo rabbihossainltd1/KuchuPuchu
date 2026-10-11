@@ -16,6 +16,9 @@
  *   DELETE /api/messages/:id            (permanent delete)
  *   GET    /api/e2ee/backup  ·  PUT /api/e2ee/backup
  *   PATCH  /api/me
+ *   POST   /api/contacts/match   (which E.164 numbers are KuchuPuchu users)
+ *   DELETE /api/conversations/:id · POST /api/conversations/:id/hide
+ *   POST   /api/conversations       ({userId} — idempotent 1:1 open/create)
  */
 
 import type { ApiClient } from "../auth/authApi";
@@ -30,6 +33,7 @@ import {
   type MessageRow,
   type MessagesPage,
 } from "./protocol";
+import { parseMatchUsers, type ContactMatchUser } from "./contacts";
 import { parseSharedMedia, type SharedMedia } from "./sharedMedia";
 
 export type MessagesQuery = {
@@ -143,6 +147,25 @@ export const messagingApi = {
       ...(options?.signal ? { signal: options.signal } : {}),
     });
     return parseConversationDetail(payload);
+  },
+
+  /**
+   * Phone-book match, the phone's `POST /api/contacts/match`: the worker
+   * tells us which of the given E.164 numbers are KuchuPuchu accounts and
+   * forgets them immediately — nothing is stored server-side.
+   */
+  async matchContacts(
+    api: ApiClient,
+    phones: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<readonly ContactMatchUser[]> {
+    const payload = await api.request<unknown>("/api/contacts/match", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ phones: [...phones] }),
+      ...(signal ? { signal } : {}),
+    });
+    return parseMatchUsers(payload);
   },
 
   async getMessages(

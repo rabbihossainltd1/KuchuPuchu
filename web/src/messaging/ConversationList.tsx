@@ -96,6 +96,28 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
                   role="menuitem"
                   onClick={() => {
                     setMenuOpen(false);
+                    navigate({ kind: "section", section: "newcontact" });
+                  }}
+                >
+                  <Icon name="personAdd" size={18} />
+                  New contact
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    navigate({ kind: "section", section: "contacts" });
+                  }}
+                >
+                  <Icon name="contactsBook" size={18} />
+                  All contacts
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
                     setCreateOpen(true);
                   }}
                 >
