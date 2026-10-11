@@ -374,3 +374,27 @@ stubbed):
 - Tests: `group-create.spec.ts` (4) — payload parity against the phone's
   exact body, directory pick + no-results, refusal surfacing, and an
   axe-clean sheet.
+
+## Slice W — Hidden chats: secret key hide, search reveal, real delete ✅
+
+The phone's round-33 hidden-chat model, end to end:
+
+- **Hide** (⋮ sheet → "Hide chat"): one field ("Secret key", 64 chars) and a
+  "Hide" button, exactly the phone's `HideKeySheet`. The key is hashed on the
+  device (`hiddenKeyHash()` = SHA-256 hex of the trimmed key, the phone's
+  `ScreenStore.hiddenKeyHash`) and only the hash travels —
+  `POST /api/conversations/:id/hide {hidden:1, key}`.
+- **Reveal**: Search hashes whatever is typed — one character included,
+  before the two-character server search — and any hidden row whose stored
+  hash matches renders under a "Hidden" section with the phone's "Unhide"
+  action (`{hidden:0}`); every other hidden chat stays concealed across the
+  People/Chats/Messages groups, the same `concealed()` rule as the phone.
+- **Parser split**: `parseConversationList` keeps hidden rows; the new
+  `visibleConversations()` is what the list, unread counts and notifications
+  see (case 56 re-pinned). The controller exposes `hiddenConversations` so
+  Search can reveal without re-fetching.
+- **Delete is delete now**: the 1:1 "Delete chat" entry is the phone's dialog
+  ("Permanently delete the chat with X?" + "Also delete for X" checkbox)
+  over `DELETE /api/conversations/:id`, instead of the old silent hide.
+- Tests: `hidden.spec.ts` (4) — hash-only payload, reveal + unhide round
+  trip, the forEveryone contract, axe-clean sheet.

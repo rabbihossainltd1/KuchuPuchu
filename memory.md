@@ -1116,3 +1116,13 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - a11y gotchas fixed: MemberRow aria-label Add/Deselect (chip Remove stays unique); selected-row muted @username failed 4.5:1 on the blue tint → .on preview uses --kp-ink.
 - CI: full npm run ci green. MERGED as PR #109; BUILD_ID rotation to confirm post-deploy.
 - STILL ABSENT: hidden-chat secret-key reveal, contacts (New contact/All contacts), message info sheet, scheduled + disappearing UI, full reaction picker, AI chat, archive/pin/hide.
+
+## Web slice W — hidden chats secret key — 2026-10-11 (branch feat/web-w-hidden)
+- ALSO FIRST (owner screenshot): chat list rows floated vertically centered — .list-content centered children for the empty state. Fixed: rows top-aligned full width; empty states margin:auto. PR #111; themeMatrix goldens regenerated.
+- HIDE: ⋮ → "Hide chat" sheet (phone HideKeySheet copy verbatim); hiddenKeyHash() in e2ee.ts = SHA-256 hex trimmed (== phone ScreenStore.hiddenKeyHash); POST /hide {hidden:1,key:hash}; announce "Chat hidden".
+- REVEAL: Search hashes ANY typed length before the 2-char server search; hiddenConversations (new controller field; parseConversationList now keeps hidden rows, visibleConversations() filters list/counts — case 56 re-pinned) matched by hiddenKey; "Hidden" section + Unhide ({hidden:0}, "Chat unhidden"); concealed() hides hidden people/chats/messages from other groups.
+- DELETE: 1:1 "Delete chat" now phone dialog — "Permanently delete the chat with X?" + "Also delete for X" checkbox → DELETE /api/conversations/:id {forEveryone}; was silently hiding before (contract mismatch fixed).
+- ChatMenu role menu→dialog (axe aria-required-children).
+- Mock helpers got worker.hideOverrides merged into the list GET (route.fetch() does NOT continue the route chain — learned the hard way; empty body from vite preview 404).
+- TESTS hidden.spec.ts 4; CI 84/84 cases + suites green. MERGED PR #112; docs PR pending; BUILD_ID to confirm.
+- STILL ABSENT: contacts (New contact/All contacts), message info sheet, scheduled + disappearing UI, full reaction picker, AI chat, archive/pin.
