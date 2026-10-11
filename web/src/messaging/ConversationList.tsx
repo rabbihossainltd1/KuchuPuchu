@@ -250,7 +250,7 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
             >
               <Icon name="plus" size={21} />
             </button>
-            {/* The phone's home ⋮ menu; only the entries the web has are offered. */}
+            {/* The phone's HomeMenuSheet rows, in the phone's order. */}
             <div className="list-header__menu">
               <button
                 type="button"
@@ -272,6 +272,17 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
                     onClick={() => setMenuOpen(false)}
                   />
                   <div className="list-menu" role="menu" aria-label="Chat list menu">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        navigate({ kind: "section", section: "account" });
+                      }}
+                    >
+                      <Icon name="profile" size={18} />
+                      My Profile
+                    </button>
                     <button
                       type="button"
                       role="menuitem"
@@ -304,6 +315,17 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
                     >
                       <Icon name="group" size={18} />
                       New group
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        navigate({ kind: "section", section: "account" });
+                      }}
+                    >
+                      <Icon name="settings" size={18} />
+                      Settings
                     </button>
                   </div>
                 </>
