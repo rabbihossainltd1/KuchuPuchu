@@ -324,6 +324,32 @@ export const messagingApi = {
     );
   },
 
+  /** Directory search the phone's group-creation screen uses. */
+  async findPeople(
+    api: ApiClient,
+    query: string,
+    signal?: AbortSignal,
+  ): Promise<readonly ConversationPeer[]> {
+    const payload = await api.request<unknown>(`/api/users?q=${encodeURIComponent(query)}`, {
+      signal,
+    });
+    const raw = (payload ?? {}) as { users?: unknown };
+    return Array.isArray(raw.users)
+      ? raw.users.map(parsePeer).filter((peer): peer is ConversationPeer => peer !== null)
+      : [];
+  },
+
+  /** POST /api/conversations/group — the phone's CreateGroupScreen endpoint. */
+  async createGroup(api: ApiClient, title: string, memberIds: readonly string[]): Promise<string> {
+    const payload = (await postJson(api, "/api/conversations/group", {
+      title,
+      memberIds: [...memberIds],
+    })) as { conversation?: { id?: string } } | null;
+    const id = payload?.conversation?.id;
+    if (!id) throw new Error("Could not create the group. Try again.");
+    return id;
+  },
+
   async leaveGroup(api: ApiClient, conversationId: string, userId: string): Promise<void> {
     await api.request<unknown>(
       `/api/conversations/${encodeURIComponent(conversationId)}/members/${encodeURIComponent(userId)}`,

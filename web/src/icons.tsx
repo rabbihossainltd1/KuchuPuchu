@@ -42,6 +42,7 @@ export type IconName =
   | "speaker"
   | "attach"
   | "camera"
+  | "group"
   | "mood"
   | "tickSent"
   | "tickAll"
@@ -189,6 +190,13 @@ const shapes: Record<IconName, ReactNode> = {
     <>
       <path d="M4 7.5h3l1.5-2.2h7L17 7.5h3v11H4z" />
       <circle cx="12" cy="12.6" r="3.1" />
+    </>
+  ),
+  group: (
+    <>
+      <circle cx="9" cy="8.5" r="3" />
+      <path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5" />
+      <path d="M15.5 6.2a2.6 2.6 0 1 1 0 4.9M17 14.4c2 .5 3.2 2 3.6 4.1" />
     </>
   ),
   photo: (
