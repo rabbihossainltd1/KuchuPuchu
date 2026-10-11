@@ -24,6 +24,7 @@ import {
   type ConversationRow,
 } from "./protocol";
 import { RouteLink } from "../RouteLink";
+import { InfoPane } from "./InfoPane";
 import { ConversationAvatar } from "./Avatar";
 import { Icon } from "../icons";
 
@@ -52,11 +53,13 @@ function PersonRow({
   peer,
   navigate,
   onStatus,
+  onOpenProfile,
 }: {
   api: ApiClient | null;
   peer: ConversationPeer;
   navigate: Navigate;
   onStatus: (message: string) => void;
+  onOpenProfile: (peer: ConversationPeer) => void;
 }) {
   const url = useAvatar(api, peer.avatarRef);
   const [busy, setBusy] = useState(false);
@@ -81,17 +84,24 @@ function PersonRow({
 
   return (
     <li className="search-row">
-      <span className="conversation-row__avatar search-row__avatar" aria-hidden="true">
-        {url ? (
-          <img className="avatar-img" src={url} alt="" draggable={false} />
-        ) : (
-          (peer.displayName || "?").charAt(0).toUpperCase()
-        )}
-      </span>
-      <span className="conversation-row__body">
-        <span className="conversation-row__name">{peer.displayName}</span>
-        <span className="conversation-row__preview">@{peer.username}</span>
-      </span>
+      <button
+        type="button"
+        className="search-row__profile"
+        onClick={() => onOpenProfile(peer)}
+        aria-label={`Open ${peer.displayName} profile`}
+      >
+        <span className="conversation-row__avatar search-row__avatar" aria-hidden="true">
+          {url ? (
+            <img className="avatar-img" src={url} alt="" draggable={false} />
+          ) : (
+            (peer.displayName || "?").charAt(0).toUpperCase()
+          )}
+        </span>
+        <span className="conversation-row__body">
+          <span className="conversation-row__name">{peer.displayName}</span>
+          <span className="conversation-row__preview">@{peer.username}</span>
+        </span>
+      </button>
       <button
         type="button"
         className="text-button search-row__open"
@@ -112,6 +122,7 @@ export function SearchPane({ api, navigate }: { api: ApiClient | null; navigate:
   const [messages, setMessages] = useState<readonly SearchMessageRow[]>([]);
   const [status, setStatus] = useState("");
   const [searching, setSearching] = useState(false);
+  const [profilePeer, setProfilePeer] = useState<ConversationPeer | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -290,6 +301,7 @@ export function SearchPane({ api, navigate }: { api: ApiClient | null; navigate:
                       peer={peer}
                       navigate={navigate}
                       onStatus={setStatus}
+                      onOpenProfile={setProfilePeer}
                     />
                   ))}
                 </ul>
@@ -298,6 +310,18 @@ export function SearchPane({ api, navigate }: { api: ApiClient | null; navigate:
           </>
         )}
       </div>
+
+      {profilePeer ? (
+        <InfoPane
+          api={api}
+          conversation={null}
+          peer={profilePeer}
+          meId=""
+          controller={null}
+          onClose={() => setProfilePeer(null)}
+          navigate={navigate}
+        />
+      ) : null}
     </section>
   );
 }

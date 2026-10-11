@@ -311,6 +311,19 @@ export const messagingApi = {
     });
   },
 
+  async addMember(api: ApiClient, conversationId: string, userId: string): Promise<void> {
+    await postJson(api, `/api/conversations/${encodeURIComponent(conversationId)}/members`, {
+      userId,
+    });
+  },
+
+  async removeMember(api: ApiClient, conversationId: string, userId: string): Promise<void> {
+    await api.request<unknown>(
+      `/api/conversations/${encodeURIComponent(conversationId)}/members/${encodeURIComponent(userId)}`,
+      { method: "DELETE" },
+    );
+  },
+
   async leaveGroup(api: ApiClient, conversationId: string, userId: string): Promise<void> {
     await api.request<unknown>(
       `/api/conversations/${encodeURIComponent(conversationId)}/members/${encodeURIComponent(userId)}`,

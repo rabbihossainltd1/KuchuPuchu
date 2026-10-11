@@ -305,3 +305,24 @@ The parity plan's §3.2 search rows, closed against the existing Worker routes
 - Contract pins refreshed for the parallel session's `ee3534a` Android
   refactor (call recovery via `beginReconnecting()`, relay-only ICE rescue,
   LazyRow nav reorder): cases 62 + 77 now pin the new source, same intent.
+
+## Slice T — Profile & group info drawer ✅
+
+The phone's profile / group-info screens as a right-hand drawer
+(`web/src/messaging/InfoPane.tsx`), opened from the chat header's identity
+(a real button now) and from search person rows:
+
+- **Person card**: picture, name + verified tag, `@username`, the phone's
+  presence line, about; *Message* (opens or creates the 1:1 as a request),
+  *Mute messages*, two-step *Block/Unblock* — the same Worker routes the ⋮
+  sheet uses.
+- **Group card**: title, member count, private-group state; member list with
+  owner/admin labels; owner-only *Add member* (directory search reusing
+  `/api/search`) and two-step *Remove*; two-step *Leave Group* for everyone.
+  Every refusal (private group, not owner) surfaces the Worker's message.
+- Protocol now parses the detail payload's `members` (user + role) and the
+  user shape's `about` / `verified`; `peerPresence()` extracted so the drawer
+  and the header subtitle share one phone-parity line.
+- Tests: `web/e2e-messaging/info.spec.ts` (4 tests); the mock group's
+  ownership is an option (`ownGroup`) so the non-owner theme lock keeps its
+  suite.
