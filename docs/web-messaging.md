@@ -29,7 +29,7 @@ VITE_KP_WEB_ACCOUNT_INTEGRATION=true VITE_KP_WEB_MESSAGING=true npm run build:we
 | `web/src/messaging/attachments.ts` | Pick → prepare → send pipeline: classify, probe, shrink, rejections, `PendingAttachment` reducers |
 | `web/src/messaging/filesApi.ts` | `POST /api/files`, the multipart lifecycle, and `fetchFileBlob` |
 | `web/src/messaging/mediaUrl.ts` | Resolves a file key to an object URL with a bounded, ref-counted cache |
-| `web/src/messaging/AttachMenu.tsx`, `AttachmentRow.tsx` | The attach sheet and the transcript/composer attachment surfaces |
+| `AttachmentRow.tsx` | The transcript/composer attachment surfaces; the paperclip opens the device picker directly |
 | `web/src/media/uploadContract.ts` | Every ceiling, plan, meta and key rule — DOM-free, so Node can test it |
 | `web/src/media/imageEdit.ts`, `renderEdits.ts` | Edit model (crop/rotate/draw/text/sticker) and the canvas bake |
 | `web/src/media/stickerPacks.ts` | **GENERATED** from the Kotlin catalog; never hand-edit |
@@ -134,7 +134,7 @@ Three rules, all of them easy to get wrong, all pinned against source:
 2. **A spent row advertises nothing.** Once `viewedAt` is set the Worker stops sending `mediaUrl`, `fileKey` and `hasImage`, and the client says "already opened, the bytes are gone" instead of showing a broken frame.
 3. **The report is de-duplicated and its failures are classified.** `createViewOnceSpender` mirrors Android's `object ViewOnce`: one report per id per page, `404`/`410` treated as terminal ("already gone"), any other failure releasing the id so the next viewing reports again.
 
-A view-once **clip or voice note fetches no bytes at all** until it is opened ("a view-once clip the recipient has not opened has no bytes to show" — a hardcoded thumbnail would be a fake). A view-once **TEXT** row arrives veiled, one tap reveals it, a five-second countdown is painted for the reader (`ONCE_TEXT_REVEAL_MS`, measured against the wall clock so a throttled background tab cannot extend it), and then the opening is reported. Sending side: the attach sheet offers "View once" for photos and clips, refuses to combine it with "send as a document" (the Worker drops the flag on a document), never attaches an album id, and the composer chip says "view once" out loud before the send.
+A view-once **clip or voice note fetches no bytes at all** until it is opened ("a view-once clip the recipient has not opened has no bytes to show" — a hardcoded thumbnail would be a fake). A view-once **TEXT** row arrives veiled, one tap reveals it, a five-second countdown is painted for the reader (`ONCE_TEXT_REVEAL_MS`, measured against the wall clock so a throttled background tab cannot extend it), and then the opening is reported. Sending side: the composer strip offers "View once" for photos and clips once media is queued, refuses to combine it with "send as a document" (the Worker drops the flag on a document), never attaches an album id, and the composer chip says "view once" out loud before the send. The paperclip hands straight to the device picker (one hidden multi-file input for media and documents, a separate `capture=environment` input as the camera substitute); files dragged onto the conversation join the same queue, and the limits plus the phone-only surfaces (location, contact, poll, event, AI images) stay disclosed in a screen-reader note.
 
 The `VANISHED` socket frame is an instruction, not a message: `applyMessageFrame` removes the row and can never insert the marker as a bubble.
 

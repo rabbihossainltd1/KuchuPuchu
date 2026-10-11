@@ -326,3 +326,27 @@ The phone's profile / group-info screens as a right-hand drawer
 - Tests: `web/e2e-messaging/info.spec.ts` (4 tests); the mock group's
   ownership is an option (`ownGroup`) so the non-owner theme lock keeps its
   suite.
+
+## Slice U — Direct attach picker, drag-and-drop, strip options ✅
+
+The emoji tile sheet is gone. The paperclip fires a hidden multi-file input
+(`image/*,video/*,audio/*` plus common document types) so the desktop opens
+its own media/documents picker in one click; a separate input with
+`capture=environment` is the camera substitute, behind its own icon button.
+
+- **Drag-and-drop**: files dropped on the conversation run through the same
+  `prepareAttachments` prep (photos shrink to 2048 px, limits enforced) with a
+  drop veil while hovering; a `dragover` without files does nothing.
+- **Strip options**: "View once" and "Send as a document" (the phone's caption
+  screen options, verbatim) sit on the composer strip once media is queued;
+  they are mutually exclusive, re-prepare from the original bytes, and an
+  optimistic mirror keeps the controlled boxes from flickering mid-re-prepare.
+- **Disclosure kept**: the limits line and every phone-only surface's reason
+  (location, contact, poll, event, AI images) moved from the sheet into a
+  screen-reader note composed from `ATTACH_TILE_IDS` /
+  `ATTACH_TILE_UNAVAILABLE`, now exported by `attachments.ts` as the single
+  source of truth (case 57 imports them from there).
+- Chip glyphs are `Icon` strokes, not emoji; the attach roster, the direct
+  picker and the drop path are pinned by `attachments.spec.ts` (15 tests,
+  including a `DataTransfer` drop and a native-click probe proving the
+  paperclip hands straight to the OS picker).
