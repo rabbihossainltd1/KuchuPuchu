@@ -486,3 +486,24 @@ The phone's `ScheduleSheet` / `ScheduledSheet` / `DisappearDialog`, mirrored:
   change needed there.
 - Tests: `ai.spec.ts` (5, axe included); helpers grow the AI chat row
   and the reset / restore-latest / sessions routes.
+
+## Slice AP — Archive + Pin parity (device-local flags) ✅
+
+- The phone keeps pinned and archived conversation ids on the device
+  (`ScreenStore.archivedConvIds` / `isPinned`), never on the worker; the
+  web mirrors both sets in localStorage (`convFlags.ts`) so a reload
+  restores them like reopening the app.
+- Main list: archived chats leave the list, pinned ones float to the
+  top with the phone's 14dp PushPin glyph beside the name; a kebab on
+  each row (hover/focus/right-click, no gesture-only access) offers the
+  phone's long-press-sheet rows **Pin/Unpin** and **Archive**.
+- "Archived (n)" entry opens `ArchivePane.tsx`, the web port of
+  `ArchiveScreen.kt`: same header, same empty state ("No archived
+  chats" / "Swipe a chat right to archive it"), rows still open their
+  chat and their kebab offers **Unarchive**.
+- Tests: `archive.spec.ts` (5, axe + reload persistence included);
+  themeMatrix goldens follow the new list entry.
+- Bonus: pinned down the delivered-frame race in `messaging.spec.ts`
+  (the frame keys the row by server id, which only exists after the
+  POST ack remaps the optimistic bubble — the spec now waits for the
+  sent tick before sending the frame).

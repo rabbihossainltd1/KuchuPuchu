@@ -35,6 +35,7 @@ VITE_KP_WEB_ACCOUNT_INTEGRATION=true VITE_KP_WEB_MESSAGING=true npm run build:we
 | `contacts.ts` `toE164()` / `inviteUrl()` | The phone's `PhoneBook.toE164` port (Bengali digits, 00→+, home-dial rule) and the WhatsApp-first wa.me invite; `POST /api/contacts/match` powers New contact's Check |
 | `schedule.ts` | The phone's `scheduleStamp` / quick picks / custom-clock math; `useMessaging.scheduleSend` seals the draft and posts `sendAt`; chip + ⋮ Scheduled sheet + DisappearDialog choices |
 | `MessageSheets.tsx` | The phone's Message-info sheet (Sent/Delivered/Seen stamps) and the 40-emoji React picker; `REACTION_EMOJIS` extracted from `ChatScreen.kt` so the seats never drift |
+| `ArchivePane.tsx` + `convFlags.ts` | Slice AP: the phone's ArchiveScreen on the web and the device-local pin/archive sets (ScreenStore parity in localStorage); row menus live in `ConversationList.tsx` |
 | `AiHistoryPane.tsx` | Slice AI: the phone's AIHistoryScreen on the web — session list ("AI History") and read-only archive ("Session"); the AI ⋮ menu rows (History / New chat / Incognito) live in `ChatMenu.tsx`, wired to `POST …/reset` and `…/restore-latest` |
 | `web/src/media/uploadContract.ts` | Every ceiling, plan, meta and key rule — DOM-free, so Node can test it |
 | `web/src/media/imageEdit.ts`, `renderEdits.ts` | Edit model (crop/rotate/draw/text/sticker) and the canvas bake |
