@@ -336,6 +336,10 @@ export type MockWorkerOptions = {
   matchUsers?: readonly Record<string, unknown>[];
   /** Slice AI: add the KuchuPuchu AI chat + serve the AI routes. */
   withAi?: boolean;
+  /** Return a profile photo from `/api/me` for the account-avatar regression. */
+  profileAvatarUrl?: string;
+  /** Leave the phone identity backup absent to test the secure-chat gate. */
+  noE2eeBackup?: boolean;
 };
 
 export async function createMockWorker(options: MockWorkerOptions = {}): Promise<MockWorker> {
@@ -845,7 +849,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         json(route, { ticket: "e2e.ticket", expiresIn: 60 }),
       );
       await page.route("**/api/e2ee/backup", (route) =>
-        json(route, { backup: plaintextBackupBlob(me) }),
+        json(route, { backup: options.noE2eeBackup ? "" : plaintextBackupBlob(me) }),
       );
       await page.route("**/api/me", (route) => {
         if (route.request().method() === "PATCH") return json(route, { ok: true });
@@ -853,6 +857,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
           user: {
             ...ME,
             about: null,
+            avatarUrl: options.profileAvatarUrl ?? null,
             email: null,
             phone: "+8801700000000",
             googleEmail: null,

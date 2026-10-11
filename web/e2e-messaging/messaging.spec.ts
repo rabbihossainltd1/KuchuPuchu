@@ -56,10 +56,11 @@ test.describe("Web messaging", () => {
     await expect(page.getByText("Hidden Person")).toHaveCount(0);
     expect(page.url()).not.toContain(HIDDEN_ID);
 
-    await expect(
-      page.getByRole("link", { name: new RegExp(`${PEER_NAME}, 2 unread`) }),
-    ).toBeVisible();
-    await expect(page.getByText("2 unread").first()).toBeVisible();
+    const directRow = page.getByRole("link", { name: new RegExp(`${PEER_NAME}, 2 unread`) });
+    await expect(directRow).toBeVisible();
+    await expect(directRow.locator(".conversation-row__badge")).toContainText("2");
+    await expect(page.locator(".list-header__count")).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /Chats, 1 unread chats/ })).toBeVisible();
 
     // The sealed preview is the plain category word, never ciphertext.
     await expect(page.getByText("KP1.")).toHaveCount(0);
@@ -92,6 +93,77 @@ test.describe("Web messaging", () => {
 
     // The transcript contains no ciphertext.
     await expect(page.locator(".transcript")).not.toContainText("KP1.");
+  });
+
+  test("scrolling to the top loads the next older history page", async ({ page }) => {
+    const oldestFirst = Array.from({ length: 75 }, (_, index) => ({
+      id: `history_${String(index).padStart(3, "0")}`,
+      senderId: "u_peer",
+      senderName: PEER_NAME,
+      kind: "TEXT",
+      body: `history-${String(index).padStart(3, "0")}`,
+      createdAt: new Date(Date.now() - (75 - index) * 1_000).toISOString(),
+      rowid: index + 1,
+    }));
+    const pageCursors: string[] = [];
+
+    await page.route(`**/api/conversations/${CHAT_ID}/messages*`, async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      const url = new URL(route.request().url());
+      const before = url.searchParams.get("before") ?? "";
+      const beforeRowid = Number(url.searchParams.get("beforeRowid") ?? 0);
+      pageCursors.push(before);
+      const eligible = oldestFirst.filter(
+        (row) =>
+          !before ||
+          row.createdAt < before ||
+          (row.createdAt === before && row.rowid < beforeRowid),
+      );
+      const newestFirst = [...eligible].sort(
+        (left, right) => right.createdAt.localeCompare(left.createdAt) || right.rowid - left.rowid,
+      );
+      const selectedPage = newestFirst.slice(0, 50);
+      const oldest = selectedPage.at(-1);
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: [...selectedPage].reverse(),
+          readAt: "",
+          typingAt: "",
+          typingKind: "",
+          marker: `history-${pageCursors.length}`,
+          oldest: oldest ? { createdAt: oldest.createdAt, rowid: oldest.rowid } : null,
+          hasMore: eligible.length > selectedPage.length,
+          priv: {},
+        }),
+      });
+    });
+
+    await page.getByRole("link", { name: new RegExp(PEER_NAME) }).click();
+    await expect(page.locator('[data-message-id="history_074"]')).toBeAttached();
+    await expect(page.locator('[data-message-id="history_000"]')).toHaveCount(0);
+    expect(pageCursors).toHaveLength(1);
+
+    await page.locator(".transcript").evaluate((list) => {
+      list.scrollTop = 0;
+    });
+
+    await expect.poll(() => pageCursors.length).toBe(2);
+    await expect(page.locator('[data-message-id="history_000"]')).toBeAttached();
+    await expect(page.getByText("history-000")).toBeVisible();
+  });
+
+  test("the send button posts a sealed message and renders its echo", async ({ page }) => {
+    await page.getByRole("link", { name: new RegExp(PEER_NAME) }).click();
+    const plaintext = "button send works from the browser";
+    await page.getByLabel("Message text", { exact: true }).fill(plaintext);
+    await page.getByRole("button", { name: /Send message, or hold to schedule/ }).click();
+
+    await expect.poll(() => worker.sent.length).toBe(1);
+    expect(String(worker.sent[0]!.body.body ?? "").startsWith("KP1.")).toBe(true);
+    await expect(page.getByText(plaintext)).toBeVisible();
+    await expect(page.getByLabel("Message text", { exact: true })).toHaveValue("");
   });
 
   test("a sent text is sealed before it leaves the browser", async ({ page }) => {
@@ -238,6 +310,30 @@ test.describe("Web messaging", () => {
     await ownRow.getByRole("button", { name: "Delete your message" }).click();
     await page.getByRole("button", { name: "Delete for everyone" }).click();
     await expect.poll(() => worker.deletedMessageIds.length).toBe(1);
+  });
+
+  test("mobile reaction and message actions occupy separate rows", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("link", { name: new RegExp(PEER_NAME) }).click();
+    const row = page.locator('[data-message-id="m_1"]');
+    const bubble = row.locator(".bubble");
+    await expect(bubble).toBeVisible();
+    await bubble.hover();
+
+    const reactions = row.locator(".reaction-bar");
+    const actions = row.locator(".message-actions");
+    await expect(reactions).toBeVisible();
+    await expect(actions).toBeVisible();
+    const [reactionBox, actionBox, bubbleBox] = await Promise.all([
+      reactions.boundingBox(),
+      actions.boundingBox(),
+      bubble.boundingBox(),
+    ]);
+    expect(reactionBox).not.toBeNull();
+    expect(actionBox).not.toBeNull();
+    expect(bubbleBox).not.toBeNull();
+    expect(reactionBox!.y + reactionBox!.height).toBeLessThanOrEqual(actionBox!.y);
+    expect(actionBox!.y + actionBox!.height).toBeLessThanOrEqual(bubbleBox!.y);
   });
 
   test("a one-way notification account cannot be replied to", async ({ page }) => {

@@ -76,6 +76,7 @@ export function AccountSettingsPage({
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
   const [username, setUsername] = useState(user?.username ?? "");
   const [about, setAbout] = useState(user?.about ?? "");
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const [usernameState, setUsernameState] = useState<
     "same" | "checking" | "available" | "taken" | "invalid"
   >("same");
@@ -101,6 +102,10 @@ export function AccountSettingsPage({
     displayName.trim().length <= 40 &&
     usernameValid &&
     (username.trim().toLowerCase() === (user?.username ?? "") || usernameState === "available");
+
+  useEffect(() => {
+    setAvatarFailed(false);
+  }, [user?.avatarUrl]);
 
   useEffect(() => {
     if (!user) return;
@@ -228,7 +233,17 @@ export function AccountSettingsPage({
 
         <section className="account-hero" aria-label="Your account">
           <div className="account-avatar" aria-hidden="true">
-            {initials(user)}
+            {user.avatarUrl && !avatarFailed ? (
+              <img
+                className="avatar-img"
+                src={user.avatarUrl}
+                alt=""
+                draggable={false}
+                onError={() => setAvatarFailed(true)}
+              />
+            ) : (
+              initials(user)
+            )}
           </div>
           <div className="account-hero__identity">
             <p className="eyebrow">SIGNED-IN ACCOUNT</p>

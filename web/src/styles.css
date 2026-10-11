@@ -1222,3 +1222,33 @@ a:focus-visible {
   color: var(--kp-ink, #e8ecf3);
   font-size: 0.95rem;
 }
+
+/* The Android chats-tab unread counter sits on the icon, not in the list title. */
+.nav-button__icon-wrap,
+.mobile-nav__icon-wrap {
+  position: relative;
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  flex: 0 0 24px;
+}
+
+.nav-unread-badge {
+  position: absolute;
+  top: -5px;
+  right: -10px;
+  display: grid;
+  min-width: 15px;
+  height: 15px;
+  place-items: center;
+  padding: 0 3px;
+  border: 1px solid var(--kp-bg);
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 8px !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+  z-index: 1;
+}

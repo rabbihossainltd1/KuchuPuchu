@@ -609,6 +609,52 @@
   pointer-events: auto;
 }
 
+/* On phone widths, a tap reveals two separate, horizontally-scrollable rows.
+   The message itself moves below them; reaction chips and text actions never
+   compete for the same pixels or cover the bubble. */
+@media (max-width: 720px) {
+  .bubble-row {
+    padding-top: 24px;
+    transition: padding-top var(--kp-motion-fast) ease;
+  }
+
+  .bubble-row:hover,
+  .bubble-row:focus-within {
+    padding-top: 66px;
+  }
+
+  .message-actions,
+  .reaction-bar {
+    right: 6px;
+    left: 6px;
+    width: calc(100% - 12px);
+    max-width: calc(100% - 12px);
+    justify-content: flex-start;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .message-actions::-webkit-scrollbar,
+  .reaction-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .reaction-bar {
+    top: 0;
+  }
+
+  .message-actions {
+    top: 32px;
+  }
+
+  .message-actions button,
+  .reaction-bar button {
+    min-height: 30px;
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+}
+
 .message-actions button,
 .reaction-bar button {
   font: inherit;
@@ -944,6 +990,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .conversation-row,
+  .bubble-row,
   .message-actions,
   .reaction-bar {
     transition: none;

@@ -787,6 +787,10 @@ export function ChatPane({
   }
 
   const oneWay = isOneWayConversation(conversation);
+  const requiresSecureIdentity = !conversation.isGroup && !isBotConversation(conversation);
+  const secureSendReady =
+    !requiresSecureIdentity ||
+    (identityStatus === "ready" && Boolean(conversation.other?.e2eePublicKey));
   const editableWindowMs = EDITABLE_WINDOW_MS;
 
   /**
@@ -2070,14 +2074,16 @@ export function ChatPane({
                         holdTimer.current = null;
                       }
                     }}
-                    disabled={oneWay}
-                    title="Hold to schedule"
+                    disabled={oneWay || !secureSendReady}
+                    title={!secureSendReady ? "Unlock secure chat to send" : "Hold to schedule"}
                     aria-label={
                       oneWay
                         ? "Replies are not accepted"
-                        : pending.length > 0
-                          ? `Send ${pending.length} attachment${pending.length === 1 ? "" : "s"}`
-                          : "Send message, or hold to schedule"
+                        : !secureSendReady
+                          ? "Unlock secure chat to send"
+                          : pending.length > 0
+                            ? `Send ${pending.length} attachment${pending.length === 1 ? "" : "s"}`
+                            : "Send message, or hold to schedule"
                     }
                   >
                     <Icon name="send" size={18} />
@@ -2135,7 +2141,7 @@ export function ChatPane({
               </p>
             ) : null}
 
-            {identityStatus !== "ready" && !oneWay ? (
+            {!secureSendReady && !oneWay ? (
               <p className="composer__hint">Secure chat is not ready yet.</p>
             ) : null}
           </footer>
