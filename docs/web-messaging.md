@@ -31,6 +31,7 @@ VITE_KP_WEB_ACCOUNT_INTEGRATION=true VITE_KP_WEB_MESSAGING=true npm run build:we
 | `web/src/messaging/mediaUrl.ts` | Resolves a file key to an object URL with a bounded, ref-counted cache |
 | `AttachmentRow.tsx` | The transcript/composer attachment surfaces; the paperclip opens the device picker directly |
 | `GroupCreatePane.tsx` | The phone's CreateGroupScreen: seeded known peers, directory search, chips, `POST /api/conversations/group` |
+| `e2ee.ts` `hiddenKeyHash()` | The phone's `ScreenStore.hiddenKeyHash` — SHA-256 hex of the trimmed secret key; hide stores/sends only the hash, Search compares it |
 | `web/src/media/uploadContract.ts` | Every ceiling, plan, meta and key rule — DOM-free, so Node can test it |
 | `web/src/media/imageEdit.ts`, `renderEdits.ts` | Edit model (crop/rotate/draw/text/sticker) and the canvas bake |
 | `web/src/media/stickerPacks.ts` | **GENERATED** from the Kotlin catalog; never hand-edit |
