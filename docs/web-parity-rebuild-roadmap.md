@@ -350,3 +350,27 @@ its own media/documents picker in one click; a separate input with
   picker and the drop path are pinned by `attachments.spec.ts` (15 tests,
   including a `DataTransfer` drop and a native-click probe proving the
   paperclip hands straight to the OS picker).
+
+## Slice V — New group creation ✅
+
+The phone's `CreateGroupScreen.kt` on the web (`GroupCreatePane.tsx`), entered
+from the chat list's ⋮ menu — the home menu on the phone — whose only offered
+entry is one that works (contacts screens arrive in a later slice, never
+stubbed):
+
+- **Seed list**: every 1:1 peer of the loaded chat list, once each, system
+  bots excluded — the same seed `ScreenStore.convs` gives the phone. Typing
+  filters them and, at two characters, adds directory matches off
+  `GET /api/users?q=` (the phone's endpoint), debounced and abortable.
+- **Picks**: chip row with the phone's "N members" count and per-chip
+  `Remove <name>`; rows carry `aria-pressed` and Add/Deselect labels; the
+  50-member ceiling and the 50-char title cap mirror the Worker's gates.
+- **States**: "No contacts yet / Search a name to add members" when the list
+  is empty, "No one found" for a dry search, "Creating…" while the POST runs.
+- **Create**: `POST /api/conversations/group {title, memberIds}` and the fresh
+  group opens exactly like the phone's `navigate("chat/$id")`. Worker refusals
+  surface through the web's fixed copy (`apiErrorMessage`) — raw server text
+  never renders.
+- Tests: `group-create.spec.ts` (4) — payload parity against the phone's
+  exact body, directory pick + no-results, refusal surfacing, and an
+  axe-clean sheet.

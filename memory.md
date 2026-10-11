@@ -1108,3 +1108,11 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - TESTS: attachments.spec re-flowed to hidden inputs (15 tests incl. direct-picker native-click probe and DataTransfer drop); messaging.spec tile-disclosure test rewritten to the sr-only note; voice.spec unlabeled-control test waits for first button (CI-load race). themeMatrix 390x844 LIST goldens regenerated — fresh headless chromium 153 after npm install shifted text antialiasing (~2% pixels); open-chat goldens untouched and passing.
 - CI: full npm run ci green. MERGED as PR #107; BUILD_ID rotation pending check (live was still 892a36ba6ace9e39 at merge time).
 - STILL ABSENT (next turns): hidden-chat secret-key reveal, group creation, contacts, message info sheet, scheduled + disappearing UI, full reaction picker, AI chat, archive/pin/hide.
+
+## Web slice V — New group creation — 2026-10-11 (branch feat/web-v-group-create)
+- WHAT: phone's CreateGroupScreen.kt as GroupCreatePane.tsx over the list pane; entry = chat-list ⋮ menu (home menu on phone) offering ONLY working entries (New group); contacts screens still absent, not stubbed.
+- FLOW: seed = 1:1 peers of loaded chats (bots excluded); typing filters + adds GET /api/users?q= matches (250ms debounce, abortable); chips with "N members" + Remove <name>; caps 50 members / 50-char title mirror Worker; Create posts {title, memberIds} then navigate(conversation) like phone's navigate(chat/$id); refusals via apiErrorMessage fixed copy (web never paints raw Worker text — discovered ApiError.message is internal-only).
+- TESTS: group-create.spec.ts 4 tests: payload parity ({title, memberIds:[PEER_ID]}), directory pick + "No one found", 400 NO_MEMBERS surfaces "The request could not be completed. Please try again." with sheet staying open, axe-clean.
+- a11y gotchas fixed: MemberRow aria-label Add/Deselect (chip Remove stays unique); selected-row muted @username failed 4.5:1 on the blue tint → .on preview uses --kp-ink.
+- CI: full npm run ci green. MERGED as PR #109; BUILD_ID rotation to confirm post-deploy.
+- STILL ABSENT: hidden-chat secret-key reveal, contacts (New contact/All contacts), message info sheet, scheduled + disappearing UI, full reaction picker, AI chat, archive/pin/hide.
