@@ -38,6 +38,8 @@ import {
   type KeyboardEvent,
 } from "react";
 import { Icon } from "../icons";
+import { messagingApi } from "./messagingApi";
+import { scheduleStamp, type ScheduledRow } from "./schedule";
 import { RouteLink } from "../RouteLink";
 import type { Navigate } from "../useBrowserRouter";
 import {
@@ -233,6 +235,27 @@ export function ChatPane({
    *  view-once toggles can re-prepare without asking for the file again. */
   const fileFor = useRef(new Map<string, File>());
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuView, setMenuView] = useState<"root" | "sendlater" | "scheduled">("root");
+  const [scheduledRows, setScheduledRows] = useState<readonly ScheduledRow[]>([]);
+
+  useEffect(() => {
+    if (!api || !selectedId) {
+      setScheduledRows([]);
+      return;
+    }
+    let live = true;
+    void messagingApi
+      .listScheduled(api, selectedId)
+      .then((rows) => {
+        if (live) setScheduledRows(rows);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [api, selectedId, menuOpen]);
+  const holdTimer = useRef<number | null>(null);
+  const heldRef = useRef(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [stickerOpen, setStickerOpen] = useState(false);
   const [editorTarget, setEditorTarget] = useState<PendingAttachment | null>(null);
@@ -868,7 +891,10 @@ export function ChatPane({
             aria-label="More options"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((value) => !value)}
+            onClick={() => {
+              setMenuView("root");
+              setMenuOpen((value) => !value);
+            }}
           >
             <Icon name="more" size={20} />
           </button>
@@ -890,6 +916,8 @@ export function ChatPane({
           navigate={navigate}
           meId={meId}
           onJumpToMessage={jumpToMessage}
+          scheduledCount={scheduledRows.length}
+          initialView={menuView}
         />
       ) : null}
 
@@ -1467,361 +1495,415 @@ export function ChatPane({
           ) : null}
         </div>
       ) : (
-        <footer className="composer">
-          {controller.replyTo && (
-            <div className="composer__reply">
-              <span className="composer__reply-copy">
-                Replying to {controller.replyTo.senderName || "message"}
-              </span>
+        <>
+          {scheduledRows.length > 0 && (
+            <div className="composer__sched-chip-row">
               <button
                 type="button"
-                className="text-button"
-                onClick={() => controller.setReplyTo(null)}
-                aria-label="Cancel reply"
-              >
-                Cancel
-              </button>
-            </div>
-          )}
-
-          {isEditing && (
-            <div className="composer__reply">
-              <span className="composer__reply-copy">Editing your message</span>
-              <button
-                type="button"
-                className="text-button"
+                className="composer__sched-chip"
                 onClick={() => {
-                  setEditingId("");
-                  setEditText("");
+                  setMenuView("scheduled");
+                  setMenuOpen(true);
                 }}
-                aria-label="Cancel edit"
               >
-                Cancel
+                <Icon name="schedule" size={14} />
+                {scheduledRows.length > 1 ? `${scheduledRows.length} · ` : ""}
+                {scheduleStamp(
+                  [...scheduledRows].sort((a, b) => a.sendAt.localeCompare(b.sendAt))[0]?.sendAt ??
+                    "",
+                )}
               </button>
             </div>
           )}
-
-          {rejections.length > 0 && (
-            <ul
-              className="composer__rejections"
-              role="alert"
-              aria-label="Files that could not be attached"
-            >
-              {rejections.map((item) => (
-                <li key={`${item.name}-${item.reason}`}>
-                  <strong>{item.name}</strong> {item.reason}
-                </li>
-              ))}
-              <li>
+          <footer className="composer">
+            {controller.replyTo && (
+              <div className="composer__reply">
+                <span className="composer__reply-copy">
+                  Replying to {controller.replyTo.senderName || "message"}
+                </span>
                 <button
                   type="button"
                   className="text-button"
-                  onClick={() => setRejections([])}
-                  aria-label="Dismiss attachment warnings"
+                  onClick={() => controller.setReplyTo(null)}
+                  aria-label="Cancel reply"
                 >
-                  Dismiss
+                  Cancel
                 </button>
-              </li>
-            </ul>
-          )}
+              </div>
+            )}
 
-          {pending.length > 0 && (
-            <div className="composer__attach-options">
-              {hasMediaQueued ? (
-                <>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={onceShown}
-                      disabled={oneWay}
-                      onChange={(event) => {
-                        setFlagFlip({ once: event.target.checked, doc: false });
-                        void reprepareMedia({ viewOnce: event.target.checked, asDocument: false });
-                      }}
-                    />
-                    <span>
-                      View once — the reader opens a photo or clip exactly once, then it is gone for
-                      both of you. A document cannot be view-once.
-                    </span>
-                  </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={docShown}
-                      disabled={oneWay}
-                      onChange={(event) => {
-                        setFlagFlip({ once: false, doc: event.target.checked });
-                        void reprepareMedia({ asDocument: event.target.checked, viewOnce: false });
-                      }}
-                    />
-                    <span>
-                      Send as a document — keeps a photo or clip's own bytes and name, with no
-                      re-encoding.
-                    </span>
-                  </label>
-                </>
-              ) : null}
-            </div>
-          )}
-          {pending.length > 0 && (
-            <ul className="composer__attachments" aria-label="Attachments ready to send">
-              {pending.map((item) => (
-                <li key={item.id} className="composer-attachment">
-                  {item.previewUrl ? (
-                    <img className="composer-attachment__thumb" src={item.previewUrl} alt="" />
-                  ) : (
-                    <span className="composer-attachment__icon" aria-hidden="true">
-                      <Icon
-                        name={
-                          item.intent === "video"
-                            ? "video"
-                            : item.intent === "audio"
-                              ? "mic"
-                              : "file"
-                        }
-                        size={18}
-                      />
-                    </span>
-                  )}
-                  <span className="composer-attachment__copy">
-                    <strong>{item.pickedName}</strong>
-                    <span>
-                      {formatBytes(item.size)}
-                      {item.width ? ` · ${item.width}×${item.height}` : ""}
-                      {hasEdits(item) ? " · edited" : ""}
-                    </span>
-                    <span className="sr-only">{describeAttachment(item)}</span>
-                  </span>
-                  {item.intent === "photo" && (
-                    <button
-                      type="button"
-                      className="text-button"
-                      onClick={() => setEditorTarget(item)}
-                      aria-label={`Edit photo ${item.pickedName}`}
-                    >
-                      {hasEdits(item) ? "Edit again" : "Edit"}
-                    </button>
-                  )}
+            {isEditing && (
+              <div className="composer__reply">
+                <span className="composer__reply-copy">Editing your message</span>
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => {
+                    setEditingId("");
+                    setEditText("");
+                  }}
+                  aria-label="Cancel edit"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            {rejections.length > 0 && (
+              <ul
+                className="composer__rejections"
+                role="alert"
+                aria-label="Files that could not be attached"
+              >
+                {rejections.map((item) => (
+                  <li key={`${item.name}-${item.reason}`}>
+                    <strong>{item.name}</strong> {item.reason}
+                  </li>
+                ))}
+                <li>
                   <button
                     type="button"
                     className="text-button"
-                    onClick={() => removeAttachment(item.id)}
-                    aria-label={`Remove ${item.pickedName} from this message`}
+                    onClick={() => setRejections([])}
+                    aria-label="Dismiss attachment warnings"
                   >
-                    Remove
+                    Dismiss
                   </button>
                 </li>
-              ))}
-            </ul>
-          )}
+              </ul>
+            )}
 
-          <p className="sr-only attach-limits">
-            Photos are shrunk to a 2048 px long edge and re-encoded as JPEG before upload, exactly
-            like the phone. Limits: 100 MB image, 2 GB video, 100 MB audio, 5 GB document. Location
-            sharing uses the phone's own location provider and is not available in a browser build.
-            Sharing a contact needs the device's contacts app, which a browser cannot reach. Polls,
-            events and AI images are coming soon on Android too.
-          </p>
+            {pending.length > 0 && (
+              <div className="composer__attach-options">
+                {hasMediaQueued ? (
+                  <>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={onceShown}
+                        disabled={oneWay}
+                        onChange={(event) => {
+                          setFlagFlip({ once: event.target.checked, doc: false });
+                          void reprepareMedia({
+                            viewOnce: event.target.checked,
+                            asDocument: false,
+                          });
+                        }}
+                      />
+                      <span>
+                        View once — the reader opens a photo or clip exactly once, then it is gone
+                        for both of you. A document cannot be view-once.
+                      </span>
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={docShown}
+                        disabled={oneWay}
+                        onChange={(event) => {
+                          setFlagFlip({ once: false, doc: event.target.checked });
+                          void reprepareMedia({
+                            asDocument: event.target.checked,
+                            viewOnce: false,
+                          });
+                        }}
+                      />
+                      <span>
+                        Send as a document — keeps a photo or clip's own bytes and name, with no
+                        re-encoding.
+                      </span>
+                    </label>
+                  </>
+                ) : null}
+              </div>
+            )}
+            {pending.length > 0 && (
+              <ul className="composer__attachments" aria-label="Attachments ready to send">
+                {pending.map((item) => (
+                  <li key={item.id} className="composer-attachment">
+                    {item.previewUrl ? (
+                      <img className="composer-attachment__thumb" src={item.previewUrl} alt="" />
+                    ) : (
+                      <span className="composer-attachment__icon" aria-hidden="true">
+                        <Icon
+                          name={
+                            item.intent === "video"
+                              ? "video"
+                              : item.intent === "audio"
+                                ? "mic"
+                                : "file"
+                          }
+                          size={18}
+                        />
+                      </span>
+                    )}
+                    <span className="composer-attachment__copy">
+                      <strong>{item.pickedName}</strong>
+                      <span>
+                        {formatBytes(item.size)}
+                        {item.width ? ` · ${item.width}×${item.height}` : ""}
+                        {hasEdits(item) ? " · edited" : ""}
+                      </span>
+                      <span className="sr-only">{describeAttachment(item)}</span>
+                    </span>
+                    {item.intent === "photo" && (
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() => setEditorTarget(item)}
+                        aria-label={`Edit photo ${item.pickedName}`}
+                      >
+                        {hasEdits(item) ? "Edit again" : "Edit"}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => removeAttachment(item.id)}
+                      aria-label={`Remove ${item.pickedName} from this message`}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
 
-          {recorder.recording ? (
-            <VoiceRecorderBar controller={recorder} onAnnounce={controller.announce} />
-          ) : (
-            <div className="composer__row">
-              {/* The phone's composer pill: sticker glyph LEFT inside the
+            <p className="sr-only attach-limits">
+              Photos are shrunk to a 2048 px long edge and re-encoded as JPEG before upload, exactly
+              like the phone. Limits: 100 MB image, 2 GB video, 100 MB audio, 5 GB document.
+              Location sharing uses the phone's own location provider and is not available in a
+              browser build. Sharing a contact needs the device's contacts app, which a browser
+              cannot reach. Polls, events and AI images are coming soon on Android too.
+            </p>
+
+            {recorder.recording ? (
+              <VoiceRecorderBar controller={recorder} onAnnounce={controller.announce} />
+            ) : (
+              <div className="composer__row">
+                {/* The phone's composer pill: sticker glyph LEFT inside the
                   pill, the field mid, attach RIGHT inside the pill; the
                   mic / send circle rides OUTSIDE the pill, right of it. */}
-              <div className="composer__pill">
-                <div className="composer__attach">
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label="Send a sticker"
-                    aria-expanded={stickerOpen}
-                    disabled={oneWay}
-                    onClick={() => setStickerOpen((value) => !value)}
-                  >
-                    <Icon name="mood" size={20} />
-                  </button>
-                  {stickerOpen && !oneWay && (
-                    <Suspense fallback={<p className="attach-loading">Loading stickers…</p>}>
-                      <StickerPicker
-                        onPick={(glyph) => {
-                          setStickerOpen(false);
-                          void controller.sendSticker(glyph);
-                        }}
-                        onClose={() => setStickerOpen(false)}
-                        onAnnounce={controller.announce}
-                      />
-                    </Suspense>
-                  )}
-                </div>
+                <div className="composer__pill">
+                  <div className="composer__attach">
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label="Send a sticker"
+                      aria-expanded={stickerOpen}
+                      disabled={oneWay}
+                      onClick={() => setStickerOpen((value) => !value)}
+                    >
+                      <Icon name="mood" size={20} />
+                    </button>
+                    {stickerOpen && !oneWay && (
+                      <Suspense fallback={<p className="attach-loading">Loading stickers…</p>}>
+                        <StickerPicker
+                          onPick={(glyph) => {
+                            setStickerOpen(false);
+                            void controller.sendSticker(glyph);
+                          }}
+                          onClose={() => setStickerOpen(false)}
+                          onAnnounce={controller.announce}
+                        />
+                      </Suspense>
+                    )}
+                  </div>
 
-                <label className="sr-only" htmlFor={composerId}>
-                  {oneWay
-                    ? "This account does not accept replies"
-                    : pending.length > 0
-                      ? "Caption for the attached files"
-                      : "Message text"}
-                </label>
-                <textarea
-                  id={composerId}
-                  ref={composerRef}
-                  className="composer__input"
-                  rows={1}
-                  value={isEditing ? editText : controller.draft}
-                  disabled={oneWay}
-                  placeholder={
-                    oneWay
-                      ? "Notification account — replies are not accepted"
+                  <label className="sr-only" htmlFor={composerId}>
+                    {oneWay
+                      ? "This account does not accept replies"
                       : pending.length > 0
-                        ? "Add a caption… (optional, sealed in a personal chat)"
-                        : "Message"
-                  }
-                  title="Enter sends, Shift+Enter adds a line"
-                  maxLength={MESSAGE_BODY_LIMIT}
-                  onChange={(event) => {
-                    if (isEditing) {
-                      setEditText(event.target.value);
-                      return;
+                        ? "Caption for the attached files"
+                        : "Message text"}
+                  </label>
+                  <textarea
+                    id={composerId}
+                    ref={composerRef}
+                    className="composer__input"
+                    rows={1}
+                    value={isEditing ? editText : controller.draft}
+                    disabled={oneWay}
+                    placeholder={
+                      oneWay
+                        ? "Notification account — replies are not accepted"
+                        : pending.length > 0
+                          ? "Add a caption… (optional, sealed in a personal chat)"
+                          : "Message"
                     }
-                    controller.setDraft(event.target.value);
-                    controller.composerChanged();
-                  }}
-                  onKeyDown={onComposerKeyDown}
-                />
+                    title="Enter sends, Shift+Enter adds a line"
+                    maxLength={MESSAGE_BODY_LIMIT}
+                    onChange={(event) => {
+                      if (isEditing) {
+                        setEditText(event.target.value);
+                        return;
+                      }
+                      controller.setDraft(event.target.value);
+                      controller.composerChanged();
+                    }}
+                    onKeyDown={onComposerKeyDown}
+                  />
 
-                <div className="composer__attach">
-                  {/* Attach opens the device's own picker straight away — no
+                  <div className="composer__attach">
+                    {/* Attach opens the device's own picker straight away — no
                       intermediate sheet. The camera substitute keeps its own
                       capture input, the way a phone browser would. */}
-                  <input
-                    ref={cameraRef}
-                    data-attach="camera"
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    className="sr-only"
-                    tabIndex={-1}
-                    aria-hidden="true"
-                    onChange={(event) => {
-                      const files = event.target.files ? Array.from(event.target.files) : [];
-                      event.target.value = "";
-                      if (files.length) void onPickFiles(files, "camera", false, false);
-                    }}
-                  />
-                  <input
-                    ref={pickerRef}
-                    data-attach="picker"
-                    type="file"
-                    multiple
-                    accept="image/*,video/*,audio/*,.pdf,.txt,.md,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar"
-                    className="sr-only"
-                    tabIndex={-1}
-                    aria-hidden="true"
-                    onChange={(event) => {
-                      const files = event.target.files ? Array.from(event.target.files) : [];
-                      event.target.value = "";
-                      if (files.length) void onPickFiles(files, "gallery", false, false);
-                    }}
-                  />
+                    <input
+                      ref={cameraRef}
+                      data-attach="camera"
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="sr-only"
+                      tabIndex={-1}
+                      aria-hidden="true"
+                      onChange={(event) => {
+                        const files = event.target.files ? Array.from(event.target.files) : [];
+                        event.target.value = "";
+                        if (files.length) void onPickFiles(files, "camera", false, false);
+                      }}
+                    />
+                    <input
+                      ref={pickerRef}
+                      data-attach="picker"
+                      type="file"
+                      multiple
+                      accept="image/*,video/*,audio/*,.pdf,.txt,.md,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar"
+                      className="sr-only"
+                      tabIndex={-1}
+                      aria-hidden="true"
+                      onChange={(event) => {
+                        const files = event.target.files ? Array.from(event.target.files) : [];
+                        event.target.value = "";
+                        if (files.length) void onPickFiles(files, "gallery", false, false);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label="Attach a photo, video or document"
+                      disabled={oneWay}
+                      onClick={() => {
+                        setStickerOpen(false);
+                        pickerRef.current?.click();
+                      }}
+                    >
+                      <Icon name="attach" size={20} />
+                    </button>
+                  </div>
+                </div>
+
+                {isEditing ? (
                   <button
                     type="button"
-                    className="icon-button"
-                    aria-label="Attach a photo, video or document"
-                    disabled={oneWay}
-                    onClick={() => {
-                      setStickerOpen(false);
-                      pickerRef.current?.click();
-                    }}
+                    className="send-button"
+                    onClick={() => void commitEdit()}
+                    disabled={!editText.trim()}
+                    aria-label="Save edited message"
                   >
-                    <Icon name="attach" size={20} />
+                    Save
                   </button>
-                </div>
-              </div>
-
-              {isEditing ? (
-                <button
-                  type="button"
-                  className="send-button"
-                  onClick={() => void commitEdit()}
-                  disabled={!editText.trim()}
-                  aria-label="Save edited message"
-                >
-                  Save
-                </button>
-              ) : controller.draft.trim() || pending.length > 0 ? (
-                <button
-                  type="button"
-                  className="send-button"
-                  onClick={() => void submit()}
-                  disabled={oneWay}
-                  aria-label={
-                    oneWay
-                      ? "Replies are not accepted"
-                      : pending.length > 0
-                        ? `Send ${pending.length} attachment${pending.length === 1 ? "" : "s"}`
-                        : "Send message"
-                  }
-                >
-                  <Icon name="send" size={18} />
-                </button>
-              ) : (
-                /* The mic/send swap the phone has: with nothing typed and nothing
+                ) : controller.draft.trim() || pending.length > 0 ? (
+                  <button
+                    type="button"
+                    className="send-button"
+                    onClick={() => {
+                      if (heldRef.current) {
+                        heldRef.current = false;
+                        return;
+                      }
+                      void submit();
+                    }}
+                    onPointerDown={() => {
+                      if (oneWay || pending.length > 0 || !controller.draft.trim()) return;
+                      holdTimer.current = window.setTimeout(() => {
+                        heldRef.current = true;
+                        setMenuView("sendlater");
+                        setMenuOpen(true);
+                      }, 450);
+                    }}
+                    onPointerUp={() => {
+                      if (holdTimer.current !== null) {
+                        window.clearTimeout(holdTimer.current);
+                        holdTimer.current = null;
+                      }
+                    }}
+                    onPointerLeave={() => {
+                      if (holdTimer.current !== null) {
+                        window.clearTimeout(holdTimer.current);
+                        holdTimer.current = null;
+                      }
+                    }}
+                    disabled={oneWay}
+                    title="Hold to schedule"
+                    aria-label={
+                      oneWay
+                        ? "Replies are not accepted"
+                        : pending.length > 0
+                          ? `Send ${pending.length} attachment${pending.length === 1 ? "" : "s"}`
+                          : "Send message, or hold to schedule"
+                    }
+                  >
+                    <Icon name="send" size={18} />
+                  </button>
+                ) : (
+                  /* The mic/send swap the phone has: with nothing typed and nothing
                attached the circle records. A click arms the locked panel (the
                phone's tap-is-lock rule), a hold sends on release, and a drag to
                the left throws the take away — all three also exist as labelled
                buttons once the panel is up, so none of them is gesture-only. */
-                <button
-                  type="button"
-                  className="send-button send-button--mic"
-                  disabled={oneWay || !recorder.supported}
-                  aria-label={
-                    oneWay
-                      ? "Replies are not accepted"
-                      : recorder.supported
-                        ? "Record a voice note — click to open the recording panel, or hold and release to send"
-                        : "This browser cannot record audio"
-                  }
-                  title={
-                    recorder.supported
-                      ? "Hold and release to send · click to lock the panel · drag left to cancel"
-                      : "This browser has no MediaRecorder, so voice notes cannot be recorded here"
-                  }
-                  onPointerDown={(event) => {
-                    if (!recorder.supported || oneWay) return;
-                    event.currentTarget.setPointerCapture?.(event.pointerId);
-                    recorder.press({ clientX: event.clientX, clientY: event.clientY });
-                  }}
-                  onPointerMove={(event) =>
-                    recorder.move({ clientX: event.clientX, clientY: event.clientY })
-                  }
-                  onPointerUp={(event) =>
-                    recorder.release({ clientX: event.clientX, clientY: event.clientY })
-                  }
-                  onPointerCancel={() => recorder.cancel()}
-                  onClick={(event) => {
-                    // detail 0 = a keyboard activation, which never fired pointer
-                    // events; the pointer path already decided by the time a mouse
-                    // click lands here.
-                    if (event.detail === 0) recorder.activate();
-                  }}
-                >
-                  <Icon name="mic" size={18} />
-                </button>
-              )}
-            </div>
-          )}
+                  <button
+                    type="button"
+                    className="send-button send-button--mic"
+                    disabled={oneWay || !recorder.supported}
+                    aria-label={
+                      oneWay
+                        ? "Replies are not accepted"
+                        : recorder.supported
+                          ? "Record a voice note — click to open the recording panel, or hold and release to send"
+                          : "This browser cannot record audio"
+                    }
+                    title={
+                      recorder.supported
+                        ? "Hold and release to send · click to lock the panel · drag left to cancel"
+                        : "This browser has no MediaRecorder, so voice notes cannot be recorded here"
+                    }
+                    onPointerDown={(event) => {
+                      if (!recorder.supported || oneWay) return;
+                      event.currentTarget.setPointerCapture?.(event.pointerId);
+                      recorder.press({ clientX: event.clientX, clientY: event.clientY });
+                    }}
+                    onPointerMove={(event) =>
+                      recorder.move({ clientX: event.clientX, clientY: event.clientY })
+                    }
+                    onPointerUp={(event) =>
+                      recorder.release({ clientX: event.clientX, clientY: event.clientY })
+                    }
+                    onPointerCancel={() => recorder.cancel()}
+                    onClick={(event) => {
+                      // detail 0 = a keyboard activation, which never fired pointer
+                      // events; the pointer path already decided by the time a mouse
+                      // click lands here.
+                      if (event.detail === 0) recorder.activate();
+                    }}
+                  >
+                    <Icon name="mic" size={18} />
+                  </button>
+                )}
+              </div>
+            )}
 
-          {recorder.error && !recorder.recording ? (
-            <p className="composer__error" role="alert">
-              {recorder.error}
-            </p>
-          ) : null}
+            {recorder.error && !recorder.recording ? (
+              <p className="composer__error" role="alert">
+                {recorder.error}
+              </p>
+            ) : null}
 
-          {identityStatus !== "ready" && !oneWay ? (
-            <p className="composer__hint">Secure chat is not ready yet.</p>
-          ) : null}
-        </footer>
+            {identityStatus !== "ready" && !oneWay ? (
+              <p className="composer__hint">Secure chat is not ready yet.</p>
+            ) : null}
+          </footer>
+        </>
       )}
 
       <p className="sr-only" role="status" aria-live="polite">

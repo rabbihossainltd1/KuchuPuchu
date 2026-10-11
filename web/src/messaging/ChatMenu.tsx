@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+
 import type { ApiClient } from "../auth/authApi";
 import { Icon, type IconName } from "../icons";
 import type { Navigate } from "../useBrowserRouter";
 import { CAPABILITY_COPY } from "./chatCopy";
 import { chatThemeOr, CHAT_THEME_LABELS } from "./chatTheme";
 import { hiddenKeyHash } from "./e2ee";
+import { DAY_OPTIONS, customPick, quickPicks, scheduleStamp, type ScheduledRow } from "./schedule";
 import { messagingApi } from "./messagingApi";
 import type { MessageRow } from "./protocol";
 import { searchSnippet } from "./SearchPane";
@@ -34,6 +36,8 @@ export function ChatMenu({
   navigate,
   meId,
   onJumpToMessage,
+  scheduledCount = 0,
+  initialView = "root",
 }: {
   api: ApiClient | null;
   conversation: ConversationRow;
@@ -44,10 +48,30 @@ export function ChatMenu({
   navigate: Navigate;
   meId: string;
   onJumpToMessage: (messageId: string) => void;
+  /** Pending scheduled rows — the phone only shows the menu row with rows. */
+  scheduledCount?: number;
+  /** The composer's long-press opens the sheet straight on the schedule view. */
+  initialView?: "root" | "sendlater" | "scheduled";
 }) {
   const [view, setView] = useState<
-    "root" | "mute" | "privacy" | "notes" | "theme" | "find" | "hide" | "delete"
-  >("root");
+    | "root"
+    | "mute"
+    | "privacy"
+    | "notes"
+    | "theme"
+    | "find"
+    | "hide"
+    | "delete"
+    | "sendlater"
+    | "scheduled"
+    | "disappear"
+  >(initialView);
+  const [scheduledRows, setScheduledRows] = useState<readonly ScheduledRow[]>([]);
+  const [sendCustom, setSendCustom] = useState(false);
+  const [dayOff, setDayOff] = useState(0);
+  const [hour12, setHour12] = useState((new Date().getHours() + 1) % 12 || 12);
+  const [minute, setMinute] = useState(0);
+  const [pm, setPm] = useState((new Date().getHours() + 1) % 24 >= 12);
   const [hideKey, setHideKey] = useState("");
   const [alsoForThem, setAlsoForThem] = useState(false);
   const [findQuery, setFindQuery] = useState("");
@@ -58,6 +82,29 @@ export function ChatMenu({
   const [muteCall, setMuteCall] = useState(conversation.mutedCall);
   const [muteMsg, setMuteMsg] = useState(conversation.mutedMsg);
   const [priv, setPriv] = useState(conversation.privacy);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  useEffect(() => {
+    if (view !== "scheduled" || !api) return;
+    const client = api;
+    let live = true;
+    void messagingApi
+      .listScheduled(client, conversation.id)
+      .then((rows) => {
+        if (live) setScheduledRows(rows);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [view, api, conversation.id]);
 
   const muted = conversation.mutedCall || conversation.mutedMsg;
   const peerId = conversationPeerId(conversation);
@@ -117,8 +164,14 @@ export function ChatMenu({
               conversation.isGroup ? "Group Media" : "Media, links, and docs",
               onOpenMedia,
             )}
+            {scheduledCount > 0
+              ? row("schedule", "Scheduled messages", () => setView("scheduled"))
+              : null}
             {row("search", "Search in chat", () => setView("find"))}
             {row("bellOff", muted ? "Unmute…" : "Mute…", () => setView("mute"))}
+            {!conversation.isGroup && !bot
+              ? row("timer", "Disappearing messages", () => setView("disappear"))
+              : null}
             {!conversation.isGroup && !bot
               ? row("lock", "Chat privacy", () => setView("privacy"))
               : null}
@@ -228,6 +281,175 @@ export function ChatMenu({
             >
               Delete Chat
             </button>
+          </>
+        )}
+
+        {view === "sendlater" && (
+          <>
+            <p className="chat-menu__title">Send later</p>
+            {quickPicks(new Date()).map((pick) =>
+              row("schedule", pick.label, () => {
+                void (async () => {
+                  if (await controller.scheduleSend(pick.at.toISOString())) onClose();
+                })();
+              }),
+            )}
+            {!sendCustom ? row("pencil", "Pick date & time", () => setSendCustom(true)) : null}
+            {sendCustom && (
+              <div className="chat-menu__sched-custom">
+                <div className="chat-menu__sched-days" role="radiogroup" aria-label="Day">
+                  {DAY_OPTIONS.map((option) => (
+                    <button
+                      key={option.offset}
+                      type="button"
+                      role="radio"
+                      aria-checked={dayOff === option.offset}
+                      className={`chat-menu__chip${dayOff === option.offset ? " is-on" : ""}`}
+                      onClick={() => setDayOff(option.offset)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="chat-menu__sched-clock">
+                  <div className="chat-menu__wheel" aria-label="Hour">
+                    <button
+                      type="button"
+                      aria-label="Hour up"
+                      onClick={() => setHour12((hour12 % 12) + 1)}
+                    >
+                      +
+                    </button>
+                    <span>{hour12}</span>
+                    <button
+                      type="button"
+                      aria-label="Hour down"
+                      onClick={() => setHour12(((hour12 + 10) % 12) + 1)}
+                    >
+                      −
+                    </button>
+                  </div>
+                  <span className="chat-menu__sched-colon">:</span>
+                  <div className="chat-menu__wheel" aria-label="Minute">
+                    <button
+                      type="button"
+                      aria-label="Minute up"
+                      onClick={() => setMinute((minute + 5) % 60)}
+                    >
+                      +
+                    </button>
+                    <span>{String(minute).padStart(2, "0")}</span>
+                    <button
+                      type="button"
+                      aria-label="Minute down"
+                      onClick={() => setMinute((minute + 55) % 60)}
+                    >
+                      −
+                    </button>
+                  </div>
+                  <div className="chat-menu__sched-ampm" role="radiogroup" aria-label="AM or PM">
+                    {([false, true] as const).map((isPm) => (
+                      <button
+                        key={String(isPm)}
+                        type="button"
+                        role="radio"
+                        aria-checked={pm === isPm}
+                        className={`chat-menu__chip${pm === isPm ? " is-on" : ""}`}
+                        onClick={() => setPm(isPm)}
+                      >
+                        {isPm ? "PM" : "AM"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {(() => {
+                  const picked = customPick(new Date(), dayOff, hour12, minute, pm);
+                  const valid = picked.getTime() > Date.now();
+                  return (
+                    <>
+                      <p className={`chat-menu__sched-stamp${valid ? "" : " is-bad"}`}>
+                        {valid ? scheduleStamp(picked.toISOString()) : "Pick a later time"}
+                      </p>
+                      <button
+                        type="button"
+                        className="primary-button"
+                        disabled={!valid || busy !== ""}
+                        onClick={() => {
+                          void (async () => {
+                            if (await controller.scheduleSend(picked.toISOString())) onClose();
+                          })();
+                        }}
+                      >
+                        Schedule
+                      </button>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+          </>
+        )}
+
+        {view === "scheduled" && (
+          <>
+            <p className="chat-menu__title">Scheduled</p>
+            {scheduledRows.length === 0 && (
+              <p className="chat-menu__notes">Nothing is waiting to send.</p>
+            )}
+            {scheduledRows.map((item) => (
+              <div className="chat-menu__sched-row" key={item.id}>
+                <Icon name="schedule" size={18} />
+                <span className="chat-menu__sched-body">
+                  <span className="chat-menu__sched-preview">{item.preview || "Message"}</span>
+                  <span className="chat-menu__sched-stamp">{scheduleStamp(item.sendAt)}</span>
+                </span>
+                <button
+                  type="button"
+                  className="icon-button chat-menu__sched-cancel"
+                  aria-label="Cancel scheduled message"
+                  onClick={() =>
+                    void run("Cancel", async (client) => {
+                      await messagingApi.cancelScheduled(client, item.id);
+                      setScheduledRows((current) =>
+                        current.filter((rowItem) => rowItem.id !== item.id),
+                      );
+                    })
+                  }
+                >
+                  <Icon name="close" size={16} />
+                </button>
+              </div>
+            ))}
+          </>
+        )}
+
+        {view === "disappear" && (
+          <>
+            <p className="chat-menu__title">Disappearing messages</p>
+            {(
+              [
+                [0, "Off"],
+                [86400, "24 hours"],
+                [604800, "7 days"],
+                [7776000, "90 days"],
+              ] as const
+            ).map(([seconds, label]) => (
+              <button
+                key={seconds}
+                type="button"
+                className="chat-menu__row"
+                disabled={busy !== ""}
+                onClick={() =>
+                  void run("Disappearing", async (client) => {
+                    await messagingApi.setDisappearSeconds(client, conversation.id, seconds);
+                    onClose();
+                  })
+                }
+              >
+                <span>{label}</span>
+                {conversation.disappearSeconds === seconds ? <Icon name="check" size={18} /> : null}
+              </button>
+            ))}
           </>
         )}
 
