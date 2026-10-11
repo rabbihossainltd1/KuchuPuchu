@@ -57,6 +57,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.OutputTransformation
 import androidx.compose.foundation.text.input.maxLength
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.rememberTextFieldState
@@ -171,6 +172,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
@@ -498,7 +500,6 @@ fun ChatScreen(nav: NavController, convId: String) {
     var showChatSearch by remember { mutableStateOf(false) }
     var showDisappear by remember { mutableStateOf(false) }
     var showTheme by remember { mutableStateOf(false) }
-    var showNicknames by remember { mutableStateOf(false) }
     // r71-18 (owner item 18): ⋮ → "Chat privacy" — three per-member switches.
     var showChatPrivacy by remember { mutableStateOf(false) }
     var privShot by remember(convId) { mutableStateOf(false) }
@@ -4068,7 +4069,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                         if (groupAdmin && !privateGroup) {
                             KpSheetRow(Icons.Filled.PersonAdd, "Add Members") { menuOpen = false; showAddMembers = true }
                         }
-                        KpSheetRow(Icons.Filled.Edit, "Nicknames") { menuOpen = false; showNicknames = true }
                         if (!privateGroup) {
                             KpSheetRow(Icons.Filled.PermMedia, "Group Media") { menuOpen = false; markViewerReturn(); nav.navigate("chatmedia/$convId") }
                         }
@@ -4082,9 +4082,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                             KpSheetRow(Icons.Filled.Schedule, "Scheduled messages") { menuOpen = false; showScheduled = true }
                         }
                         KpSheetRow(Icons.Filled.GroupAdd, "New group") { menuOpen = false; nav.navigate("newgroup") }
-                        if (otherUserId.isNotBlank() && !botChat) {
-                            KpSheetRow(Icons.Filled.Edit, "Nickname") { menuOpen = false; showNicknames = true }
-                        }
                         if (otherUserId.isNotBlank()) {
                             // Owner round 30: "View contact" only when this person is
                             // already in the phone book; otherwise offer to add them
@@ -4122,20 +4119,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                 }
             }
-        }
-        if (showNicknames) {
-            ConversationNicknamesSheet(
-                conversationId = convId,
-                conversation = c,
-                meId = Store.myId(),
-                onDismiss = { showNicknames = false },
-                onSaved = { updated ->
-                    conv.value = updated
-                    ScreenStore.setConvDetail(convId, updated)
-                    ScreenStore.upsertConv(updated)
-                    ScreenStore.pokeInbox()
-                },
-            )
         }
         if (confirmLeave) {
             KpConfirmSheet(
@@ -6068,141 +6051,6 @@ fun ChatScreen(nav: NavController, convId: String) {
 
 /* ------------------------------------------------------------------ */
 
-private data class ChatNicknameMember(
-    val id: String,
-    val displayName: String,
-    val nickname: String,
-)
-
-/** Nickname editing lives in the conversation's ⋮ menu, not the profile screen. */
-@Composable
-private fun ConversationNicknamesSheet(
-    conversationId: String,
-    conversation: JSONObject?,
-    meId: String,
-    onDismiss: () -> Unit,
-    onSaved: (JSONObject) -> Unit,
-) {
-    val scope = rememberCoroutineScope()
-    val members = remember(conversationId, conversation?.toString(), meId) {
-        val result = mutableListOf<ChatNicknameMember>()
-        if (conversation?.optBoolean("isGroup") == true) {
-            val rows = conversation.optJSONArray("members")
-            if (rows != null) for (index in 0 until rows.length()) {
-                val user = rows.optJSONObject(index)?.optJSONObject("user") ?: continue
-                val id = user.optString("id")
-                if (id.isBlank() || id == meId) continue
-                result += ChatNicknameMember(
-                    id = id,
-                    displayName = user.optText("displayName").ifBlank { user.optText("username") },
-                    nickname = user.optText("nickname"),
-                )
-            }
-        } else {
-            val user = conversation?.optJSONObject("other")
-            val id = user?.optString("id").orEmpty()
-            if (user != null && id.isNotBlank() && id != meId) {
-                result += ChatNicknameMember(
-                    id = id,
-                    displayName = user.optText("displayName").ifBlank { user.optText("username") },
-                    nickname = user.optText("nickname"),
-                )
-            }
-        }
-        result
-    }
-    var target by remember(conversationId) { mutableStateOf<ChatNicknameMember?>(null) }
-    var draft by remember(conversationId) { mutableStateOf("") }
-    var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf("") }
-
-    fun saveNickname(rawValue: String) {
-        val current = target ?: return
-        if (busy) return
-        val value = rawValue.trim().take(40)
-        scope.launch {
-            busy = true
-            error = ""
-            try {
-                val path = "/api/conversations/${Uri.encode(conversationId)}/nicknames/${Uri.encode(current.id)}"
-                val response = withContext(Dispatchers.IO) {
-                    if (value.isBlank()) Api.delete(path)
-                    else Api.put(path, JSONObject().put("nickname", value))
-                }
-                response.optJSONObject("conversation")?.let(onSaved)
-                ScreenStore.pokeInbox()
-                target = null
-                draft = ""
-            } catch (failure: Exception) {
-                error = failure.message?.takeIf { it.isNotBlank() } ?: "Could not save the nickname."
-            } finally {
-                busy = false
-            }
-        }
-    }
-
-    KpSheet(onDismiss = { if (!busy) onDismiss() }, title = if (target == null) "Nicknames" else "Nickname") {
-        if (target == null) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
-                Text(
-                    "Aliases are shared only with people in this chat; profile names stay unchanged.",
-                    color = Muted,
-                    fontSize = 12.5.sp,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
-                if (members.isEmpty()) {
-                    Text("No other chat members are available.", color = Muted, fontSize = 13.sp)
-                }
-            }
-            members.forEach { member ->
-                KpSheetRow(
-                    Icons.Filled.Edit,
-                    if (member.nickname.isNotBlank()) "${member.displayName} · ${member.nickname}" else member.displayName,
-                ) {
-                    target = member
-                    draft = member.nickname
-                    error = ""
-                }
-            }
-        } else {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp).imePadding()) {
-                Text("For ${target?.displayName ?: "this member"} in this chat.", color = Muted, fontSize = 12.5.sp)
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = { draft = it.take(40) },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp),
-                    singleLine = true,
-                    enabled = !busy,
-                    shape = RoundedCornerShape(14.dp),
-                    label = { Text("Nickname") },
-                    placeholder = { Text(target?.displayName.orEmpty()) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = ActionBlue,
-                        unfocusedBorderColor = Line,
-                        cursorColor = ActionBlue,
-                        focusedTextColor = Ink,
-                        unfocusedTextColor = Ink,
-                    ),
-                )
-                if (error.isNotBlank()) {
-                    Text(error, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
-                }
-                Spacer(Modifier.height(10.dp))
-                GoldBtn(
-                    "Save",
-                    Modifier.fillMaxWidth(),
-                    enabled = !busy && draft.trim().isNotBlank(),
-                ) { saveNickname(draft) }
-                if (target?.nickname?.isNotBlank() == true) {
-                    KpSheetRow(null, "Clear nickname", tint = Red) { saveNickname("") }
-                }
-                KpSheetRow(null, "Cancel") { if (!busy) target = null }
-            }
-        }
-    }
-}
-
 /** Subtle scattered coins behind the conversation (locked design #7). */
 @Composable
 private fun CoinWallpaper() {
@@ -6532,6 +6380,13 @@ private fun Composer(
                             val currentInput by rememberUpdatedState(input)
                             val currentOnInput by rememberUpdatedState(onInput)
                             val currentOnReceiveImage by rememberUpdatedState(onReceiveImage)
+                            val boldOutputTransformation = remember {
+                                OutputTransformation {
+                                    MessageMarkup.boldDelimiterRanges(toString())
+                                        .sortedByDescending { it.first }
+                                        .forEach { range -> delete(range.first, range.last + 1) }
+                                }
+                            }
                             LaunchedEffect(inputState) {
                                 androidx.compose.runtime.snapshotFlow { inputState.text.toString() }
                                     .collect { t -> if (t != currentInput) currentOnInput(t) }
@@ -6557,10 +6412,24 @@ private fun Composer(
                                     }
                                 }
                             }
+                            Text(
+                                text = MessageMarkup.formatted(inputState.text.toString()),
+                                color = Ink,
+                                fontSize = 14.sp,
+                                lineHeight = 20.sp,
+                                maxLines = 4,
+                                overflow = TextOverflow.Clip,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 20.dp)
+                                    .padding(vertical = 6.dp)
+                                    .clearAndSetSemantics {},
+                            )
                             BasicTextField(
                                 state = inputState,
                                 inputTransformation = InputTransformation.maxLength(MESSAGE_BODY_LIMIT),
-                                textStyle = TextStyle(color = Ink, fontSize = 14.sp, lineHeight = 20.sp),
+                                outputTransformation = boldOutputTransformation,
+                                textStyle = TextStyle(color = Color.Transparent, fontSize = 14.sp, lineHeight = 20.sp),
                                 // Owner round 19: the caret follows the chat theme too.
                                 cursorBrush = androidx.compose.ui.graphics.SolidColor(accent),
                                 lineLimits = TextFieldLineLimits.MultiLine(minHeightInLines = 1, maxHeightInLines = 4),
@@ -9390,10 +9259,8 @@ private fun MessageRow(
                             }
                         } else {
                             val full = m.optText("body")
-                            val magicTextInk = magicMessageTextColor(
+                            val magicTextModifier = magicMessageTextModifier(
                                 enabled = kind == "TEXT" && m.optJSONObject("meta")?.optBoolean("magic") == true && fxBorn,
-                                base = bodyInk,
-                                accent = chatAccent(theme),
                             )
                             val visibleFull = MessageMarkup.plain(full)
                             // Owner round 32 (item 32): a link in the text
@@ -9402,7 +9269,7 @@ private fun MessageRow(
                             // text. In select mode taps stay with the bubble.
                             val selecting = selectedIds.isNotEmpty()
                             val linked =
-                                remember(full, bodyInk, selecting, isGroup, theme, onOpenMention) {
+                                remember(full, bodyInk, selecting, theme, onOpenMention) {
                                     if (selecting) {
                                         if (visibleFull == full) null
                                         else androidx.compose.ui.text.AnnotatedString(visibleFull)
@@ -9410,7 +9277,7 @@ private fun MessageRow(
                                         value = full,
                                         linkInk = chatAccent(theme),
                                         mentionInk = chatAccent(theme),
-                                        allowMentions = !isGroup,
+                                        allowMentions = true,
                                         openUrl = { url ->
                                             revealStamp.value()
                                             Links.open(ctx, url)
@@ -9442,7 +9309,8 @@ private fun MessageRow(
                                         visibleFull.take(revealChars) + " ▍",
                                         fontSize = 14.5.sp,
                                         lineHeight = 19.sp,
-                                        color = magicTextInk,
+                                        color = bodyInk,
+                                        modifier = magicTextModifier,
                                         maxLines = if (capped) BODY_COLLAPSE_LINES else Int.MAX_VALUE,
                                         overflow = if (capped) TextOverflow.Ellipsis else TextOverflow.Clip,
                                         onTextLayout = { countLines(it, { _ -> }) },
@@ -9452,7 +9320,8 @@ private fun MessageRow(
                                         linked,
                                         fontSize = 14.5.sp,
                                         lineHeight = 19.sp,
-                                        color = magicTextInk,
+                                        color = bodyInk,
+                                        modifier = magicTextModifier,
                                         maxLines = if (capped) BODY_COLLAPSE_LINES else Int.MAX_VALUE,
                                         overflow = if (capped) TextOverflow.Ellipsis else TextOverflow.Clip,
                                         onTextLayout = { countLines(it, { _ -> }) },
@@ -9467,7 +9336,8 @@ private fun MessageRow(
                                         visibleFull,
                                         fontSize = 14.5.sp,
                                         lineHeight = 19.sp,
-                                        color = magicTextInk,
+                                        color = bodyInk,
+                                        modifier = magicTextModifier,
                                         maxLines = if (capped) BODY_COLLAPSE_LINES else Int.MAX_VALUE,
                                         overflow = if (capped) TextOverflow.Ellipsis else TextOverflow.Clip,
                                         onTextLayout = { countLines(it, { _ -> }) },

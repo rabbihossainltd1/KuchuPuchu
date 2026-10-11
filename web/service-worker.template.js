@@ -48,11 +48,10 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-/* Slice H: the browser doorbell. The payload arrives GENERIC by server
-   contract (a kind, nothing else — never message text, names or photos), so
-   the notification this worker shows can only knock; the signed-in app loads
-   the actual content after the click. The copy below is pinned against
-   web/src/push/pushModel.ts by contract case 77 and verify-web-sw. */
+/* Slice H: the browser doorbell. The payload carries only a kind and coarse
+   silent / mention flags — never message text, sender identity, conversation
+   id or photos. A mention copy can therefore say WHAT happened without
+   exposing who wrote it or where. The signed-in app loads details after click. */
 self.addEventListener("push", (event) => {
   if (!event.data) return;
   let payload = {};
@@ -63,12 +62,15 @@ self.addEventListener("push", (event) => {
   }
   const kind = payload.t === "kp.call" ? "kp.call" : "kp.msg";
   const silent = payload.s === 1;
+  const mentioned = kind === "kp.msg" && payload.m === 1;
   event.waitUntil(
     self.registration.showNotification("KuchuPuchu", {
       body:
         kind === "kp.call"
           ? "Call activity on KuchuPuchu — open the app to check."
-          : "New message activity on KuchuPuchu — open the app to check.",
+          : mentioned
+            ? "Someone mentioned you in a group — open the app to check."
+            : "New message activity on KuchuPuchu — open the app to check.",
       tag: kind === "kp.call" ? "kp-call" : "kp-msg",
       renotify: true,
       silent: silent,

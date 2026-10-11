@@ -17,7 +17,6 @@ import {
   conversationPeerId,
   conversationTitle,
   isBotConversation,
-  type ConversationPeer,
   type ConversationRow,
 } from "./protocol";
 import type { MessagingController } from "./useMessaging";
@@ -74,8 +73,6 @@ export function ChatMenu({
     | "sendlater"
     | "scheduled"
     | "disappear"
-    | "nicknames"
-    | "nickname-edit"
   >(initialView);
   const [scheduledRows, setScheduledRows] = useState<readonly ScheduledRow[]>([]);
   const [sendCustom, setSendCustom] = useState(false);
@@ -91,8 +88,6 @@ export function ChatMenu({
   const [busy, setBusy] = useState("");
   const [confirm, setConfirm] = useState("");
   const [priv, setPriv] = useState(conversation.privacy);
-  const [nicknameTarget, setNicknameTarget] = useState<ConversationPeer | null>(null);
-  const [nicknameDraft, setNicknameDraft] = useState("");
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -121,11 +116,6 @@ export function ChatMenu({
   const peerId = conversationPeerId(conversation);
   const bot = isBotConversation(conversation);
   const ai = peerId === "kp_ai_bot";
-  const nicknameTargets = conversation.isGroup
-    ? conversation.members.map((member) => member.user).filter((user) => user.id !== meId)
-    : conversation.other
-      ? [conversation.other]
-      : [];
 
   const themeLabel =
     CHAT_THEME_LABELS.find((option) => option.value === chatThemeOr(conversation.theme))?.label ??
@@ -216,7 +206,6 @@ export function ChatMenu({
               ? row("schedule", "Scheduled messages", () => setView("scheduled"))
               : null}
             {row("search", "Search in chat", () => setView("find"))}
-            {!bot ? row("pencil", "Nicknames", () => setView("nicknames")) : null}
             {row("bellOff", muted ? "Unmute…" : "Mute…", () => setView("mute"))}
             {!conversation.isGroup && !bot
               ? row("timer", "Disappearing messages", () => setView("disappear"))
@@ -262,102 +251,6 @@ export function ChatMenu({
             {!conversation.isGroup && !bot
               ? row("trash", "Delete chat", () => setView("delete"), { danger: true })
               : null}
-          </>
-        )}
-
-        {view === "nicknames" && (
-          <>
-            <p className="chat-menu__title">Nicknames</p>
-            <p className="chat-menu__notes">
-              Aliases are shared only with people in this chat; they do not change profile names.
-            </p>
-            {nicknameTargets.length > 0 ? (
-              nicknameTargets.map((user) =>
-                row(
-                  "pencil",
-                  user.nickname ? `${user.displayName} · ${user.nickname}` : user.displayName,
-                  () => {
-                    setNicknameTarget(user);
-                    setNicknameDraft(user.nickname ?? "");
-                    setView("nickname-edit");
-                  },
-                  { key: user.id },
-                ),
-              )
-            ) : (
-              <p className="chat-menu__notes">No chat members are available to nickname.</p>
-            )}
-          </>
-        )}
-
-        {view === "nickname-edit" && nicknameTarget && (
-          <>
-            <p className="chat-menu__title">Nickname</p>
-            <p className="chat-menu__notes">For {nicknameTarget.displayName} in this chat.</p>
-            <label className="chat-menu__nickname-field" htmlFor="chat-menu-nickname">
-              <span>Nickname</span>
-              <input
-                id="chat-menu-nickname"
-                value={nicknameDraft}
-                maxLength={40}
-                onChange={(event) => setNicknameDraft(event.target.value)}
-                placeholder={nicknameTarget.displayName}
-                disabled={busy !== ""}
-                autoFocus
-              />
-            </label>
-            <div className="chat-menu__nickname-actions">
-              <button
-                type="button"
-                className="primary-button"
-                disabled={busy !== "" || !nicknameDraft.trim()}
-                onClick={() =>
-                  void run("Nickname", async (client) => {
-                    await messagingApi.setNickname(
-                      client,
-                      conversation.id,
-                      nicknameTarget.id,
-                      nicknameDraft,
-                    );
-                    controller.announce("Nickname saved for this chat.");
-                    setView("nicknames");
-                  })
-                }
-              >
-                Save
-              </button>
-              {nicknameTarget.nickname ? (
-                <button
-                  type="button"
-                  className="text-button"
-                  disabled={busy !== ""}
-                  onClick={() =>
-                    void run("Nickname", async (client) => {
-                      await messagingApi.setNickname(
-                        client,
-                        conversation.id,
-                        nicknameTarget.id,
-                        "",
-                      );
-                      setNicknameDraft("");
-                      setNicknameTarget({ ...nicknameTarget, nickname: "" });
-                      controller.announce("Nickname cleared.");
-                      setView("nicknames");
-                    })
-                  }
-                >
-                  Clear
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className="text-button"
-                disabled={busy !== ""}
-                onClick={() => setView("nicknames")}
-              >
-                Cancel
-              </button>
-            </div>
           </>
         )}
 

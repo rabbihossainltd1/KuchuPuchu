@@ -4,21 +4,21 @@
  * and the service worker.
  *
  * The privacy stance is the whole reason this module exists: a web push is a
- * GENERIC doorbell. The Worker's payload carries a type and nothing else (see
- * `webPushToUser` in `src/worker/index.ts`), so the notification the service
- * worker shows can never quote a message, name a sender or open a chat on its
- * own — it can only knock, and then let the authenticated app fetch whatever
- * it is allowed to show. Every string below is written to stay honest about
- * exactly that.
+ * PRIVACY-SAFE doorbell. The Worker's payload carries a type, an optional
+ * silent bit, and a coarse mention-only bit (see `webPushToUser` in
+ * `src/worker/index.ts`) — never message text, sender identity, or a
+ * conversation id. The service worker can therefore say that a group mention
+ * arrived without revealing who sent it or what they wrote.
  */
 
 export const PUSH_KINDS = ["kp.msg", "kp.call"] as const;
 export type PushKind = (typeof PUSH_KINDS)[number];
 
-/** The decoded push payload: a kind, and `silent` for a muted-chat knock. */
+/** The decoded push payload: kind plus only coarse silence / mention flags. */
 export type PushPayload = {
   readonly kind: PushKind;
   readonly silent: boolean;
+  readonly mentioned: boolean;
 };
 
 /**
@@ -29,7 +29,7 @@ export type PushPayload = {
 export function parsePushPayload(raw: unknown): PushPayload {
   const data = (raw ?? {}) as Record<string, unknown>;
   const kind: PushKind = data.t === "kp.call" ? "kp.call" : "kp.msg";
-  return { kind, silent: data.s === 1 };
+  return { kind, silent: data.s === 1, mentioned: kind === "kp.msg" && data.m === 1 };
 }
 
 /**
@@ -42,18 +42,22 @@ export function pushTargetSection(kind: PushKind, callsEnabled: boolean): "chats
 }
 
 /**
- * The notification the service worker shows. The title is the app name and the
- * body names the KIND of activity, never its content — the payload this worker
- * receives cannot carry content in the first place (contract case 77 proves
- * it), and these strings make that limit visible instead of pretending.
+ * The notification the service worker shows. The title is the app name; a
+ * mention uses its coarse flag to tell the user they were mentioned without
+ * disclosing sender, conversation, or message text.
  */
-export function pushNotificationCopy(kind: PushKind): { title: string; body: string } {
+export function pushNotificationCopy(
+  kind: PushKind,
+  mentioned = false,
+): { title: string; body: string } {
   return {
     title: "KuchuPuchu",
     body:
       kind === "kp.call"
         ? "Call activity on KuchuPuchu — open the app to check."
-        : "New message activity on KuchuPuchu — open the app to check.",
+        : mentioned
+          ? "Someone mentioned you in a group — open the app to check."
+          : "New message activity on KuchuPuchu — open the app to check.",
   };
 }
 

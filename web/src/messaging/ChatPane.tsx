@@ -230,6 +230,7 @@ export function ChatPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const composerPreviewRef = useRef<HTMLDivElement | null>(null);
   const [composerCaret, setComposerCaret] = useState(0);
   const [stickToBottom, setStickToBottom] = useState(true);
   const [confirmDeleteId, setConfirmDeleteId] = useState("");
@@ -1179,7 +1180,7 @@ export function ChatPane({
                   message.fileType,
                   (message.meta ?? {}) as Record<string, unknown>,
                 );
-                const textParts = parseMessageText(body, !conversation.isGroup && !isPlaceholder);
+                const textParts = parseMessageText(body, !isPlaceholder);
                 const vanishDeadline =
                   message.meta.vanish === true && typeof message.meta.vanishExpiresAt === "string"
                     ? Date.parse(message.meta.vanishExpiresAt)
@@ -1955,34 +1956,60 @@ export function ChatPane({
                         ? "Caption for the attached files"
                         : "Message text"}
                   </label>
-                  <textarea
-                    id={composerId}
-                    ref={composerRef}
-                    className="composer__input"
-                    rows={1}
-                    value={isEditing ? editText : controller.draft}
-                    disabled={oneWay}
-                    placeholder={
-                      oneWay
-                        ? "Notification account — replies are not accepted"
-                        : pending.length > 0
-                          ? "Add a caption… (optional, sealed in a personal chat)"
-                          : "Message"
-                    }
-                    title="Enter sends, Shift+Enter adds a line"
-                    maxLength={MESSAGE_BODY_LIMIT}
-                    onChange={(event) => {
-                      setComposerCaret(event.currentTarget.selectionStart);
-                      if (isEditing) {
-                        setEditText(event.target.value);
-                        return;
+                  <div className="composer__editor">
+                    {!isEditing && controller.draft ? (
+                      <div
+                        ref={composerPreviewRef}
+                        className="composer__format-preview"
+                        aria-hidden="true"
+                      >
+                        {parseMessageText(controller.draft).map((part, index) =>
+                          part.bold ? (
+                            <strong key={`bold-${index}`}>{part.text}</strong>
+                          ) : (
+                            <span key={`text-${index}`}>{part.text}</span>
+                          ),
+                        )}
+                      </div>
+                    ) : null}
+                    <textarea
+                      id={composerId}
+                      ref={composerRef}
+                      className={`composer__input${
+                        !isEditing && controller.draft ? " composer__input--format-overlay" : ""
+                      }`}
+                      rows={1}
+                      value={isEditing ? editText : controller.draft}
+                      disabled={oneWay}
+                      placeholder={
+                        oneWay
+                          ? "Notification account — replies are not accepted"
+                          : pending.length > 0
+                            ? "Add a caption… (optional, sealed in a personal chat)"
+                            : "Message"
                       }
-                      controller.setDraft(event.target.value);
-                      controller.composerChanged();
-                    }}
-                    onSelect={(event) => setComposerCaret(event.currentTarget.selectionStart)}
-                    onKeyDown={onComposerKeyDown}
-                  />
+                      title="Enter sends, Shift+Enter adds a line"
+                      maxLength={MESSAGE_BODY_LIMIT}
+                      onChange={(event) => {
+                        setComposerCaret(event.currentTarget.selectionStart);
+                        if (isEditing) {
+                          setEditText(event.target.value);
+                          return;
+                        }
+                        controller.setDraft(event.target.value);
+                        controller.composerChanged();
+                      }}
+                      onSelect={(event) => setComposerCaret(event.currentTarget.selectionStart)}
+                      onScroll={(event) => {
+                        const preview = composerPreviewRef.current;
+                        if (preview) {
+                          preview.scrollTop = event.currentTarget.scrollTop;
+                          preview.scrollLeft = event.currentTarget.scrollLeft;
+                        }
+                      }}
+                      onKeyDown={onComposerKeyDown}
+                    />
+                  </div>
 
                   <div className="composer__attach">
                     {/* Attach opens the device's own picker straight away — no

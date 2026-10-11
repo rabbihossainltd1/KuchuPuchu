@@ -4460,6 +4460,7 @@ async function membersOf(db: D1Database, convId: string) {
     hidden: number | null;
     last_active: string | null;
     priv_messages: string | null;
+    priv_read_receipts: number | null;
     has_device: number;
   }>(
     db,
@@ -4467,6 +4468,7 @@ async function membersOf(db: D1Database, convId: string) {
             (SELECT username FROM users WHERE id = members.user_id) AS username,
             (SELECT last_active_at FROM users WHERE id = members.user_id) AS last_active,
             (SELECT priv_messages FROM users WHERE id = members.user_id) AS priv_messages,
+            members.priv_read_receipts,
             (SELECT EXISTS(SELECT 1 FROM devices WHERE devices.user_id = members.user_id)) AS has_device
        FROM members WHERE conv_id = ?`,
     convId,
@@ -5327,6 +5329,7 @@ async function webPushToUser(
   kind: "kp.msg" | "kp.call",
   ttlSeconds: number,
   silent = false,
+  mentioned = false,
 ): Promise<boolean> {
   if (!env.VAPID_PRIVATE_KEY) return false;
   const subs = await all<WebPushSubRow>(
@@ -5335,7 +5338,11 @@ async function webPushToUser(
     userId,
   );
   if (subs.length === 0) return false;
-  const payload = JSON.stringify(silent ? { t: kind, s: 1 } : { t: kind });
+  const payload = JSON.stringify({
+    t: kind,
+    ...(silent ? { s: 1 } : {}),
+    ...(kind === "kp.msg" && mentioned ? { m: 1 } : {}),
+  });
   let anyAccepted = false;
   await Promise.all(
     subs.map(async (sub) => {
@@ -10200,6 +10207,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         uid,
       ),
     ]);
+    const aiMember =
+      conv.kind === "SOLO" ? members.find((member) => member.user_id === AI_BOT_ID) : undefined;
+    const isAiConversation = aiMember !== undefined;
+    const aiReadReceiptEnabled =
+      isAiConversation && readReceiptsOnForChat(conv) && readReceiptsOnForChat(aiMember);
     // Owner round 32 (item 38): the recipient of a message request writing
     // back IS the acceptance (no prompt tap needed). The opener's open chat
     // re-reads the detail (a conv frame without `msg`) and gains calls /
@@ -10479,8 +10491,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const written = (await db.batch([
       db
         .prepare(
-          `INSERT INTO messages (id, conv_id, sender_id, kind, body, media, meta_json, created_at, client_id, reply_to)
-           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          `INSERT INTO messages (id, conv_id, sender_id, kind, body, media, meta_json, created_at, client_id, reply_to, delivered_at)
+           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             WHERE NOT EXISTS (SELECT 1 FROM messages WHERE conv_id = ? AND sender_id = ? AND client_id = ?)`,
         )
         .bind(
@@ -10494,6 +10506,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           created,
           clientId,
           replyTo,
+          isAiConversation ? created : null,
           convId,
           uid,
           clientId,
@@ -10534,6 +10547,19 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           "UPDATE members SET unread = unread + 1 WHERE conv_id = ? AND user_id != ? AND EXISTS (SELECT 1 FROM messages WHERE id = ?)",
         )
         .bind(convId, uid, mid),
+      ...(isAiConversation
+        ? [
+            db
+              .prepare(
+                `UPDATE members
+                    SET last_read_at = CASE WHEN ? = 1 THEN ? ELSE last_read_at END,
+                        unread = 0
+                  WHERE conv_id = ? AND user_id = ?
+                    AND EXISTS (SELECT 1 FROM messages WHERE id = ?)`,
+              )
+              .bind(aiReadReceiptEnabled ? 1 : 0, created, convId, AI_BOT_ID, mid),
+          ]
+        : []),
       // r56 item 2: clear typing on message send so recipients never see fake typing after send
       db.prepare("DELETE FROM typing WHERE conv_id = ? AND user_id = ?").bind(convId, uid),
     ])) as { meta?: { changes?: number } }[];
@@ -10563,7 +10589,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       media: imageData ?? fileKey ?? null,
       meta_json: meta,
       created_at: created,
-      delivered_at: null,
+      delivered_at: isAiConversation ? created : null,
       reply_to: replyTo,
     } as MsgRow);
     // Realtime: anyone with this chat open hears about the message the
@@ -10572,6 +10598,27 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     ctx.waitUntil(
       broadcastRoomEvent(env, convId, { type: "message", conversationId: convId, message }),
     );
+    if (isAiConversation) {
+      ctx.waitUntil(
+        broadcastRoomEvent(env, convId, {
+          type: "delivered",
+          conversationId: convId,
+          messageIds: [mid],
+          senderIds: [uid],
+          at: created,
+        }),
+      );
+    }
+    if (aiReadReceiptEnabled) {
+      ctx.waitUntil(
+        broadcastRoomEvent(env, convId, {
+          type: "read",
+          conversationId: convId,
+          userId: AI_BOT_ID,
+          at: created,
+        }),
+      );
+    }
     // r56 item 2: clear typing realtime frame on send
     ctx.waitUntil(
       broadcastRoomEvent(env, convId, {
@@ -10700,7 +10747,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       const needsDeviceRendering = (!!sealedBody && !message.viewOnce) || !!pictureUrl;
       const fallbackNote = needsDeviceRendering
         ? undefined
-        : recipientAlert(memberId, preview, me.display_name, live);
+        : recipientAlert(
+            memberId,
+            preview,
+            mentioned ? `${me.display_name} mentioned you` : me.display_name,
+            live,
+          );
       // Numeric launcher badges are driven by notifications on Android. Carry
       // the authoritative post-increment unread-message total so both our app
       // handler and a Play-services fallback can set the same count.
@@ -10769,6 +10821,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           "kp.msg",
           WEB_PUSH_TTL_MESSAGE_S,
           memberId.muted_msg === 1 && !mentioned,
+          mentioned,
         );
       }
       // N4 -> r84-4 (owner r84 #4: "massage delivered double tick er system a
@@ -10789,7 +10842,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // animation instead of typing dots. The kind rides the typing row
     // (polls + reopen healing) and the response, for whoever reads it.
     let aiKind: string | undefined;
-    if (conv.kind === "SOLO" && members.some((m) => m.user_id === AI_BOT_ID)) {
+    if (isAiConversation) {
       aiKind = await classifyAiKind(
         db,
         convId,

@@ -564,6 +564,7 @@ class KpPushService : FirebaseMessagingService() {
             picture = picture,
             senderAvatar = senderAvatar(data),
             unreadMessages = unreadMessages,
+            mentioned = mentioned,
         )
     }
 

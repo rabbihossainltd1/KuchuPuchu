@@ -220,9 +220,12 @@ test.describe("Web messaging", () => {
     expect((worker.sent[0]!.body.meta as Record<string, unknown>)?.magic).toBe(true);
     const magicText = page.locator(".bubble__body--magic").last();
     await expect(magicText).toContainText("bright text");
+    expect(await magicText.evaluate((el) => getComputedStyle(el).animationName)).toContain(
+      "message-magic-text",
+    );
     expect(
-      await magicText.evaluate((el) => el.closest("article")?.classList.contains("bubble--magic")),
-    ).toBe(false);
+      await magicText.evaluate((el) => getComputedStyle(el.closest(".bubble")!).animationName),
+    ).not.toContain("message-magic-text");
   });
 
   test("@ filters chat members and inserts the selected username", async ({ page }) => {
@@ -240,6 +243,24 @@ test.describe("Web messaging", () => {
     await composer.press("Enter");
     await expect.poll(() => worker.sent.length).toBe(1);
     expect(worker.sent[0]!.body.body).toBe("@rahi");
+    const clickableMention = page.getByRole("button", { name: "Open chat with @rahi" });
+    await expect(clickableMention).toBeVisible();
+    await expect(clickableMention).toHaveAttribute("type", "button");
+  });
+
+  test("**bold** is visible in the composer before the message is sent", async ({ page }) => {
+    await page.getByRole("link", { name: /Squad/ }).click();
+    const composer = page.getByLabel("Message text", { exact: true });
+    await composer.fill("**hi** ");
+    await expect(composer).toHaveValue("**hi** ");
+    await expect(page.locator(".composer__format-preview strong")).toHaveText("hi");
+    expect(worker.sent.length).toBe(0);
+
+    await composer.press("Enter");
+    await expect.poll(() => worker.sent.length).toBe(1);
+    expect(worker.sent[0]!.body.body).toBe("**hi**");
+    await expect(page.locator(".bubble__body strong").last()).toHaveText("hi");
+    await expect(page.locator(".bubble__body").last()).not.toContainText("**");
   });
 
   test("an unsent draft survives a page reload", async ({ page }) => {

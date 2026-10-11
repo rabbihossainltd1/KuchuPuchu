@@ -49,6 +49,7 @@ object KpNotify {
         val at: Long,
         val photo: Boolean,
         val avatar: android.graphics.Bitmap?,
+        val mentioned: Boolean,
     )
 
     /** r103-2: start the conversation's card fresh (reply / mark-read / opening the chat). */
@@ -368,6 +369,7 @@ object KpNotify {
         picture: android.graphics.Bitmap? = null,
         senderAvatar: android.graphics.Bitmap? = null,
         unreadMessages: Int = ScreenStore.totalUnreadMessages(),
+        mentioned: Boolean = false,
     ) {
         ensureChannels(ctx)
         // WhatsApp-style direct actions: reply straight from the
@@ -441,7 +443,7 @@ object KpNotify {
             if (stackable) {
                 appendStackedMessage(
                     convoId,
-                    StkMsg(from, body, System.currentTimeMillis(), picture != null, senderIcon),
+                    StkMsg(from, body, System.currentTimeMillis(), picture != null, senderIcon, mentioned),
                 )
             } else {
                 null
@@ -463,13 +465,14 @@ object KpNotify {
                     ),
                 ).build()
             }
+        val notificationTitle = if (mentioned) "$from mentioned you" else from
         val n =
             NotificationCompat.Builder(ctx, if (muted) SILENT_CHANNEL else toneChannelFor(ctx))
                 .setSmallIcon(R.mipmap.ic_stat_kp)
                 // Use the current sender's privacy-checked avatar when it is
                 // available; bot, hidden-photo, and offline cases keep the brand fallback.
                 .setLargeIcon(senderIcon ?: roundLogo(ctx))
-                .setContentTitle(from)
+                .setContentTitle(notificationTitle)
                 .setContentText(body)
                 .setAutoCancel(true)
                 .setGroup(GROUP)
@@ -500,12 +503,16 @@ object KpNotify {
                             NotificationCompat.MessagingStyle(
                                 androidx.core.app.Person.Builder().setName("Me").build(),
                             )
-                                .setConversationTitle(from)
+                                .setConversationTitle(notificationTitle)
                                 .also { st ->
                                     stacked.forEach { e ->
                                         st.addMessage(
                                             NotificationCompat.MessagingStyle.Message(
-                                                if (e.photo) "\uD83D\uDDBC\uFE0F Photo" else e.body,
+                                                when {
+                                                    e.photo -> "\uD83D\uDDBC\uFE0F Photo"
+                                                    e.mentioned -> "Mentioned you: ${e.body}"
+                                                    else -> e.body
+                                                },
                                                 e.at,
                                                 androidx.core.app.Person.Builder().setName(e.from).apply {
                                                     e.avatar?.let { setIcon(IconCompat.createWithBitmap(it)) }

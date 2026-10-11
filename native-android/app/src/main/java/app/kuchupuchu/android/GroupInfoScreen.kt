@@ -86,7 +86,8 @@ fun GroupInfoScreen(nav: NavController, convId: String) {
     var confirmLeave by remember { mutableStateOf(false) }
     var rename by remember { mutableStateOf(false) }
     var addOpen by remember { mutableStateOf(false) }
-    // Owner round 32 (item 5): the profile's ⋮ sheet — Add Members / Settings.
+    var showNicknames by remember { mutableStateOf(false) }
+    // The profile's ⋮ sheet carries conversation-scoped nicknames for every member.
     var moreOpen by remember { mutableStateOf(false) }
 
     suspend fun reload() {
@@ -167,14 +168,10 @@ fun GroupInfoScreen(nav: NavController, convId: String) {
             Text("Group", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
             Spacer(Modifier.weight(1f))
             if (busy) CircularProgressIndicator(color = ActionBlueDeep, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
-            if (isAdmin) {
-                IconButton(onClick = { moreOpen = true }, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Filled.MoreVert, "More", tint = Ink, modifier = Modifier.size(22.dp))
-                }
-                Spacer(Modifier.width(4.dp))
-            } else {
-                Spacer(Modifier.width(16.dp))
+            IconButton(onClick = { moreOpen = true }, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Filled.MoreVert, "More", tint = Ink, modifier = Modifier.size(22.dp))
             }
+            Spacer(Modifier.width(4.dp))
         }
 
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -313,21 +310,41 @@ fun GroupInfoScreen(nav: NavController, convId: String) {
         }
     }
 
-    // ---- ⋮ sheet (admin): Add Members / Settings — owner round 32 (item 5) ----
+    // ---- ⋮ profile menu: nickname action for every member; settings stay admin-only ----
     if (moreOpen) {
         KpSheet(onDismiss = { moreOpen = false }) {
-            if (!privateGroup) {
-                KpSheetRow(Icons.Filled.PersonAdd, "Add Members") {
+            KpSheetRow(Icons.Filled.Edit, "Nicknames") {
+                moreOpen = false
+                showNicknames = true
+            }
+            if (isAdmin) {
+                if (!privateGroup) {
+                    KpSheetRow(Icons.Filled.PersonAdd, "Add Members") {
+                        moreOpen = false
+                        haptics.tap()
+                        addOpen = true
+                    }
+                }
+                KpSheetRow(Icons.Filled.Settings, "Settings") {
                     moreOpen = false
-                    haptics.tap()
-                    addOpen = true
+                    nav.navigate("group/$convId/settings")
                 }
             }
-            KpSheetRow(Icons.Filled.Settings, "Settings") {
-                moreOpen = false
-                nav.navigate("group/$convId/settings")
-            }
         }
+    }
+    if (showNicknames && c != null) {
+        ConversationNicknamesSheet(
+            conversationId = convId,
+            conversation = c,
+            meId = myId,
+            onDismiss = { showNicknames = false },
+            onSaved = { updated ->
+                conv = updated
+                ScreenStore.setConvDetail(convId, updated)
+                ScreenStore.upsertConv(updated)
+                ScreenStore.pokeInbox()
+            },
+        )
     }
     // ---- member sheet: profile / remove (admin) ----
     memberSheet?.let { u ->

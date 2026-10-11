@@ -10244,7 +10244,7 @@ const convBetween = (db, a, b) =>
         post.includes("const replyTo: string | null = replyTarget ? rawReplyTo : null;") &&
         post.includes("const written = (await db.batch([") &&
         post.includes(
-          "INSERT INTO messages (id, conv_id, sender_id, kind, body, media, meta_json, created_at, client_id, reply_to)\n           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?\n            WHERE NOT EXISTS (SELECT 1 FROM messages WHERE conv_id = ? AND sender_id = ? AND client_id = ?)`,",
+          "INSERT INTO messages (id, conv_id, sender_id, kind, body, media, meta_json, created_at, client_id, reply_to, delivered_at)\n           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?\n            WHERE NOT EXISTS (SELECT 1 FROM messages WHERE conv_id = ? AND sender_id = ? AND client_id = ?)`,",
         ) &&
         post.includes(
           '"UPDATE files SET conv_id = ? WHERE key = ? AND owner_id = ? AND conv_id IS NULL",',

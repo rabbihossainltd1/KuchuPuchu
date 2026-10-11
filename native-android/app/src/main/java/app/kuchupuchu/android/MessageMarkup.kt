@@ -30,7 +30,7 @@ private data class MarkRange(
     val mention: String? = null,
 )
 
-/** Lightweight message formatting: `*bold*`, `**bold**`, links and optional 1:1 mentions. */
+/** Lightweight message formatting: `*bold*`, `**bold**`, links and optional @username mentions. */
 internal object MessageMarkup {
     private val boldMarkers = Regex("\\*{1,2}([^*\\n]+?)\\*{1,2}")
     private val mentionPattern = Regex("(^|[^A-Za-z0-9_])@([A-Za-z0-9_]{3,30})(?![A-Za-z0-9_])")
@@ -56,6 +56,15 @@ internal object MessageMarkup {
         parts(value).forEach { part ->
             if (part.bold) withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(part.text) }
             else append(part.text)
+        }
+    }
+
+    /** Delimiter offsets used by the live composer output transform. */
+    fun boldDelimiterRanges(value: String): List<IntRange> = buildList {
+        for (match in boldMarkers.findAll(value)) {
+            val content = match.groups[1] ?: match.groups[2] ?: continue
+            add(match.range.first until content.range.first)
+            add((content.range.last + 1)..match.range.last)
         }
     }
 

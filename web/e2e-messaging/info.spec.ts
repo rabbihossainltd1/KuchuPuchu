@@ -52,29 +52,36 @@ test.describe("Web profile and group info", () => {
     await expect(drawer).toHaveCount(0);
   });
 
-  test("nickname editing is under chat options, not the profile, and the input keeps a usable width", async ({
+  test("nickname editing is under the profile's three-dot menu, not conversation options", async ({
     page,
   }) => {
     await openChat(page, new RegExp(PEER_NAME));
     await page.getByRole("button", { name: new RegExp(`Open ${PEER_NAME} profile`) }).click();
     const profile = page.getByRole("dialog", { name: new RegExp(`${PEER_NAME} profile`) });
-    await expect(profile.getByText("Nickname in this chat")).toHaveCount(0);
     await profile.getByRole("button", { name: "Close profile" }).click();
 
     await page.getByRole("button", { name: "More options" }).click();
-    const menu = page.getByRole("dialog", { name: `Conversation options for ${PEER_NAME}` });
-    await menu.getByRole("button", { name: "Nicknames" }).click();
-    await menu.getByRole("button", { name: PEER_NAME, exact: true }).click();
+    const conversationMenu = page.getByRole("dialog", {
+      name: `Conversation options for ${PEER_NAME}`,
+    });
+    await expect(conversationMenu.getByRole("button", { name: "Nicknames" })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+
+    await page.getByRole("button", { name: new RegExp(`Open ${PEER_NAME} profile`) }).click();
+    await profile.getByRole("button", { name: "More profile options" }).click();
+    await profile.getByRole("menuitem", { name: "Nicknames" }).click();
+    await profile.getByRole("button", { name: PEER_NAME, exact: true }).click();
 
     const input = page.getByLabel("Nickname", { exact: true });
     const inputBox = await input.boundingBox();
     expect(inputBox).not.toBeNull();
     expect(inputBox!.width).toBeGreaterThan(200);
     await input.fill("Bestie");
-    await menu.getByRole("button", { name: "Save" }).click();
+    await profile.getByRole("button", { name: "Save" }).click();
     await expect
       .poll(() => worker.nicknames)
       .toEqual([{ conversationId: "c_direct", userId: "u_peer", nickname: "Bestie" }]);
+    await expect(profile.getByText("Rahi · Bestie")).toBeVisible();
   });
 
   test("the group card lists members with roles and the owner can remove", async ({ page }) => {

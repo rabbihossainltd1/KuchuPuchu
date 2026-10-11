@@ -135,6 +135,104 @@ check(
     workerSource.includes("onChunk(text);"),
 );
 
+// The AI is an immediate recipient: its accepted/read timestamps must be
+// visible to open clients without violating the mutual 1:1 read-receipt switch.
+await call("POST", "/api/ai/welcome", {}, A.token);
+const aiConversation = db._db
+  .prepare(
+    `SELECT c.id FROM conversations c
+       JOIN members a ON a.conv_id = c.id AND a.user_id = ?
+       JOIN members ai ON ai.conv_id = c.id AND ai.user_id = 'kp_ai_bot'
+      WHERE c.kind = 'SOLO' LIMIT 1`,
+  )
+  .get(A.user.id);
+const aiConversationId = aiConversation?.id;
+const roomEvents = [];
+env.CHAT_ROOM = {
+  idFromName: (name) => name,
+  get: (room) => ({
+    fetch: async (_url, init) => {
+      const event = JSON.parse(init.body);
+      roomEvents.push({ room, event });
+      return new Response(JSON.stringify({ sent: 1 }), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  }),
+};
+const aiSend = await call(
+  "POST",
+  `/api/conversations/${aiConversationId}/messages`,
+  { body: "hello AI receipt", clientId: "ai-receipt-on" },
+  A.token,
+);
+const aiStored = db._db.prepare("SELECT * FROM messages WHERE id = ?").get(aiSend.json.message?.id);
+const botMember = db._db
+  .prepare("SELECT last_read_at, unread FROM members WHERE conv_id = ? AND user_id = 'kp_ai_bot'")
+  .get(aiConversationId);
+check(
+  "AI accepts immediately: message delivery persists, and an opted-in AI read is stored and broadcast",
+  aiSend.status === 201 &&
+    aiSend.json.message?.deliveredAt === aiStored?.delivered_at &&
+    aiStored?.delivered_at === aiStored?.created_at &&
+    botMember?.last_read_at === aiStored?.created_at &&
+    botMember?.unread === 0 &&
+    roomEvents.some(
+      ({ room, event }) =>
+        room === aiConversationId &&
+        event.type === "delivered" &&
+        event.messageIds?.includes(aiStored?.id) &&
+        event.senderIds?.includes(A.user.id),
+    ) &&
+    roomEvents.some(
+      ({ room, event }) =>
+        room === aiConversationId &&
+        event.type === "read" &&
+        event.userId === "kp_ai_bot" &&
+        event.at === aiStored?.created_at,
+    ),
+  JSON.stringify({
+    deliveredAt: aiStored?.delivered_at,
+    createdAt: aiStored?.created_at,
+    botMember,
+    events: roomEvents.map(({ room, event }) => ({ room, type: event.type, userId: event.userId })),
+  }),
+);
+
+await call(
+  "POST",
+  `/api/conversations/${aiConversationId}/privacy`,
+  { readReceipts: false },
+  A.token,
+);
+roomEvents.length = 0;
+const aiPrivateSend = await call(
+  "POST",
+  `/api/conversations/${aiConversationId}/messages`,
+  { body: "private receipt setting", clientId: "ai-receipt-off" },
+  A.token,
+);
+const privateStored = db._db
+  .prepare("SELECT * FROM messages WHERE id = ?")
+  .get(aiPrivateSend.json.message?.id);
+const privateBotMember = db._db
+  .prepare("SELECT last_read_at, unread FROM members WHERE conv_id = ? AND user_id = 'kp_ai_bot'")
+  .get(aiConversationId);
+check(
+  "turning read receipts off keeps AI delivery but neither persists nor broadcasts a read receipt",
+  aiPrivateSend.status === 201 &&
+    privateStored?.delivered_at === privateStored?.created_at &&
+    privateBotMember?.last_read_at === aiStored?.created_at &&
+    privateBotMember?.unread === 0 &&
+    !roomEvents.some(({ event }) => event.type === "read" && event.userId === "kp_ai_bot"),
+  JSON.stringify({
+    deliveredAt: privateStored?.delivered_at,
+    createdAt: privateStored?.created_at,
+    botMember: privateBotMember,
+    readEvents: roomEvents.filter(({ event }) => event.type === "read"),
+  }),
+);
+
 console.log(lines.join("\n"));
 const broken = lines.filter((line) => line.includes("BROKEN")).length;
 console.log(`\n--- ${lines.length - broken} ok / ${broken} broken ---`);

@@ -3,7 +3,7 @@
 export type MessageTextPart = {
   readonly text: string;
   readonly bold: boolean;
-  /** Present only when this is a clickable @username in a one-to-one chat. */
+  /** Present when this is a clickable @username in any conversation. */
   readonly mention?: string;
 };
 

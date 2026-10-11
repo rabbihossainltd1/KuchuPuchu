@@ -132,6 +132,7 @@ fun ProfileScreen(
         // Mute-Unmute / Report. Block exists nowhere else on this screen; the
         // owner's account and the bots never get Block at all.
         var moreOpen by remember { mutableStateOf(false) }
+        var showNicknames by remember { mutableStateOf(false) }
         var confirmReport by remember { mutableStateOf(false) }
         // Owner round 33 (item 6): Hide asks for the secret key in its own sheet.
         var askHideKey by remember { mutableStateOf(false) }
@@ -232,6 +233,12 @@ fun ProfileScreen(
                         nav.navigate("newcontact?name=$n&phone=$p")
                     }
                 }
+                if (peerConvForMenu != null && !isKpBot(userId)) {
+                    KpSheetRow(Icons.Filled.Edit, "Nickname") {
+                        moreOpen = false
+                        showNicknames = true
+                    }
+                }
                 if (!unblockable) {
                     KpSheetRow(Icons.Filled.Block, if (blocked) "Unblock" else "Block", tint = Red) {
                         moreOpen = false
@@ -272,6 +279,21 @@ fun ProfileScreen(
                     }
                 }
             }
+        }
+        if (showNicknames && peerConvForMenu != null) {
+            ConversationNicknamesSheet(
+                conversationId = peerConvForMenu.optString("id"),
+                conversation = peerConvForMenu,
+                meId = Store.myId(),
+                onDismiss = { showNicknames = false },
+                onSaved = { updated ->
+                    val cid = peerConvForMenu.optString("id")
+                    ScreenStore.setConvDetail(cid, updated)
+                    ScreenStore.upsertConv(updated)
+                    ScreenStore.pokeInbox()
+                    updated.optJSONObject("other")?.takeIf { it.optString("id") == userId }?.let { user = it }
+                },
+            )
         }
         if (askMute) {
             val pc = peerConvForMenu

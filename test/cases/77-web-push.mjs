@@ -3,7 +3,8 @@
 // The browser doorbell, end to end against the real worker: VAPID-signed
 // delivery (RFC 8292), RFC 8291 `aes128gcm` payloads, the subscription
 // registry and its cleanup — and the privacy rule the whole slice exists to
-// protect: the payload is GENERIC. This case subscribes with a real P-256
+// protect: the payload is a generic doorbell with only a coarse mention bit,
+// never sender identity, message text, or a conversation id. This case subscribes with a real P-256
 // browser-side key pair, intercepts the delivery fetch, then DECRYPTS the
 // record with the subscription's own private key and asserts the plaintext is
 // exactly the generic doorbell — never the message body, never the sender's
@@ -143,13 +144,13 @@ async function main() {
   check("message doorbell TTL is 60 s", ttlMsg === "60", String(ttlMsg));
   check("call doorbell TTL is 300 s", ttlCall === "300", String(ttlCall));
   check(
-    "the generic payload is built in exactly one place",
-    (workerSource.match(/const payload = JSON\.stringify\(silent \? \{ t: kind, s: 1 \}/g) ?? [])
-      .length === 1,
+    "the privacy-safe payload is built in exactly one place",
+    (workerSource.match(/const payload = JSON\.stringify\(\{\n    t: kind,/g) ?? []).length === 1,
   );
+  check("the silent flag rides only as s:1", workerSource.includes("...(silent ? { s: 1 } : {})"));
   check(
-    "the silent flag rides as s:1",
-    workerSource.includes("JSON.stringify(silent ? { t: kind, s: 1 } : { t: kind })"),
+    "the mention doorbell carries only its coarse m:1 flag",
+    workerSource.includes('...(kind === "kp.msg" && mentioned ? { m: 1 } : {})'),
   );
   check(
     "web subscriptions live in their OWN registry, not devices",
@@ -469,8 +470,12 @@ async function main() {
       .prepare("SELECT meta_json FROM messages WHERE conv_id = ? ORDER BY rowid DESC LIMIT 1")
       .all(mentionGroupId)[0]?.meta_json;
     check(
-      "a muted group mention still gets a generic Web Push even when its room socket is live",
-      mentionText === '{"t":"kp.msg"}' &&
+      "a muted group mention gets only the privacy-safe m:1 Web Push even when its room socket is live",
+      mentionText === '{"t":"kp.msg","m":1}' &&
+        !mentionText.includes("Hello @") &&
+        !mentionText.includes(a.user.username) &&
+        !mentionText.includes("Web Push Bruno") &&
+        !mentionText.includes(mentionGroupId) &&
         JSON.parse(mentionStored || "{}").mentions?.includes(a.user.id),
       JSON.stringify({ mentionText, meta: mentionStored }),
     );

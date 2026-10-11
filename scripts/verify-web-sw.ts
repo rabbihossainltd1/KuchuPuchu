@@ -82,8 +82,13 @@ assert.ok(
 );
 assert.ok(
   worker.includes("New message activity on KuchuPuchu — open the app to check."),
-  "the message doorbell copy must stay generic and exact",
+  "the ordinary message doorbell copy must stay generic and exact",
 );
+assert.ok(
+  worker.includes("Someone mentioned you in a group — open the app to check."),
+  "the mention doorbell must say the user was mentioned without naming anyone",
+);
+assert.ok(worker.includes('const mentioned = kind === "kp.msg" && payload.m === 1;'));
 assert.ok(worker.includes('tag: kind === "kp.call" ? "kp-call" : "kp-msg"'));
 assert.ok(worker.includes('{ type: "kp-push-nav", path: target }'));
 assert.ok(
@@ -163,8 +168,14 @@ const cacheStorage = {
 
 const handlers = new Map<string, (event: any) => void>();
 let clientsClaimed = false;
+const shownNotifications: Array<{ title: string; options: Record<string, unknown> }> = [];
 const workerSelf = {
   location: { origin },
+  registration: {
+    async showNotification(title: string, options: Record<string, unknown>): Promise<void> {
+      shownNotifications.push({ title, options });
+    },
+  },
   clients: {
     async claim(): Promise<void> {
       clientsClaimed = true;
@@ -231,6 +242,36 @@ handlers.get("activate")!({
 assert.ok(activationPromise, "activate must wait for cache cleanup and client claim");
 await activationPromise;
 assert.ok(!cacheStores.has("kp-web-shell-obsolete"), "activation must remove stale Web caches");
+
+async function dispatchPush(payload: Record<string, unknown>): Promise<void> {
+  let pending: Promise<unknown> | undefined;
+  handlers.get("push")!({
+    data: { text: () => JSON.stringify(payload) },
+    waitUntil(value: Promise<unknown>): void {
+      pending = value;
+    },
+  });
+  assert.ok(pending, "push handler must wait for the notification");
+  await pending;
+}
+
+await dispatchPush({ t: "kp.msg", m: 1 });
+assert.equal(shownNotifications[shownNotifications.length - 1]?.title, "KuchuPuchu");
+assert.equal(
+  shownNotifications[shownNotifications.length - 1]?.options.body,
+  "Someone mentioned you in a group — open the app to check.",
+  "a Web Push mention must explicitly say the user was mentioned",
+);
+assert.equal(
+  JSON.stringify(shownNotifications[shownNotifications.length - 1]?.options.data),
+  '{"t":"kp.msg"}',
+  "the notification click data must not gain message, sender, or conversation details",
+);
+await dispatchPush({ t: "kp.msg" });
+assert.equal(
+  shownNotifications[shownNotifications.length - 1]?.options.body,
+  "New message activity on KuchuPuchu — open the app to check.",
+);
 // Slice J cutover: the RETIRED legacy shell caches (public/sw.js) are deleted
 // on activation — no stale legacy bytes may survive the migration. A rollback
 // to the legacy worker symmetrically deletes the kp-web-shell-* caches.

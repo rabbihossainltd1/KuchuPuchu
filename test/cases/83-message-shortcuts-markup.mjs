@@ -50,6 +50,11 @@ const androidCommands = read(
 const androidMagic = read(
   "native-android/app/src/main/java/app/kuchupuchu/android/MagicMessageEffect.kt",
 );
+const androidNicknameSheet = read(
+  "native-android/app/src/main/java/app/kuchupuchu/android/ConversationNicknamesSheet.kt",
+);
+const webPush = read("web/src/push/pushModel.ts");
+const webServiceWorker = read("web/service-worker.template.js");
 const webCommands = read("web/src/messaging/ChatPane.tsx");
 const webMessaging = read("web/src/messaging/useMessaging.ts");
 const webInfo = read("web/src/messaging/InfoPane.tsx");
@@ -106,7 +111,7 @@ check(
   boldPreview === "example",
 );
 const directText = parseMessageText("Hi **@rahi** and a@b.com; https://example.com/@linked", true);
-const groupText = parseMessageText("Hi @rahi", false);
+const groupText = parseMessageText("Hi @rahi", true);
 const mentionCandidates = [
   { id: "1", displayName: "Rahi Ahmed", username: "rahi" },
   { id: "2", displayName: "Mina Akter", username: "mina" },
@@ -133,10 +138,10 @@ check(
     parseMessageText("**example*").some((part) => part.bold && part.text === "example"),
 );
 check(
-  "a direct-chat @username is clickable and styled bold too; the group and email lookalike are plain",
+  "@username is clickable in direct and group message text, while email and URL lookalikes stay plain",
   directText.some((part) => part.text === "@rahi" && part.bold && part.mention === "rahi") &&
     directText.every((part) => part.mention !== "b" && part.mention !== "linked") &&
-    groupText.every((part) => part.mention === undefined),
+    groupText.some((part) => part.text === "@rahi" && part.mention === "rahi"),
 );
 check(
   "the Web command suggestions, cleaned send body, formatting and mention click are wired to the composer and bubbles",
@@ -144,7 +149,8 @@ check(
     webCommands.includes("activeMentionQuery(controller.draft, composerCaret)") &&
     webCommands.includes("matchingMentionCandidates(mentionQuery.query, mentionCandidates)") &&
     webCommands.includes("insertMention(") &&
-    webCommands.includes("parseMessageText(body, !conversation.isGroup && !isPlaceholder)") &&
+    webCommands.includes("parseMessageText(body, !isPlaceholder)") &&
+    androidChat.includes("allowMentions = true") &&
     webCommands.includes("openMentionChat(part.mention!)") &&
     webMessaging.includes("const plaintext = command ? command.text : composerText") &&
     webMessaging.includes("...(item.meta ? { meta: { ...item.meta } } : {})"),
@@ -185,7 +191,7 @@ check(
     androidChatPreview.includes("MessageMarkup.plain(plain)"),
 );
 check(
-  "1:1 mention taps open a chat on Android from both normal and optimistic rows and on Web",
+  "mention taps open a chat from normal and optimistic Android rows and Web group/direct message rows",
   (androidChat.match(/onOpenMention = \{ username -> openMentionChat\(username\) \}/g) ?? [])
     .length >= 2 &&
     androidChat.includes("/api/users/username/$username") &&
@@ -199,7 +205,13 @@ check(
     androidPush.includes('val mentioned = data["mention"] == "1"') &&
     androidPush.includes(
       'val muted = !mentioned && (data["muted"] == "1" || ScreenStore.isMsgMuted(convoId))',
-    ),
+    ) &&
+    androidPush.includes("mentioned = mentioned,") &&
+    androidNotify.includes('if (mentioned) "$from mentioned you" else from') &&
+    worker.includes('...(kind === "kp.msg" && mentioned ? { m: 1 } : {})') &&
+    webPush.includes("Someone mentioned you in a group — open the app to check.") &&
+    webServiceWorker.includes("payload.m === 1") &&
+    webServiceWorker.includes("data: { t: kind }"),
 );
 check(
   "/silent keeps the unread/list refresh but suppresses Worker push and in-app message alert",
@@ -210,12 +222,13 @@ check(
     worker.includes('kind === "TEXT" && incomingMeta.silent === true'),
 );
 check(
-  "magic sends animate the text itself on Android and Web, without a bubble-frame glow",
-  androidMagic.includes("fun magicMessageTextColor") &&
-    androidChat.includes("magicMessageTextColor(") &&
-    !androidChat.includes("magicMessageEffect") &&
+  "magic sends move only the text itself on Android and Web, leaving the bubble frame still",
+  androidMagic.includes("fun magicMessageTextModifier") &&
+    androidMagic.includes("translationY =") &&
+    androidChat.includes("magicMessageTextModifier(") &&
     webCommands.includes('message.meta.magic === true ? " bubble__body--magic"') &&
     webCss.includes("@keyframes message-magic-text") &&
+    webCss.includes("transform: translateY(-3px)") &&
     !webCss.includes("@keyframes message-magic-glow"),
 );
 check(
@@ -234,19 +247,29 @@ check(
     webMessaging.includes("...(command ? { meta: { ...command.meta } } : {})"),
 );
 check(
-  "conversation nicknames are set from the ⋮ menu on Web and Android, with fixed-width input and no profile field",
+  "conversation-scoped nicknames live in the Profile / Group Info ⋮ menu, never conversation options",
   worker.includes("conversation_nicknames") &&
     worker.includes('method === "PUT" || method === "DELETE"') &&
-    webMenu.includes('row("pencil", "Nicknames"') &&
-    webMenu.includes('setView("nickname-edit")') &&
-    webCss.includes(".chat-menu__nickname-field input") &&
+    !webMenu.includes('row("pencil", "Nicknames"') &&
+    webInfo.includes('aria-label="More profile options"') &&
+    webInfo.includes('role="menuitem"') &&
+    webInfo.includes("messagingApi.setNickname(") &&
+    webCss.includes(".info-pane__nickname-field input") &&
     webCss.includes("width: 100%") &&
-    !webInfo.includes("Nickname in this chat") &&
-    androidChat.includes('KpSheetRow(Icons.Filled.Edit, "Nicknames")') &&
-    androidChat.includes("heightIn(min = 54.dp)") &&
-    !androidProfile.includes("Nickname in this chat") &&
-    !androidGroup.includes("Set group nickname") &&
-    androidGroup.includes('u.optText("nickname")'),
+    !androidChat.includes('KpSheetRow(Icons.Filled.Edit, "Nicknames")') &&
+    androidProfile.includes('KpSheetRow(Icons.Filled.Edit, "Nickname")') &&
+    androidGroup.includes('KpSheetRow(Icons.Filled.Edit, "Nicknames")') &&
+    androidNicknameSheet.includes("heightIn(min = 54.dp)") &&
+    androidNicknameSheet.includes('Api.put(path, JSONObject().put("nickname", value))'),
+);
+check(
+  "composer bold formatting previews before send, with the same marker-free rendering on Android and Web",
+  androidChat.includes("MessageMarkup.formatted(inputState.text.toString())") &&
+    androidChat.includes("outputTransformation = boldOutputTransformation") &&
+    androidMarkup.includes("fun boldDelimiterRanges(value: String): List<IntRange>") &&
+    webCommands.includes('className="composer__format-preview"') &&
+    webCommands.includes("parseMessageText(controller.draft)") &&
+    webCss.includes(".composer__input--format-overlay"),
 );
 check(
   "status route owns its missing system-bar/cutout inset without replacing established shortcut icons",

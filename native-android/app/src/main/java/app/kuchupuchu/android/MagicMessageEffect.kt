@@ -6,29 +6,26 @@ import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
 
-/** One-shot text-only color shimmer for live /magic messages; the bubble frame stays still. */
+/** One-shot vertical motion on message glyphs only; the bubble frame stays still. */
 @Composable
-internal fun magicMessageTextColor(enabled: Boolean, base: Color, accent: Color): Color {
-    val progress = remember { Animatable(0f) }
-    LaunchedEffect(enabled, base, accent) {
-        progress.snapTo(0f)
+internal fun magicMessageTextModifier(enabled: Boolean): Modifier {
+    val offset = remember { Animatable(0f) }
+    val density = LocalDensity.current
+    LaunchedEffect(enabled) {
+        offset.snapTo(0f)
         if (enabled) {
-            progress.animateTo(0.68f, tween(420, easing = FastOutSlowInEasing))
-            progress.animateTo(0f, tween(1_380, easing = FastOutSlowInEasing))
+            offset.animateTo(-2.5f, tween(180, easing = FastOutSlowInEasing))
+            offset.animateTo(1.8f, tween(210, easing = FastOutSlowInEasing))
+            offset.animateTo(-1.0f, tween(170, easing = FastOutSlowInEasing))
+            offset.animateTo(0f, tween(220, easing = FastOutSlowInEasing))
         }
     }
-    return blendColor(base, accent, progress.value)
-}
-
-private fun blendColor(from: Color, to: Color, amount: Float): Color {
-    val t = amount.coerceIn(0f, 1f)
-    return Color(
-        red = from.red + (to.red - from.red) * t,
-        green = from.green + (to.green - from.green) * t,
-        blue = from.blue + (to.blue - from.blue) * t,
-        alpha = from.alpha + (to.alpha - from.alpha) * t,
-        colorSpace = from.colorSpace,
-    )
+    return Modifier.graphicsLayer {
+        translationY = with(density) { offset.value.dp.toPx() }
+    }
 }
