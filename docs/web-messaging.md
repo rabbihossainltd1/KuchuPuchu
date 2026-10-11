@@ -24,7 +24,7 @@ VITE_KP_WEB_ACCOUNT_INTEGRATION=true VITE_KP_WEB_MESSAGING=true npm run build:we
 | `web/src/messaging/messagingApi.ts` | REST calls for conversations, messages, read, typing, react, edit, delete |
 | `web/src/messaging/useE2eeIdentity.ts` | `ensureIdentity()` state machine: adopt / generate / pending unlock / unavailable |
 | `web/src/messaging/useMessaging.ts` | The controller the two panes share |
-| `web/src/messaging/ConversationList.tsx`, `ChatPane.tsx`, `MessagingWorkspace.tsx` | The three-pane desktop surface and its mobile collapse |
+| `web/src/messaging/ConversationList.tsx`, `ChatPane.tsx`, `MessagingWorkspace.tsx` | The three-pane desktop surface and its mobile collapse; home ⋮ rows mirror `HomeMenuSheet`: My Profile, New contact, All contacts, New group, Settings |
 | `web/src/messaging/chatCopy.ts` | Static catalogs and capability wording, testable without a DOM |
 | `web/src/messaging/attachments.ts` | Pick → prepare → send pipeline: classify, probe, shrink, rejections, `PendingAttachment` reducers |
 | `web/src/messaging/filesApi.ts` | `POST /api/files`, the multipart lifecycle, and `fetchFileBlob` |

@@ -1172,7 +1172,7 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - FLAKY FIX messaging.spec live-socket test: delivered frame must wait for POST ack (sent tick) or srv_1 unknown → lost frame; wait .bubble__tick--sent inside the composer bubble first.
 - themeMatrix: list+chat goldens shifted (new list entry) — regen targeted.
 - TESTS archive.spec.ts 5; CI green. MERGED PR #122 + docs PR #123; prod BUILD_ID 77eb9762ef33281b confirmed.
-- STILL ABSENT: nothing big — parity plan essentially complete; multi-select sheet not ported (out of scope).
+- Follow-up Slice MS completed (see entry below); AP and MS together close archive/pin + ListSelect parity.
 
 ## Web slice MS — multi-select (ListSelect port) — 2026-10-11 (feat/web-multi-select)
 - ConversationList select mode: kebab "Select" → tick bar (X + "{n} selected" h1 + ⋮); rows role=checkbox; ⋮ sheet rows verbatim: Delete / Mute… / Pin|Unpin / Create group with {handle} / Select; Escape clears.
@@ -1182,3 +1182,9 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - helpers: DELETE /api/conversations/:id removes row + records; **/api/conversations/*/mute records + flips raw row flags.
 - LESSON: playwright glob `*` never crosses `/` — /mute needed its own route; axe page-one-h1: select bar count must stay an h1.
 - TESTS select.spec.ts 5; CI green EXIT=0. MERGED PR #124 + docs PR #125; prod BUILD_ID 83df8a5f1305ad42 confirmed.
+
+
+## Web slice HP — HomeMenuSheet parity — 2026-10-11 (feat/web-home-menu)
+- ConversationList home ⋮ now matches phone HomeMenuSheet copy + order: My Profile / New contact / All contacts / New group / Settings. My Profile + Settings route to the web Account & settings surface; New group opens GroupCreatePane.
+- Updated `shots/home-menu.png`; `home.spec.ts` 3 checks (row order, axe, Settings/My Profile routes).
+- Full `npm run ci` EXIT=0. MERGED code PR #126; docs PR pending; prod BUILD_ID pending confirmation.

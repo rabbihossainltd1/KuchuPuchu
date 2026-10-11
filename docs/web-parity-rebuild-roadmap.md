@@ -529,3 +529,14 @@ The phone's `ScheduleSheet` / `ScheduledSheet` / `DisappearDialog`, mirrored:
   `DELETE /api/conversations/:id`.
 - Tests: `select.spec.ts` (5, axe included); helpers record DELETE and
   `/mute` picks and serve them back on the list refresh.
+
+
+## Slice HP — Home menu parity ✅
+
+- `ConversationList.tsx` home ⋮ now has the phone `HomeMenuSheet` rows, in
+  the phone's order and exact copy: **My Profile**, **New contact**,
+  **All contacts**, **New group**, **Settings**.
+- My Profile and Settings open the web's authenticated account surface;
+  New group opens `GroupCreatePane`; contacts retain their existing routes.
+- `home.spec.ts` covers exact row order, route destinations and axe; updated
+  desktop capture is `shots/home-menu.png`.
