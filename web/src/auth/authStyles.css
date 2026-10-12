@@ -1215,7 +1215,9 @@
   border-radius: 14px;
   border: 1.5px solid rgba(255, 255, 255, 0.18);
   background: rgba(255, 255, 255, 0.05);
-  transition: border-color 120ms ease, transform 120ms ease;
+  transition:
+    border-color 120ms ease,
+    transform 120ms ease;
 }
 .otp-box--filled {
   border-color: #f0b43c;

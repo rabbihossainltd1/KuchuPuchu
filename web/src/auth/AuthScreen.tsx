@@ -666,7 +666,11 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
                     autoFocus
                   />
                 </label>
-                <button className="otp-full__verify" type="submit" disabled={busy || !validOtp(otp)}>
+                <button
+                  className="otp-full__verify"
+                  type="submit"
+                  disabled={busy || !validOtp(otp)}
+                >
                   {busy ? "Checking…" : "Verify code"}
                 </button>
               </form>
