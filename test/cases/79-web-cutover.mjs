@@ -62,9 +62,11 @@ check(
   !wrangler.includes("[[assets.rules]]"),
 );
 check(
-  "non-API paths delegate to the ASSETS binding before the REST router",
+  "non-API paths delegate to the ASSETS binding before the REST router (only /download/apk stays on the worker)",
   worker.includes("serveShellAsset(env, request)") &&
-    worker.includes('!pathname.startsWith("/api/") && !pathname.startsWith("/ws/")'),
+    worker.includes('!pathname.startsWith("/api/")') &&
+    worker.includes('!pathname.startsWith("/ws/")') &&
+    worker.includes('pathname !== "/download/apk"'),
 );
 check(
   "the worker stamps frame-ancestors as a response header (meta cannot)",
