@@ -6502,6 +6502,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   // pipeline drops the newest signed APK at this bucket key; no auth because
   // the offer lives on the pre-login welcome screen.
   if (path === "/download/apk" && method === "GET") {
+    if (!env.MEDIA) fail(503, "Media storage is not configured.");
     const object = await env.MEDIA.get("apk/kuchupuchu-latest.apk");
     if (!object) fail(404, "The latest APK is not uploaded yet.");
     return new Response(object.body, {
