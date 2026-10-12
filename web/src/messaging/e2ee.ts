@@ -342,6 +342,19 @@ export function isPersonalConversation(conversation: ConversationIdentity): bool
   return !conversation.isGroup && !BOT_IDS.has(conversation.otherId.trim());
 }
 
+/**
+ * A ready identity chatting with a peer that published NO key (a dormant
+ * pre-E2EE account, or a phone that never ran a key-publishing build) cannot
+ * seal — but refusing every send would leave whole chats dead, which is the
+ * failure the owner reported on 2026-10-12. The fallback sends plaintext and
+ * the UI names the chat as not end-to-end encrypted; a missing OWN identity
+ * still refuses, because an account whose messages are sealed elsewhere must
+ * never leak plaintext from this browser.
+ */
+export function isPlaintextFallback(identity: E2eeIdentity | null, peerPublicKey: string): boolean {
+  return Boolean(identity) && !isValidPublicKey(peerPublicKey);
+}
+
 export async function protectOutgoingBody(
   plaintext: string,
   conversation: ConversationIdentity,
@@ -350,7 +363,15 @@ export async function protectOutgoingBody(
 ): Promise<string> {
   if (!plaintext) return plaintext;
   if (!isPersonalConversation(conversation)) return plaintext;
-  if (!identity || !isValidPublicKey(peerPublicKey)) throw new SendRefusedError();
+  if (isPlaintextFallback(identity, peerPublicKey)) return plaintext;
+  // A missing OWN identity on an account that publishes a key gets the honest
+  // why and the way out — the generic "waiting" copy left the owner staring at
+  // a composer that silently swallowed every send (2026-10-12 report).
+  if (!identity)
+    throw new SendRefusedError(
+      "Secure chat keys are not on this browser. On your phone: Settings → Message key backup, then unlock it here.",
+    );
+  if (!isValidPublicKey(peerPublicKey)) throw new SendRefusedError();
 
   const sealed = await sealBody(plaintext, peerPublicKey, identity);
   if (!sealed) throw new SendRefusedError();

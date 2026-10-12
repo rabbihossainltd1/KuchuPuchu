@@ -1,4 +1,4 @@
-/** The Web must not fork a phone's identity or ship a plaintext fallback. */
+/** The Web must not fork a phone's identity; plaintext only for a keyless peer. */
 
 import { expect, test } from "@playwright/test";
 import { CHAT_ID, createMockWorker, signIn, type MockWorker } from "./helpers";
@@ -10,6 +10,8 @@ async function mountMessaging(
   options: {
     noE2eeBackup?: boolean;
     omitPeerKeyFromList?: boolean;
+    peerKeyless?: boolean;
+    detailNotFound?: boolean;
   } = {},
 ) {
   worker = await createMockWorker(options);
@@ -42,7 +44,8 @@ test.describe("secure identity gate", () => {
 
     await composer.press("Enter");
     await expect(composer).toHaveValue("keep this until I unlock the phone key");
-    await expect(page.getByText(/Waiting for secure chat/)).toBeVisible();
+    // The refusal names the way out (key backup on the phone), not a vague wait.
+    await expect(page.locator(".composer-notice")).toContainText("Message key backup");
     expect(worker.sent).toHaveLength(0);
     expect(page.url()).toContain(`/chats/${CHAT_ID}`);
   });
@@ -151,5 +154,58 @@ test.describe("compact conversation rows", () => {
     await expect(
       page.getByText("secure send after detail-key lookup", { exact: true }),
     ).toBeVisible();
+  });
+});
+
+test.describe("keyless peer (dormant pre-E2EE account)", () => {
+  test.beforeEach(async ({ page }) => {
+    await mountMessaging(page, { peerKeyless: true });
+  });
+
+  test("a ready identity sends plaintext to a keyless peer and names the gap", async ({ page }) => {
+    await page.getByRole("link", { name: /^Rahi/ }).click();
+    // Honest disclosure: the chat is not end-to-end encrypted.
+    await expect(page.getByText(/predates secure chat/)).toBeVisible();
+
+    const composer = page.getByLabel("Message text", { exact: true });
+    await composer.fill("hello from the web");
+    const send = page.getByRole("button", { name: /Send message, or hold to schedule/ });
+    await expect(send).toBeEnabled();
+    await send.click();
+
+    await expect.poll(() => worker.sent.length).toBe(1);
+    const outgoing = String(worker.sent[0]?.body.body ?? "");
+    // Fallback is plaintext — never a KP1 envelope a keyless peer cannot open.
+    expect(outgoing).toBe("hello from the web");
+    expect(outgoing.startsWith("KP1.")).toBe(false);
+  });
+});
+
+test.describe("conversation detail unavailable", () => {
+  test.beforeEach(async ({ page }) => {
+    await mountMessaging(page, { omitPeerKeyFromList: true, detailNotFound: true });
+  });
+
+  test("a dead detail route never bricks a chat the list already knows", async ({ page }) => {
+    await page.getByRole("link", { name: /^Rahi/ }).click();
+
+    // The transcript loads from the messages route; the failed detail fetch is
+    // not allowed to replace the chat with an error banner (2026-10-12: old
+    // accounts' web chats died on "That item is no longer available"). The
+    // sealed row stays honestly locked without the peer key.
+    await expect(page.getByText("Open in the app").first()).toBeVisible();
+    await expect(page.getByText(/no longer available/i)).toHaveCount(0);
+
+    // The peer key stayed unknown, so sending degrades to the disclosed
+    // plaintext fallback instead of failing.
+    await expect(page.getByText(/predates secure chat/)).toBeVisible();
+    const composer = page.getByLabel("Message text", { exact: true });
+    await composer.fill("still works without the detail route");
+    const send = page.getByRole("button", { name: /Send message, or hold to schedule/ });
+    await expect(send).toBeEnabled();
+    await send.click();
+
+    await expect.poll(() => worker.sent.length).toBe(1);
+    expect(String(worker.sent[0]?.body.body ?? "")).toBe("still works without the detail route");
   });
 });

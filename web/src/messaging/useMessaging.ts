@@ -259,11 +259,28 @@ export function useMessaging(options: Options): MessagingController {
       setHiddenConversations(rows.filter((row) => row.hidden));
       setListError("");
       setListStatus("ready");
-      // Keep the open chat's header in step with the refreshed row.
+      // Keep the open chat's header in step with the refreshed row — but the
+      // list is compact on purpose: it omits the peer key material the detail
+      // fetch established. Overwriting the open row with the fresh list row
+      // re-locked sealed messages and refused sends mid-session (2026-10-12,
+      // the old-account web report), so the fresh list fields ride ON TOP of
+      // the current detail row instead of replacing it.
       const openId = selectedRef.current?.id;
       if (openId) {
         const fresh = rows.find((row) => row.id === openId);
-        if (fresh) setSelected(fresh);
+        const current = selectedRef.current;
+        if (fresh && current && current.id === fresh.id) {
+          const other =
+            current.other && fresh.other
+              ? {
+                  ...fresh.other,
+                  e2eePublicKey: fresh.other.e2eePublicKey || current.other.e2eePublicKey,
+                }
+              : (fresh.other ?? current.other);
+          setSelected({ ...current, ...fresh, other });
+        } else if (fresh) {
+          setSelected(fresh);
+        }
       }
     } catch (error) {
       if (error instanceof ApiError && error.kind === "aborted") return;
@@ -479,17 +496,26 @@ export function useMessaging(options: Options): MessagingController {
       );
       // List rows are intentionally compact and can omit key material. Resolve
       // the authoritative conversation detail before enabling a direct-chat
-      // send; never relax the E2EE gate or fall back to plaintext.
+      // send; a keyless peer (dormant pre-E2EE account) gets the honest
+      // plaintext fallback, a missing own identity never does (e2ee.ts).
       if (!conversation || needsPeerKey) {
         try {
           const detail = await messagingApi.getConversation(api, conversationId);
           if (detail) conversation = detail;
         } catch (error) {
-          if (!(error instanceof ApiError && error.kind === "aborted")) {
+          if (error instanceof ApiError && error.kind === "aborted") return;
+          // The list row is in hand but the detail call failed (an older cached
+          // build asking a route the Worker no longer serves, a transient
+          // routing miss). That must not take the whole chat down: the message
+          // fetch below is the authority on whether the conversation exists.
+          // The peer key simply stays unknown and sending degrades per
+          // e2ee.ts with the honest banner. With NO row in hand there is
+          // nothing to open, so the error stands.
+          if (!conversation) {
             setMessagesError(apiErrorMessage(error));
             setMessagesStatus("error");
+            return;
           }
-          return;
         }
       }
       if (!conversation) {
