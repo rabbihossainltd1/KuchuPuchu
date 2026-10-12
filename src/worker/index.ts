@@ -6233,7 +6233,13 @@ export default {
     // handle(); every other path is the built React PWA from the ASSETS
     // binding, stamped with the server-side security headers above.
     const { pathname } = new URL(request.url);
-    if (!pathname.startsWith("/api/") && !pathname.startsWith("/ws/")) {
+    // /download/apk is a public non-/api route: keep it on the worker so the
+    // R2 stream in handle() answers it instead of the shell fallback.
+    if (
+      !pathname.startsWith("/api/") &&
+      !pathname.startsWith("/ws/") &&
+      pathname !== "/download/apk"
+    ) {
       return serveShellAsset(env, request);
     }
     try {
