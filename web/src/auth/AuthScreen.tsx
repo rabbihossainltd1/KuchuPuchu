@@ -651,7 +651,7 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
                   ))}
                 </div>
                 <label className="otp-sr-label" htmlFor="auth-otp">
-                  Six-digit one-time code
+                  Six-digit code
                   <input
                     id="auth-otp"
                     className="otp-sr"

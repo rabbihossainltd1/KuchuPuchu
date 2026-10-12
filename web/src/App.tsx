@@ -294,9 +294,11 @@ export default function App() {
     if (authStatus === "unverified")
       return <SessionRestoreFailure onBack={goToChats} onSignOut={logOutToChats} />;
     if (authStatus !== "signed-in") {
-      // /account is an explicit sign-in intent, so it keeps the form; every
-      // other signed-out landing is the welcome page first.
-      return isAccountRoute || welcomeSignin ? (
+      // Only the bare chats landing shows the welcome page. Anywhere a
+      // visitor arrived with intent — /account, a protected deep link, or
+      // their own sign-in tap — goes straight to the form.
+      const bareLanding = route.kind === "section" && route.section === "chats";
+      return !bareLanding || isAccountRoute || welcomeSignin ? (
         <AuthScreen onBackToChats={() => setWelcomeSignin(false)} />
       ) : (
         <WelcomePage onSignIn={() => setWelcomeSignin(true)} />
