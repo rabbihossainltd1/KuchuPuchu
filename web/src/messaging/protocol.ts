@@ -466,7 +466,12 @@ function parsePreview(value: unknown): ConversationPreview | null {
 
 export function parseConversationRow(value: unknown): ConversationRow | null {
   if (!isRecord(value)) return null;
-  const id = text(value.id, 64);
+  // Legacy SOLO ids are `c_<uuid>_<uuid>` — 75 chars — and the server stores
+  // conversation ids as uncapped TEXT. The old 64-char cap silently truncated
+  // those ids, so every follow-up request (detail, messages, send) 404'd for
+  // accounts with pre-2026 conversation ids: history refused to load and sends
+  // died in the cloud. Keep the cap at 128 so no stored id can be clipped.
+  const id = text(value.id, 128);
   if (!id) return null;
 
   // The list route reports `isGroup`; some single-conversation payloads only
