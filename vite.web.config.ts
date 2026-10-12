@@ -4,6 +4,12 @@ import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 
+// Firebase-hosted builds talk to the Worker cross-origin; the CSP meta in
+// web/index.html injects this origin into connect-src via %VITE_KP_API_ORIGIN%.
+// Same-origin (worker-served) builds leave it empty so 'self' stays the only
+// API source.
+process.env.VITE_KP_API_ORIGIN ??= "";
+
 const serviceWorkerTemplate = readFileSync(
   resolve(process.cwd(), "web/service-worker.template.js"),
   "utf8",
