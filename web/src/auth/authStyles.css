@@ -454,6 +454,7 @@
 }
 
 .account-avatar {
+  position: relative;
   display: grid;
   width: 61px;
   height: 61px;
