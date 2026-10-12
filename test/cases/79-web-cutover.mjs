@@ -160,7 +160,7 @@ check(
 check(
   "the React shell ships the same manifest and icon the legacy PWA had",
   indexHtml.includes('rel="manifest" href="/manifest.webmanifest"') &&
-    indexHtml.includes('rel="icon" href="/icon.svg"') &&
+    indexHtml.includes('rel="icon" type="image/png" href="/logo.png"') &&
     indexHtml.includes('rel="apple-touch-icon" href="/icon.svg"'),
 );
 check(
