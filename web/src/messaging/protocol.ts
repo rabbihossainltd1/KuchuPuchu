@@ -44,6 +44,10 @@ export type ConversationPeer = {
   readonly about: string;
   /** Official-account badge, the way the phone draws verified accounts. */
   readonly verified: boolean;
+  /** Owner round 2026-09-04 crossed-tools mark; independent of verified. */
+  readonly moderator: boolean;
+  /** The account's chosen badge — "verified"/"moderator"/"none"; null = all held. */
+  readonly badge: string | null;
   /**
    * Owner round 31 item 21: a private profile's chat, calls, pictures and
    * videos are screenshot-blocked and NOT saveable / forwardable on the other
@@ -432,8 +436,15 @@ export function parsePeer(value: unknown): ConversationPeer | null {
     lastActiveAt: isoTimestamp(value.lastActiveAt),
     about: text(value.about, 240),
     verified: booleanish(value.verified),
+    moderator: booleanish(value.moderator),
+    badge: badgeChoice(value.badge),
     privateProfile: booleanish(value.privateProfile),
   };
+}
+
+/** The worker validates the choice against held badges; keep only known ones. */
+function badgeChoice(value: unknown): string | null {
+  return value === "verified" || value === "moderator" || value === "none" ? value : null;
 }
 
 export type ConversationMember = {

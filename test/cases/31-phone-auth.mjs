@@ -908,8 +908,23 @@ const otpHash = (requestId, code) =>
   check("logout ok", lo.status === 200);
   const row = k.db._db.prepare("SELECT status FROM auth_devices WHERE user_id = ?").get(a.user.id);
   check("auth device row is REVOKED", row?.status === "REVOKED", row?.status);
+  // H2 option 2 (2026-10-12): the account is Google-bound, so after logout the
+  // no-live-device path demands the bound Google proof instead of trusting the
+  // SIM self-attestation — and the proof completes the login without approval.
   const v = await verify(k, a.user.phone, "MATCH", "dev-logout");
-  check("re-login after logout needs no approval", v.json.status === "SESSION", v.json.status);
+  check(
+    "bound re-login after logout demands the Google proof, not approval",
+    v.json.status === "GOOGLE_REQUIRED",
+    v.json.status,
+  );
+  const v2 = await k.call("POST", "/api/auth/verify-phone", {
+    phone: a.user.phone,
+    sim: "MATCH",
+    deviceId: "dev-logout",
+    deviceName: "Pixel Test",
+    googleIdToken: fakeIdToken("g-logout", "logout@x.com"),
+  });
+  check("the bound Google proof completes re-login", v2.json.status === "SESSION", v2.json.status);
 }
 
 // ---- 17. the old routes are gone ----

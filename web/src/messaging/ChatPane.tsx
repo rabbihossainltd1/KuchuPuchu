@@ -96,6 +96,7 @@ import {
 } from "./messageMentions";
 import { parseMessageText, stripBoldMarkers } from "./messageText";
 import { ConversationAvatar } from "./Avatar";
+import { UserBadges } from "./Badges";
 import {
   takePendingMessageJump,
   MESSAGE_BODY_LIMIT,
@@ -827,9 +828,17 @@ export function ChatPane({
 
   const oneWay = isOneWayConversation(conversation);
   const requiresSecureIdentity = !conversation.isGroup && !isBotConversation(conversation);
-  const secureSendReady =
-    !requiresSecureIdentity ||
-    (identityStatus === "ready" && Boolean(conversation.other?.e2eePublicKey));
+  /**
+   * Owner 2026-10-12: a peer that never published a key (a dormant pre-E2EE
+   * account) must not kill the chat — with our own identity ready, sends fall
+   * back to plaintext and the transcript says so honestly. A missing/locked
+   * own identity still refuses.
+   */
+  const plaintextFallback =
+    requiresSecureIdentity &&
+    identityStatus === "ready" &&
+    !Boolean(conversation.other?.e2eePublicKey);
+  const secureSendReady = !requiresSecureIdentity || identityStatus === "ready";
   const editableWindowMs = EDITABLE_WINDOW_MS;
 
   /**
@@ -976,7 +985,16 @@ export function ChatPane({
               className="conversation-avatar"
             />
             <div className="conversation-header__copy">
-              <h2 id="conversation-heading">{conversationTitle(conversation)}</h2>
+              <h2 id="conversation-heading">
+                {conversationTitle(conversation)}
+                {!conversation.isGroup && conversation.other ? (
+                  <UserBadges
+                    verified={conversation.other.verified}
+                    moderator={conversation.other.moderator}
+                    badge={conversation.other.badge}
+                  />
+                ) : null}
+              </h2>
               <p>
                 {controller.typingActive
                   ? controller.typingKind === "voice"
@@ -1141,6 +1159,16 @@ export function ChatPane({
         <div className="e2ee-bar e2ee-bar--error" role="alert">
           <Icon name="lock" size={16} />
           <span>{identityError}</span>
+        </div>
+      )}
+
+      {plaintextFallback && (
+        <div className="e2ee-bar e2ee-bar--info" role="status">
+          <Icon name="lock" size={16} />
+          <span>
+            {conversationTitle(conversation)}&apos;s account predates secure chat, so messages here
+            are not end-to-end encrypted until that device updates and opens the app.
+          </span>
         </div>
       )}
 

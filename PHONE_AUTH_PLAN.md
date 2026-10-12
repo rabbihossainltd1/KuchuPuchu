@@ -119,7 +119,7 @@ Notes:
 
 | Route | Auth | Ki kore |
 | --- | --- | --- |
-| `POST /api/auth/verify-phone` `{phone, sim, deviceId, deviceName?}` | — | normalize → MISMATCH block → account lookup → `SESSION` \| `APPROVAL_REQUIRED{requestId,expiresAt}` \| `ACCOUNT_CREATED` \| `BIND_REQUIRED` |
+| `POST /api/auth/verify-phone` `{phone, sim, deviceId, deviceName?}` | — | normalize → MISMATCH block → account lookup → `SESSION` \| `APPROVAL_REQUIRED{requestId,expiresAt}` \| `ACCOUNT_CREATED` \| `BIND_REQUIRED` \| `GOOGLE_REQUIRED` (2026-10-12, H2 option 2: Google-bound account, no live device → client retries with `googleIdToken` proving the bound subject) |
 | `POST /api/auth/google/bind` `{phone, idToken, deviceId, displayName?}` | — | Google ID token verify (server-side) → PENDING account ke ACTIVE + google bind → device ACTIVE → session → `{token,user}`. Legacy email-migration: google email == kono legacy account-r email hole SHEI account-e phone bind hoy (chat hote). |
 | `POST /api/auth/login/poll` `{requestId, deviceId}` | — | `PENDING`\|`APPROVED→session mint (single-use CLAIMED)`\|`DECLINED`\|`EXPIRED` |
 | `POST /api/auth/login/approve` `{id}` | old device | atomic D1 batch: request PENDING+unexpired → old session/device revoke, device row ACTIVE, request APPROVED |

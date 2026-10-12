@@ -539,6 +539,30 @@ test.describe("opt-in Worker-backed account flows", () => {
   });
 });
 
+test("a Google-bound account with no live device proves the linked Google", async ({ page }) => {
+  // H2 option 2: first verify-phone answers GOOGLE_REQUIRED; the retry carries
+  // the Google ID token and earns the session.
+  const { calls } = await mockWorker(page, {
+    "/api/auth/verify-phone": (request) =>
+      typeof request.body?.googleIdToken === "string" && request.body.googleIdToken
+        ? jsonResponse({ status: "SESSION", token: "proof-session", user: baseProfile })
+        : jsonResponse({ status: "GOOGLE_REQUIRED", phone: request.body?.phone }),
+  });
+  await installGoogleMock(page);
+  await page.goto("/account");
+
+  await enterPhone(page);
+  await expect(page.getByRole("heading", { name: "Verify it's you" })).toBeVisible();
+  await expect(page.getByText(/Only that Google account can unlock/)).toBeVisible();
+  await page.getByRole("button", { name: "Continue with Google" }).click();
+
+  await expect(page.getByRole("heading", { name: "Account & settings" })).toBeVisible();
+  const verifyCalls = calls.filter((call) => call.path === "/api/auth/verify-phone");
+  expect(verifyCalls).toHaveLength(2);
+  expect(String(verifyCalls[1]?.body?.googleIdToken || "")).toBe("mock-google-id-token");
+  expect(verifyCalls[1]?.body).toMatchObject({ platform: "WEB", sim: "UNAVAILABLE" });
+});
+
 test("account sign-in and profile settings are accessible on desktop and mobile", async ({
   page,
 }) => {

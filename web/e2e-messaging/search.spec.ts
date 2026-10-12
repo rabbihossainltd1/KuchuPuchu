@@ -94,11 +94,11 @@ test.describe("Web global search", () => {
     await expect(page.getByText(/older than the loaded history/)).toBeVisible();
   });
 
-  test("New chat opens the directory person as a message request", async ({ page }) => {
-    // The list header's plus is live now, and lands on the search pane.
-    await page.getByRole("button", { name: "New chat" }).click();
+  test("search opens the directory person as a message request", async ({ page }) => {
+    // The list header's plus was removed on owner direction; the nav's Search
+    // is the way into the people directory now.
+    await openSearch(page);
     const field = page.getByLabel("Search people, chats and messages");
-    await expect(field).toBeFocused();
     await field.fill("directory");
 
     await page.getByRole("button", { name: "Message Directory Person" }).click();

@@ -13,6 +13,7 @@ import { RouteLink } from "../RouteLink";
 import type { Navigate } from "../useBrowserRouter";
 import { ArchivePane } from "./ArchivePane";
 import { ConversationAvatar } from "./Avatar";
+import { UserBadges } from "./Badges";
 import { useArchivePullOpen } from "./useArchivePullOpen";
 import { setArchivedFlag, setPinnedFlag, useConvFlags } from "./convFlags";
 import { DeleteChatsDialog } from "./DeleteChatsDialog";
@@ -261,15 +262,6 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
               <p className="eyebrow">KUCHUPUCHU WEB</p>
               <h1 id="list-heading">Chats</h1>
             </div>
-            <button
-              type="button"
-              className="icon-button"
-              aria-label="New chat"
-              title="New chat"
-              onClick={() => navigate({ kind: "section", section: "search" })}
-            >
-              <Icon name="plus" size={21} />
-            </button>
             {/* The phone's HomeMenuSheet rows, in the phone's order. */}
             <div className="list-header__menu">
               <button
@@ -455,7 +447,7 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
             <p>
               {query
                 ? "Clear the filter to see every loaded chat."
-                : "Start one with the New chat button. Hidden chats never appear here."}
+                : "Start one from Search. Hidden chats never appear here."}
             </p>
             {query && (
               <button type="button" className="secondary-button" onClick={() => setQuery("")}>
@@ -494,6 +486,13 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
                         <span className="conversation-row__line">
                           <span className="conversation-row__name">
                             {conversationTitle(row)}
+                            {!row.isGroup && row.other ? (
+                              <UserBadges
+                                verified={row.other.verified}
+                                moderator={row.other.moderator}
+                                badge={row.other.badge}
+                              />
+                            ) : null}
                             {pinned && (
                               <span className="conversation-row__pin" title="Pinned">
                                 <Icon name="pin" size={13} />
@@ -541,6 +540,13 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
                       <span className="conversation-row__line">
                         <span className="conversation-row__name">
                           {conversationTitle(row)}
+                          {!row.isGroup && row.other ? (
+                            <UserBadges
+                              verified={row.other.verified}
+                              moderator={row.other.moderator}
+                              badge={row.other.badge}
+                            />
+                          ) : null}
                           {pinned && (
                             <span className="conversation-row__pin" title="Pinned">
                               <Icon name="pin" size={13} />

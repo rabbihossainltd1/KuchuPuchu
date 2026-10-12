@@ -340,8 +340,16 @@ export type MockWorkerOptions = {
   profileAvatarUrl?: string;
   /** Serve the profile photo only through the stable avatarRef resolver. */
   profileAvatarRef?: string;
+  /** Give the direct peer a profile photo, served through the avatarRef resolver. */
+  peerAvatarUrl?: string;
+  /** Badge flags for the direct peer (verified seal / moderator tools). */
+  peerBadges?: { verified?: boolean; moderator?: boolean; badge?: string | null };
   /** Omit the direct peer key from the list while leaving detail authoritative. */
   omitPeerKeyFromList?: boolean;
+  /** The direct peer never published a key (a dormant pre-E2EE account). */
+  peerKeyless?: boolean;
+  /** `GET /api/conversations/:id` answers 404 (a stale build's dead route). */
+  detailNotFound?: boolean;
   /** Leave the phone identity backup absent to test the secure-chat gate. */
   noE2eeBackup?: boolean;
 };
@@ -392,11 +400,14 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         displayName: PEER_NAME,
         username: "rahi",
         nickname: "",
-        e2eePublicKey: peer.u,
+        e2eePublicKey: options.peerKeyless ? "" : peer.u,
         online: true,
         lastActiveAt: new Date().toISOString(),
         about: "tea & stickers",
-        verified: false,
+        verified: options.peerBadges?.verified ?? false,
+        moderator: options.peerBadges?.moderator ?? false,
+        badge: options.peerBadges?.badge ?? null,
+        avatarRef: options.peerAvatarUrl ? `${PEER_ID}@v1` : "",
       },
       // r76-18: the server answers with the EFFECTIVE value, so a switched-off
       // permission arrives as an explicit false rather than as a missing flag.
@@ -876,6 +887,11 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
           json(route, { avatarUrl: options.profileAvatarUrl ?? null }),
         );
       }
+      if (options.peerAvatarUrl) {
+        await page.route(`**/api/users/${PEER_ID}/avatar`, (route) =>
+          json(route, { avatarUrl: options.peerAvatarUrl, avatarRef: `${PEER_ID}@v1` }),
+        );
+      }
 
       // Slice I: the real Worker wraps the list as { items, marker }; the mock
       // must serve the same shape or the suites would pass against a contract
@@ -1129,6 +1145,13 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
           if (at >= 0) conversations.splice(at, 1);
           return json(route, { ok: true });
         }
+        if (options.detailNotFound) {
+          return route.fulfill({
+            status: 404,
+            contentType: "application/json",
+            body: JSON.stringify({ error: { code: "NOT_FOUND", message: "Not found." } }),
+          });
+        }
         const row = conversations.find((item) => item.id === conversationId);
         return json(route, { conversation: row ?? null });
       });
@@ -1212,6 +1235,8 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         lastActiveAt: new Date().toISOString(),
         about: "",
         verified: false,
+        moderator: false,
+        badge: null as string | null,
         privateProfile: false,
       };
 
@@ -1297,9 +1322,27 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
 
       await page.route("**/api/conversations", (route) => {
         if (route.request().method() !== "POST") {
+          // This handler is registered AFTER the one at ~899, so Playwright's
+          // LIFO matching makes IT the effective list server — the compact-row
+          // omission must therefore happen HERE (2026-10-12: it silently never
+          // ran, which let a detail-404 degradation hide behind a list key).
           const items = conversations.map((item) => {
             const over = worker.hideOverrides[item.id];
-            return over ? { ...item, hidden: over.hidden, hiddenKey: over.hiddenKey } : item;
+            let row: Record<string, unknown> = over
+              ? { ...item, hidden: over.hidden, hiddenKey: over.hiddenKey }
+              : { ...item };
+            if (
+              options.omitPeerKeyFromList &&
+              item.id === CHAT_ID &&
+              row.other &&
+              typeof row.other === "object"
+            ) {
+              row = {
+                ...row,
+                other: { ...(row.other as Record<string, unknown>), e2eePublicKey: "" },
+              };
+            }
+            return row;
           });
           return json(route, { items });
         }

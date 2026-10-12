@@ -14,6 +14,7 @@ import type { ApiClient } from "../auth/authApi";
 import { Icon } from "../icons";
 import type { Navigate } from "../useBrowserRouter";
 import { useAvatar } from "./avatars";
+import { UserBadges } from "./Badges";
 import { messagingApi } from "./messagingApi";
 import {
   conversationTitle,
@@ -294,8 +295,13 @@ export function InfoPane({
             </span>
             <p className="info-pane__name">
               {title}
-              {!group && person?.verified ? (
-                <span className="conversation-row__tag">Verified</span>
+              {!group && person ? (
+                <UserBadges
+                  verified={person.verified}
+                  moderator={person.moderator}
+                  badge={person.badge}
+                  size={16}
+                />
               ) : null}
             </p>
             {!group && person ? (

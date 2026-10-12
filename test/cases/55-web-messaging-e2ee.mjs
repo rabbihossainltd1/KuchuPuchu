@@ -32,7 +32,6 @@ import {
   KP2_ITERATIONS,
   KP2_PREFIX,
   OFFICIAL_BOT_ID,
-  SECURE_CHAT_WAITING,
   UNOPENABLE_BODY,
   SendRefusedError,
   base64ToBytes,
@@ -341,16 +340,19 @@ try {
 check(
   "no local identity refuses a personal send instead of sending plaintext",
   refusedWithoutIdentity instanceof SendRefusedError &&
-    refusedWithoutIdentity.message === SECURE_CHAT_WAITING,
+    // The refusal names the way out (key backup on the phone), not a vague
+    // wait — the 2026-10-12 owner report was a composer that looked broken.
+    refusedWithoutIdentity.message.includes("Message key backup"),
 );
 
-let refusedWithoutPeerKey = null;
-try {
-  await protectOutgoingBody(sample, personal, "", alice);
-} catch (error) {
-  refusedWithoutPeerKey = error;
-}
-check("a missing peer key refuses the send too", refusedWithoutPeerKey instanceof SendRefusedError);
+// 2026-10-12 (old-account fix): a ready identity chatting with a PEER that
+// never published a key falls back to disclosed plaintext instead of killing
+// the whole chat; a missing OWN identity still refuses (checked above).
+const plaintextFallback = await protectOutgoingBody(sample, personal, "", alice);
+check(
+  "a missing peer key degrades to the plaintext fallback, not a refusal",
+  plaintextFallback === sample,
+);
 
 // 10. deterministic key derivation
 const shared = new Uint8Array(referenceShared(alice, bob));

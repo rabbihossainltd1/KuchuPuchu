@@ -15,6 +15,7 @@ import type { ApiClient } from "../auth/authApi";
 import type { Navigate } from "../useBrowserRouter";
 import type { MessagingController } from "./useMessaging";
 import { useAvatar } from "./avatars";
+import { UserBadges } from "./Badges";
 import { hiddenKeyHash } from "./e2ee";
 import { messagingApi, type SearchMessageRow } from "./messagingApi";
 import {
@@ -101,7 +102,10 @@ function PersonRow({
           )}
         </span>
         <span className="conversation-row__body">
-          <span className="conversation-row__name">{peer.displayName}</span>
+          <span className="conversation-row__name">
+            {peer.displayName}
+            <UserBadges verified={peer.verified} moderator={peer.moderator} badge={peer.badge} />
+          </span>
           <span className="conversation-row__preview">@{peer.username}</span>
         </span>
       </button>
