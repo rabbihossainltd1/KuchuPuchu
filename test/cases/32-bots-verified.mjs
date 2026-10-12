@@ -3460,7 +3460,7 @@ const convBetween = (db, a, b) =>
             push1.message.android.data.callId === c1 &&
             push1.message.android.data.kp_callback === caller.user.id &&
             !!push1.message.android.data.kp_chat &&
-            push1.message.android.notification?.channel_id === "kp_missed_v1" &&
+            push1.message.android.notification?.channel_id === "kp_missed_v2" &&
             push1.message.android.notification?.body === "Missed voice call" &&
             log1?.body === "Missed voice call" &&
             JSON.parse(log1?.meta_json ?? "{}").status === "MISSED" &&
@@ -3507,11 +3507,11 @@ const convBetween = (db, a, b) =>
             ) || []
           ).length === 2 &&
             readFileSync("src/worker/index.ts", "utf8").includes(
-              'const MISSED_CALL_CHANNEL = "kp_missed_v1";',
+              'const MISSED_CALL_CHANNEL = "kp_missed_v2";',
             ) &&
-            kt("KpNotify.kt").includes('private const val MISSED_CHANNEL = "kp_missed_v1"') &&
+            kt("KpNotify.kt").includes('private const val MISSED_CHANNEL = "kp_missed_v2"') &&
             kt("KpNotify.kt").includes(
-              'NotificationChannel(MISSED_CHANNEL, "Missed calls", NotificationManager.IMPORTANCE_HIGH)',
+              'NotificationChannel(MISSED_CHANNEL, "Missed calls", NotificationManager.IMPORTANCE_DEFAULT)',
             ) &&
             kt("KpNotify.kt").includes("NotificationCompat.Builder(ctx, MISSED_CHANNEL)") &&
             kt("KpNotify.kt").includes(".setCategory(NotificationCompat.CATEGORY_MISSED_CALL)"),

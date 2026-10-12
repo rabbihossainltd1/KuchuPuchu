@@ -137,8 +137,9 @@ const pairId = (a: string, b: string) => (a < b ? `c_${a}_${b}` : `c_${b}_${a}`)
  *  callee's screen (hidden from /active, the push waits it out), so a caller
  *  who hangs up inside it did not leave a missed call behind. */
 const PHANTOM_RING_MS = 1_600;
-/** Android channel for missed-call cards (KpNotify.MISSED_CHANNEL). */
-const MISSED_CALL_CHANNEL = "kp_missed_v1";
+/** Android channel for missed-call cards (KpNotify.MISSED_CHANNEL). v2:
+ *  v1 was born ringing on devices and channel sounds freeze forever. */
+const MISSED_CALL_CHANNEL = "kp_missed_v2";
 /**
  * Owner round 32 (item 26): notification tag shared by a call's ring card and
  * its missed-call card. Android keys a notification by (tag, id) and the FCM
@@ -6496,6 +6497,22 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   }
 
   /* ---------- public ---------- */
+
+  // Public APK download for the Web landing page / mobile gate. The release
+  // pipeline drops the newest signed APK at this bucket key; no auth because
+  // the offer lives on the pre-login welcome screen.
+  if (path === "/download/apk" && method === "GET") {
+    if (!env.MEDIA) fail(503, "Media storage is not configured.");
+    const object = await env.MEDIA.get("apk/kuchupuchu-latest.apk");
+    if (!object) fail(404, "The latest APK is not uploaded yet.");
+    return new Response(object.body, {
+      headers: {
+        "content-type": "application/vnd.android.package-archive",
+        "content-disposition": 'attachment; filename="kuchupuchu-latest.apk"',
+        "cache-control": "public, max-age=600",
+      },
+    });
+  }
 
   if (path === "/api/health") {
     // Presence booleans only — never a value, never a token. "push: false" is the

@@ -533,7 +533,7 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
       <div className="auth-background-glow auth-background-glow--amber" />
       <section className="auth-card" aria-labelledby="auth-heading">
         <header className="auth-brand">
-          <BrandMark size={46} />
+          <img className="auth-logo" src="/logo.png" alt="KuchuPuchu logo" />
           <div>
             <p className="eyebrow">KUCHUPUCHU WEB</p>
             <h1 id="auth-heading">
@@ -641,23 +641,36 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
               </span>
             </div>
             {flow.otpAvailable && !otpLocked && (
-              <form className="otp-form" onSubmit={submitOtp}>
-                <label className="field-label" htmlFor="auth-otp">
+              <form className="otp-full" onSubmit={submitOtp}>
+                <p className="otp-full__title">Enter the 6-digit code</p>
+                <div className="otp-boxes" aria-hidden="true">
+                  {[0, 1, 2, 3, 4, 5].map((index) => (
+                    <span key={index} className={`otp-box${otp[index] ? " otp-box--filled" : ""}`}>
+                      {otp[index] ?? ""}
+                    </span>
+                  ))}
+                </div>
+                <label className="otp-sr-label" htmlFor="auth-otp">
                   Six-digit code
+                  <input
+                    id="auth-otp"
+                    className="otp-sr"
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    pattern="[0-9]{6}"
+                    maxLength={6}
+                    value={otp}
+                    onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                    disabled={busy}
+                    autoFocus
+                  />
                 </label>
-                <input
-                  id="auth-otp"
-                  className="auth-input otp-input"
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  pattern="[0-9]{6}"
-                  maxLength={6}
-                  value={otp}
-                  onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))}
-                  disabled={busy}
-                />
-                <button className="primary-button" type="submit" disabled={busy || !validOtp(otp)}>
+                <button
+                  className="otp-full__verify"
+                  type="submit"
+                  disabled={busy || !validOtp(otp)}
+                >
                   {busy ? "Checking…" : "Verify code"}
                 </button>
               </form>

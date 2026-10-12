@@ -87,12 +87,15 @@ object KpNotify {
     // per-tone message channel (that channel intentionally rings).
     private const val REPLY_CHANNEL = "kp_reply_silent_v1"
     private const val CALL_CHANNEL = "kp_calls_v5"
-    // Owner round 31 (item 24): missed-call cards used to ride the incoming-
-    // call channel above, which RINGS (alarm stream, DND bypass, ring
-    // vibration) — a missed call sounded like a second call and on several
-    // ROMs got swept with the ring cards. Its own channel: normal notification
-    // sound, no DND bypass. The worker's payload fallback names the same id.
-    private const val MISSED_CHANNEL = "kp_missed_v1"
+    // Owner round 31 (item 24) gave missed calls their own channel, but v1
+    // was born RINGING on owner devices and OEM ROMs freeze a channel's first
+    // sound forever (r89-3 tombstone) — "miss call notification a call
+    // ringing play hoi". v2 rotates the id so the calm settings actually
+    // take effect: normal importance (no heads-up), the picked NOTIFICATION
+    // tone on the notification stream, no vibration. A missed call must read
+    // as history, never as a second incoming call. The worker's FCM payload
+    // names the same id.
+    private const val MISSED_CHANNEL = "kp_missed_v2"
     private const val GROUP = "kp_chats"
 
     /**
@@ -263,8 +266,11 @@ object KpNotify {
                     lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
                 },
         )
+        // Sweep the ringing v1 tombstone so ROMs that resurrect deleted
+        // channels never replay the call ring for a missed call.
+        runCatching { mgr.deleteNotificationChannel("kp_missed_v1") }
         mgr.createNotificationChannel(
-            NotificationChannel(MISSED_CHANNEL, "Missed calls", NotificationManager.IMPORTANCE_HIGH)
+            NotificationChannel(MISSED_CHANNEL, "Missed calls", NotificationManager.IMPORTANCE_DEFAULT)
                 .apply {
                     description = "Missed call alerts"
                     setSound(
@@ -273,7 +279,7 @@ object KpNotify {
                         ),
                         attrs,
                     )
-                    enableVibration(true)
+                    enableVibration(false)
                     lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
                 },
         )

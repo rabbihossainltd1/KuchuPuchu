@@ -202,7 +202,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                     buildE164(country, phone)
                         ?: throw IllegalStateException(
                             if (country.iso == "BD") {
-                                "Enter a valid Bangladeshi mobile number, e.g. 1792929202."
+                                "Valid BD number, e.g. 1792929202."
                             } else {
                                 "Enter a valid phone number."
                             },
@@ -243,7 +243,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                         if (idToken == null) {
                             stage = LoginStage.PHONE
                             error =
-                                "This number is linked to Google. Sign in with that Google account to continue."
+                                "Google-linked number — sign in with that Google account."
                         } else {
                             val retry =
                                 withContext(Dispatchers.IO) {
@@ -266,7 +266,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                                 }
                                 else -> {
                                     stage = LoginStage.PHONE
-                                    error = "Google verification failed. Please try again."
+                                    error = "Google verify failed — try again."
                                 }
                             }
                         }
@@ -287,7 +287,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                             // to the Google way out (owner rule).
                             waitFailed = true
                             waitFailReason =
-                                "We couldn't reach your previous device. Verify with Google to sign in here."
+                                "Old device unreachable — verify with Google."
                             showAnotherWay = true
                         }
                         afterVerify = { stage = LoginStage.WAITING }
@@ -319,7 +319,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
         if (buildE164(country, phone) == null) {
             error =
                 if (country.iso == "BD") {
-                    "Enter a valid Bangladeshi mobile number, e.g. 1792929202."
+                    "Valid BD number, e.g. 1792929202."
                 } else {
                     "Enter a valid phone number."
                 }
@@ -366,7 +366,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                 Store.saveMe(data.optJSONObject("user") ?: JSONObject())
                 if (isNewSignup) stage = LoginStage.PROFILE else stage = LoginStage.DONE
             } catch (e: Exception) {
-                error = e.message ?: "Google account binding failed. Please try again."
+                error = e.message ?: "Google binding failed — try again."
             } finally {
                 busy = false
             }
@@ -407,7 +407,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                 stage = LoginStage.DONE
             } catch (e: Exception) {
                 stage = LoginStage.PROFILE
-                profileError = e.message ?: "Could not save your profile. Please try again."
+                profileError = e.message ?: "Profile save failed — try again."
             } finally {
                 busy = false
             }
@@ -423,7 +423,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                 ?: run {
                     error =
                         if (country.iso == "BD") {
-                            "Enter a valid Bangladeshi mobile number, e.g. 1792929202."
+                            "Valid BD number, e.g. 1792929202."
                         } else {
                             "Enter a valid phone number."
                         }
@@ -445,7 +445,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                     error = "No account found with this number."
                 }
             } catch (e: Exception) {
-                error = e.message ?: "Could not check this number. Please try again."
+                error = e.message ?: "Number check failed — try again."
             } finally {
                 busy = false
             }
@@ -519,7 +519,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
     fun submitOtp() {
         if (busy || !otpAvailable || otpLocked || requestId.isBlank()) return
         if (!Regex("^[0-9]{6}$").matches(otpCode)) {
-            error = "Enter all six digits. / ছয় সংখ্যার কোড দিন।"
+            error = "Enter the 6-digit code."
             return
         }
         val rid = requestId
@@ -547,24 +547,24 @@ fun LoginScreen(onAuthed: () -> Unit) {
                         val left = data.optInt("attemptsRemaining", -1)
                         error =
                             if (left >= 0) {
-                                "Code didn't match — $left tries left. / কোড মেলেনি — আরও $left বার।"
+                                "Wrong code — $left tries left."
                             } else {
-                                "Code didn't match. / কোডটি মেলেনি।"
+                                "Wrong code."
                             }
                     }
                     "OTP_LOCKED" -> {
                         otpCode = ""
                         otpLocked = true
-                        error = "Five wrong codes used. Approval still works. / পাঁচবার ভুল হয়েছে; Approve করা যাবে।"
+                        error = "Too many wrong codes — approval still works."
                     }
                     "OTP_UNAVAILABLE" -> {
                         otpCode = ""
                         otpAvailable = false
-                        error = "Code verification is unavailable; approval still works. / কোড যাচাই বন্ধ, Approve করা যাবে।"
+                        error = "Code check unavailable — approval still works."
                     }
                     "APPROVED" -> {
                         otpCode = ""
-                        error = "Approved on another device — signing in… / অন্য ডিভাইস Approve করেছে…"
+                        error = "Approved — signing in…"
                     }
                     "DECLINED" -> {
                         otpCode = ""
@@ -593,7 +593,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                     }
                 }
             } catch (e: Exception) {
-                error = e.message ?: "Network unavailable. Approval can still finish sign-in."
+                error = e.message ?: "Offline — approval can still sign you in."
             } finally {
                 busy = false
             }

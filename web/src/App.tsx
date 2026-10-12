@@ -6,6 +6,7 @@ import { useBrowserRouter } from "./useBrowserRouter";
 import { useConnectivity } from "./useConnectivity";
 import { AccountSettingsPage } from "./auth/AccountSettingsPage";
 import { AuthScreen } from "./auth/AuthScreen";
+import { MobileGate, WelcomePage, useIsMobileViewport } from "./auth/WelcomePage";
 import { useAuth } from "./auth/AuthContext";
 import { useProfileAvatar } from "./auth/useProfileAvatar";
 
@@ -177,6 +178,8 @@ function SessionRestoreFailure({
 
 export default function App() {
   const { route, navigate } = useBrowserRouter();
+  const isMobileViewport = useIsMobileViewport();
+  const [welcomeSignin, setWelcomeSignin] = useState(false);
   const { api, status: authStatus, user, logout } = useAuth();
   const accountAvatar = useProfileAvatar(api, user);
   const [sessionNotice, setSessionNotice] = useState("");
@@ -250,6 +253,14 @@ export default function App() {
     });
   };
 
+  // The web client is a desktop product: signed-out phones and tablets get
+  // the app download gate. /account stays reachable on phones (Google
+  // recovery) and an existing signed-in session is never locked out; flag-off
+  // preview builds keep the foundation preview.
+  if (accountEnabled && isMobileViewport && !isAccountRoute && authStatus !== "signed-in") {
+    return <MobileGate />;
+  }
+
   if (isAccountRoute && !accountEnabled) {
     return <AccountRolloutGate onBack={goToChats} />;
   }
@@ -282,7 +293,17 @@ export default function App() {
     }
     if (authStatus === "unverified")
       return <SessionRestoreFailure onBack={goToChats} onSignOut={logOutToChats} />;
-    if (authStatus !== "signed-in") return <AuthScreen onBackToChats={goToChats} />;
+    if (authStatus !== "signed-in") {
+      // Only the bare chats landing shows the welcome page. Anywhere a
+      // visitor arrived with intent — /account, a protected deep link, or
+      // their own sign-in tap — goes straight to the form.
+      const bareLanding = route.kind === "section" && route.section === "chats";
+      return !bareLanding || isAccountRoute || welcomeSignin ? (
+        <AuthScreen onBackToChats={() => setWelcomeSignin(false)} />
+      ) : (
+        <WelcomePage onSignIn={() => setWelcomeSignin(true)} />
+      );
+    }
 
     if (isAccountRoute) {
       return <AccountSettingsPage onBackToChats={goToChats} onLogout={logOutToChats} />;
