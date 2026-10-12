@@ -149,9 +149,17 @@ async function mk() {
 // ---- 5. source locks ----
 {
   const src = readFileSync(new URL("../../src/worker/index.ts", import.meta.url), "utf8");
+  // H2 option 2 (2026-10-12) re-added a GOOGLE_MISMATCH answer, but ONLY on
+  // verify-phone, where the caller already proved SIM possession — no
+  // enumeration surface. The recovery/start lock stays: that block must never
+  // branch on the Google account again.
+  const startAt = src.indexOf('path === "/api/auth/recovery/start"');
+  const completeAt = src.indexOf('path === "/api/auth/recovery/complete"');
+  const recoveryStartBlock =
+    startAt >= 0 && completeAt > startAt ? src.slice(startAt, completeAt) : "";
   check(
-    "worker — GOOGLE_MISMATCH is gone (one identical recovery/start answer)",
-    !src.includes("GOOGLE_MISMATCH"),
+    "worker — the recovery/start block never branches on the Google account",
+    recoveryStartBlock !== "" && !recoveryStartBlock.includes("GOOGLE_MISMATCH"),
   );
   check(
     "worker — per-phone global caps on verify-phone + lookup, lookup audited",

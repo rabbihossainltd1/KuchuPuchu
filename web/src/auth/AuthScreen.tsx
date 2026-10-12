@@ -26,7 +26,7 @@ export type AuthFlow =
       otpAvailable: boolean;
       deviceGone: boolean;
     }
-  | { kind: "google"; purpose: "bind" | "recovery"; phone: string };
+  | { kind: "google"; purpose: "bind" | "recovery" | "proof"; phone: string };
 
 type Notice = { kind: "error" | "success" | "info"; text: string } | null;
 
@@ -281,6 +281,16 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
         });
         return;
       }
+      // H2 option 2: a Google-bound account with no live device proves the
+      // bound Google before this browser earns a session.
+      if (result.status === "GOOGLE_REQUIRED") {
+        setFlow({ kind: "google", purpose: "proof", phone: result.phone || phone });
+        setNotice({
+          kind: "info",
+          text: "This account is protected. Sign in with the Google account linked to it to continue.",
+        });
+        return;
+      }
       if (result.status === "APPROVAL_REQUIRED" && result.requestId) {
         otpAttempted.current = false;
         setOtp("");
@@ -412,9 +422,31 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
       text:
         activeFlow.purpose === "bind"
           ? "Linking the Google account…"
-          : "Verifying account recovery…",
+          : activeFlow.purpose === "proof"
+            ? "Verifying the linked Google account…"
+            : "Verifying account recovery…",
     });
     try {
+      if (activeFlow.purpose === "proof") {
+        const result = await authApi.verifyPhone(
+          api,
+          {
+            phone: activeFlow.phone,
+            sim: "UNAVAILABLE",
+            deviceId,
+            deviceName: "Web browser",
+            platform: "WEB",
+            googleIdToken: credential,
+          },
+          controller.signal,
+        );
+        if (result.status === "SESSION" && isSessionPayload(result)) {
+          signIn({ token: result.token, user: result.user, status: "SESSION" });
+          return;
+        }
+        setNotice({ kind: "error", text: "Google verification failed. Try again." });
+        return;
+      }
       if (activeFlow.purpose === "bind") {
         const result = await authApi.bindGoogle(
           api,
@@ -510,7 +542,9 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
                 : isGoogle
                   ? flow.purpose === "bind"
                     ? "Finish setting up"
-                    : "Recover your account"
+                    : flow.purpose === "proof"
+                      ? "Verify it's you"
+                      : "Recover your account"
                   : isRecoveryEntry
                     ? "Recover your account"
                     : "Sign in or create an account"}
@@ -666,7 +700,9 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
             <p className="auth-copy">
               {flow.purpose === "bind"
                 ? `Link a Google account to ${maskPhone(flow.phone)} to finish account setup.`
-                : `Use the Google account already linked to ${maskPhone(flow.phone)}. Other Google accounts cannot recover this account.`}
+                : flow.purpose === "proof"
+                  ? `Sign in with the Google account already linked to ${maskPhone(flow.phone)}. Only that Google account can unlock this sign-in.`
+                  : `Use the Google account already linked to ${maskPhone(flow.phone)}. Other Google accounts cannot recover this account.`}
             </p>
             {flow.purpose === "bind" && (
               <>

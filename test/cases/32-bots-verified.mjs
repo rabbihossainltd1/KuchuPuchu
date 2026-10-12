@@ -2565,10 +2565,23 @@ const convBetween = (db, a, b) =>
     deviceId: "dev-so-new",
     deviceName: "Other phone",
   });
+  // H2 option 2 (2026-10-12): the signed-out install never demands an
+  // APPROVAL again — but the Google-bound account proves its bound Google on
+  // the way in (GOOGLE_REQUIRED → retry with the id token → SESSION).
+  const proved =
+    plain.json.status === "GOOGLE_REQUIRED"
+      ? await k.call("POST", "/api/auth/verify-phone", {
+          phone: a.user.phone,
+          sim: "MATCH",
+          deviceId: "dev-so-new",
+          deviceName: "Other phone",
+          googleIdToken: fakeIdToken("g-so", "so@x.com"),
+        })
+      : plain;
   check(
     "r28-4b: a signed-out install (ACTIVE row, no live session) no longer demands an approval",
-    active?.status === "ACTIVE" && plain.json.status === "SESSION" && !!plain.json.token,
-    `row=${active?.status} status=${plain.json.status}`,
+    active?.status === "ACTIVE" && proved.json.status === "SESSION" && !!proved.json.token,
+    `row=${active?.status} status=${proved.json.status}`,
   );
   const audit = k.db._db
     .prepare("SELECT event FROM auth_audit WHERE user_id = ? ORDER BY created_at DESC")

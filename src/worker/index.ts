@@ -6698,6 +6698,21 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     );
 
     if (activeDevices.length === 0 || sameDeviceLive) {
+      // H2 option 2 (2026-10-12, owner decision): a GOOGLE-BOUND account with
+      // no signed-in device anywhere must not trust self-attested SIM alone —
+      // anyone who knows the number could claim a logged-out account. The
+      // bound Google proof is mandatory on this path; clients answer
+      // GOOGLE_REQUIRED by signing in with Google and retrying with
+      // `googleIdToken`. The same install returning with a live session keeps
+      // the fast path (possession of that device is the proof), and UNBOUND
+      // accounts keep the SIM-only reinstall UX unchanged.
+      if (user.google_subject && !sameDeviceLive) {
+        const googleToken = String(body.googleIdToken ?? "").trim();
+        if (!googleToken) return json({ status: "GOOGLE_REQUIRED", phone, method: attestMethod });
+        const google = await verifyGoogleIdToken(env, googleToken);
+        if (google.sub !== user.google_subject)
+          fail(403, "That Google account is not linked to this number.", "GOOGLE_MISMATCH");
+      }
       // No signed-in client exists, or this exact install is returning. Replace
       // only this platform's slot; a signed-in client on the other platform is
       // never evicted by a direct login.

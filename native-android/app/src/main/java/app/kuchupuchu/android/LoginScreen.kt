@@ -234,6 +234,43 @@ fun LoginScreen(onAuthed: () -> Unit) {
                         afterVerify = { stage = LoginStage.BIND }
                         stage = LoginStage.VERIFY_OK
                     }
+                    "GOOGLE_REQUIRED" -> {
+                        // H2 option 2: this number is Google-bound but no device
+                        // is signed in anywhere — self-attested SIM alone no
+                        // longer earns a session. Prove the bound Google right
+                        // here; cancelling leaves the phone form with the reason.
+                        val idToken = GoogleAuth.idToken(ctx)
+                        if (idToken == null) {
+                            stage = LoginStage.PHONE
+                            error =
+                                "This number is linked to Google. Sign in with that Google account to continue."
+                        } else {
+                            val retry =
+                                withContext(Dispatchers.IO) {
+                                    Api.post(
+                                        "/api/auth/verify-phone",
+                                        JSONObject()
+                                            .put("phone", e164)
+                                            .put("sim", sim)
+                                            .put("deviceId", deviceId)
+                                            .put("deviceName", deviceName)
+                                            .put("googleIdToken", idToken),
+                                    )
+                                }
+                            when (retry.optString("status")) {
+                                "SESSION" -> {
+                                    sessionPayload = retry
+                                    isNewSignup = false
+                                    afterVerify = { stage = LoginStage.DONE }
+                                    stage = LoginStage.VERIFY_OK
+                                }
+                                else -> {
+                                    stage = LoginStage.PHONE
+                                    error = "Google verification failed. Please try again."
+                                }
+                            }
+                        }
+                    }
                     "APPROVAL_REQUIRED" -> {
                         requestId = data.optString("requestId")
                         otpAvailable = data.optBoolean("otpAvailable")
