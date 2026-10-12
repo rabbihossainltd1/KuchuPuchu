@@ -66,6 +66,7 @@ import {
   callHistoryLine,
   callIsMissed,
   callIsPhantom,
+  callAvatarRef,
   callPeerAvatar,
   callPeerId,
   callPeerName,
@@ -117,6 +118,7 @@ const tabSource = readFileSync(resolve(`${ANDROID}/CallsTabScreen.kt`), "utf8");
 const e2eeSource = readFileSync(resolve(`${ANDROID}/E2eeCall.kt`), "utf8");
 const chatSource = readFileSync(resolve(`${ANDROID}/ChatScreen.kt`), "utf8");
 const signalSource = readFileSync(resolve("src/worker/durable-objects/CallSignal.ts"), "utf8");
+const callsWebSource = readFileSync(resolve("web/src/calls/CallsWorkspace.tsx"), "utf8");
 const webModel = readFileSync(resolve("web/src/calls/callsModel.ts"), "utf8");
 const webEngine = readFileSync(resolve("web/src/calls/callEngine.ts"), "utf8");
 const webApi = readFileSync(resolve("web/src/calls/callsApi.ts"), "utf8");
@@ -638,12 +640,17 @@ check(
     tabSource.includes('if (group) call.optText("conversationId") else callPeerId(call)'),
 );
 check(
-  "a light history row names itself from its avatarRef, not a missing avatarUrl",
-  callPeerAvatar(parseCallRow(row())) === `${PEER}@v3` &&
+  "a light history row keeps its avatarRef as a cache token, never as an img src",
+  callPeerAvatar(parseCallRow(row())) === "" &&
+    callAvatarRef(parseCallRow(row())) === `${PEER}@v3` &&
+    callAvatarRef(parseCallRow(row({ group: true, avatarRef: "g:c_g@v2" }))) === "g:c_g@v2" &&
     callPeerName(parseCallRow(row())) === "Rina" &&
     tabSource.includes(
       'val avatarRef = if (group) call.optIso("avatarRef") else other?.optIso("avatarRef")',
-    ),
+    ) &&
+    // The Web row resolves the token through the shared avatar cache; a raw
+    // `id@vN` in <img src> was the "calls tab picture load hoy na" bug.
+    callsWebSource.includes("useAvatar(api, callAvatarRef(row))"),
 );
 check(
   "a row with no name at all is Unknown, never blank",

@@ -96,6 +96,7 @@ import {
 } from "./messageMentions";
 import { parseMessageText, stripBoldMarkers } from "./messageText";
 import { ConversationAvatar } from "./Avatar";
+import { conversationAvatarRef, useAvatar } from "./avatars";
 import { UserBadges } from "./Badges";
 import {
   takePendingMessageJump,
@@ -321,6 +322,10 @@ export function ChatPane({
   const originals = useRef<Map<string, { blob: Blob; width: number; height: number }>>(new Map());
 
   const conversation = controller.selected;
+  // The ring screen shows the peer's picture: hand the resolved avatar over
+  // instead of making the calls layer guess from a cache token. A hook, so it
+  // must run before the `!conversation` early return below.
+  const headerAvatarUrl = useAvatar(api, conversation ? conversationAvatarRef(conversation) : "");
   const mentionCandidates = useMemo<readonly MentionCandidate[]>(() => {
     if (!conversation || isBotConversation(conversation)) return [];
     const peers = conversation.isGroup
@@ -860,7 +865,14 @@ export function ChatPane({
   });
   const peerName = conversationTitle(conversation);
   const startCall = (kind: "AUDIO" | "VIDEO") => {
-    const launched = launchCall({ id: conversationPeerId(conversation), name: peerName }, kind);
+    const launched = launchCall(
+      {
+        id: conversationPeerId(conversation),
+        name: peerName,
+        avatar: headerAvatarUrl ?? undefined,
+      },
+      kind,
+    );
     if (!launched) {
       controller.announce(
         callGate.group

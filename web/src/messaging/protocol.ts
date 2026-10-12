@@ -11,6 +11,7 @@
  * `POST /api/conversations/:id/read|typing`, `/ws/user`, `/ws/chat/:id`).
  */
 
+import { externalApiOrigin } from "../api";
 import { BOT_IDS, OFFICIAL_BOT_ID, isEnvelope } from "./e2ee";
 import { stripBoldMarkers } from "./messageText";
 import { parseStatusQuote, type StatusQuote } from "../status/statusQuote";
@@ -1034,10 +1035,10 @@ export function foldAlbums(rows: readonly MessageRow[]): readonly MessageRow[] {
 
 export function socketUrl(path: string, token: string): string {
   if (typeof window === "undefined") return "";
-  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
   // Browsers cannot set WebSocket headers, so the bearer travels as a query
   // parameter. The Worker accepts that on /ws/* only (pinned by test 48).
-  return `${protocol}://${window.location.host}${path}?token=${encodeURIComponent(token)}`;
+  const { protocol, host } = socketEndpoint();
+  return `${protocol}://${host}${path}?token=${encodeURIComponent(token)}`;
 }
 
 /**
@@ -1047,8 +1048,22 @@ export function socketUrl(path: string, token: string): string {
  */
 export function socketTicketUrl(path: string, ticket: string): string {
   if (typeof window === "undefined") return "";
-  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${protocol}://${window.location.host}${path}?ticket=${encodeURIComponent(ticket)}`;
+  const { protocol, host } = socketEndpoint();
+  return `${protocol}://${host}${path}?ticket=${encodeURIComponent(ticket)}`;
+}
+
+/* A Firebase-hosted shell talks to the Worker across origins; the socket must
+   follow the configured API origin instead of the page's own host. */
+function socketEndpoint(): { protocol: string; host: string } {
+  const external = externalApiOrigin();
+  if (external) {
+    const parsed = new URL(external);
+    return { protocol: parsed.protocol === "https:" ? "wss" : "ws", host: parsed.host };
+  }
+  return {
+    protocol: window.location.protocol === "https:" ? "wss" : "ws",
+    host: window.location.host,
+  };
 }
 
 export function parseSocketFrame(raw: unknown): SocketFrame | null {

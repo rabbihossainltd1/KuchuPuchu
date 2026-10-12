@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { useAuth } from "../auth/AuthContext";
 import { apiErrorMessage } from "../api";
 import { isWebFeatureEnabled } from "../featureFlags";
+import { resolveAvatar } from "../messaging/avatars";
 import { messagingApi } from "../messaging/messagingApi";
 import { newClientId } from "../messaging/protocol";
 import { protectOutgoingBody } from "../messaging/e2ee";
@@ -201,17 +202,24 @@ export function CallsLayer({ route, navigate }: Props) {
       }
       const peerId = row.incoming ? row.callerId : row.calleeId;
       if (!peerId) return;
-      void engine.start(
-        {
-          id: peerId,
-          name: row.other?.displayName || row.other?.username || "KuchuPuchu",
-          avatar: row.other?.avatarUrl || row.other?.avatarRef || "",
-          online: row.other?.online === true,
-        },
-        row.kind,
-      );
+      // Light history rows carry only the avatarRef token; resolve it before
+      // the stage draws so the ring screen never shows `<img src="id@v1">`.
+      void (async () => {
+        const avatar =
+          row.other?.avatarUrl ||
+          (row.other?.avatarRef ? ((await resolveAvatar(api, row.other.avatarRef)) ?? "") : "");
+        void engine.start(
+          {
+            id: peerId,
+            name: row.other?.displayName || row.other?.username || "KuchuPuchu",
+            avatar,
+            online: row.other?.online === true,
+          },
+          row.kind,
+        );
+      })();
     },
-    [controller, engine],
+    [api, controller, engine],
   );
 
   const onOpenChat = useCallback(

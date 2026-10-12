@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 import {
   BLOCKED_CHAT_ID,
   BOT_CHAT_ID,
+  CALLS_MOCK_AVATAR,
   CALL_ID,
   CANCELLED_CALL_ID,
   CHAT_ID,
@@ -72,6 +73,17 @@ test.describe("the history list", () => {
     expect(days[1]).toBe("Yesterday");
     // Nine days back is past the weekday window, so it reads day-and-month.
     expect(days[2]).toMatch(/^\d{1,2} [A-Z][a-z]{2}$/);
+  });
+
+  test("light history rows resolve their avatarRef into a real picture", async ({ page }) => {
+    await openTab(page);
+
+    // The Worker's light rows carry avatarUrl:null + an `id@vN` cache token.
+    // The row must trade the token at the avatar resolver and draw the bytes —
+    // the raw token in <img src> was the "calls tab picture loads na" bug.
+    const first = rows(page).first().locator(".call-row__avatar img");
+    await expect(first).toHaveAttribute("src", CALLS_MOCK_AVATAR);
+    await expect(rows(page).locator(".call-row__avatar img")).toHaveCount(3);
   });
 
   test("a missed call is named and coloured as missed", async ({ page }) => {

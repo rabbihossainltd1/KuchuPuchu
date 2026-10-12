@@ -20,8 +20,16 @@
  */
 
 import { useCallback } from "react";
+import { useAuth } from "../auth/AuthContext";
 import { Icon } from "../icons";
-import { CALL_COPY, callBackTarget, type CallDaySection, type CallRow } from "./callsModel";
+import { useAvatar } from "../messaging/avatars";
+import {
+  CALL_COPY,
+  callBackTarget,
+  callAvatarRef,
+  type CallDaySection,
+  type CallRow,
+} from "./callsModel";
 import { callRowView, type CallsController } from "./useCalls";
 
 type Props = {
@@ -158,6 +166,11 @@ function CallHistoryRow({
   const view = callRowView(row, meId);
   const target = callBackTarget(row, meId);
   const video = view.video;
+  // Light history rows carry only the avatarRef token; live rows carry the
+  // data-URI. Resolve the token through the shared per-ref cache so history
+  // rows show the real picture instead of a broken `<img src="id@v1">`.
+  const { api } = useAuth();
+  const resolvedAvatar = useAvatar(api, callAvatarRef(row));
 
   return (
     <li className={`call-row${view.missed ? " call-row--missed" : ""}`}>
@@ -168,8 +181,8 @@ function CallHistoryRow({
         aria-label={`Open the chat with ${view.name}`}
       >
         <span className="call-row__avatar" aria-hidden="true">
-          {view.avatar ? (
-            <img src={view.avatar} alt="" />
+          {resolvedAvatar || view.avatar ? (
+            <img src={resolvedAvatar || view.avatar} alt="" />
           ) : (
             view.name.trim().charAt(0).toUpperCase() || "?"
           )}

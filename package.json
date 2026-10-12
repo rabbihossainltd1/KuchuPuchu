@@ -12,6 +12,7 @@
     "dev:web": "vite --config vite.web.config.ts",
     "build:web": "vite build --config vite.web.config.ts",
     "build:web:prod": "VITE_KP_WEB_ACCOUNT_INTEGRATION=true VITE_KP_WEB_MESSAGING=true VITE_KP_WEB_STATUSES=true VITE_KP_WEB_PUSH=true VITE_KP_WEB_CALLS=true npm run build:web",
+    "build:web:firebase": "VITE_KP_API_ORIGIN=https://kuchupuchu-api.kuchupuchu.workers.dev npm run build:web:prod",
     "verify:web-sw": "tsx scripts/verify-web-sw.ts",
     "preview:web": "vite preview --config vite.web.config.ts",
     "typecheck:web": "tsc -p web/tsconfig.json --noEmit",

@@ -2,6 +2,39 @@ const API_ORIGIN_FOR_VALIDATION = "https://app.invalid";
 const API_PATH_PATTERN = /^\/api(?:\/|$)/;
 const SAFE_ERROR_CODE = /^[A-Za-z0-9_-]{1,64}$/;
 
+/* Hosting the shell on a different origin (Firebase Hosting) while the API
+   stays on the Worker: VITE_KP_API_ORIGIN names that API origin. Empty (the
+   workers.dev deployment) keeps every request same-origin. Only https is
+   accepted — a bearer header must never target plain http. */
+const CONFIGURED_API_ORIGIN = (() => {
+  // Optional access: plain-node test runners have no import.meta.env at all.
+  const raw = String(
+    (import.meta as unknown as { env?: Record<string, unknown> }).env?.VITE_KP_API_ORIGIN ?? "",
+  ).trim();
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw);
+    return parsed.protocol === "https:" ? parsed.origin : "";
+  } catch {
+    return "";
+  }
+})();
+
+/** True when the API lives on another origin than the page (Firebase host). */
+export function hasExternalApiOrigin(): boolean {
+  return CONFIGURED_API_ORIGIN !== "";
+}
+
+/** Absolute API origin for URL builders (sockets), or "" for same-origin. */
+export function externalApiOrigin(): string {
+  return CONFIGURED_API_ORIGIN;
+}
+
+/** Prefix a validated API path with the configured origin, if any. */
+function withApiOrigin(requestPath: string): string {
+  return CONFIGURED_API_ORIGIN ? `${CONFIGURED_API_ORIGIN}${requestPath}` : requestPath;
+}
+
 export type ApiErrorKind = "invalid-request" | "network" | "aborted" | "http" | "invalid-response";
 
 type ApiErrorOptions = {
@@ -143,7 +176,7 @@ export function createApiClient(fetcher: ApiFetcher = globalThis.fetch) {
 
       let response: Response;
       try {
-        response = await fetcher(requestPath, {
+        response = await fetcher(withApiOrigin(requestPath), {
           ...init,
           headers,
           credentials: "same-origin",
@@ -201,7 +234,7 @@ export function createApiClient(fetcher: ApiFetcher = globalThis.fetch) {
 
       let response: Response;
       try {
-        response = await fetcher(requestPath, {
+        response = await fetcher(withApiOrigin(requestPath), {
           ...init,
           headers,
           method,
