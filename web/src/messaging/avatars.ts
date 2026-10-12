@@ -91,6 +91,24 @@ export function useAvatar(api: ApiClient | null, ref: string): string | null {
   return url;
 }
 
+/** True when `value` is a `user@vN` / `g:conv@vN` cache token, not a ready
+ *  URL. Light call payloads ride the token in the same field a resolved
+ *  data-URI would occupy; only the token needs resolving. */
+export function isAvatarRef(value: string): boolean {
+  return (
+    Boolean(value) && !value.startsWith("data:") && !/^https?:/.test(value) && value.includes("@")
+  );
+}
+
+/** Resolve a raw avatar field (cache token or ready URL) into a displayable
+ *  URL. Ready URLs pass through; tokens go through the per-ref cache. Null
+ *  only when there is nothing to show (callers draw their initials tile). */
+export function useResolvedAvatar(api: ApiClient | null, raw: string): string | null {
+  const ref = isAvatarRef(raw) ? raw : "";
+  const resolved = useAvatar(api, ref);
+  return ref ? resolved : raw || null;
+}
+
 /** The avatar ref a conversation row shows: the group picture or the peer's. */
 export function conversationAvatarRef(conversation: {
   readonly isGroup: boolean;

@@ -138,32 +138,49 @@ phone bind hoye jabe. Onno Gmail dile notun alada account hobe.
 
 ## 🌐 Web on Firebase Hosting (kuchupuchu.web.app) — 2026-10-12
 
-The shell can live on Firebase Hosting while the API stays on the Worker.
+The shell lives on Firebase Hosting while the API stays on the Worker.
 The build reads `VITE_KP_API_ORIGIN` (https-only) and points every `/api`
 request and `/ws` socket at that origin; the Worker already answers `/api`
 with permissive CORS headers, so no Worker change is needed.
 
-### Build + deploy
+The Firebase project is **kuchupuchuff2026** (same project as the Android
+app). Its *default* hosting site would be `kuchupuchuff2026.web.app`, so
+`kuchupuchu.web.app` must be added as a second site (step 2 below).
+
+### One-time manual steps (console + CLI)
+
+1. **Install the CLI once:** `npm i -g firebase-tools && firebase login`.
+2. **Create the site id:** console.firebase.google.com → project
+   **kuchupuchuff2026** → Hosting → **Add another site** → site id
+   `kuchupuchu` → Create. This reserves `https://kuchupuchu.web.app`.
+3. **Point the CLI at the project** (from this repo root, where
+   `firebase.json` lives): `firebase use --add` → pick
+   `kuchupuchuff2026`, alias `default`. This writes `.firebaserc`.
+4. **Authorize the origin for Google verify:** console.cloud.google.com →
+   project **kuchupuchuff2026** → APIs & Services → Credentials → open the
+   Web client `458576897499-1khrecq3eli0obsr6vc3q2k0q1e86rpg.apps.googleusercontent.com`
+   → **Authorized JavaScript origins** → Add URI `https://kuchupuchu.web.app`
+   → Save (propagates in a few minutes). Without it the Google popup answers
+   `Error 400: origin_mismatch`. Add `https://kuchupuchuff2026.web.app` too if
+   you ever open the default site. The Worker secret `GOOGLE_WEB_CLIENT_ID`
+   is already set (live `/api/config/firebase` returns the client id), so no
+   wrangler step is needed for verify.
+5. Optional niceties: Hosting → `kuchupuchu` site → Settings → add
+   `www.kuchupuchu.web.app` etc. only if you want extra domains.
+
+### Every deploy after that
 
 ```bash
 npm run build:web:firebase     # prod flags + VITE_KP_API_ORIGIN=<worker url>
-firebase deploy --only hosting # from the project that serves kuchupuchu.web.app
+firebase deploy --only hosting # uses firebase.json (web/dist + SPA rewrite)
 ```
 
-`firebase.json` should serve `web/dist` and fall back to `index.html` for
-non-file paths (SPA routes like `/chats` or `/account`).
-
-### Google verify from the Firebase origin (one-time console step)
+`firebase.json` (committed) serves `web/dist`, falls back to `index.html`
+for SPA routes like `/chats` or `/account`, keeps `sw.js`/`index.html`
+no-store so a fresh shell always wins, and caches hashed `/assets/*`
+for a year.
 
 The proof screen pulls `googleWebClientId` from `/api/config/firebase` at
-runtime — with the API origin configured it reaches the Worker, so the
-"Continue with Google" button renders. Google still refuses to mint a token
-until the Firebase origin is authorized on the OAuth client; that lives in
-the Google Cloud console, not in code:
-
-1. console.cloud.google.com → project **kuchupuchuff2026** → APIs & Services → Credentials.
-2. Open the Web client ending `1khrecq3eli0obsr6vc3q2k0q1e86rpg.apps.googleusercontent.com`.
-3. **Authorized JavaScript origins** → Add URI `https://kuchupuchu.web.app` → Save
-   (takes a few minutes to propagate).
-
-Without it the Google popup answers `Error 400: origin_mismatch`.
+runtime — with the API origin configured it reaches the Worker cross-origin,
+so once step 4 propagates the "Continue with Google" button mints a token
+from `kuchupuchu.web.app` and the H2 phone-proof completes in the browser.

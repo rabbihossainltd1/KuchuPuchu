@@ -35,6 +35,8 @@ import {
   e2eeSheetCopy,
   incomingCallLine,
 } from "./callsModel";
+import { useAuth } from "../auth/AuthContext";
+import { useResolvedAvatar } from "../messaging/avatars";
 import type { MediaStreamLike } from "./peerRuntime";
 
 type Props = {
@@ -43,6 +45,11 @@ type Props = {
 };
 
 export function CallStage({ engine, state }: Props) {
+  // Light call payloads (the incoming ring) carry only the `id@vN` cache
+  // token in peer.avatar; resolved call-backs carry a data-URI. Render either
+  // through the shared per-ref avatar cache, never the raw token.
+  const { api } = useAuth();
+  const peerAvatar = useResolvedAvatar(api, state.peer.avatar);
   // The engine owns the sheet, not this component: a fingerprint that CHANGED
   // has to raise it by itself mid-call, with no click anywhere on this screen.
   const verifyOpen = state.verifyOpen;
@@ -136,7 +143,7 @@ export function CallStage({ engine, state }: Props) {
       }
     >
       <div className="call-stage__backdrop" aria-hidden="true">
-        {state.peer.avatar ? <img src={state.peer.avatar} alt="" /> : null}
+        {peerAvatar ? <img src={peerAvatar} alt="" /> : null}
       </div>
 
       {/* Visual only: the call's AUDIO is played by the single element the layer
@@ -153,8 +160,8 @@ export function CallStage({ engine, state }: Props) {
       <div className="call-stage__body">
         <header className="call-stage__head">
           <span className="call-stage__avatar" aria-hidden="true">
-            {state.peer.avatar ? (
-              <img src={state.peer.avatar} alt="" />
+            {peerAvatar ? (
+              <img src={peerAvatar} alt="" />
             ) : (
               state.peer.name.trim().charAt(0).toUpperCase() || "?"
             )}

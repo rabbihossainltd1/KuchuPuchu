@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
+  CALLS_MOCK_AVATAR,
   CALL_ID,
   CHAT_ID,
   PEER,
@@ -197,6 +198,16 @@ test.describe("an incoming call", () => {
     await signIn(page);
     await page.goto("/calls");
     await expect(stage(page)).toBeVisible();
+  });
+
+  test("the ring resolves the peer's avatarRef token into the real picture", async ({ page }) => {
+    // The active-call payload is LIGHT (avatarUrl null + `u_peer@v1`), exactly
+    // like the Worker's; the stage must trade the token at the avatar
+    // resolver instead of rendering it as a broken <img src>.
+    const img = stage(page).locator(".call-stage__avatar img");
+    await expect(img).toBeVisible();
+    await expect(img).toHaveAttribute("src", CALLS_MOCK_AVATAR);
+    expect(await stage(page).locator(".call-stage__avatar").innerHTML()).not.toContain("@v1");
   });
 
   test("the ring names the kind and offers three labelled ways out", async ({ page }) => {
