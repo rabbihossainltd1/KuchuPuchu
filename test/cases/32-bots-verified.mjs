@@ -3511,7 +3511,7 @@ const convBetween = (db, a, b) =>
             ) &&
             kt("KpNotify.kt").includes('private const val MISSED_CHANNEL = "kp_missed_v2"') &&
             kt("KpNotify.kt").includes(
-              'NotificationChannel(MISSED_CHANNEL, "Missed calls", NotificationManager.IMPORTANCE_HIGH)',
+              'NotificationChannel(MISSED_CHANNEL, "Missed calls", NotificationManager.IMPORTANCE_DEFAULT)',
             ) &&
             kt("KpNotify.kt").includes("NotificationCompat.Builder(ctx, MISSED_CHANNEL)") &&
             kt("KpNotify.kt").includes(".setCategory(NotificationCompat.CATEGORY_MISSED_CALL)"),
