@@ -338,6 +338,10 @@ export type MockWorkerOptions = {
   withAi?: boolean;
   /** Return a profile photo from `/api/me` for the account-avatar regression. */
   profileAvatarUrl?: string;
+  /** Serve the profile photo only through the stable avatarRef resolver. */
+  profileAvatarRef?: string;
+  /** Omit the direct peer key from the list while leaving detail authoritative. */
+  omitPeerKeyFromList?: boolean;
   /** Leave the phone identity backup absent to test the secure-chat gate. */
   noE2eeBackup?: boolean;
 };
@@ -857,7 +861,8 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
           user: {
             ...ME,
             about: null,
-            avatarUrl: options.profileAvatarUrl ?? null,
+            avatarUrl: options.profileAvatarRef ? null : (options.profileAvatarUrl ?? null),
+            avatarRef: options.profileAvatarRef ?? null,
             email: null,
             phone: "+8801700000000",
             googleEmail: null,
@@ -866,11 +871,27 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
           },
         });
       });
+      if (options.profileAvatarUrl || options.profileAvatarRef) {
+        await page.route(`**/api/users/${encodeURIComponent(ME.id)}/avatar`, (route) =>
+          json(route, { avatarUrl: options.profileAvatarUrl ?? null }),
+        );
+      }
 
       // Slice I: the real Worker wraps the list as { items, marker }; the mock
       // must serve the same shape or the suites would pass against a contract
       // the server does not speak (the exact drift that hid an empty list).
-      await page.route("**/api/conversations", (route) => json(route, { items: conversations }));
+      await page.route("**/api/conversations", (route) => {
+        const rows = options.omitPeerKeyFromList
+          ? (conversations as Array<Record<string, unknown>>).map((row) => {
+              if (row.id !== CHAT_ID || !row.other || typeof row.other !== "object") return row;
+              return {
+                ...row,
+                other: { ...(row.other as Record<string, unknown>), e2eePublicKey: "" },
+              };
+            })
+          : conversations;
+        return json(route, { items: rows });
+      });
 
       /* --- uploads: single POST, multipart lifecycle, authenticated GET --- */
 

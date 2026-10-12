@@ -2,9 +2,9 @@
  * Open-chat pane: transcript, composer, message actions and the honest E2EE
  * state bar.
  *
- * Every action has a visible, labelled control. The parity plan forbids
- * hover-only and gesture-only affordances, so the per-message action row is
- * always in the tab order and revealed visually on hover *or* keyboard focus.
+ * Each message keeps a compact three-dot trigger beside its bubble. Actions
+ * and quick reactions share one anchored menu, so they stay reachable without
+ * overlapping the message body or stretching the bubble.
  *
  * Capability limits are stated rather than hidden: a browser cannot block
  * screen capture, media bytes are not sealed, and an envelope that cannot be
@@ -19,7 +19,7 @@
  *   • document preview — a document row opens a full-screen reader (browser PDF
  *     viewer, selectable text, pictures, clips) which says plainly what a
  *     browser cannot render;
- *   • selection and forwarding — every row has a Select button, the selection
+ *   • selection and forwarding — every message menu has Select, the selection
  *     bar carries Copy / Forward / Edit / Delete, and Forward opens the chat
  *     picker the phone uses.
  */
@@ -30,6 +30,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -41,15 +42,11 @@ import { Icon } from "../icons";
 import { messagingApi } from "./messagingApi";
 import { AiHistoryPane } from "./AiHistoryPane";
 import { MessageInfoSheet, ReactionPickerSheet } from "./MessageSheets";
+import { MessageActionMenu } from "./MessageActionMenu";
 import { scheduleStamp, type ScheduledRow } from "./schedule";
 import { RouteLink } from "../RouteLink";
 import type { Navigate } from "../useBrowserRouter";
-import {
-  CAPABILITY_COPY,
-  LOCKED_BODY_PLACEHOLDER,
-  QUICK_REACTIONS,
-  type QuickReaction,
-} from "./chatCopy";
+import { CAPABILITY_COPY, LOCKED_BODY_PLACEHOLDER } from "./chatCopy";
 import type { ApiClient } from "../auth/authApi";
 import type { EditModel } from "../media/imageEdit";
 
@@ -193,6 +190,12 @@ export function ChatPane({
 }: Props) {
   const composerId = useId();
   const transcriptRef = useRef<HTMLOListElement | null>(null);
+  const olderScrollAnchorRef = useRef<{
+    conversationId: string;
+    scrollHeight: number;
+    scrollTop: number;
+    messageCount: number;
+  } | null>(null);
 
   /** Slice S: scroll a search hit into view; older-than-loaded says so aloud. */
   const jumpToMessage = (messageId: string) => {
@@ -247,6 +250,8 @@ export function ChatPane({
    *  view-once toggles can re-prepare without asking for the file again. */
   const fileFor = useRef(new Map<string, File>());
   const [menuOpen, setMenuOpen] = useState(false);
+  const [messageMenuFor, setMessageMenuFor] = useState("");
+  const closeMessageMenu = useCallback(() => setMessageMenuFor(""), []);
   const [infoFor, setInfoFor] = useState<MessageRow | null>(null);
   const [reactFor, setReactFor] = useState("");
   const [aiIncognito, setAiIncognito] = useState(false);
@@ -534,9 +539,25 @@ export function ChatPane({
     list.scrollTo({ top: list.scrollHeight, behavior });
   }, []);
 
+  const loadOlderKeepingPosition = useCallback(async () => {
+    const list = transcriptRef.current;
+    setStickToBottom(false);
+    if (list) {
+      olderScrollAnchorRef.current = {
+        conversationId: selectedId,
+        scrollHeight: list.scrollHeight,
+        scrollTop: list.scrollTop,
+        messageCount: controller.messages.length,
+      };
+    }
+    await controller.loadOlder();
+  }, [controller.loadOlder, controller.messages.length, selectedId]);
+
   useEffect(() => {
     setStickToBottom(true);
+    olderScrollAnchorRef.current = null;
     setConfirmDeleteId("");
+    setMessageMenuFor("");
     setEditingId("");
     setEditText("");
     setDragOver(false);
@@ -561,6 +582,23 @@ export function ChatPane({
     if (stickToBottom) scrollToBottom();
   }, [controller.messages.length, scrollToBottom, stickToBottom]);
 
+  useLayoutEffect(() => {
+    const anchor = olderScrollAnchorRef.current;
+    if (!anchor) return;
+    if (anchor.conversationId !== selectedId) {
+      olderScrollAnchorRef.current = null;
+      return;
+    }
+    if (controller.loadingOlder) return;
+
+    const list = transcriptRef.current;
+    if (list && controller.messages.length > anchor.messageCount) {
+      const addedHeight = list.scrollHeight - anchor.scrollHeight;
+      list.scrollTop = Math.max(0, anchor.scrollTop + addedHeight);
+    }
+    olderScrollAnchorRef.current = null;
+  }, [controller.loadingOlder, controller.messages.length, selectedId]);
+
   const onTranscriptScroll = useCallback(() => {
     const list = transcriptRef.current;
     if (!list) return;
@@ -574,9 +612,9 @@ export function ChatPane({
       !controller.loadingOlder &&
       controller.messagesStatus === "ready"
     ) {
-      void controller.loadOlder();
+      void loadOlderKeepingPosition();
     }
-  }, [controller]);
+  }, [controller, loadOlderKeepingPosition]);
 
   const copyText = useCallback(
     async (value: string) => {
@@ -1129,13 +1167,22 @@ export function ChatPane({
       >
         {controller.hasMore && (
           <li className="transcript__more">
+            {controller.loadOlderError && (
+              <p className="transcript__more-error" role="alert">
+                {controller.loadOlderError}
+              </p>
+            )}
             <button
               type="button"
               className="secondary-button"
-              onClick={() => void controller.loadOlder()}
+              onClick={() => void loadOlderKeepingPosition()}
               disabled={controller.loadingOlder}
             >
-              {controller.loadingOlder ? "Loading older messages…" : "Load older messages"}
+              {controller.loadingOlder
+                ? "Loading older messages…"
+                : controller.loadOlderError
+                  ? "Retry loading older messages"
+                  : "Load older messages"}
             </button>
           </li>
         )}
@@ -1176,6 +1223,12 @@ export function ChatPane({
                 const groupRows =
                   message.albumMembers.length > 1 ? message.albumMembers : [message];
                 const forwardVerdict = canForwardSelection(groupRows, forwardContext, isOwnRow);
+                const failedOutboxItem = controller.outbox.find(
+                  (item) =>
+                    item.clientId === message.clientId &&
+                    item.conversationId === conversation.id &&
+                    (item.state === "failed" || item.state === "refused"),
+                );
                 const rowCategory = attachmentCategory(
                   message.fileType,
                   (message.meta ?? {}) as Record<string, unknown>,
@@ -1356,19 +1409,25 @@ export function ChatPane({
                             <span className="sr-only"> {TICK_LABELS[ticks]}</span>
                           </span>
                         )}
-                      </footer>
-
-                      {message.localState === "failed" && (
-                        <p className="bubble__error" role="alert">
-                          {message.localError || "Not sent."}
-                        </p>
-                      )}
-
-                      {message.kind !== "DELETED" && (
-                        <div className="message-actions">
-                          <button
-                            type="button"
-                            onClick={() => {
+                        {message.kind !== "DELETED" && (
+                          <MessageActionMenu
+                            message={message}
+                            meId={meId}
+                            open={messageMenuFor === message.id}
+                            selected={selected}
+                            canCopy={!isPlaceholder}
+                            canForward={forwardVerdict.allowed}
+                            forwardReason={forwardVerdict.reason}
+                            canEdit={canEdit}
+                            canDelete={own}
+                            canRetry={Boolean(failedOutboxItem)}
+                            onToggle={() =>
+                              setMessageMenuFor((current) =>
+                                current === message.id ? "" : message.id,
+                              )
+                            }
+                            onClose={closeMessageMenu}
+                            onReply={() => {
                               controller.setReplyTo({
                                 id: message.id,
                                 senderId: message.senderId,
@@ -1378,108 +1437,30 @@ export function ChatPane({
                               });
                               composerRef.current?.focus();
                             }}
-                            aria-label={`Reply to ${senderLabel(message, conversation, meId)}`}
-                          >
-                            Reply
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void copyText(stripBoldMarkers(body))}
-                            disabled={isPlaceholder}
-                            aria-label={`Copy message from ${senderLabel(
-                              message,
-                              conversation,
-                              meId,
-                            )}`}
-                          >
-                            Copy
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setInfoFor(message)}
-                            aria-label={`Message info for ${senderLabel(
-                              message,
-                              conversation,
-                              meId,
-                            )} message`}
-                          >
-                            Info
-                          </button>
-                          {forwardVerdict.allowed ? (
-                            <button
-                              type="button"
-                              onClick={() => openForward(groupRows)}
-                              aria-label={`Forward ${
-                                groupRows.length > 1 ? `${groupRows.length} photos` : "this message"
-                              } to another chat`}
-                            >
-                              Forward
-                            </button>
-                          ) : (
-                            <span
-                              className="message-actions__refused"
-                              title={forwardVerdict.reason}
-                              aria-disabled="true"
-                            >
-                              Forward
-                            </span>
-                          )}
-                          {canEdit && (
-                            <button
-                              type="button"
-                              onClick={() => beginEdit(message)}
-                              aria-label="Edit your message"
-                            >
-                              Edit
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => toggleSelect(message)}
-                            aria-pressed={selected}
-                            aria-label={selected ? "Unselect this message" : "Select this message"}
-                          >
-                            Select
-                          </button>
-                          {own && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setConfirmDeleteId(confirmDeleteId === message.id ? "" : message.id)
-                              }
-                              aria-expanded={confirmDeleteId === message.id}
-                              aria-label="Delete your message"
-                            >
-                              Delete
-                            </button>
-                          )}
-                        </div>
-                      )}
+                            onCopy={() => void copyText(stripBoldMarkers(body))}
+                            onInfo={() => setInfoFor(message)}
+                            onForward={() => openForward(groupRows)}
+                            onEdit={() => beginEdit(message)}
+                            onToggleSelect={() => toggleSelect(message)}
+                            onDelete={() => setConfirmDeleteId(message.id)}
+                            onReact={(emoji) => void controller.react(message.id, emoji)}
+                            onMoreReactions={() => setReactFor(message.id)}
+                            onRetry={() => {
+                              if (failedOutboxItem)
+                                void controller.retry(failedOutboxItem.clientId);
+                            }}
+                            onDiscard={() => {
+                              if (failedOutboxItem)
+                                void controller.discard(failedOutboxItem.clientId);
+                            }}
+                          />
+                        )}
+                      </footer>
 
-                      {message.kind !== "DELETED" && (
-                        <div className="reaction-bar" aria-label="Quick reactions">
-                          {QUICK_REACTIONS.map((reaction: QuickReaction) => (
-                            <button
-                              key={reaction.emoji}
-                              type="button"
-                              className={message.reactions[meId] === reaction.emoji ? "is-on" : ""}
-                              onClick={() => void controller.react(message.id, reaction.emoji)}
-                              aria-label={`React ${reaction.label}`}
-                              aria-pressed={message.reactions[meId] === reaction.emoji}
-                              title={reaction.label}
-                            >
-                              <span aria-hidden="true">{reaction.emoji}</span>
-                            </button>
-                          ))}
-                          <button
-                            type="button"
-                            className="reaction-bar__more"
-                            onClick={() => setReactFor(message.id)}
-                            aria-label="More emojis"
-                          >
-                            <Icon name="plus" size={16} />
-                          </button>
-                        </div>
+                      {message.localState === "failed" && (
+                        <p className="bubble__error" role="alert">
+                          {message.localError || "Not sent."}
+                        </p>
                       )}
 
                       {confirmDeleteId === message.id && (

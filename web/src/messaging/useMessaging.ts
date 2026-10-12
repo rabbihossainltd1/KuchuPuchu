@@ -31,6 +31,7 @@ import {
   conversationPeerId,
   conversationPeerKey,
   conversationTitle,
+  isBotConversation,
   createLocalAttachmentEcho,
   createLocalEcho,
   isOneWayConversation,
@@ -100,6 +101,7 @@ export type MessagingState = {
   sealedCount: number;
   hasMore: boolean;
   loadingOlder: boolean;
+  loadOlderError: string;
   otherReadAt: string;
   typingActive: boolean;
   /**
@@ -201,7 +203,9 @@ export function useMessaging(options: Options): MessagingController {
   const [messagesError, setMessagesError] = useState("");
   const [messages, setMessages] = useState<readonly MessageRow[]>([]);
   const [hasMore, setHasMore] = useState(false);
-  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [loadingOlderFor, setLoadingOlderFor] = useState("");
+  const [loadOlderError, setLoadOlderError] = useState("");
+  const loadingOlderIds = useRef(new Set<string>());
   const [cursor, setCursor] = useState<{ before: string; beforeRowid: number }>({
     before: "",
     beforeRowid: 0,
@@ -465,10 +469,21 @@ export function useMessaging(options: Options): MessagingController {
       setHasMore(false);
       setCursor({ before: "", beforeRowid: 0 });
 
+      setLoadOlderError("");
       let conversation = known;
-      if (!conversation) {
+      const needsPeerKey = Boolean(
+        conversation &&
+        !conversation.isGroup &&
+        !isBotConversation(conversation) &&
+        !conversationPeerKey(conversation),
+      );
+      // List rows are intentionally compact and can omit key material. Resolve
+      // the authoritative conversation detail before enabling a direct-chat
+      // send; never relax the E2EE gate or fall back to plaintext.
+      if (!conversation || needsPeerKey) {
         try {
-          conversation = await messagingApi.getConversation(api, conversationId);
+          const detail = await messagingApi.getConversation(api, conversationId);
+          if (detail) conversation = detail;
         } catch (error) {
           if (!(error instanceof ApiError && error.kind === "aborted")) {
             setMessagesError(apiErrorMessage(error));
@@ -514,6 +529,7 @@ export function useMessaging(options: Options): MessagingController {
       setSelected(null);
       setMessages([]);
       setMessagesStatus("idle");
+      setLoadOlderError("");
       return;
     }
     if (selectedRef.current?.id === selectedId && messagesStatus !== "idle") return;
@@ -525,28 +541,48 @@ export function useMessaging(options: Options): MessagingController {
 
   const loadOlder = useCallback(async () => {
     const conversation = selectedRef.current;
-    if (!conversation || loadingOlder || !hasMore || !cursor.before) return;
-    setLoadingOlder(true);
+    if (
+      !conversation ||
+      loadingOlderIds.current.has(conversation.id) ||
+      !hasMore ||
+      !cursor.before
+    ) {
+      return;
+    }
+    const conversationId = conversation.id;
+    loadingOlderIds.current.add(conversationId);
+    setLoadingOlderFor(conversationId);
+    setLoadOlderError("");
     try {
-      const page = await messagingApi.getMessages(api, conversation.id, {
+      const page = await messagingApi.getMessages(api, conversationId, {
         before: cursor.before,
         beforeRowid: cursor.beforeRowid,
       });
-      setMessages((current) => prependOlderPage(current, [...page.items].sort(compareMessages)));
+      // A slow page for a chat the reader has left must never be prepended to
+      // the next transcript or replace that chat's cursor.
+      if (selectedRef.current?.id !== conversationId) return;
+      const ordered = [...page.items].sort(compareMessages);
+      setMessages((current) => prependOlderPage(current, ordered));
       setHasMore(page.hasMore);
-      const oldest = [...page.items].sort(compareMessages)[0];
+      const oldest = ordered[0];
       setCursor({
         before: page.oldest || oldest?.createdAt || cursor.before,
         beforeRowid: page.oldestRowid || oldest?.rowid || cursor.beforeRowid,
       });
     } catch (error) {
-      if (!(error instanceof ApiError && error.kind === "aborted")) {
-        announce(apiErrorMessage(error));
+      if (
+        selectedRef.current?.id === conversationId &&
+        !(error instanceof ApiError && error.kind === "aborted")
+      ) {
+        const message = apiErrorMessage(error);
+        setLoadOlderError(message);
+        announce(message);
       }
     } finally {
-      setLoadingOlder(false);
+      loadingOlderIds.current.delete(conversationId);
+      setLoadingOlderFor((current) => (current === conversationId ? "" : current));
     }
-  }, [announce, api, cursor.before, cursor.beforeRowid, hasMore, loadingOlder]);
+  }, [announce, api, cursor.before, cursor.beforeRowid, hasMore]);
 
   /* --------------------------------------------------------------- chat socket */
 
@@ -696,7 +732,7 @@ export function useMessaging(options: Options): MessagingController {
         });
         await stores.outbox.remove(item.clientId);
         setOutbox((current) => current.filter((row) => row.clientId !== item.clientId));
-        if (result.message) {
+        if (result.message && selectedRef.current?.id === item.conversationId) {
           setMessages((current) => applyMessageFrame(current, result.message!, meId).messages);
         }
         void refreshList();
@@ -714,12 +750,14 @@ export function useMessaging(options: Options): MessagingController {
                 : row,
             ),
           );
-          if (outcome.message === SECURE_CHAT_WAITING) {
-            // Give the text back: a policy refusal is not a lost draft.
-            await stores.drafts.write(item.conversationId, item.plaintext);
+          // A permanent refusal is not a lost draft. Restore it to that chat's
+          // saved draft even if the reader switched conversations mid-request;
+          // only update the visible composer when that chat is still selected.
+          await stores.drafts.write(item.conversationId, item.plaintext);
+          if (selectedRef.current?.id === item.conversationId) {
             setDraftState(item.plaintext);
+            announce(outcome.message);
           }
-          announce(outcome.message);
           return;
         }
 
@@ -747,7 +785,7 @@ export function useMessaging(options: Options): MessagingController {
               void attemptItem(next);
             }, delay);
             retryTimers.current.set(next.clientId, timer);
-          } else {
+          } else if (selectedRef.current?.id === item.conversationId) {
             announce("Message not sent. Retry from the composer.");
           }
         }
@@ -1510,7 +1548,8 @@ export function useMessaging(options: Options): MessagingController {
     displayBodies,
     sealedCount,
     hasMore,
-    loadingOlder,
+    loadingOlder: Boolean(selectedId && loadingOlderFor === selectedId),
+    loadOlderError,
     otherReadAt,
     typingActive,
     typingKind,

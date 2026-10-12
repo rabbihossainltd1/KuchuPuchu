@@ -152,11 +152,10 @@ export function chatThemeCssVars(style: ChatThemeStyle): Record<string, string> 
   };
 }
 
-export const CHAT_THEME_LABELS: ReadonlyArray<{ value: ChatTheme; label: string; bangla: string }> =
-  [
-    { value: "darkblue", label: "Dark Blue", bangla: "ডার্ক ব্লু" },
-    { value: "default", label: "Classic Cream", bangla: "ক্লাসিক ক্রিম" },
-    { value: "mint", label: "Mint", bangla: "মিন্ট" },
-    { value: "rose", label: "Rose", bangla: "রোজ" },
-    { value: "night", label: "Night", bangla: "নাইট" },
-  ];
+export const CHAT_THEME_LABELS: ReadonlyArray<{ value: ChatTheme; label: string }> = [
+  { value: "darkblue", label: "Dark Blue" },
+  { value: "default", label: "Classic Cream" },
+  { value: "mint", label: "Mint" },
+  { value: "rose", label: "Rose" },
+  { value: "night", label: "Night" },
+];

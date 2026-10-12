@@ -10,22 +10,15 @@
 import { useCallback } from "react";
 import { applyAppTheme, persistAppTheme, useAppTheme, type AppTheme } from "./appTheme";
 
-const OPTIONS: ReadonlyArray<{
-  value: AppTheme;
-  label: string;
-  bangla: string;
-  note: string;
-}> = [
+const OPTIONS: ReadonlyArray<{ value: AppTheme; label: string; note: string }> = [
   {
     value: "dark_blue",
     label: "Dark Blue",
-    bangla: "ডার্ক ব্লু",
     note: "The default KuchuPuchu look — deep navy surfaces, blue accents.",
   },
   {
     value: "light",
     label: "Light Cream",
-    bangla: "লাইট ক্রিম",
     note: "The classic warm light look — cream surfaces, gold accents.",
   },
 ];
@@ -42,7 +35,7 @@ export function AppearanceSection() {
     <section className="settings-card" aria-labelledby="appearance-heading">
       <div className="settings-card__heading">
         <div>
-          <p className="eyebrow">Appearance · থিম</p>
+          <p className="eyebrow">Appearance</p>
           <h2 id="appearance-heading">App theme</h2>
         </div>
       </div>
@@ -66,9 +59,7 @@ export function AppearanceSection() {
               aria-hidden="true"
             />
             <span className="appearance-option__text">
-              <span className="appearance-option__title">
-                {option.label} · {option.bangla}
-              </span>
+              <span className="appearance-option__title">{option.label}</span>
               <span className="appearance-option__note">{option.note}</span>
             </span>
           </label>

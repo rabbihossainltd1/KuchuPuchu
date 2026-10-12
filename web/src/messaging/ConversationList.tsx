@@ -560,12 +560,6 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
                           {row.muted && <span className="conversation-row__tag">Muted</span>}
                           {conversationPreviewText(row)}
                         </span>
-                        {row.unread > 0 && (
-                          <span className="conversation-row__badge">
-                            {row.unread > 99 ? "99+" : row.unread}
-                            <span className="sr-only"> unread messages</span>
-                          </span>
-                        )}
                       </span>
                     </span>
                   </RouteLink>
