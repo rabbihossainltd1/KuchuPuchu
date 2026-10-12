@@ -40,7 +40,9 @@ test("a 75-char legacy conversation loads history and sends", async ({ page }) =
   const composer = page.getByLabel("Message text", { exact: true });
   await composer.fill("legacy id send");
   await page.keyboard.press("Enter");
-  await expect(page.getByText("legacy id send")).toBeVisible();
+  // Scope to the transcript: right after Enter the composer may still hold the
+  // draft for a frame, and getByText would trip over both in strict mode.
+  await expect(page.locator(".transcript").getByText("legacy id send")).toBeVisible();
   await expect.poll(() => worker.sent.length).toBeGreaterThan(0);
   expect(worker.sent[0]?.conversationId).toBe(LEGACY_ID);
 });

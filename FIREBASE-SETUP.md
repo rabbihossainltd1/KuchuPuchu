@@ -133,3 +133,37 @@ phone bind hoye jabe. Onno Gmail dile notun alada account hobe.
 - **Fresh start:** all old accounts/chats/media/files were erased from D1 and
   R2 — everyone signs up anew with a phone number. Legacy email-migration code
   stays but has nothing to migrate against.
+
+---
+
+## 🌐 Web on Firebase Hosting (kuchupuchu.web.app) — 2026-10-12
+
+The shell can live on Firebase Hosting while the API stays on the Worker.
+The build reads `VITE_KP_API_ORIGIN` (https-only) and points every `/api`
+request and `/ws` socket at that origin; the Worker already answers `/api`
+with permissive CORS headers, so no Worker change is needed.
+
+### Build + deploy
+
+```bash
+npm run build:web:firebase     # prod flags + VITE_KP_API_ORIGIN=<worker url>
+firebase deploy --only hosting # from the project that serves kuchupuchu.web.app
+```
+
+`firebase.json` should serve `web/dist` and fall back to `index.html` for
+non-file paths (SPA routes like `/chats` or `/account`).
+
+### Google verify from the Firebase origin (one-time console step)
+
+The proof screen pulls `googleWebClientId` from `/api/config/firebase` at
+runtime — with the API origin configured it reaches the Worker, so the
+"Continue with Google" button renders. Google still refuses to mint a token
+until the Firebase origin is authorized on the OAuth client; that lives in
+the Google Cloud console, not in code:
+
+1. console.cloud.google.com → project **kuchupuchuff2026** → APIs & Services → Credentials.
+2. Open the Web client ending `1khrecq3eli0obsr6vc3q2k0q1e86rpg.apps.googleusercontent.com`.
+3. **Authorized JavaScript origins** → Add URI `https://kuchupuchu.web.app` → Save
+   (takes a few minutes to propagate).
+
+Without it the Google popup answers `Error 400: origin_mismatch`.

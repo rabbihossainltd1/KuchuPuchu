@@ -32,6 +32,10 @@ export { signIn };
 export const ME = { id: "u_me", username: "me", displayName: "Amar Account" };
 export const PEER = { id: "u_peer", username: "rahi", displayName: "Rahi" };
 
+/** A 1x1 red PNG: what the avatar resolver hands to the Calls tab rows. */
+export const CALLS_MOCK_AVATAR =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
 const INCOMING_OFFER_SDP = [
   "v=0",
   "o=- 1 1 IN IP4 127.0.0.1",
@@ -240,6 +244,14 @@ export async function createMockCallsWorker(
             e2eePublicKey: identity.u,
           },
         });
+      });
+
+      /* The avatar resolver: light call rows carry only `id@vN` tokens, and
+         the Calls tab must trade them for bytes here — the regression proves
+         the row's <img> ends up with this data-URI, not the raw token. */
+      await page.route(/\/api\/users\/([^/]+)\/avatar(\?.*)?$/, (route) => {
+        const id = decodeURIComponent(new URL(route.request().url()).pathname.split("/")[3] ?? "");
+        return json(route, { avatarUrl: CALLS_MOCK_AVATAR, avatarRef: `${id}@v1` });
       });
 
       /* ---------------------------------------------------------- calls ---- */
@@ -544,7 +556,9 @@ export async function createMockCallsWorker(
         displayName: peerUser.displayName,
         username: peerUser.username,
         avatarUrl: null,
-        avatarRef: "",
+        // LIGHT history row, exactly like the Worker: bytes live behind the
+        // avatar resolver, only the cache token rides the row.
+        avatarRef: `${peerUser.id}@v1`,
         online: true,
         privateProfile: false,
       },

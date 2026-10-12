@@ -477,10 +477,20 @@ export function callPeerName(row: CallRow): string {
   return row.other?.displayName || row.other?.username || "Unknown";
 }
 
-/** The picture a row shows: a group's ref, else the peer's (light rows: ref). */
+/**
+ * The picture bytes a row already holds. `avatarRef` is a cache token
+ * (`id@vN`), NOT a URL — returning it here would feed `<img src="u@v1">` and
+ * every light history row (avatarUrl null by design) drew a broken image.
+ * The Web UI resolves refs through the avatar pipeline (useAvatar) instead.
+ */
 export function callPeerAvatar(row: CallRow): string {
+  return row.other?.avatarUrl ?? "";
+}
+
+/** The avatar cache token a row carries: the group picture or the peer's. */
+export function callAvatarRef(row: CallRow): string {
   if (row.group) return row.avatarRef;
-  return row.other?.avatarUrl || row.other?.avatarRef || "";
+  return row.other?.avatarRef ?? "";
 }
 
 /**
