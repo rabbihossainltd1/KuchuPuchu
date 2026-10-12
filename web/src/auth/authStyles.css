@@ -1180,3 +1180,84 @@
 :root[data-kp-theme="light"] .notice-card {
   background: #ffffff;
 }
+
+/* Real brand logo tile on the auth card. */
+.auth-logo {
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  box-shadow: 0 8px 22px rgba(240, 180, 60, 0.25);
+}
+
+/* Full-screen OTP entry: six digit boxes over the hidden real input. */
+.otp-full {
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  padding: 26px 10px 8px;
+}
+.otp-full__title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+}
+.otp-boxes {
+  display: flex;
+  gap: 10px;
+}
+.otp-box {
+  width: 52px;
+  height: 62px;
+  display: grid;
+  place-items: center;
+  font-size: 26px;
+  font-weight: 800;
+  border-radius: 14px;
+  border: 1.5px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.05);
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+.otp-box--filled {
+  border-color: #f0b43c;
+  color: #f0b43c;
+  transform: translateY(-2px);
+}
+:root[data-kp-theme="light"] .otp-box {
+  border-color: rgba(13, 21, 36, 0.22);
+  background: rgba(13, 21, 36, 0.04);
+}
+:root[data-kp-theme="light"] .otp-box--filled {
+  border-color: #b57a10;
+  color: #b57a10;
+}
+.otp-sr-label {
+  position: relative;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.otp-sr {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  border: 0;
+}
+.otp-full__verify {
+  min-width: 220px;
+  border: 0;
+  border-radius: 999px;
+  padding: 13px 26px;
+  font-weight: 800;
+  font-size: 15px;
+  color: #241a05;
+  background: linear-gradient(135deg, #f6c65b, #e29a1f);
+  cursor: pointer;
+}
+.otp-full__verify:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
