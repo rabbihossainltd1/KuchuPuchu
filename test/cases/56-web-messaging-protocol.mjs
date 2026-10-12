@@ -129,6 +129,22 @@ check(
     parseConversationDetail(conversationPayload.items[2]).id === "c_group",
 );
 
+/* Legacy conversation-id pin: pre-2026 SOLO ids are `c_<uuid>_<uuid>` — 75
+   chars. A 64-char parse cap silently clipped them, so every follow-up route
+   (detail, messages, send) 404'd on old accounts: history never loaded and
+   sends died in the cloud. Stored ids must survive parsing byte-for-byte. */
+const legacyUuid = "f9864c26-b413-48ba-9b7f-be64fed8d6d6";
+const legacyId = `c_2541ac80-ecb9-4a68-96e5-1dda334fdc52_${legacyUuid}`;
+check(
+  "legacy 75-char conversation ids survive list parsing intact",
+  parseConversationList({ items: [{ id: legacyId, other: { id: legacyUuid } }] })[0].id ===
+    legacyId,
+);
+check(
+  "legacy 75-char conversation ids survive detail parsing intact",
+  parseConversationDetail({ conversation: { id: legacyId } }).id === legacyId,
+);
+
 check(
   "titles fall back peer displayName -> username -> id",
   conversationTitle(list[0]) === "Rahi" &&

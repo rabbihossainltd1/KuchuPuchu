@@ -352,11 +352,14 @@ export type MockWorkerOptions = {
   detailNotFound?: boolean;
   /** Leave the phone identity backup absent to test the secure-chat gate. */
   noE2eeBackup?: boolean;
+  /** Use a different id for the direct chat (legacy 75-char id pin). */
+  chatId?: string;
 };
 
 export async function createMockWorker(options: MockWorkerOptions = {}): Promise<MockWorker> {
   const me = await generateTestIdentity();
   const peer = await generateTestIdentity();
+  const CHAT = options.chatId ?? CHAT_ID;
 
   const sealedFromPeer = await sealFor("এই মেসেজটি ফোন থেকে এনক্রিপ্টেড", peer, me);
   const sealedOnceText = await sealFor("গোপন মেসেজ", peer, me);
@@ -382,7 +385,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         ]
       : []),
     {
-      id: CHAT_ID,
+      id: CHAT,
       isGroup: false,
       unread: 2,
       hidden: 0,
@@ -490,7 +493,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         },
       ];
     }
-    if (conversationId === CHAT_ID) {
+    if (conversationId === CHAT) {
       const voice = options.withVoice
         ? [
             {
@@ -899,7 +902,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
       await page.route("**/api/conversations", (route) => {
         const rows = options.omitPeerKeyFromList
           ? (conversations as Array<Record<string, unknown>>).map((row) => {
-              if (row.id !== CHAT_ID || !row.other || typeof row.other !== "object") return row;
+              if (row.id !== CHAT || !row.other || typeof row.other !== "object") return row;
               return {
                 ...row,
                 other: { ...(row.other as Record<string, unknown>), e2eePublicKey: "" },
@@ -1260,7 +1263,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
                 body: "pineapple parcel arrives friday",
                 createdAt: new Date(Date.now() - 60_000).toISOString(),
                 rowid: 900,
-                convoId: CHAT_ID,
+                convoId: CHAT,
                 convTitle: PEER_NAME,
               },
               {
@@ -1271,7 +1274,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
                 body: "KP1.c2VhbGVkYm9keQ==",
                 createdAt: new Date(Date.now() - 50_000).toISOString(),
                 rowid: 901,
-                convoId: CHAT_ID,
+                convoId: CHAT,
                 convTitle: PEER_NAME,
               },
             ]
@@ -1333,7 +1336,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
               : { ...item };
             if (
               options.omitPeerKeyFromList &&
-              item.id === CHAT_ID &&
+              item.id === CHAT &&
               row.other &&
               typeof row.other === "object"
             ) {
