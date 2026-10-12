@@ -253,9 +253,11 @@ export default function App() {
     });
   };
 
-  // The web client is a desktop product: phones and tablets get the app
-  // download gate instead of the app itself.
-  if (isMobileViewport) {
+  // The web client is a desktop product: signed-out phones and tablets get
+  // the app download gate. /account stays reachable on phones (Google
+  // recovery) and an existing signed-in session is never locked out; flag-off
+  // preview builds keep the foundation preview.
+  if (accountEnabled && isMobileViewport && !isAccountRoute && authStatus !== "signed-in") {
     return <MobileGate />;
   }
 
