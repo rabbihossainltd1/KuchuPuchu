@@ -7,6 +7,7 @@ import { useConnectivity } from "./useConnectivity";
 import { AccountSettingsPage } from "./auth/AccountSettingsPage";
 import { AuthScreen } from "./auth/AuthScreen";
 import { useAuth } from "./auth/AuthContext";
+import { useProfileAvatar } from "./auth/useProfileAvatar";
 
 import { routeRequiresAuthentication, type AppRoute, type SectionId } from "./router";
 
@@ -176,7 +177,8 @@ function SessionRestoreFailure({
 
 export default function App() {
   const { route, navigate } = useBrowserRouter();
-  const { status: authStatus, user, logout } = useAuth();
+  const { api, status: authStatus, user, logout } = useAuth();
+  const accountAvatar = useProfileAvatar(api, user);
   const [sessionNotice, setSessionNotice] = useState("");
   const [unreadChats, setUnreadChats] = useState(0);
   const isOnline = useConnectivity();
@@ -373,8 +375,13 @@ export default function App() {
             </RouteLink>
             <div className="account-chip" role="img" aria-label={accountChipLabel}>
               <div className="account-chip__avatar">
-                {user?.avatarUrl ? (
-                  <img className="avatar-img" src={user.avatarUrl} alt="" />
+                {accountAvatar.src ? (
+                  <img
+                    className="avatar-img"
+                    src={accountAvatar.src}
+                    alt=""
+                    onError={accountAvatar.onError}
+                  />
                 ) : (
                   accountInitials
                 )}

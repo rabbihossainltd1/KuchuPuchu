@@ -7,6 +7,7 @@ import { PushSettingsSection } from "../push/PushSettingsSection";
 import { AppearanceSection } from "../theme/AppearanceSection";
 import { RouteLink } from "../RouteLink";
 import { useAuth } from "./AuthContext";
+import { useProfileAvatar } from "./useProfileAvatar";
 import {
   authApi,
   authErrorCopy,
@@ -73,10 +74,10 @@ export function AccountSettingsPage({
   onLogout: () => void;
 }) {
   const { api, user, updateUser } = useAuth();
+  const profileAvatar = useProfileAvatar(api, user);
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
   const [username, setUsername] = useState(user?.username ?? "");
   const [about, setAbout] = useState(user?.about ?? "");
-  const [avatarFailed, setAvatarFailed] = useState(false);
   const [usernameState, setUsernameState] = useState<
     "same" | "checking" | "available" | "taken" | "invalid"
   >("same");
@@ -102,10 +103,6 @@ export function AccountSettingsPage({
     displayName.trim().length <= 40 &&
     usernameValid &&
     (username.trim().toLowerCase() === (user?.username ?? "") || usernameState === "available");
-
-  useEffect(() => {
-    setAvatarFailed(false);
-  }, [user?.avatarUrl]);
 
   useEffect(() => {
     if (!user) return;
@@ -233,13 +230,13 @@ export function AccountSettingsPage({
 
         <section className="account-hero" aria-label="Your account">
           <div className="account-avatar" aria-hidden="true">
-            {user.avatarUrl && !avatarFailed ? (
+            {profileAvatar.src ? (
               <img
                 className="avatar-img"
-                src={user.avatarUrl}
+                src={profileAvatar.src}
                 alt=""
                 draggable={false}
-                onError={() => setAvatarFailed(true)}
+                onError={profileAvatar.onError}
               />
             ) : (
               initials(user)

@@ -51,10 +51,24 @@ export function MessagingWorkspace({ route, navigate, isOnline, onUnreadChatsCha
     onUnreadChatsChange(unreadChats);
   }, [onUnreadChatsChange, unreadChats]);
 
-  const selected = useMemo(
-    () => controller.conversations.find((row) => row.id === selectedId) ?? controller.selected,
-    [controller.conversations, controller.selected, selectedId],
-  );
+  const selected = useMemo(() => {
+    const listed = controller.conversations.find((row) => row.id === selectedId) ?? null;
+    const detailed = controller.selected?.id === selectedId ? controller.selected : null;
+    if (!listed) return detailed;
+    if (!detailed) return listed;
+
+    // Keep the fresh list fields while retaining secure peer material fetched
+    // from the detail endpoint when the compact list omits it.
+    const other =
+      listed.other && detailed.other
+        ? {
+            ...detailed.other,
+            ...listed.other,
+            e2eePublicKey: listed.other.e2eePublicKey || detailed.other.e2eePublicKey,
+          }
+        : (listed.other ?? detailed.other);
+    return { ...detailed, ...listed, other };
+  }, [controller.conversations, controller.selected, selectedId]);
 
   const isSearch = route.kind === "section" && route.section === "search";
   const isContacts = route.kind === "section" && route.section === "contacts";

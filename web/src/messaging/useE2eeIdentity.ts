@@ -182,7 +182,7 @@ export function useE2eeIdentity(
       if (!lockedBlob) return false;
       const pair = await unlockPassphraseBackup(lockedBlob, passphrase);
       if (!pair) {
-        setError("ভুল পাসফ্রেজ / wrong passphrase");
+        setError("Incorrect passphrase.");
         return false;
       }
       adopt(pair);

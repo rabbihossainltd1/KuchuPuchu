@@ -51,7 +51,7 @@ check(
 // 2. mocks speak the server's shape
 check(
   "messaging mock serves { items }",
-  messagingHelpers.includes("json(route, { items: conversations })"),
+  /json\(route,\s*\{\s*items:\s*(?:conversations|rows)\s*\}\s*\)/.test(messagingHelpers),
 );
 check("calls mock serves { items }", callsHelpers.includes("items: conversationsFor("));
 check("status mock serves { items }", statusHelpers.includes("{ items: [] }"));

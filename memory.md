@@ -1199,7 +1199,7 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - Local verification: Prettier + TypeScript passed; 6 targeted Playwright regressions passed; full `npm run ci` exited 0 (including worker/backend tests, all Web E2E suites, production builds/service-worker verification, secret scan, Android validation). No deploy or production account probe in this batch.
 - Current handoff: changes are on local branch `fix/web-chat-send-history-layout`; create one code+memory PR, wait for/confirm green CI, then merge only after that gate. After main deploy, verify `public/sw.js` BUILD_ID rotation. Archive pull-to-open is still deferred.
 
-## Web Archive pull-to-open — 2026-10-12 (`feat/web-archive-pull-open`)
+## Web Archive pull-to-open — 2026-10-11 (`feat/web-archive-pull-open`)
 - Ported the Android `ArchivePullArea` interaction: a downward pull of at least 90 CSS px at the conversation-list top, held for 2 seconds, reveals the icon-only archive ring; completion pops the icon, gives best-effort Web Vibration feedback, then opens the existing Archive pane. Header/search chrome is the second trigger, as on Android.
 - Touch listeners observe passively except for preventing browser overscroll during the downward pull at the list top. Upward/horizontal scrolling remains native; list pulls do not arm below the top; an early release cancels the timer and suppresses the row's follow-up click. The existing Archived button stays for desktop and keyboard/accessibility access.
 - Updated `docs/android-web-parity-plan.md` to record the completed gesture and the remaining delete/dust-exit gap. No backend or Android source changes.

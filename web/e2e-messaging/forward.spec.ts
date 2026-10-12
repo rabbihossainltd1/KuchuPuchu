@@ -34,10 +34,12 @@ const openChat = async (page: Page) => {
 
 const note = (page: Page, id: string) => page.locator(`[data-message-id="${id}"]`);
 const selectButton = async (page: Page, id: string) => {
-  // The action row only takes pointer events once the bubble is hovered.
   const row = note(page, id);
-  await row.locator(".bubble").hover();
-  await row.getByRole("button", { name: /select this message/i }).click();
+  const menu = row.getByRole("menu", { name: "Message actions" });
+  if (!(await menu.isVisible())) {
+    await row.getByRole("button", { name: "Message options" }).click();
+  }
+  await row.getByRole("menuitem", { name: /select this message/i }).click();
 };
 const bar = (page: Page) =>
   page.getByRole("toolbar", { name: "Actions for the selected messages" });
@@ -89,9 +91,9 @@ test.describe("Web multi-select and forwarding", () => {
     await expect(bar(page).getByRole("status")).toHaveText("2 selected");
 
     // Ticking a row off again is the same control, with the other name.
-    await note(page, "m_3")
-      .getByRole("button", { name: /unselect this message/i })
-      .click();
+    const selectedRow = note(page, "m_3");
+    await selectedRow.getByRole("button", { name: "Message options" }).click();
+    await selectedRow.getByRole("menuitem", { name: /unselect this message/i }).click();
     await expect(bar(page).getByRole("status")).toHaveText("1 selected");
 
     await bar(page).getByRole("button", { name: "Clear the selection" }).click();
@@ -225,11 +227,11 @@ test.describe("Web multi-select and forwarding", () => {
   test("a view-once row cannot be forwarded, and the refusal says why", async ({ page }) => {
     await openChat(page);
 
-    // The row's own action is not a button: it is a labelled refusal.
-    const refused = note(page, "once_photo").locator(".message-actions__refused");
-    await expect(refused).toHaveAttribute("aria-disabled", "true");
+    const row = note(page, "once_photo");
+    await row.getByRole("button", { name: "Message options" }).click();
+    const refused = row.getByRole("menuitem", { name: "Forward", exact: true });
+    await expect(refused).toBeDisabled();
     await expect(refused).toHaveAttribute("title", /one opening/);
-    await expect(note(page, "once_photo").getByRole("button", { name: /Forward/ })).toHaveCount(0);
 
     // Selecting it refuses the whole bar, with the same reason.
     await selectButton(page, "once_photo");
@@ -415,9 +417,12 @@ test.describe("Web media save permission", () => {
     await openChat(page);
 
     // r71-18: their photo is theirs to withhold.
-    const refused = note(page, "m_4").locator(".message-actions__refused");
+    const row = note(page, "m_4");
+    await row.getByRole("button", { name: "Message options" }).click();
+    const refused = row.getByRole("menuitem", { name: "Forward", exact: true });
+    await expect(refused).toBeDisabled();
     await expect(refused).toHaveAttribute("title", /sender turned off saving/);
-    await expect(note(page, "m_4").getByRole("button", { name: /Forward/ })).toHaveCount(0);
+    await page.keyboard.press("Escape");
 
     // The viewer withholds Save with the reason, and Forward with it too.
     await note(page, "m_4")

@@ -33,10 +33,10 @@ export const AI_BOT_ID = "kp_ai_bot";
 export const BOT_IDS: ReadonlySet<string> = new Set([OFFICIAL_BOT_ID, AI_BOT_ID]);
 
 /** Shown when an envelope cannot be opened with the local identity. */
-export const UNOPENABLE_BODY = "\u{1F512} অ্যাপে খুলুন";
+export const UNOPENABLE_BODY = "Open in the app";
 
 /** The app's refusal copy when a personal chat has no usable peer key. */
-export const SECURE_CHAT_WAITING = "Waiting for secure chat — নিরাপদ চ্যাটের জন্য অপেক্ষা…";
+export const SECURE_CHAT_WAITING = "Waiting for secure chat…";
 
 export type E2eeIdentity = {
   /** PKCS#8 private key, base64. */

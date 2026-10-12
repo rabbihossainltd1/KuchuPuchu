@@ -148,21 +148,6 @@
   flex: none;
 }
 
-.conversation-row__badge {
-  margin-left: auto;
-  flex: none;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--kp-blue);
-  color: #fff;
-  font-size: 0.72rem;
-  font-weight: 600;
-  display: grid;
-  place-items: center;
-}
-
 /* ------------------------------------------------------------ secure chat bar */
 
 .e2ee-bar {
@@ -248,6 +233,7 @@
   margin: 0;
   padding: 18px;
   overflow-y: auto;
+  overflow-anchor: none;
   display: grid;
   gap: 14px;
   align-content: start;
@@ -294,9 +280,9 @@
   list-style: none;
 }
 
+/* Rows stay tight; the per-message menu no longer reserves a hover toolbar. */
 .bubble-row {
   position: relative;
-  padding-top: 24px;
   display: flex;
   list-style: none;
 }
@@ -306,7 +292,6 @@
 }
 
 /* Phone-sized bubbles: 12 dp corners, tight padding, no reserved dead space. */
-/* position stays static on purpose: the hover overlays anchor to the row. */
 .bubble {
   max-width: min(560px, 78%);
   background: var(--chat-other, var(--kp-card));
@@ -557,131 +542,138 @@
 
 /* --------------------------------------------------------- message actions */
 
-/* Hidden rows must not pad the bubble out (the "huge bubble" bug): they float
-   over the bubble's own top corners (desktop-chat hover pattern) instead of
-   taking layout space, and fade in on hover / focus. They stay
-   hit-testable while hidden so keyboard and scripted access keep working. */
-.message-actions,
-.reaction-bar {
-  position: absolute;
-  z-index: 2;
-  top: 4px;
-  display: flex;
-  flex-wrap: nowrap;
-  width: max-content;
-  gap: 4px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--kp-motion-fast) ease;
-}
-
-/* The hover rows ride the row's opposite top corners (reactions left,
-   actions right), clear of the bubble body so they never sit on top of the
-   text or the play button. */
-/* Slice Z: the hover rows live INSIDE the row's own top padding (the row
-   yields 24px), so the reveal zone never leaves the row's hover surface. */
-.message-actions {
-  top: 0;
-  right: 6px;
+/* The three-dot control stays beside the message time without claiming a row
+   above the bubble. Its compact popover owns both message actions and quick
+   reactions, so neither can collide with the text or with each other. */
+.message-actions-menu {
+  position: relative;
   z-index: 3;
+  display: inline-flex;
+  flex: 0 0 22px;
+  align-items: center;
+  justify-content: center;
 }
 
-.reaction-bar {
-  top: 0;
-  left: 6px;
-}
-
-.bubble:hover .message-actions,
-.bubble:hover .reaction-bar,
-.bubble-row:hover .message-actions,
-.bubble-row:hover .reaction-bar,
-.bubble:focus-within .message-actions,
-.bubble:focus-within .reaction-bar {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-/* Keyboard users must never depend on the reveal: keep the row visible once
-   any child has focus, even if the pointer moved away. */
-.message-actions:focus-within,
-.reaction-bar:focus-within {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-/* On phone widths, a tap reveals two separate, horizontally-scrollable rows.
-   The message itself moves below them; reaction chips and text actions never
-   compete for the same pixels or cover the bubble. */
-@media (max-width: 720px) {
-  .bubble-row {
-    padding-top: 24px;
-    transition: padding-top var(--kp-motion-fast) ease;
-  }
-
-  .bubble-row:hover,
-  .bubble-row:focus-within {
-    padding-top: 66px;
-  }
-
-  .message-actions,
-  .reaction-bar {
-    right: 6px;
-    left: 6px;
-    width: calc(100% - 12px);
-    max-width: calc(100% - 12px);
-    justify-content: flex-start;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .message-actions::-webkit-scrollbar,
-  .reaction-bar::-webkit-scrollbar {
-    display: none;
-  }
-
-  .reaction-bar {
-    top: 0;
-  }
-
-  .message-actions {
-    top: 32px;
-  }
-
-  .message-actions button,
-  .reaction-bar button {
-    min-height: 30px;
-    flex: 0 0 auto;
-    white-space: nowrap;
-  }
-}
-
-.message-actions button,
-.reaction-bar button {
-  font: inherit;
-  font-size: 0.74rem;
-  color: var(--kp-muted);
-  background: rgba(13, 21, 36, 0.6);
-  border: 1px solid var(--kp-line);
-  border-radius: 8px;
-  padding: 3px 8px;
+.message-actions-menu__trigger {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  place-items: center;
+  margin-left: 1px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--chat-other-muted, var(--kp-muted));
   cursor: pointer;
+  opacity: 0.86;
 }
 
-.message-actions button:hover:not(:disabled),
-.reaction-bar button:hover:not(:disabled) {
+.message-actions-menu__trigger:hover,
+.message-actions-menu[data-open="true"] .message-actions-menu__trigger {
+  border-color: var(--kp-line);
+  background: color-mix(in srgb, var(--kp-blue) 15%, transparent);
   color: var(--kp-ink);
-  border-color: var(--kp-blue);
+  opacity: 1;
 }
 
-.message-actions button:focus-visible,
-.reaction-bar button:focus-visible {
+.message-actions-menu__trigger:focus-visible,
+.message-actions-menu__item:focus-visible,
+.message-actions-menu__reaction:focus-visible {
   outline: 2px solid var(--kp-focus);
-  outline-offset: 1px;
+  outline-offset: 2px;
 }
 
-.message-actions button:disabled {
-  opacity: 0.5;
+.message-actions-menu__panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  display: grid;
+  width: 224px;
+  max-width: min(236px, calc(100vw - 32px));
+  max-height: min(70vh, 420px);
+  gap: 2px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--kp-line);
+  border-radius: 12px;
+  background: var(--kp-card-raised, var(--kp-card));
+  color: var(--kp-ink);
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.38);
+}
+
+.message-actions-menu__reactions {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+  padding: 1px 0 5px;
+}
+
+.message-actions-menu__reaction {
+  display: grid;
+  min-width: 0;
+  min-height: 30px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--kp-ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 17px;
+}
+
+.message-actions-menu__reaction:hover,
+.message-actions-menu__reaction.is-on {
+  border-color: color-mix(in srgb, var(--kp-blue) 45%, transparent);
+  background: color-mix(in srgb, var(--kp-blue) 18%, transparent);
+}
+
+.message-actions-menu__reaction--more {
+  color: var(--kp-blue-light);
+}
+
+.message-actions-menu__separator {
+  height: 1px;
+  margin: 2px 0;
+  background: var(--kp-line);
+}
+
+.message-actions-menu__item {
+  display: flex;
+  width: 100%;
+  min-height: 34px;
+  align-items: center;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--kp-ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+}
+
+.message-actions-menu__item:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--kp-blue) 14%, transparent);
+}
+
+.message-actions-menu__item:disabled {
+  color: var(--kp-muted);
   cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.message-actions-menu__item--danger {
+  color: #fca5a5;
+}
+
+:root[data-kp-theme="light"] .message-actions-menu__item--danger {
+  color: #b91c1c;
 }
 
 .confirm-panel {
@@ -990,21 +982,12 @@
 
 @media (prefers-reduced-motion: reduce) {
   .conversation-row,
-  .bubble-row,
-  .message-actions,
-  .reaction-bar {
+  .bubble-row {
     transition: none;
   }
 
   .bubble__body--magic {
     animation: none;
-  }
-
-  /* With motion reduced the action rows stay permanently visible: a reveal
-     animation must never be the only way to reach a control. */
-  .message-actions,
-  .reaction-bar {
-    opacity: 1;
   }
 }
 
@@ -2608,15 +2591,6 @@ button.attachment__expand {
   border-color: var(--kp-blue);
 }
 
-.message-actions__refused {
-  padding: 4px 8px;
-  border: 1px dashed var(--kp-line);
-  border-radius: 999px;
-  color: var(--kp-muted);
-  font-size: 0.75rem;
-  cursor: not-allowed;
-}
-
 .selection-bar {
   display: flex;
   flex-wrap: wrap;
@@ -4001,21 +3975,6 @@ button.attachment__expand {
 }
 
 /* Slice Z — full reaction picker + message info sheet. */
-.reaction-bar .is-on {
-  background: color-mix(in srgb, var(--kp-blue) 22%, transparent);
-  border-radius: 50%;
-}
-.reaction-bar__more {
-  flex: none;
-  width: 30px;
-  border: 0;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--kp-blue) 14%, transparent);
-  color: var(--kp-blue);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-}
 .react-picker__row {
   display: flex;
   justify-content: space-evenly;

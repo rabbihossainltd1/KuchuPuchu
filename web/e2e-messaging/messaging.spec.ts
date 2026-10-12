@@ -58,9 +58,18 @@ test.describe("Web messaging", () => {
 
     const directRow = page.getByRole("link", { name: new RegExp(`${PEER_NAME}, 2 unread`) });
     await expect(directRow).toBeVisible();
-    await expect(directRow.locator(".conversation-row__badge")).toContainText("2");
+    await expect(directRow.locator(".conversation-row__badge")).toHaveCount(0);
     await expect(page.locator(".list-header__count")).toHaveCount(0);
-    await expect(page.getByRole("link", { name: /Chats, 1 unread chats/ })).toBeVisible();
+    const chatsNav = page.getByRole("link", { name: /Chats, 1 unread chats/ });
+    await expect(chatsNav).toBeVisible();
+    const badge = page.locator(".primary-nav .nav-unread-badge");
+    await expect(badge).toBeVisible();
+    const badgeBox = await badge.boundingBox();
+    const iconBox = await chatsNav.locator(".nav-button__icon-wrap").boundingBox();
+    expect(badgeBox).not.toBeNull();
+    expect(iconBox).not.toBeNull();
+    expect(badgeBox!.x + badgeBox!.width).toBeGreaterThan(iconBox!.x + iconBox!.width / 2);
+    expect(badgeBox!.y).toBeLessThan(iconBox!.y + iconBox!.height / 2);
 
     // The sealed preview is the plain category word, never ciphertext.
     await expect(page.getByText("KP1.")).toHaveCount(0);
@@ -102,17 +111,25 @@ test.describe("Web messaging", () => {
       senderName: PEER_NAME,
       kind: "TEXT",
       body: `history-${String(index).padStart(3, "0")}`,
-      createdAt: new Date(Date.now() - (75 - index) * 1_000).toISOString(),
+      // Three messages share each timestamp; the page boundary therefore
+      // exercises the `(created_at, rowid)` cursor instead of time alone.
+      createdAt: new Date(Date.now() - Math.floor((74 - index) / 3) * 1_000).toISOString(),
       rowid: index + 1,
     }));
-    const pageCursors: string[] = [];
+    const pageCursors: Array<{ before: string; beforeRowid: number }> = [];
+    let releaseOlderPage: (() => void) | null = null;
 
     await page.route(`**/api/conversations/${CHAT_ID}/messages*`, async (route) => {
       if (route.request().method() !== "GET") return route.fallback();
       const url = new URL(route.request().url());
       const before = url.searchParams.get("before") ?? "";
       const beforeRowid = Number(url.searchParams.get("beforeRowid") ?? 0);
-      pageCursors.push(before);
+      pageCursors.push({ before, beforeRowid });
+      if (before && pageCursors.length === 2) {
+        await new Promise<void>((resolve) => {
+          releaseOlderPage = resolve;
+        });
+      }
       const eligible = oldestFirst.filter(
         (row) =>
           !before ||
@@ -150,8 +167,97 @@ test.describe("Web messaging", () => {
     });
 
     await expect.poll(() => pageCursors.length).toBe(2);
+    expect(pageCursors[1]?.beforeRowid).toBeGreaterThan(0);
+    const currentOldest = page.locator('[data-message-id="history_025"]');
+    const yBefore = (await currentOldest.boundingBox())!.y;
+    expect(releaseOlderPage).not.toBeNull();
+    releaseOlderPage!();
+
     await expect(page.locator('[data-message-id="history_000"]')).toBeAttached();
+    await expect(page.locator('[data-message-id^="history_"]')).toHaveCount(75);
+    const yAfter = (await currentOldest.boundingBox())!.y;
+    expect(Math.abs(yAfter - yBefore)).toBeLessThan(3);
+
+    await page.locator(".transcript").evaluate((list) => {
+      list.scrollTop = 0;
+    });
     await expect(page.getByText("history-000")).toBeVisible();
+  });
+
+  test("older-history failures stay visible and the cursor can be retried", async ({ page }) => {
+    const history = Array.from({ length: 4 }, (_, index) => ({
+      id: `retry_history_${index}`,
+      senderId: "u_peer",
+      senderName: PEER_NAME,
+      kind: "TEXT",
+      body: `retry-history-${index}`,
+      createdAt: new Date(Date.now() - (4 - index) * 1_000).toISOString(),
+      rowid: index + 1,
+      replyTo: null,
+      fileName: null,
+      fileType: null,
+      fileSize: null,
+      fileKey: null,
+      meta: null,
+    }));
+    let olderAttempts = 0;
+
+    await page.route(`**/api/conversations/${CHAT_ID}/messages*`, async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      const before = new URL(route.request().url()).searchParams.get("before") ?? "";
+      if (!before) {
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            items: [history[3], history[2]],
+            readAt: "",
+            typingAt: "",
+            typingKind: "",
+            marker: "history-newer",
+            oldest: { createdAt: history[2]!.createdAt, rowid: history[2]!.rowid },
+            hasMore: true,
+            priv: {},
+          }),
+        });
+      }
+      olderAttempts += 1;
+      if (olderAttempts === 1) {
+        return route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { message: "Temporarily unavailable" } }),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: [history[1], history[0]],
+          readAt: "",
+          typingAt: "",
+          typingKind: "",
+          marker: "history-older",
+          oldest: { createdAt: history[0]!.createdAt, rowid: history[0]!.rowid },
+          hasMore: false,
+          priv: {},
+        }),
+      });
+    });
+
+    await page.getByRole("link", { name: new RegExp(PEER_NAME) }).click();
+    await expect(page.locator('[data-message-id="retry_history_3"]')).toBeAttached();
+    await page.getByRole("button", { name: "Load older messages" }).click();
+    await expect.poll(() => olderAttempts).toBe(1);
+    await expect(page.locator(".transcript__more-error")).toContainText(
+      "The service is temporarily unavailable",
+    );
+
+    await page.getByRole("button", { name: "Retry loading older messages" }).click();
+    await expect.poll(() => olderAttempts).toBe(2);
+    await expect(page.locator('[data-message-id="retry_history_0"]')).toBeAttached();
+    await expect(page.locator('[data-message-id^="retry_history_"]')).toHaveCount(4);
+    await expect(page.locator(".transcript__more-error")).toHaveCount(0);
   });
 
   test("the send button posts a sealed message and renders its echo", async ({ page }) => {
@@ -262,78 +368,81 @@ test.describe("Web messaging", () => {
     await page.getByRole("link", { name: new RegExp(PEER_NAME) }).click();
     await expect(page.getByText("আগের প্লেইন মেসেজ")).toBeVisible();
 
-    // Two peer rows both offer "Reply to <peer>"; the first is enough here.
-    const replyButton = page
-      .getByRole("button", { name: new RegExp(`Reply to ${PEER_NAME}`) })
-      .first();
-    await replyButton.focus();
-    await replyButton.press("Enter");
+    // Keyboard-open the compact menu, then activate Reply from its options.
+    const peerBubble = page.locator(".bubble", { hasText: "আগের প্লেইন মেসেজ" }).first();
+    const peerOptions = peerBubble.getByRole("button", { name: "Message options" });
+    await peerOptions.focus();
+    await peerOptions.press("Enter");
+    await peerBubble.getByRole("menuitem", { name: "Reply", exact: true }).press("Enter");
 
     await expect(page.getByText(`Replying to ${PEER_NAME}`)).toBeVisible();
     await page.getByRole("button", { name: "Cancel reply" }).click();
     await expect(page.getByText(`Replying to ${PEER_NAME}`)).toHaveCount(0);
 
     // Escape also cancels a reply.
-    await replyButton.press("Enter");
+    await peerOptions.press("Enter");
+    await peerBubble.getByRole("menuitem", { name: "Reply", exact: true }).press("Enter");
     await expect(page.getByText(`Replying to ${PEER_NAME}`)).toBeVisible();
     await page.getByLabel("Message text").press("Escape");
     await expect(page.getByText(`Replying to ${PEER_NAME}`)).toHaveCount(0);
 
-    // Copy is a real clipboard write, and the copy is confirmed aloud. The
-    // action row only takes pointer events once revealed on hover.
-    await page.locator(".bubble-row").first().locator(".bubble").hover();
-    await page
-      .getByRole("button", { name: new RegExp(`Copy message from ${PEER_NAME}`) })
-      .first()
-      .click();
+    // Copy is a real clipboard write, and the copy is confirmed aloud.
+    await peerOptions.click();
+    await peerBubble.getByRole("menuitem", { name: "Copy", exact: true }).click();
     await expect(page.getByText("Message text copied.")).toBeVisible();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("আগের প্লেইন মেসেজ");
 
     // An existing reaction is shown with a spoken label, not colour alone.
     await expect(page.getByText("You reacted").first()).toBeAttached();
 
-    // A peer's message offers a quick reaction that reaches the Worker.
-    await page.getByRole("button", { name: "React red heart" }).first().click();
+    // A peer's message offers a quick reaction inside its options menu.
+    await peerOptions.click();
+    await peerBubble.getByRole("menuitem", { name: "React red heart" }).click();
     await expect.poll(() => worker.reactions.length).toBe(1);
     expect(worker.reactions[0]!.emoji).toBe("\u2764\uFE0F");
 
     // Delete asks before it acts, and only the sender's rows offer it.
     const ownRow = page.locator(".bubble-row--own").first();
-    await ownRow.locator(".bubble").hover();
-    await ownRow.getByRole("button", { name: "Delete your message" }).click();
+    const ownBubble = ownRow.locator(".bubble");
+    const ownOptions = ownBubble.getByRole("button", { name: "Message options" });
+    await ownOptions.click();
+    await ownBubble.getByRole("menuitem", { name: "Delete", exact: true }).click();
     await expect(page.getByText("Delete for everyone?")).toBeVisible();
     await page.getByRole("button", { name: "Keep message" }).click();
     await expect(page.getByText("Delete for everyone?")).toHaveCount(0);
     expect(worker.deletedMessageIds.length).toBe(0);
 
-    await ownRow.locator(".bubble").hover();
-    await ownRow.getByRole("button", { name: "Delete your message" }).click();
+    await ownOptions.click();
+    await ownBubble.getByRole("menuitem", { name: "Delete", exact: true }).click();
     await page.getByRole("button", { name: "Delete for everyone" }).click();
     await expect.poll(() => worker.deletedMessageIds.length).toBe(1);
   });
 
-  test("mobile reaction and message actions occupy separate rows", async ({ page }) => {
+  test("mobile message options stay in one viewport-fitted menu", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole("link", { name: new RegExp(PEER_NAME) }).click();
     const row = page.locator('[data-message-id="m_1"]');
     const bubble = row.locator(".bubble");
     await expect(bubble).toBeVisible();
-    await bubble.hover();
 
-    const reactions = row.locator(".reaction-bar");
-    const actions = row.locator(".message-actions");
-    await expect(reactions).toBeVisible();
-    await expect(actions).toBeVisible();
-    const [reactionBox, actionBox, bubbleBox] = await Promise.all([
-      reactions.boundingBox(),
-      actions.boundingBox(),
-      bubble.boundingBox(),
-    ]);
-    expect(reactionBox).not.toBeNull();
-    expect(actionBox).not.toBeNull();
-    expect(bubbleBox).not.toBeNull();
-    expect(reactionBox!.y + reactionBox!.height).toBeLessThanOrEqual(actionBox!.y);
-    expect(actionBox!.y + actionBox!.height).toBeLessThanOrEqual(bubbleBox!.y);
+    const trigger = bubble.getByRole("button", { name: "Message options" });
+    const triggerBox = await trigger.boundingBox();
+    expect(triggerBox).not.toBeNull();
+    expect(triggerBox!.width).toBeLessThanOrEqual(24);
+    expect(triggerBox!.height).toBeLessThanOrEqual(24);
+    await trigger.click();
+
+    const menu = bubble.getByRole("menu", { name: "Message actions" });
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "React thumbs up" })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Copy", exact: true })).toBeVisible();
+    const menuBox = await menu.boundingBox();
+    expect(menuBox).not.toBeNull();
+    expect(menuBox!.x).toBeGreaterThanOrEqual(0);
+    expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(390);
+    expect(menuBox!.y).toBeGreaterThanOrEqual(0);
+    expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(844);
+    await expect(row.locator(".message-actions, .reaction-bar")).toHaveCount(0);
   });
 
   test("a one-way notification account cannot be replied to", async ({ page }) => {
