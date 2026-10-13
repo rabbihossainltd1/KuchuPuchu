@@ -20,6 +20,7 @@ import {
   conversationTitle,
   headerSubtitle,
   isBotConversation,
+  isOneWayConversation,
   peerPresence,
   type ConversationMember,
   type ConversationPeer,
@@ -144,7 +145,10 @@ export function InfoPane({
   }));
   const canOpenProfileMenu = Boolean(conversation && !bot);
 
-  const personUrl = useAvatar(api, person?.avatarRef ?? "");
+  const personUrlRaw = useAvatar(api, person?.avatarRef ?? "");
+  const personUrl =
+    personUrlRaw ||
+    (bot || (conversation ? isOneWayConversation(conversation) : false) ? "/logo.png" : null);
   const groupUrl = useAvatar(api, conversation?.avatarRef ?? "");
 
   useEffect(() => {

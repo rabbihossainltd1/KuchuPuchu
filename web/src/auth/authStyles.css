@@ -33,8 +33,8 @@
   right: -9%;
   bottom: -15%;
   width: min(32vw, 330px);
-  background: #bb7819;
-  opacity: 0.08;
+  background: #1d4ed8;
+  opacity: 0.14;
 }
 
 .auth-card {
@@ -529,17 +529,17 @@
   gap: 9px;
   margin: 14px 0 18px;
   padding: 10px 13px;
-  border: 1px solid rgba(245, 158, 11, 0.19);
+  border: 1px solid rgba(96, 165, 250, 0.25);
   border-radius: 12px;
-  background: rgba(109, 74, 24, 0.11);
-  color: #c9b58e;
+  background: rgba(29, 78, 216, 0.14);
+  color: #b7c8e8;
   font-size: 10px;
   line-height: 1.5;
 }
 
 .rollout-note svg {
   flex: 0 0 auto;
-  color: #e2ae55;
+  color: #60a5fa;
 }
 
 .settings-grid {
@@ -616,7 +616,7 @@
 }
 
 .field-help--checking {
-  color: #e1bd78;
+  color: #93c5fd;
 }
 
 .settings-form .field-help {
@@ -831,10 +831,10 @@
 .workspace-notice {
   margin: 0 15px 12px;
   padding: 9px 11px;
-  border: 1px solid rgba(245, 158, 11, 0.2);
+  border: 1px solid rgba(96, 165, 250, 0.25);
   border-radius: 10px;
-  background: rgba(120, 80, 25, 0.12);
-  color: #d7bd87;
+  background: rgba(29, 78, 216, 0.14);
+  color: #b7c8e8;
   font-size: 10px;
   line-height: 1.45;
 }
@@ -1056,7 +1056,7 @@
 }
 
 .appearance-swatch--light {
-  background: linear-gradient(135deg, #f59e0b 0 38%, transparent 38%), #f7f6f4;
+  background: linear-gradient(135deg, #2f6fed 0 38%, transparent 38%), #16213a;
 }
 
 .appearance-option__text {

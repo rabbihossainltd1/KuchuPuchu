@@ -10,11 +10,19 @@ export const SECTIONS = [
 
 export type SectionId = (typeof SECTIONS)[number];
 
-/* Owner (2026-10-13): the landing page's policy sections are real, separate
- * static pages now (/features, /encryption, /privacy, /data, /terms) instead
- * of one endless scroll with #anchors — each has its own URL that can be
- * shared or linked from outside (store listings, support replies). */
-export const SITE_PAGES = ["features", "encryption", "privacy", "data", "terms"] as const;
+/* Owner (2026-10-13): the landing page's policy and overview sections are real,
+ * separate static pages now (/features, /encryption, /architecture, /faq,
+ * /privacy, /data, /terms) instead of one endless scroll with #anchors or fake
+ * in-page state — each has its own URL that can be shared or linked directly. */
+export const SITE_PAGES = [
+  "features",
+  "encryption",
+  "architecture",
+  "faq",
+  "privacy",
+  "data",
+  "terms",
+] as const;
 
 export type SitePageId = (typeof SITE_PAGES)[number];
 

@@ -61,6 +61,30 @@ function versionedServiceWorker(): Plugin {
           .replace("__BUILD_ID__", buildId)
           .replace("__PRECACHE_URLS__", JSON.stringify(precacheUrls));
         this.emitFile({ type: "asset", fileName: "sw.js", source: workerSource });
+
+        const indexAsset = bundle["index.html"];
+        if (indexAsset && indexAsset.type === "asset" && typeof indexAsset.source === "string") {
+          const sitePages: Array<[string, string]> = [
+            ["features", "Features — KuchuPuchu"],
+            ["encryption", "Encryption — KuchuPuchu"],
+            ["architecture", "Architecture — KuchuPuchu"],
+            ["faq", "FAQ — KuchuPuchu"],
+            ["privacy", "Privacy — KuchuPuchu"],
+            ["data", "Data — KuchuPuchu"],
+            ["terms", "Terms — KuchuPuchu"],
+          ];
+          for (const [slug, pageTitle] of sitePages) {
+            const pageHtml = indexAsset.source.replace(
+              /<title>.*?<\/title>/,
+              `<title>${pageTitle}</title>`,
+            );
+            this.emitFile({
+              type: "asset",
+              fileName: `${slug}/index.html`,
+              source: pageHtml,
+            });
+          }
+        }
       },
     },
   };

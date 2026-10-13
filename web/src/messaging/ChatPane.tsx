@@ -819,6 +819,9 @@ export function ChatPane({
         </header>
         <section className="conversation-canvas" aria-label="No conversation open">
           <div className="welcome-card">
+            <div className="welcome-card__mark">
+              <BrandMark size={52} />
+            </div>
             <p className="eyebrow">DESKTOP WORKSPACE</p>
             <h3>Conversation, contacts and context—together.</h3>
             <p className="welcome-card__body">

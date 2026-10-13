@@ -2,38 +2,44 @@ import { RouteLink } from "../RouteLink";
 import { SITE_PAGES, type SitePageId } from "../router";
 import type { Navigate } from "../useBrowserRouter";
 
-/**
- * Owner (2026-10-13): the landing page and the five static pages all share one
- * header, so the policy pages feel like the same site instead of a detour.
- */
-
 export const SITE_PAGE_LABELS: Record<SitePageId, string> = {
   features: "Features",
   encryption: "Encryption",
+  architecture: "Architecture",
+  faq: "FAQ",
   privacy: "Privacy",
   data: "Data",
   terms: "Terms",
 };
 
+const APK_URL = "/download/apk";
+
 type PublicHeaderProps = {
-  readonly navigate: Navigate;
-  readonly onSignIn: () => void;
-  /** Present when the brand should lead back to the landing page. */
-  readonly onHome?: () => void;
-  readonly active?: "welcome" | SitePageId;
+  navigate?: Navigate;
+  onSignIn: () => void;
+  onHome?: () => void;
+  active: "welcome" | SitePageId;
 };
 
 export function PublicHeader({ navigate, onSignIn, onHome, active }: PublicHeaderProps) {
   const brand = (
     <>
       <img src="/logo.png" alt="KuchuPuchu logo" />
-      KuchuPuchu
+      <span>KuchuPuchu</span>
     </>
   );
 
   return (
     <header className="kp-welcome__top">
-      {onHome ? (
+      {navigate ? (
+        <RouteLink
+          route={{ kind: "section", section: "chats" }}
+          navigate={navigate}
+          className="kp-welcome__brand kp-welcome__brand--link"
+        >
+          {brand}
+        </RouteLink>
+      ) : onHome ? (
         <button
           type="button"
           className="kp-welcome__brand kp-welcome__brand--button"
@@ -44,26 +50,51 @@ export function PublicHeader({ navigate, onSignIn, onHome, active }: PublicHeade
       ) : (
         <span className="kp-welcome__brand">{brand}</span>
       )}
-      <nav className="kp-welcome__nav" aria-label="Page sections">
-        <RouteLink
-          route={{ kind: "section", section: "chats" }}
-          navigate={navigate}
-          className={active === "welcome" ? "is-active" : undefined}
-          aria-current={active === "welcome" ? "page" : undefined}
-        >
-          Overview
-        </RouteLink>
-        {SITE_PAGES.map((page) => (
-          <RouteLink
-            key={page}
-            route={{ kind: "site", page }}
-            navigate={navigate}
-            className={active === page ? "is-active" : undefined}
-            aria-current={active === page ? "page" : undefined}
-          >
-            {SITE_PAGE_LABELS[page]}
-          </RouteLink>
-        ))}
+      <nav className="kp-welcome__nav" aria-label="Site pages">
+        {navigate ? (
+          <>
+            <RouteLink
+              route={{ kind: "section", section: "chats" }}
+              navigate={navigate}
+              className={`kp-welcome__page-tab${active === "welcome" ? " is-active" : ""}`}
+              aria-current={active === "welcome" ? "page" : undefined}
+            >
+              Overview
+            </RouteLink>
+            {SITE_PAGES.map((page) => (
+              <RouteLink
+                key={page}
+                route={{ kind: "site", page }}
+                navigate={navigate}
+                className={`kp-welcome__page-tab${active === page ? " is-active" : ""}`}
+                aria-current={active === page ? "page" : undefined}
+              >
+                {SITE_PAGE_LABELS[page]}
+              </RouteLink>
+            ))}
+          </>
+        ) : (
+          <>
+            <a
+              href="/chats"
+              className={`kp-welcome__page-tab${active === "welcome" ? " is-active" : ""}`}
+            >
+              Overview
+            </a>
+            {SITE_PAGES.map((page) => (
+              <a
+                key={page}
+                href={`/${page}`}
+                className={`kp-welcome__page-tab${active === page ? " is-active" : ""}`}
+              >
+                {SITE_PAGE_LABELS[page]}
+              </a>
+            ))}
+          </>
+        )}
+        <a href={APK_URL} className="kp-welcome__apk-link">
+          Download APK
+        </a>
       </nav>
       <button type="button" className="kp-welcome__signin" onClick={onSignIn}>
         Sign in

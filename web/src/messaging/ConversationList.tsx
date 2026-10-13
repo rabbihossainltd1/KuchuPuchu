@@ -258,9 +258,12 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
         )}
         {!selecting && (
           <>
-            <div>
-              <p className="eyebrow">KUCHUPUCHU WEB</p>
-              <h1 id="list-heading">Chats</h1>
+            <div className="list-header__brand">
+              <img className="list-header__logo" src="/logo.png" alt="" draggable={false} />
+              <div>
+                <p className="eyebrow">KUCHUPUCHU WEB</p>
+                <h1 id="list-heading">Chats</h1>
+              </div>
             </div>
             {/* The phone's HomeMenuSheet rows, in the phone's order. */}
             <div className="list-header__menu">
