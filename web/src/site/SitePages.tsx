@@ -1,8 +1,9 @@
 import { useEffect, type ReactNode } from "react";
 import { RouteLink } from "../RouteLink";
+import { useIsMobileViewport } from "../auth/WelcomePage";
 import { SITE_PAGES, type SitePageId } from "../router";
 import type { Navigate } from "../useBrowserRouter";
-import { PublicHeader, SITE_PAGE_LABELS } from "./PublicHeader";
+import { HEADER_PAGES, LEGAL_PAGES, PublicHeader, SITE_PAGE_LABELS } from "./PublicHeader";
 
 type SiteCard = {
   title: string;
@@ -497,14 +498,15 @@ export const SITE_PAGE_BLURBS: Record<SitePageId, string> = {
 
 type SitePageProps = {
   page: SitePageId;
-  onSignIn: () => void;
+  onSignIn?: () => void;
   onHome: () => void;
   navigate?: Navigate;
 };
 
 export function SitePage({ page, onSignIn, onHome, navigate }: SitePageProps) {
+  const isMobile = useIsMobileViewport();
   const content = PAGES[page];
-  const others = SITE_PAGES.filter((candidate) => candidate !== page);
+  const others = HEADER_PAGES.filter((candidate) => candidate !== page);
 
   useEffect(() => {
     document.title = `${SITE_PAGE_LABELS[page]} — KuchuPuchu`;
@@ -521,9 +523,11 @@ export function SitePage({ page, onSignIn, onHome, navigate }: SitePageProps) {
           <h1 id="site-title">{content.title}</h1>
           <p className="kp-site__intro">{content.intro}</p>
           <div className="kp-site__actions">
-            <button type="button" className="kp-site__signin" onClick={onSignIn}>
-              Open KuchuPuchu Web
-            </button>
+            {!isMobile && onSignIn ? (
+              <button type="button" className="kp-site__signin kp-desktop-only" onClick={onSignIn}>
+                Open KuchuPuchu Web
+              </button>
+            ) : null}
             <a className="kp-site__apk" href={APK_URL}>
               Download Android APK
             </a>
@@ -570,7 +574,7 @@ export function SitePage({ page, onSignIn, onHome, navigate }: SitePageProps) {
         </section>
 
         <nav className="kp-site__more" aria-label="Other pages">
-          <span>Switch to another page:</span>
+          <span>Explore features:</span>
           {others.map((other) =>
             navigate ? (
               <RouteLink
@@ -591,26 +595,30 @@ export function SitePage({ page, onSignIn, onHome, navigate }: SitePageProps) {
       </article>
 
       <footer className="kp-welcome__foot">
-        <span>KuchuPuchu · End-to-end encrypted · </span>
-        <a href={APK_URL}>Android APK</a>
-        {SITE_PAGES.map((slug) => (
-          <span key={slug}>
-            {" · "}
-            {navigate ? (
-              <RouteLink
-                route={{ kind: "site", page: slug }}
-                navigate={navigate}
-                className="link-button"
-              >
-                {SITE_PAGE_LABELS[slug]}
-              </RouteLink>
-            ) : (
-              <a href={`/${slug}`} className="link-button">
-                {SITE_PAGE_LABELS[slug]}
-              </a>
-            )}
+        <div className="kp-welcome__foot-inner">
+          <span>KuchuPuchu · End-to-end encrypted</span>
+          <span className="kp-welcome__foot-links">
+            <a href={APK_URL}>Android APK</a>
+            {LEGAL_PAGES.map((slug) => (
+              <span key={slug}>
+                {" · "}
+                {navigate ? (
+                  <RouteLink
+                    route={{ kind: "site", page: slug }}
+                    navigate={navigate}
+                    className="link-button"
+                  >
+                    {SITE_PAGE_LABELS[slug]}
+                  </RouteLink>
+                ) : (
+                  <a href={`/${slug}`} className="link-button">
+                    {SITE_PAGE_LABELS[slug]}
+                  </a>
+                )}
+              </span>
+            ))}
           </span>
-        ))}
+        </div>
       </footer>
     </main>
   );

@@ -49,7 +49,7 @@ test("Settings and My Profile land on the account page", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
 });
 
-test("signed-out mobile visitors see real separate page tabs and can navigate across pages", async ({
+test("signed-out mobile visitors see feature banners, no login buttons, footer legal links, and page tabs", async ({
   browser,
 }) => {
   const mobileCtx = await browser.newContext({ viewport: { width: 390, height: 844 } });
@@ -58,18 +58,49 @@ test("signed-out mobile visitors see real separate page tabs and can navigate ac
   await expect(
     mobilePage.getByRole("heading", { name: "Messages that stay yours." }),
   ).toBeVisible();
+  await expect(
+    mobilePage.getByRole("heading", { name: "How to Hide & Unhide Secret Chats" }),
+  ).toBeVisible();
+  await expect(
+    mobilePage.getByRole("heading", {
+      name: "How to Archive Chats & Use the 2-Second Pull Gesture",
+    }),
+  ).toBeVisible();
+
+  // Mobile mode has no login button anywhere
+  await expect(mobilePage.getByRole("button", { name: "Sign in" })).toHaveCount(0);
+  await expect(mobilePage.getByRole("button", { name: "Open KuchuPuchu Web" })).toHaveCount(0);
+
   const nav = mobilePage.getByRole("navigation", { name: "Site pages" });
   await expect(nav.getByRole("link", { name: "Features" })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Privacy" })).toHaveCount(0);
+
+  const footer = mobilePage.locator(".kp-welcome__foot");
+  await expect(footer.getByRole("link", { name: "Privacy" })).toBeVisible();
+  await expect(footer.getByRole("link", { name: "Data" })).toBeVisible();
+  await expect(footer.getByRole("link", { name: "Terms" })).toBeVisible();
+
   await nav.getByRole("link", { name: "Features" }).click();
   await expect(mobilePage).toHaveURL(/\/features$/);
   await expect(
     mobilePage.getByRole("heading", { name: "Built for everyday privacy" }),
   ).toBeVisible();
+  await expect(mobilePage.getByRole("button", { name: "Open KuchuPuchu Web" })).toHaveCount(0);
 
   await nav.getByRole("link", { name: "Encryption" }).click();
   await expect(mobilePage).toHaveURL(/\/encryption$/);
   await expect(
     mobilePage.getByRole("heading", { name: "End-to-end encryption (KP1 & KP2)" }),
   ).toBeVisible();
+
+  await nav.getByRole("link", { name: "Overview" }).click();
+  await expect(
+    mobilePage.getByRole("heading", { name: "Messages that stay yours." }),
+  ).toBeVisible();
+  const AxeBuilder = (await import("@axe-core/playwright")).default;
+  const scan = await new AxeBuilder({ page: mobilePage })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(scan.violations).toEqual([]);
   await mobileCtx.close();
 });

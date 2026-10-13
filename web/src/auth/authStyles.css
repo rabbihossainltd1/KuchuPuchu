@@ -41,12 +41,10 @@
   position: relative;
   width: min(100%, 510px);
   padding: 32px clamp(22px, 5vw, 42px) 26px;
-  border: 1px solid rgba(125, 153, 198, 0.2);
-  border-radius: 25px;
-  background: linear-gradient(160deg, rgba(26, 40, 64, 0.97), rgba(15, 25, 43, 0.98));
-  box-shadow:
-    0 28px 90px rgba(0, 0, 0, 0.31),
-    inset 0 1px 0 rgba(236, 244, 255, 0.035);
+  border: 1px solid rgba(125, 168, 245, 0.22);
+  border-radius: 28px;
+  background: var(--kp-skeuo-card-bg);
+  box-shadow: var(--kp-skeuo-raised);
 }
 
 .auth-brand,
@@ -95,10 +93,11 @@
 .auth-input {
   width: 100%;
   min-height: 45px;
-  padding: 10px 12px;
-  border: 1px solid rgba(129, 152, 191, 0.25);
-  border-radius: 12px;
-  background: rgba(7, 13, 24, 0.43);
+  padding: 10px 14px;
+  border: 1px solid rgba(129, 162, 220, 0.24);
+  border-radius: 14px;
+  background: var(--kp-skeuo-well-bg);
+  box-shadow: var(--kp-skeuo-inset);
   color: #edf3fc;
   font-size: 13px;
   transition:
@@ -131,9 +130,10 @@
   align-items: center;
   justify-content: center;
   padding: 0 10px;
-  border: 1px solid rgba(129, 152, 191, 0.2);
-  border-radius: 12px;
-  background: rgba(43, 60, 87, 0.52);
+  border: 1px solid rgba(129, 162, 220, 0.24);
+  border-radius: 14px;
+  background: var(--kp-skeuo-card-bg);
+  box-shadow: var(--kp-skeuo-raised-sm);
   color: #c5d6f1;
   font-variant-numeric: tabular-nums;
 }
@@ -159,12 +159,12 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 0 15px;
+  padding: 0 16px;
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: 999px;
   cursor: pointer;
   font-size: 12px;
-  font-weight: 680;
+  font-weight: 700;
   text-decoration: none;
   transition:
     background 150ms ease,
@@ -175,20 +175,22 @@
 
 .primary-button {
   margin-top: 7px;
-  background: linear-gradient(135deg, #4d8df4, #2f6fed);
+  border-color: rgba(165, 205, 255, 0.38);
+  background: linear-gradient(145deg, #3b82f6, #1d4ed8);
   color: #fff;
-  box-shadow: 0 8px 22px rgba(36, 98, 218, 0.2);
+  box-shadow: var(--kp-skeuo-btn-primary);
 }
 
 .primary-button:hover:not(:disabled) {
   transform: translateY(-1px);
-  background: linear-gradient(135deg, #65a0ff, #3b7bf1);
+  background: linear-gradient(145deg, #4f90f9, #2563eb);
 }
 
 .secondary-button {
-  border-color: rgba(124, 151, 192, 0.25);
-  background: rgba(53, 71, 101, 0.45);
-  color: #c8d6eb;
+  border-color: rgba(124, 158, 212, 0.28);
+  background: var(--kp-skeuo-card-bg);
+  box-shadow: var(--kp-skeuo-btn-secondary);
+  color: #d6e2f5;
 }
 
 .secondary-button:hover:not(:disabled) {
@@ -447,10 +449,10 @@
   align-items: center;
   gap: 17px;
   padding: 19px 22px;
-  border: 1px solid rgba(122, 149, 192, 0.21);
-  border-radius: 19px;
-  background: linear-gradient(115deg, rgba(30, 47, 74, 0.94), rgba(19, 30, 49, 0.96));
-  box-shadow: 0 17px 38px rgba(0, 0, 0, 0.12);
+  border: 1px solid rgba(125, 168, 245, 0.22);
+  border-radius: 22px;
+  background: var(--kp-skeuo-card-bg);
+  box-shadow: var(--kp-skeuo-raised);
 }
 
 .account-avatar {
@@ -507,16 +509,17 @@
   min-width: 114px;
   gap: 3px;
   padding: 8px 10px;
-  border: 1px solid rgba(120, 148, 191, 0.16);
-  border-radius: 11px;
-  background: rgba(6, 12, 22, 0.24);
+  border: 1px solid rgba(120, 148, 191, 0.18);
+  border-radius: 12px;
+  background: var(--kp-skeuo-well-bg);
+  box-shadow: var(--kp-skeuo-inset);
   color: #c0cde0;
   font-size: 10px;
   overflow-wrap: anywhere;
 }
 
 .account-hero__details strong {
-  color: #7787a0;
+  color: #93a2be;
   font-size: 8px;
   font-weight: 750;
   letter-spacing: 0.1em;
@@ -546,15 +549,16 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-items: start;
-  gap: 14px;
+  gap: 16px;
 }
 
 .settings-card {
   min-width: 0;
   padding: 18px 19px;
-  border: 1px solid rgba(119, 145, 187, 0.19);
-  border-radius: 17px;
-  background: linear-gradient(150deg, rgba(25, 38, 61, 0.91), rgba(16, 26, 44, 0.93));
+  border: 1px solid rgba(125, 168, 245, 0.2);
+  border-radius: 22px;
+  background: var(--kp-skeuo-card-bg);
+  box-shadow: var(--kp-skeuo-raised);
 }
 
 .settings-card--wide {
@@ -583,13 +587,14 @@
 
 .settings-card__icon {
   display: grid;
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   flex: 0 0 auto;
   place-items: center;
-  border: 1px solid rgba(111, 153, 224, 0.2);
-  border-radius: 11px;
-  background: rgba(47, 111, 237, 0.11);
+  border: 1px solid rgba(111, 153, 224, 0.24);
+  border-radius: 12px;
+  background: var(--kp-skeuo-card-bg);
+  box-shadow: var(--kp-skeuo-raised-sm);
   color: #9bc1ff;
 }
 

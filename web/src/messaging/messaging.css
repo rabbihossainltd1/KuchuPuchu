@@ -80,8 +80,9 @@
 }
 
 .conversation-row.is-selected {
-  background: var(--kp-card-raised);
-  border-color: var(--kp-line);
+  background: var(--kp-skeuo-card-bg);
+  border-color: rgba(120, 168, 248, 0.25);
+  box-shadow: var(--kp-skeuo-raised-sm);
 }
 
 .conversation-row__avatar {
@@ -313,6 +314,7 @@
   display: grid;
   gap: 2px;
   color: var(--chat-other-ink, var(--kp-ink));
+  box-shadow: var(--kp-skeuo-raised-sm);
 }
 
 .bubble--own {
@@ -322,6 +324,7 @@
   border-color: #2a4f8c;
   border-color: color-mix(in srgb, var(--chat-mine-to, #1b3a6b) 70%, transparent);
   color: var(--chat-mine-ink, var(--kp-ink));
+  box-shadow: var(--kp-skeuo-btn-primary);
 }
 
 .bubble--failed {
@@ -931,7 +934,8 @@
   border: 1px solid var(--kp-line);
   border-radius: 22px;
   padding: 3px 6px;
-  background: var(--kp-card);
+  background: var(--kp-skeuo-well-bg);
+  box-shadow: var(--kp-skeuo-inset);
 }
 
 .composer__editor {
