@@ -325,9 +325,10 @@ input:disabled {
   height: 40px;
   flex: 0 0 auto;
   place-items: center;
-  border: 1px solid rgba(128, 153, 194, 0.16);
+  border: 1px solid rgba(128, 158, 210, 0.22);
   border-radius: 13px;
-  background: rgba(40, 57, 84, 0.48);
+  background: var(--kp-skeuo-card-bg);
+  box-shadow: var(--kp-skeuo-raised-sm);
   color: #b9c7dd;
   cursor: pointer;
   transition:
@@ -351,10 +352,11 @@ input:disabled {
   gap: 9px;
   margin: 0 16px 14px;
   padding: 0 11px;
-  border: 1px solid rgba(112, 135, 174, 0.17);
-  border-radius: 12px;
-  background: rgba(7, 13, 24, 0.33);
-  color: #7182a0;
+  border: 1px solid rgba(112, 140, 188, 0.2);
+  border-radius: 14px;
+  background: var(--kp-skeuo-well-bg);
+  box-shadow: var(--kp-skeuo-inset);
+  color: #8293b2;
 }
 
 .search-field input {

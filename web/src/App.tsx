@@ -263,10 +263,14 @@ export default function App() {
       <SitePage
         page={route.page}
         navigate={navigate}
-        onSignIn={() => {
-          setWelcomeSignin(true);
-          navigate({ kind: "section", section: "chats" });
-        }}
+        onSignIn={
+          isMobileViewport
+            ? undefined
+            : () => {
+                setWelcomeSignin(true);
+                navigate({ kind: "section", section: "chats" });
+              }
+        }
         onHome={() => {
           setWelcomeSignin(false);
           navigate({ kind: "section", section: "chats" });
@@ -308,6 +312,9 @@ export default function App() {
     if (authStatus === "unverified")
       return <SessionRestoreFailure onBack={goToChats} onSignOut={logOutToChats} />;
     if (authStatus !== "signed-in") {
+      if (isMobileViewport) {
+        return <WelcomePage navigate={navigate} showMobileBanner />;
+      }
       // Only the bare chats landing shows the welcome page. Anywhere a
       // visitor arrived with intent — /account, a protected deep link, or
       // their own sign-in tap — goes straight to the form.
@@ -323,7 +330,7 @@ export default function App() {
         <WelcomePage
           onSignIn={() => setWelcomeSignin(true)}
           navigate={navigate}
-          showMobileBanner={isMobileViewport}
+          showMobileBanner={false}
         />
       );
     }

@@ -1,14 +1,9 @@
 import { RouteLink } from "../RouteLink";
-import { type SitePageId } from "../router";
+import { useIsMobileViewport } from "../auth/WelcomePage";
+import type { SitePageId } from "../router";
 import type { Navigate } from "../useBrowserRouter";
 
-export const HEADER_PAGES: readonly SitePageId[] = [
-  "features",
-  "encryption",
-  "privacy",
-  "data",
-  "terms",
-];
+const APK_URL = "/download/apk";
 
 export const SITE_PAGE_LABELS: Record<SitePageId, string> = {
   features: "Features",
@@ -20,20 +15,26 @@ export const SITE_PAGE_LABELS: Record<SitePageId, string> = {
   terms: "Terms",
 };
 
+/** Product & technical tabs shown in the top navigation bar (no legal notices here). */
+export const HEADER_PAGES: readonly SitePageId[] = [
+  "features",
+  "encryption",
+  "architecture",
+  "faq",
+];
+
+/** Legal pages stay exclusively in the footer. */
+export const LEGAL_PAGES: readonly SitePageId[] = ["privacy", "data", "terms"];
+
 type PublicHeaderProps = {
-  navigate?: Navigate;
-  onSignIn: () => void;
-  onHome?: () => void;
   active: "welcome" | SitePageId;
+  navigate?: Navigate;
+  onSignIn?: () => void;
+  onHome?: () => void;
 };
 
-export function PublicHeader({ navigate, onSignIn, onHome, active }: PublicHeaderProps) {
-  const brand = (
-    <>
-      <img src="/logo.png" alt="KuchuPuchu logo" />
-      <span>KuchuPuchu</span>
-    </>
-  );
+export function PublicHeader({ active, navigate, onSignIn, onHome }: PublicHeaderProps) {
+  const isMobile = useIsMobileViewport();
 
   return (
     <header className="kp-welcome__top">
@@ -42,9 +43,11 @@ export function PublicHeader({ navigate, onSignIn, onHome, active }: PublicHeade
           <RouteLink
             route={{ kind: "section", section: "chats" }}
             navigate={navigate}
-            className="kp-welcome__brand kp-welcome__brand--link"
+            className="kp-welcome__brand"
+            aria-label="KuchuPuchu Home"
           >
-            {brand}
+            <img src="/logo.png" alt="KuchuPuchu logo" />
+            <span>KuchuPuchu</span>
           </RouteLink>
         ) : onHome ? (
           <button
@@ -52,57 +55,67 @@ export function PublicHeader({ navigate, onSignIn, onHome, active }: PublicHeade
             className="kp-welcome__brand kp-welcome__brand--button"
             onClick={onHome}
           >
-            {brand}
+            <img src="/logo.png" alt="KuchuPuchu logo" />
+            <span>KuchuPuchu</span>
           </button>
         ) : (
-          <span className="kp-welcome__brand">{brand}</span>
+          <a className="kp-welcome__brand" href="/">
+            <img src="/logo.png" alt="KuchuPuchu logo" />
+            <span>KuchuPuchu</span>
+          </a>
         )}
-        <button type="button" className="kp-welcome__signin" onClick={onSignIn}>
-          Sign in
-        </button>
+
+        {!isMobile && onSignIn ? (
+          <button type="button" className="kp-welcome__signin kp-desktop-only" onClick={onSignIn}>
+            Sign in
+          </button>
+        ) : (
+          <a className="kp-welcome__apk-top" href={APK_URL}>
+            Get APK
+          </a>
+        )}
       </div>
 
       <nav className="kp-welcome__nav" aria-label="Site pages">
         {navigate ? (
-          <>
-            <RouteLink
-              route={{ kind: "section", section: "chats" }}
-              navigate={navigate}
-              className={`kp-welcome__page-tab${active === "welcome" ? " is-active" : ""}`}
-              aria-current={active === "welcome" ? "page" : undefined}
-            >
-              Overview
-            </RouteLink>
-            {HEADER_PAGES.map((page) => (
-              <RouteLink
-                key={page}
-                route={{ kind: "site", page }}
-                navigate={navigate}
-                className={`kp-welcome__page-tab${active === page ? " is-active" : ""}`}
-                aria-current={active === page ? "page" : undefined}
-              >
-                {SITE_PAGE_LABELS[page]}
-              </RouteLink>
-            ))}
-          </>
+          <RouteLink
+            route={{ kind: "section", section: "chats" }}
+            navigate={navigate}
+            className={`kp-welcome__page-tab${active === "welcome" ? " is-active" : ""}`}
+            aria-current={active === "welcome" ? "page" : undefined}
+          >
+            Overview
+          </RouteLink>
         ) : (
-          <>
-            <a
-              href="/chats"
-              className={`kp-welcome__page-tab${active === "welcome" ? " is-active" : ""}`}
+          <a
+            href="/"
+            className={`kp-welcome__page-tab${active === "welcome" ? " is-active" : ""}`}
+            aria-current={active === "welcome" ? "page" : undefined}
+          >
+            Overview
+          </a>
+        )}
+        {HEADER_PAGES.map((page) =>
+          navigate ? (
+            <RouteLink
+              key={page}
+              route={{ kind: "site", page }}
+              navigate={navigate}
+              className={`kp-welcome__page-tab${active === page ? " is-active" : ""}`}
+              aria-current={active === page ? "page" : undefined}
             >
-              Overview
+              {SITE_PAGE_LABELS[page]}
+            </RouteLink>
+          ) : (
+            <a
+              key={page}
+              href={`/${page}`}
+              className={`kp-welcome__page-tab${active === page ? " is-active" : ""}`}
+              aria-current={active === page ? "page" : undefined}
+            >
+              {SITE_PAGE_LABELS[page]}
             </a>
-            {HEADER_PAGES.map((page) => (
-              <a
-                key={page}
-                href={`/${page}`}
-                className={`kp-welcome__page-tab${active === page ? " is-active" : ""}`}
-              >
-                {SITE_PAGE_LABELS[page]}
-              </a>
-            ))}
-          </>
+          ),
         )}
       </nav>
     </header>
