@@ -179,8 +179,8 @@
 }
 
 .e2ee-bar--locked {
-  border-color: #6b5310;
-  background: #241d0c;
+  border-color: #2a4f8c;
+  background: #14223c;
 }
 
 .e2ee-bar--error {
@@ -537,9 +537,9 @@
 .capability-banner {
   margin: 0 18px;
   padding: 10px 14px;
-  border: 1px solid rgba(245, 158, 11, 0.45);
+  border: 1px solid rgba(96, 165, 250, 0.45);
   border-radius: 12px;
-  background: rgba(245, 158, 11, 0.12);
+  background: rgba(47, 111, 237, 0.14);
   color: var(--kp-ink);
   font-size: 0.82rem;
 }
@@ -749,8 +749,8 @@
 .outbox-bar {
   margin: 0 18px;
   padding: 8px 12px;
-  border: 1px solid #6b5310;
-  background: #241d0c;
+  border: 1px solid #2a4f8c;
+  background: #14223c;
   border-radius: 12px;
   font-size: 0.8rem;
   display: grid;

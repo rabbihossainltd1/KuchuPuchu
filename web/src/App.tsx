@@ -475,9 +475,12 @@ export default function App() {
               aria-labelledby="list-heading"
             >
               <header className="list-header">
-                <div>
-                  <p className="eyebrow">KUCHUPUCHU WEB</p>
-                  <h1 id="list-heading">{sectionHeading}</h1>
+                <div className="list-header__brand">
+                  <img className="list-header__logo" src="/logo.png" alt="" draggable={false} />
+                  <div>
+                    <p className="eyebrow">KUCHUPUCHU WEB</p>
+                    <h1 id="list-heading">{sectionHeading}</h1>
+                  </div>
                 </div>
                 <button
                   type="button"
@@ -580,7 +583,7 @@ export default function App() {
                     </RouteLink>
                   )}
                   <div className="conversation-avatar conversation-avatar--empty">
-                    <Icon name="message" size={20} />
+                    <BrandMark size={38} />
                   </div>
                   <div className="conversation-header__copy">
                     <h2 id="conversation-heading">
@@ -632,9 +635,6 @@ export default function App() {
                 <div className="welcome-card">
                   <div className="welcome-card__mark">
                     <BrandMark size={52} />
-                    <span className="welcome-card__sparkle">
-                      <Icon name="sparkle" size={19} />
-                    </span>
                   </div>
                   <p className="eyebrow">
                     {isConversation

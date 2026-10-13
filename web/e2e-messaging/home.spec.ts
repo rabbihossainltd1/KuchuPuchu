@@ -49,15 +49,25 @@ test("Settings and My Profile land on the account page", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
 });
 
-test("signed-out mobile visitors see the full welcome tabs and APK banner", async ({ browser }) => {
+test("signed-out mobile visitors see real separate page tabs and can navigate across pages", async ({
+  browser,
+}) => {
   const mobileCtx = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const mobilePage = await mobileCtx.newPage();
   await mobilePage.goto("/");
   await expect(
     mobilePage.getByRole("heading", { name: "Messages that stay yours." }),
   ).toBeVisible();
-  await expect(mobilePage.getByRole("tab", { name: "Features" })).toBeVisible();
-  await mobilePage.getByRole("tab", { name: "Architecture" }).click();
+  const nav = mobilePage.getByRole("navigation", { name: "Site pages" });
+  await expect(nav.getByRole("link", { name: "Features" })).toBeVisible();
+  await nav.getByRole("link", { name: "Features" }).click();
+  await expect(mobilePage).toHaveURL(/\/features$/);
+  await expect(
+    mobilePage.getByRole("heading", { name: "Built for everyday privacy" }),
+  ).toBeVisible();
+
+  await nav.getByRole("link", { name: "Architecture" }).click();
+  await expect(mobilePage).toHaveURL(/\/architecture$/);
   await expect(mobilePage.getByRole("heading", { name: "System architecture" })).toBeVisible();
   await mobileCtx.close();
 });

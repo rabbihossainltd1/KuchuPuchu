@@ -286,6 +286,21 @@ input:disabled {
   padding: 18px 20px 12px;
 }
 
+.list-header__brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+
+.list-header__logo {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  flex: none;
+  object-fit: cover;
+}
+
 .eyebrow {
   margin: 0 0 5px;
   color: #7586a6;
@@ -600,8 +615,8 @@ input:disabled {
   bottom: 0;
   left: 7%;
   width: min(27vw, 310px);
-  background: #b26b11;
-  opacity: 0.09;
+  background: #1d4ed8;
+  opacity: 0.14;
 }
 
 .welcome-card {
@@ -638,7 +653,7 @@ input:disabled {
   border: 1px solid rgba(121, 164, 235, 0.25);
   border-radius: 10px;
   background: #1e3150;
-  color: #ffd074;
+  color: #60a5fa;
 }
 
 .welcome-card .eyebrow {
@@ -1000,7 +1015,7 @@ a:focus-visible {
   width: 22px;
   height: 22px;
   margin: 0;
-  accent-color: var(--kp-accent, #51a33c);
+  accent-color: var(--kp-accent, #2f6fed);
 }
 .composer__attach-options label {
   display: flex;
@@ -1017,7 +1032,7 @@ a:focus-visible {
 
 /* Drag & drop: a soft veil over the pane while files hover. */
 .conversation-pane.dragging {
-  outline: 2px dashed var(--kp-accent, #51a33c);
+  outline: 2px dashed var(--kp-accent, #2f6fed);
   outline-offset: -6px;
 }
 .drop-hint {
