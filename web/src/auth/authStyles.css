@@ -1087,8 +1087,31 @@
 :root[data-kp-theme="light"] .settings-header h1,
 :root[data-kp-theme="light"] .account-hero__identity h2,
 :root[data-kp-theme="light"] .settings-card__heading h2,
+:root[data-kp-theme="light"] .auth-brand h1,
 :root[data-kp-theme="light"] .approval-summary strong {
   color: #1c1917;
+}
+
+/* Owner (2026-10-13): the auth card's heading was the one surface the light
+ * palette never re-inked — "Confirm this sign-in" sat near-white on white.
+ * The eyebrow and the text buttons deepen with it so every label on the card
+ * stays readable on cream. */
+:root[data-kp-theme="light"] .auth-brand .eyebrow {
+  color: #92400e;
+}
+
+:root[data-kp-theme="light"] .text-button {
+  color: #1d4ed8;
+}
+
+:root[data-kp-theme="light"] .approval-summary {
+  border-color: rgba(13, 21, 36, 0.12);
+  background: #f4f6fb;
+}
+
+:root[data-kp-theme="light"] .approval-summary__label,
+:root[data-kp-theme="light"] .auth-footnote {
+  color: var(--kp-muted);
 }
 
 :root[data-kp-theme="light"] .auth-copy,
@@ -1202,8 +1225,10 @@
   font-weight: 700;
 }
 .otp-boxes {
+  position: relative;
   display: flex;
   gap: 10px;
+  cursor: text;
 }
 .otp-box {
   width: 52px;
@@ -1216,13 +1241,115 @@
   border: 1.5px solid rgba(255, 255, 255, 0.18);
   background: rgba(255, 255, 255, 0.05);
   transition:
-    border-color 120ms ease,
-    transform 120ms ease;
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease,
+    background 140ms ease;
 }
+/* Owner (2026-10-13): a digit landing in a box pops it; the box that types
+   next breathes so the eye is always on the cursor. */
 .otp-box--filled {
   border-color: #f0b43c;
   color: #f0b43c;
   transform: translateY(-2px);
+  animation: kp-otp-pop 180ms ease-out;
+}
+.otp-box--active {
+  border-color: rgba(246, 198, 91, 0.75);
+  animation: kp-otp-breathe 1.6s ease-in-out infinite;
+}
+/* Any tap inside the row (or keyboard focus) lights the row up — the boxes
+   themselves are only paint; the input on top owns every interaction. */
+.otp-boxes:focus-within .otp-box {
+  background: rgba(255, 255, 255, 0.09);
+}
+.otp-boxes:focus-within .otp-box--active {
+  border-color: #f6c65b;
+  box-shadow: 0 0 0 3px rgba(246, 198, 91, 0.16);
+}
+/* Verifying: the row runs a light wave while the request is in flight. */
+.otp-boxes--verifying .otp-box {
+  animation: kp-otp-wave 1.05s ease-in-out infinite;
+}
+.otp-boxes--verifying .otp-box:nth-child(2) {
+  animation-delay: 90ms;
+}
+.otp-boxes--verifying .otp-box:nth-child(3) {
+  animation-delay: 180ms;
+}
+.otp-boxes--verifying .otp-box:nth-child(4) {
+  animation-delay: 270ms;
+}
+.otp-boxes--verifying .otp-box:nth-child(5) {
+  animation-delay: 360ms;
+}
+.otp-boxes--verifying .otp-box:nth-child(6) {
+  animation-delay: 450ms;
+}
+/* Wrong code: the row shakes once and flashes the error line. */
+.otp-full--error .otp-boxes {
+  animation: kp-otp-shake 340ms ease-in-out;
+}
+.otp-full--error .otp-box {
+  border-color: rgba(248, 113, 113, 0.8);
+  color: #fca5a5;
+}
+@keyframes kp-otp-pop {
+  0% {
+    transform: translateY(2px) scale(0.86);
+  }
+  60% {
+    transform: translateY(-3px) scale(1.06);
+  }
+  100% {
+    transform: translateY(-2px) scale(1);
+  }
+}
+@keyframes kp-otp-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(246, 198, 91, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(246, 198, 91, 0.14);
+  }
+}
+@keyframes kp-otp-wave {
+  0%,
+  100% {
+    transform: translateY(0);
+    border-color: rgba(255, 255, 255, 0.18);
+  }
+  50% {
+    transform: translateY(-3px);
+    border-color: rgba(246, 198, 91, 0.65);
+  }
+}
+@keyframes kp-otp-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-7px);
+  }
+  40% {
+    transform: translateX(6px);
+  }
+  60% {
+    transform: translateX(-4px);
+  }
+  80% {
+    transform: translateX(2px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .otp-box--filled,
+  .otp-box--active,
+  .otp-boxes--verifying .otp-box,
+  .otp-full--error .otp-boxes {
+    animation: none;
+  }
 }
 :root[data-kp-theme="light"] .otp-box {
   border-color: rgba(13, 21, 36, 0.22);
@@ -1232,14 +1359,22 @@
   border-color: #b57a10;
   color: #b57a10;
 }
+:root[data-kp-theme="light"] .otp-boxes:focus-within .otp-box {
+  background: rgba(13, 21, 36, 0.07);
+}
+/* Visually hidden (clip-path, not a nested input): the accessible label for
+   the real field, kept out of the flex row so it never eats a tap. */
 .otp-sr-label {
-  position: relative;
+  position: absolute;
   width: 1px;
   height: 1px;
   overflow: hidden;
-  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
   white-space: nowrap;
 }
+/* The real input rides invisibly on top of the boxes row, so a tap on any
+   box types into it. opacity:0 (not clip/visibility) keeps it focusable and
+   clickable — the owner's tap-to-type fix. */
 .otp-sr {
   position: absolute;
   inset: 0;
@@ -1247,8 +1382,14 @@
   height: 100%;
   opacity: 0;
   border: 0;
+  background: transparent;
+  cursor: text;
 }
 .otp-full__verify {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
   min-width: 220px;
   border: 0;
   border-radius: 999px;
@@ -1262,4 +1403,24 @@
 .otp-full__verify:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+/* Verifying spinner inside the button. */
+.otp-spinner {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  border-radius: 50%;
+  border: 2.5px solid rgba(36, 26, 5, 0.28);
+  border-top-color: #241a05;
+  animation: kp-otp-spin 700ms linear infinite;
+}
+@keyframes kp-otp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .otp-spinner {
+    animation-duration: 1.6s;
+  }
 }
