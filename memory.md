@@ -1229,3 +1229,10 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - Residual hole fixed here: the incoming-ring / in-call `CallStage` still rendered the light payload's raw `id@vN` token as `<img src>`. Added `isAvatarRef`/`useResolvedAvatar` to `avatars.ts`; CallStage resolves via `useAuth().api`. Regression in call-stage.spec (fails on #133 code, passes with fix).
 - Repo now ships `firebase.json` (web/dist public, SPA rewrite, sw.js/index no-store, hashed assets immutable) and FIREBASE-SETUP.md gained the full manual path: Firebase project kuchupuchuff2026 needs "Add another site" id `kuchupuchu` (default site would be kuchupuchuff2026.web.app), `firebase use --add`, Google Cloud Credentials → Web client 458576897499-1khrecq… → Authorized JavaScript origins += https://kuchupuchu.web.app. Worker secret GOOGLE_WEB_CLIENT_ID verified live via /api/config/firebase — no wrangler step needed.
 - **Process incident (this round):** the fix commit `b40af915` was pushed straight to `main` by mistake (branch not created after `git reset --hard`); no force-push was used to hide it. Local full CI was green before the push and GHA ran on the push. All future rounds: create the `fix/` branch BEFORE committing.
+
+## Web mobile layout & public navigation polish — 2026-10-13 (`fix/mobile-layout-polish`)
+- Fixed mobile viewport (`390x844`) layout on `https://kuchupuchu.web.app/`:
+  1. Streamlined `PublicHeader.tsx` and `welcome.css` so `.kp-welcome__nav` renders a single-row 6-tab bar (`Overview`, `Features`, `Encryption`, `Privacy`, `Data`, `Terms`) that fits on one line on `390px` mobile screens without wrapping into a 3-row sticky header.
+  2. Removed the duplicate `.kp-welcome__logo` and ragged stacked pills in `WelcomePage.tsx`, added a 4-card Core Capabilities overview section above the dedicated page cards, and aligned CTA buttons in a 2-column grid on mobile.
+  3. Updated `firebase.json` so `"source": "**"` sets `Cache-Control: no-store` (overridden by `/assets/**` immutable cache) so `/` and SPA routes are never cached for 1 hour by Firebase Hosting.
+

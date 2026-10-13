@@ -1,6 +1,14 @@
 import { RouteLink } from "../RouteLink";
-import { SITE_PAGES, type SitePageId } from "../router";
+import { type SitePageId } from "../router";
 import type { Navigate } from "../useBrowserRouter";
+
+export const HEADER_PAGES: readonly SitePageId[] = [
+  "features",
+  "encryption",
+  "privacy",
+  "data",
+  "terms",
+];
 
 export const SITE_PAGE_LABELS: Record<SitePageId, string> = {
   features: "Features",
@@ -11,8 +19,6 @@ export const SITE_PAGE_LABELS: Record<SitePageId, string> = {
   data: "Data",
   terms: "Terms",
 };
-
-const APK_URL = "/download/apk";
 
 type PublicHeaderProps = {
   navigate?: Navigate;
@@ -31,25 +37,31 @@ export function PublicHeader({ navigate, onSignIn, onHome, active }: PublicHeade
 
   return (
     <header className="kp-welcome__top">
-      {navigate ? (
-        <RouteLink
-          route={{ kind: "section", section: "chats" }}
-          navigate={navigate}
-          className="kp-welcome__brand kp-welcome__brand--link"
-        >
-          {brand}
-        </RouteLink>
-      ) : onHome ? (
-        <button
-          type="button"
-          className="kp-welcome__brand kp-welcome__brand--button"
-          onClick={onHome}
-        >
-          {brand}
+      <div className="kp-welcome__top-bar">
+        {navigate ? (
+          <RouteLink
+            route={{ kind: "section", section: "chats" }}
+            navigate={navigate}
+            className="kp-welcome__brand kp-welcome__brand--link"
+          >
+            {brand}
+          </RouteLink>
+        ) : onHome ? (
+          <button
+            type="button"
+            className="kp-welcome__brand kp-welcome__brand--button"
+            onClick={onHome}
+          >
+            {brand}
+          </button>
+        ) : (
+          <span className="kp-welcome__brand">{brand}</span>
+        )}
+        <button type="button" className="kp-welcome__signin" onClick={onSignIn}>
+          Sign in
         </button>
-      ) : (
-        <span className="kp-welcome__brand">{brand}</span>
-      )}
+      </div>
+
       <nav className="kp-welcome__nav" aria-label="Site pages">
         {navigate ? (
           <>
@@ -61,7 +73,7 @@ export function PublicHeader({ navigate, onSignIn, onHome, active }: PublicHeade
             >
               Overview
             </RouteLink>
-            {SITE_PAGES.map((page) => (
+            {HEADER_PAGES.map((page) => (
               <RouteLink
                 key={page}
                 route={{ kind: "site", page }}
@@ -81,7 +93,7 @@ export function PublicHeader({ navigate, onSignIn, onHome, active }: PublicHeade
             >
               Overview
             </a>
-            {SITE_PAGES.map((page) => (
+            {HEADER_PAGES.map((page) => (
               <a
                 key={page}
                 href={`/${page}`}
@@ -92,13 +104,7 @@ export function PublicHeader({ navigate, onSignIn, onHome, active }: PublicHeade
             ))}
           </>
         )}
-        <a href={APK_URL} className="kp-welcome__apk-link">
-          Download APK
-        </a>
       </nav>
-      <button type="button" className="kp-welcome__signin" onClick={onSignIn}>
-        Sign in
-      </button>
     </header>
   );
 }
