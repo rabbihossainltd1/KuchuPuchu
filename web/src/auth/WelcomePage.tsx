@@ -96,7 +96,7 @@ export function WelcomePage({
         <figure className="kp-welcome__visual">
           <img
             className="kp-welcome__hero-img"
-            src="/hero-Illustration.jpg"
+            src="/hero-illustration.jpg"
             alt="Encrypted chat bubbles and lock shields around a smartphone"
             width={1408}
             height={768}
