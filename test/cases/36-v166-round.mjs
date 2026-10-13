@@ -90,8 +90,8 @@ const pkg = readFileSync(
 
 /* the round's own bookkeeping */
 check(
-  "r108: versionCode 280 / versionName 3.9.203 (web landing + APK download round, missed-call channel v2; reuse of the v274 debug signer still needs explicit approval)",
-  /versionCode\s*=\s*280\b/.test(pkg) && /versionName\s*=\s*"3\.9\.203"/.test(pkg),
+  "r109: versionCode 281 / versionName 3.9.204 (dark-blue-only web + standalone policy pages + OTP tap fix round, compact security alerts; reuse of the v274 debug signer still needs explicit approval)",
+  /versionCode\s*=\s*281\b/.test(pkg) && /versionName\s*=\s*"3\.9\.204"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */
