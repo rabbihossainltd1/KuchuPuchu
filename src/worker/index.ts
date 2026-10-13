@@ -770,8 +770,11 @@ async function sendApprovalMessage(
   // device, place, IP, time — so the approver can judge the request).
   const cf = (request as Request & { cf?: { country?: string; city?: string } }).cf;
   const ip = clientIp(request);
-  const place = [cf?.city, cf?.country].filter(Boolean).join(", ");
-  const where = place ? ` · ${place}` : "";
+  // Owner (2026-10-13): the list row and the system notification now carry a
+  // compact one-liner ("🔐 New sign-in · Another device"). The full origin
+  // (device, place, IP, Dhaka-time) still lives in the approval CARD's meta —
+  // it just no longer bloats the row, the shade or the lock screen.
+  const compact = `🔐 New sign-in · ${label}`;
   const meta = {
     requestId,
     deviceName: label,
@@ -790,7 +793,7 @@ async function sendApprovalMessage(
     mid,
     convId,
     botId,
-    `New sign-in attempt on ${label}${where}`,
+    compact,
     JSON.stringify(meta),
     created,
   );
@@ -798,7 +801,7 @@ async function sendApprovalMessage(
     db,
     "UPDATE conversations SET last_message_at = ?, last_message = ? WHERE id = ?",
     created,
-    `New sign-in attempt on ${label}${where}`,
+    compact,
     convId,
   );
   await run(
@@ -812,7 +815,7 @@ async function sendApprovalMessage(
     conv_id: convId,
     sender_id: botId,
     kind: "LOGIN_APPROVAL",
-    body: `New sign-in attempt on ${label}${where}`,
+    body: compact,
     media: null,
     meta_json: JSON.stringify(meta),
     created_at: created,
@@ -837,8 +840,11 @@ async function sendApprovalMessage(
         convoId: convId,
         mid,
         kind: "SOLO",
-        fromName: "KuchuPuchu",
-        body: `New sign-in attempt on ${label}${where}. Tap to review it.`,
+        // Owner (2026-10-13): the shade title reads "KuchuPuchu · Security"
+        // so a login alert cannot be mistaken for a chat message, and the
+        // body stays one short line.
+        fromName: "KuchuPuchu · Security",
+        body: `🔐 New sign-in · ${label} — tap to review`,
         kp_chat: convId,
         muted: "0",
         // Owner round 32 (item 27): the card carries a Decline action that
@@ -846,8 +852,8 @@ async function sendApprovalMessage(
         kp_login_req: requestId,
       },
       {
-        title: "KuchuPuchu",
-        body: `New sign-in attempt on ${label}${where}. Tap to review it.`,
+        title: "KuchuPuchu · Security",
+        body: `🔐 New sign-in · ${label} — tap to review`,
         channel: "kp_messages_v2",
       },
     ),
