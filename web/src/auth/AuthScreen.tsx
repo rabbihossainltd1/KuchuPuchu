@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import countryData from "../../../public/countries.json";
 import { ApiError } from "../api";
+import { isWebFeatureEnabled } from "../featureFlags";
 import { BrandMark } from "../icons";
 import { useAuth } from "./AuthContext";
 import { authApi, authErrorCopy, isSessionPayload, isTransientPollError } from "./authApi";
@@ -837,9 +838,8 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
             Sign-in uses the existing KuchuPuchu account service. Your token is never placed in the
             URL.
           </p>
-          <p>Messaging, status, media and calls are not enabled by this account screen.</p>
           <button className="auth-back-link" type="button" onClick={leaveAuth}>
-            Back to Chats preview
+            {isWebFeatureEnabled("messaging") ? "Return to Chats" : "Back to Chats preview"}
           </button>
         </footer>
       </section>

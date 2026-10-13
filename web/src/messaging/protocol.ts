@@ -432,7 +432,7 @@ export function parsePeer(value: unknown): ConversationPeer | null {
     username: text(value.username, 64),
     ...(text(value.nickname, 40) ? { nickname: text(value.nickname, 40) } : {}),
     e2eePublicKey: text(value.e2eePublicKey, 4096),
-    avatarRef: text(value.avatarRef, 128),
+    avatarRef: text(value.avatarRef, 128) || text(value.avatarUrl, 2_000_000),
     online: booleanish(value.online),
     lastActiveAt: isoTimestamp(value.lastActiveAt),
     about: text(value.about, 240),
@@ -499,7 +499,7 @@ export function parseConversationRow(value: unknown): ConversationRow | null {
     lastMessage: text(value.lastMessage, 32),
     preview: parsePreview(value.lastMessagePreview),
     other: parsePeer(value.other),
-    avatarRef: text(value.avatarRef, 128),
+    avatarRef: text(value.avatarRef, 128) || text(value.avatarUrl, 2_000_000),
     privateGroup: booleanish(value.privateGroup),
     // Withheld by an older payload means "allowed": the worker's own default is
     // `otherSave ?? true`, and a missing flag must not silently disable Save.

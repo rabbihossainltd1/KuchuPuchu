@@ -612,16 +612,16 @@ const convBetween = (db, a, b) =>
 
   // ---- Owner round 7 (2026-09-04) ----
   check(
-    "AI replies: live HF chain (Kimi-K2 → Kimi-K2.5 → DeepSeek-V3.2 → Llama-3.3-70B) then Workers-AI then Gemini rescue — the HF credit running out (hf-stt 402) used to take EVERY reply down silently; chain verdicts now land in error_log (r48)",
-    src.includes('"moonshotai/Kimi-K2-Instruct"') &&
-      src.includes('"moonshotai/Kimi-K2.5"') &&
-      src.includes('"deepseek-ai/DeepSeek-V3.2"') &&
-      src.includes('"meta-llama/Llama-3.3-70B-Instruct"') &&
-      src.includes("const HF_CHAT_MODELS") &&
-      src.includes("async function cfAiChat(") &&
+    "AI replies: Gemini-only brain (geminiParts, geminiChat, geminiStream, geminiImage) with HF completely removed; errors land in error_log",
+    src.includes("async function geminiParts(") &&
       src.includes("async function geminiChat(") &&
+      src.includes("async function geminiStream(") &&
+      src.includes("async function geminiImage(") &&
       src.includes("async function aiBrain(") &&
-      src.includes("`hf-chat ${lastErrs"),
+      src.includes("`gemini-chat ${res.status}`") &&
+      !src.includes("const HF_CHAT_MODELS") &&
+      !src.includes("async function hfChat(") &&
+      !src.includes("HF_TOKEN"),
   );
   check(
     "bot-conversation reset endpoint exists (bot chats only)",
@@ -765,8 +765,8 @@ const convBetween = (db, a, b) =>
 
   // ---- Owner round 11 (2026-09-05) ----
   check(
-    "AI: each HF model capped (12s) so one 503 can't starve the rest",
-    src.includes("perCallMs = 12_000") && src.includes("HF_CALL_BUDGET_MS"),
+    "AI: each Gemini call is bounded by AbortSignal.timeout (12s chat, 20s multimodal/voice, 22s image)",
+    src.includes("timeoutMs = 12_000") && src.includes("AbortSignal.timeout(12_000)"),
   );
   check("user-channel conv pokes carry msg:1 for the in-app sound", src.includes("msg: 1 }"));
   const kpapp = readFileSync(
@@ -823,12 +823,9 @@ const convBetween = (db, a, b) =>
   check(
     "AI budget 900 tokens: Bengali script no longer dies mid-message",
     src.includes('[{ role: "user", content: prompt + voicePrompt + photoPrompt }],') &&
-      // v166: the photo turn is hedged (Gemini vs the HF vision leg) — the HF
-      // leg still asks with the FULL prompt at the 900-token budget, and so
-      // does the text leg that answers when there are no bytes to look at.
-      src.includes("          900,\n          [HF_VISION_MODEL],") &&
-      // v167: the same 900-token legs, now on the STREAMING brain (the answer
-      // is painted as it is written; the budget is unchanged).
+      src.includes(
+        "(await geminiStream(env, fullPrompt, [{ mime: src.mime, b64 }], 900, push, 20_000)) ??",
+      ) &&
       src.includes(
         'answer = await aiBrainStream(env, [{ role: "user", content: fullPrompt }], 900, push);',
       ) &&
@@ -1761,8 +1758,8 @@ const convBetween = (db, a, b) =>
       settings.includes("fun EditFieldScaffold("),
   );
   check(
-    "15: AI replies fail over per-model (12s HF cap) + release APK only per CI run (2026-09-22 storage limit)",
-    src.includes("perCallMs = 12_000") &&
+    "15: AI replies bounded (12s Gemini cap) + release APK only per CI run (2026-09-22 storage limit)",
+    src.includes("timeoutMs = 12_000") &&
       readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8").includes(
         "assembleRelease",
       ) &&
@@ -3049,22 +3046,16 @@ const convBetween = (db, a, b) =>
     );
 
     check(
-      "r31-17: the hold-mic gesture always awaits the pointer down first (a disabled mic no longer spins the main thread), and the AI answers voice notes via Whisper transcription",
+      "r31-17: the hold-mic gesture always awaits the pointer down first (a disabled mic no longer spins the main thread), and the AI answers voice notes via Gemini transcription",
       chat.includes(
         "val down = awaitFirstDown(requireUnconsumed = false)\n                    if (!enabled) {\n                        down.consume()\n                        return@awaitEachGesture\n                    }",
       ) &&
         !chat.includes("if (!enabled) return@awaitEachGesture") &&
-        // Owner round 42 (item 3): two attempts, 503-sleep, error_log.
-        readFileSync("src/worker/index.ts", "utf8").includes("async function hfTranscribe(") &&
+        readFileSync("src/worker/index.ts", "utf8").includes("async function aiTranscribe(") &&
         readFileSync("src/worker/index.ts", "utf8").includes(
           "Promise<{ text: string | null; err: string }>",
         ) &&
-        readFileSync("src/worker/index.ts", "utf8").includes("hf-stt-loading") &&
-        readFileSync("src/worker/index.ts", "utf8").includes("`hf-stt ${heard.err}`") &&
-        readFileSync("src/worker/index.ts", "utf8").includes("openai/whisper-large-v3-turbo") &&
-        // Owner round 43 (item 5): the cron keeps Whisper warm.
-        readFileSync("src/worker/index.ts", "utf8").includes("function wavSilence()") &&
-        readFileSync("src/worker/index.ts", "utf8").includes('"content-type": "audio/wav"') &&
+        readFileSync("src/worker/index.ts", "utf8").includes("`gemini-stt ${heard.err}`") &&
         readFileSync("src/worker/index.ts", "utf8").includes("this is what they said:") &&
         readFileSync("src/worker/index.ts", "utf8").includes("the clip could not be heard: say so"),
     );
@@ -9273,7 +9264,7 @@ const convBetween = (db, a, b) =>
       src.indexOf("async function all<T>("),
     );
     check(
-      "r33-11a: sendAiReply — the transcript names photos / voice notes, a bare photo or a question about one goes to the vision model (READ), a change request reads the nearby photo then draws the variation (a NEW-picture request still creates), a Banglish creation request draws, an owner-photo request never draws; a failed image tool makes the text reply apologise; the bot's picture goes out with a kp_media push",
+      "r33-11a: sendAiReply — the transcript names photos / voice notes, a bare photo or a question about one goes to Gemini vision (READ), a change request reads the nearby photo then draws the variation (a NEW-picture request still creates), a Banglish creation request draws, an owner-photo request never draws; a failed image tool makes the text reply apologise; the bot's picture goes out with a kp_media push",
       ai.includes(
         "WHERE conv_id = ? AND kind IN ('TEXT', 'IMAGE', 'FILE') ORDER BY rowid DESC LIMIT 12",
       ) &&
@@ -9281,22 +9272,18 @@ const convBetween = (db, a, b) =>
         ai.includes(
           'newest && newest.kind === "TEXT" && newest.sender_id === userId ? (newest.body ?? "") : "";',
         ) &&
-        ai.includes("const photoParts: unknown[] = [];") &&
+        ai.includes("let hasPhotoRead = false;") &&
         ai.includes(
-          "if (!parts) {\n          readSource = newestPhoto; // bare photo / a question about it\n          readPhoto = newestPhoto;\n        }",
+          "if (!parts) {\n          readSource = newestPhoto;\n          readPhoto = newestPhoto;\n        }",
         ) &&
-        ai.includes("readSource = recentPhoto; // a follow-up question about the photo") &&
+        ai.includes("readSource = recentPhoto;") &&
         ai.includes("if (recentPhoto && wantsEdit(newestText)) {") &&
-        // Owner round 42 (item 3): the predicates live at module level now
-        // (the send path classifies with the same definitions).
         src.includes("const wantsPicture = (t: string) =>") &&
         src.includes(
           "IMAGE_MAKE_VERB.test(t) && IMAGE_NOUN.test(t) && !OWNER_PHOTO_ASK.test(t);",
         ) &&
         src.includes("const wantsEdit = (t: string) =>") &&
         src.includes("IMAGE_EDIT_HINT.test(t) && (IMAGE_REF.test(t) || !FRESH_NOUN.test(t));") &&
-        // Owner round 43 (item 6): his spellings route to the brush too,
-        // and the model never promises a picture in chat text.
         src.includes("kore\\s*daw|kore\\s*de\\b") &&
         src.includes("daw\\b|de\\b|give\\b|pathao|pathiye|pathan") &&
         src.includes("Never PROMISE a picture in chat text") &&
@@ -9315,71 +9302,30 @@ const convBetween = (db, a, b) =>
         ai.includes("VALUES (?, ?, ?, 'IMAGE', ?, ?, ?)`") &&
         ai.includes("await sendBotImage(drawn.image, firstReplyIntro)") &&
         ai.includes("kp_media: `/api/messages/${imgMid}/media`,") &&
-        // v166: the photo leg calls the HF vision model, and the text-only
-        // apology behind it, through the hedged helper.
-        ai.includes("const hf = await hfChat(") &&
-        ai.includes(
-          "answer ?? (!env.GEMINI_API_KEY && !env.HF_TOKEN ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);",
-        ) &&
-        // v165 (owner: "messaging voice messaging shob kichur jonno gemini
-        // use hobe but image create/edit request a hugging face ai use hobe"):
-        // Gemini leads chat text, a photo the user sends to be READ, and a
-        // voice note; the HF chain + Whisper stay behind it as fallbacks; the
-        // picture CREATE / EDIT path is still HF's alone.
+        ai.includes("answer ?? (!env.GEMINI_API_KEY ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);") &&
         src.includes("async function geminiParts(") &&
         src.includes(
           'inline_data: { mime_type: m.mime || "application/octet-stream", data: m.b64 }',
         ) &&
-        // v166 (owner: "ai reply dite onek late korche"): Gemini still LEADS,
-        // but it is raced against the HF chain — the fallback starts mid-hedge
-        // instead of after Gemini's whole timeout.
-        // v168: the hedge is 800 ms - the reply starts streaming twice as early.
-        src.includes("const AI_HEDGE_MS = 800;") &&
-        src.includes(
-          "return await Promise.any([answered(primary()), answered(gate.then(secondary))]);",
-        ) &&
-        src.includes(
-          "() => geminiChat(env, messages, maxTokens),\n    () => hfThenCf(env, messages, maxTokens),",
-        ) &&
         src.includes("const heard = await aiTranscribe(") &&
         src.includes("async function aiTranscribe(") &&
         src.includes("async function aiWelcomeText(") &&
-        ai.includes("const seen = readPhoto;") &&
-        src.includes("const drawn = await hfImage(env, parts, scene, clean);"),
-      // Owner round 39 (item 5): an HF-side failure says so honestly
-      // (module-level const, outside the sendAiReply slice).
-      src.includes("const AI_REPLY_DOWN =") &&
+        src.includes("async function geminiImage(") &&
+        src.includes("const drawn = await geminiImage(env, parts);") &&
+        src.includes("const AI_REPLY_DOWN =") &&
         src.includes("can't reach its brain right now") &&
-        ai.includes("it cannot be seen right now: say so briefly") &&
         src.includes(
           "Abilities: you CAN see photos the user sends and you CAN create or edit pictures on request",
         ) &&
-        src.includes('const HF_VISION_MODEL = "Qwen/Qwen3.8-27B";') &&
-        src.includes('const HF_IMAGE_MODEL = "stabilityai/stable-diffusion-3-medium-diffusers";') &&
-        src.includes('const HF_STT_MODEL = "openai/whisper-large-v3-turbo";') &&
-        src.includes("async function hfChat(") &&
-        src.includes("async function hfImage(") &&
-        src.includes("async function hfTranscribe(") &&
         src.includes("async function aiPhotoBytes(") &&
         src.includes("type AiPhotoSrc = { bytes: Uint8Array<ArrayBuffer>; mime: string };") &&
-        src.includes("Rewrite this picture request as ONE text-to-image prompt") &&
-        src.includes("recreates this exact photo WITH that ") &&
-        src.includes("no text, no letters, no words in the image") &&
         src.includes("AbortSignal.timeout(") &&
-        src.includes("router.huggingface.co") &&
-        src.includes("v1/chat/completions") &&
-        src.includes("hf-inference/models") &&
-        src.includes('type: "image_url"') &&
-        src.includes("const drawn = await hfImage(env, parts, scene, clean);") &&
         !src.includes("geminiComplete(") &&
         !src.includes("cfImage(") &&
-        // Owner round 48 (item 2): rescue brains — Gemini + Workers AI stay
-        // TEXT-ONLY fallbacks behind the live HF chain; picture/voice keep
-        // their own HF-only honest failure paths.
+        !src.includes("HF_TOKEN") &&
+        !src.includes("router.huggingface.co") &&
         src.includes("gemini-flash-latest:generateContent") &&
         src.includes("GEMINI_API_KEY?: string") &&
-        src.includes("CF_AI_TOKEN?: string") &&
-        src.includes("async function aiPhotoVisionPart(") &&
         src.includes("const AI_PHOTO_MAX_BYTES = 7_000_000;"),
     );
     // the intent regexes, evaluated the way the worker does
@@ -9428,61 +9374,73 @@ const convBetween = (db, a, b) =>
     );
   }
   {
-    // behavioural probe: a fake HF router answers the TEXT + VISION chat
-    // models and the image / STT task routes, and records what each model
-    // was asked
+    // behavioural probe: a fake Gemini endpoint answers the TEXT + VISION +
+    // VOICE + IMAGE routes, and records what each model was asked
     const seen = [];
     const realFetch = globalThis.fetch;
     const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
-    // r34-4: flipped by the failure checks — hfImagesDown = every image
-    // attempt throws; loadingOnce = the first image call answers a
-    // loading-503 (the retry must still draw)
-    let hfImagesDown = false;
-    let loadingOnce = false;
+    let geminiImagesDown = false;
     globalThis.fetch = async (input, init) => {
       const url = typeof input === "string" ? input : input.url;
-      if (url.startsWith("https://router.huggingface.co/hf-inference/models/")) {
-        const model = url.split("/models/")[1];
-        if (model.includes("whisper")) {
-          seen.push({ model, image: false, audio: true, text: "" });
-          return new Response(JSON.stringify({ text: "kemon acho" }), {
-            status: 200,
-            headers: { "content-type": "application/json" },
-          });
-        }
+      if (url.startsWith("https://generativelanguage.googleapis.com/v1beta/models/")) {
         const req = JSON.parse(init.body);
-        seen.push({ model, image: true, hasInline: false, text: String(req.inputs ?? "") });
-        if (hfImagesDown) throw new Error("HF images are down");
-        if (loadingOnce) {
-          loadingOnce = false;
-          return new Response(JSON.stringify({ error: "Model loading", estimated_time: 0.01 }), {
-            status: 503,
-            headers: { "content-type": "application/json" },
-          });
-        }
-        return new Response(pngBytes, {
-          status: 200,
-          headers: { "content-type": "image/png" },
-        });
-      }
-      if (url.startsWith("https://router.huggingface.co/v1/chat/completions")) {
-        const req = JSON.parse(init.body);
-        const content = req.messages?.[0]?.content;
-        const parts = Array.isArray(content)
-          ? content
-          : [{ type: "text", text: String(content ?? "") }];
+        const parts = req.contents?.[0]?.parts ?? [];
+        const text = parts
+          .filter((p) => typeof p.text === "string")
+          .map((p) => p.text)
+          .join("\n");
+        const hasImageInline = parts.some(
+          (p) => p.inline_data && String(p.inline_data.mime_type || "").startsWith("image/"),
+        );
+        const hasAudioInline = parts.some(
+          (p) => p.inline_data && String(p.inline_data.mime_type || "").startsWith("audio/"),
+        );
+        const isImageModel = url.includes("gemini-2.0-flash-preview-image-generation");
         seen.push({
-          model: req.model,
-          image: false,
-          hasInline: parts.some((p) => p.type === "image_url"),
-          text: parts
-            .filter((p) => p.type === "text" || typeof p.text === "string")
-            .map((p) => p.text)
-            .join("\n"),
+          model: isImageModel ? "gemini-image" : "gemini-flash-latest",
+          image: isImageModel,
+          audio: hasAudioInline,
+          hasInline: hasImageInline,
+          text,
         });
+        if (isImageModel) {
+          if (geminiImagesDown) throw new Error("Gemini images are down");
+          return new Response(
+            JSON.stringify({
+              candidates: [
+                {
+                  content: {
+                    parts: [
+                      {
+                        inlineData: {
+                          mimeType: "image/png",
+                          data: pngBytes.toString("base64"),
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        const replyText = hasAudioInline ? "kemon acho" : "Ami ekta lal phool dekhte pacchi.";
+        if (url.includes(":streamGenerateContent")) {
+          const sse =
+            "data: " +
+            JSON.stringify({
+              candidates: [{ content: { parts: [{ text: replyText }] } }],
+            }) +
+            "\n\ndata: [DONE]\n\n";
+          return new Response(sse, {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          });
+        }
         return new Response(
           JSON.stringify({
-            choices: [{ message: { content: "Ami ekta lal phool dekhte pacchi." } }],
+            candidates: [{ content: { parts: [{ text: replyText }] } }],
           }),
           { status: 200, headers: { "content-type": "application/json" } },
         );
@@ -9497,7 +9455,7 @@ const convBetween = (db, a, b) =>
         DB: db,
         MEDIA: r2,
         GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
-        HF_TOKEN: "test-hf-token",
+        GEMINI_API_KEY: "test-gemini-key",
       };
       const ctx = makeCtx();
       let ipSeq = 0;
@@ -9597,17 +9555,9 @@ const convBetween = (db, a, b) =>
         .prepare("SELECT last_message FROM conversations WHERE id = ?")
         .get(conv.id);
       check(
-        "r33-11a: 'ekta chobi banao' (a photo 4 rows up) → the request is rewritten to a clean image prompt, the image model draws it, the bot's IMAGE lands, the chat list reads Photo — and no OWNER_CARD rides along ('banao' also matches the owner intent)",
-        afterCreate.length >= 2 &&
-          afterCreate.some(
-            (c) =>
-              !c.image &&
-              c.text.includes("Rewrite this picture request") &&
-              c.text.includes("ekta chobi banao"),
-          ) &&
-          afterCreate.some(
-            (c) => c.image && !c.hasInline && c.text === "Ami ekta lal phool dekhte pacchi.",
-          ) &&
+        "r33-11a: 'ekta chobi banao' (a photo 4 rows up) → Gemini image model draws it, the bot's IMAGE lands, the chat list reads Photo — and no OWNER_CARD rides along ('banao' also matches the owner intent)",
+        afterCreate.length >= 1 &&
+          afterCreate.some((c) => c.image && !c.hasInline && c.text.includes("ekta chobi banao")) &&
           rowsNow.length === before + 1 &&
           created.kind === "IMAGE" &&
           created.body === null &&
@@ -9629,16 +9579,13 @@ const convBetween = (db, a, b) =>
       const afterEdit = seen.splice(0);
       const edited = botRows().filter((r) => r.kind === "IMAGE");
       check(
-        "r33-11a: 'background remove kore dao' after a photo → the vision model rewrites photo + change into a clean image prompt, the image model draws it verbatim, the bot answers with a new IMAGE",
-        afterEdit.length >= 2 &&
+        "r33-11a: 'background remove kore dao' after a photo → Gemini image model receives photo + change and answers with a new IMAGE",
+        afterEdit.length >= 1 &&
           afterEdit.some(
             (c) =>
-              !c.image &&
+              c.image &&
               c.hasInline &&
-              c.text.includes("recreates this exact photo WITH that change applied"),
-          ) &&
-          afterEdit.some(
-            (c) => c.image && !c.hasInline && c.text === "Ami ekta lal phool dekhte pacchi.",
+              c.text.includes("Edit this photo as requested: background remove kore dao"),
           ) &&
           edited.length === 2 &&
           !!edited[1].media &&
@@ -9685,10 +9632,9 @@ const convBetween = (db, a, b) =>
         JSON.stringify({ botImg, status: media?.status }).slice(0, 300),
       );
 
-      // 5. r34-4: HF images down (both attempts throw) → the text model is
-      // told the image tool failed (honest line); nothing is blocked — the
-      // retry right after draws fine.
-      hfImagesDown = true;
+      // 5. r34-4: Gemini images down → the text model is told the image tool
+      // failed (honest line); nothing is blocked — the retry right after draws fine.
+      geminiImagesDown = true;
       const botCountBefore = botRows().length;
       await call(
         "POST",
@@ -9697,7 +9643,7 @@ const convBetween = (db, a, b) =>
         a.token,
       );
       const afterDown = seen.splice(0);
-      hfImagesDown = false;
+      geminiImagesDown = false;
       await call(
         "POST",
         `/api/conversations/${conv.id}/messages`,
@@ -9707,8 +9653,8 @@ const convBetween = (db, a, b) =>
       const afterRetry = seen.splice(0);
       const downRows = botRows().slice(botCountBefore);
       check(
-        "r34-4: HF images down → both attempts tried, the text reply says the image tool failed (TEXT row, no IMAGE); the retry draws (no block window)",
-        afterDown.filter((c) => c.image).length === 2 &&
+        "r34-4: Gemini images down → the text reply says the image tool failed (TEXT row, no IMAGE); the retry draws (no block window)",
+        afterDown.filter((c) => c.image).length === 1 &&
           afterDown.some(
             (c) => !c.image && c.text.includes("but the image tool failed this time"),
           ) &&
@@ -9720,28 +9666,7 @@ const convBetween = (db, a, b) =>
         JSON.stringify({ afterDown, afterRetry, downRows }).slice(0, 600),
       );
 
-      // 5b. r34-4: the first draw answers a loading-503 → the retry lands
-      // (the IMAGE is served from the second attempt's bytes).
-      loadingOnce = true;
-      const botCountBeforeFb = botRows().length;
-      await call(
-        "POST",
-        `/api/conversations/${conv.id}/messages`,
-        { kind: "TEXT", body: "ekta sunset er chobi banao please", clientId: "ai-c4" },
-        a.token,
-      );
-      const afterFb = seen.splice(0);
-      const fbRows = botRows().slice(botCountBeforeFb);
-      check(
-        "r34-4: loading-503 → the retry draws (two image attempts, IMAGE lands)",
-        afterFb.filter((c) => c.image).length === 2 &&
-          fbRows.length === 1 &&
-          fbRows[0].kind === "IMAGE" &&
-          !!(await r2.get(fbRows[0].media)),
-        JSON.stringify({ afterFb, fbRows }).slice(0, 500),
-      );
-
-      // 6. VOICE: an audio note is transcribed by Whisper and the transcript
+      // 6. VOICE: an audio note is transcribed by Gemini and the transcript
       // is answered as chat text.
       const kv = await upload("note.m4a", "audio/mp4");
       await call(
@@ -9758,7 +9683,7 @@ const convBetween = (db, a, b) =>
       );
       const afterVoice = seen.splice(0);
       check(
-        "HF migration: a voice note goes to Whisper, the transcript is answered as chat text",
+        "Gemini-only AI: a voice note goes to Gemini, the transcript is answered as chat text",
         afterVoice.some((c) => c.audio === true) &&
           afterVoice.some(
             (c) =>

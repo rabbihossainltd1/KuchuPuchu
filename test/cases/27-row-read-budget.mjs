@@ -448,6 +448,16 @@ const plan = (raw, sql, ...bind) =>
       /already exists\/i\.test\(msg\)\) return true;/.test(src) &&
       /if \(!\(await runCatchingSql\(db, sql\)\)\) allApplied = false;/.test(src),
   );
+  const unattachedPlan = plan(
+    env3.DB._db,
+    "SELECT key FROM files WHERE conv_id IS NULL AND created_at < ? LIMIT 100",
+    "2026-09-01T00:00:00.000Z",
+  );
+  check(
+    "unattached files sweep uses idx_files_unattached without full table scan",
+    unattachedPlan.includes("idx_files_unattached") && !/SCAN files\b/.test(unattachedPlan),
+    unattachedPlan,
+  );
 }
 
 process.stdout.write(lines.join("\n") + "\n");

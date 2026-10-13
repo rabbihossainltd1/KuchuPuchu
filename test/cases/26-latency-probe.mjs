@@ -46,7 +46,18 @@ const val = async (db, key) =>
   );
   check("three samples of the real handler are counted", res.count === 3, JSON.stringify(res));
   check("no probe failed", res.errors === 0, JSON.stringify(res));
-  check("latency is a non-negative sum", res.sumMs >= 0, String(res.sumMs));
+  check("latency is a positive sum", res.sumMs >= 3, String(res.sumMs));
+  await env.MEDIA.put("apk/kuchupuchu-latest.apk", new Uint8Array([0x50, 0x4b, 0x03, 0x04]));
+  const headApk = await mod.default.fetch(
+    new Request("https://kp.test/download/apk", { method: "HEAD" }),
+    env,
+    makeCtx(),
+  );
+  check(
+    "HEAD /download/apk serves 200 without auth and includes content-length",
+    headApk.status === 200 && headApk.headers.get("content-length") === "4",
+    `status=${headApk.status} len=${headApk.headers.get("content-length")}`,
+  );
   check(
     "lat.count lands in today's bucket",
     (await val(db, "lat.count")) === 3,

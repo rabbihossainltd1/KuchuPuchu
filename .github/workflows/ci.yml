@@ -53,6 +53,12 @@ jobs:
         run: npm run test:web:calls:e2e
       - name: Web push browser tests
         run: npm run test:web:push:e2e
+      - name: Web hardening browser tests
+        run: npm run test:web:hardening:e2e
+      - name: Web cutover browser tests
+        run: npm run test:web:cutover:e2e
+      - name: Web production cutover build & SW verification
+        run: npm run build:web:prod && npm run verify:web-sw
       - name: Upload Web browser QA report
         if: failure()
         uses: actions/upload-artifact@v4

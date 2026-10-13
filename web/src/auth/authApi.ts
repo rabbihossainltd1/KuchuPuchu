@@ -149,6 +149,14 @@ export const authApi = {
       ...(signal ? { signal } : {}),
     });
   },
+  getE2eeBackup(api: ApiClient, signal?: AbortSignal) {
+    return api.request<{ blob: string | null }>("/api/e2ee/backup", {
+      ...(signal ? { signal } : {}),
+    });
+  },
+  putE2eeBackup(api: ApiClient, blob: string | null, signal?: AbortSignal) {
+    return requestJson<{ ok: boolean }>(api, "/api/e2ee/backup", "PUT", { blob }, signal);
+  },
   logout(api: ApiClient) {
     return requestJson<{ ok: boolean }>(api, "/api/auth/logout", "POST", {});
   },

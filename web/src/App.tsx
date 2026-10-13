@@ -6,7 +6,7 @@ import { useBrowserRouter } from "./useBrowserRouter";
 import { useConnectivity } from "./useConnectivity";
 import { AccountSettingsPage } from "./auth/AccountSettingsPage";
 import { AuthScreen } from "./auth/AuthScreen";
-import { MobileGate, WelcomePage, useIsMobileViewport } from "./auth/WelcomePage";
+import { WelcomePage, useIsMobileViewport } from "./auth/WelcomePage";
 import { SitePage } from "./site/SitePages";
 import { useAuth } from "./auth/AuthContext";
 import { useProfileAvatar } from "./auth/useProfileAvatar";
@@ -275,14 +275,6 @@ export default function App() {
     );
   }
 
-  // The web client is a desktop product: signed-out phones and tablets get
-  // the app download gate. /account stays reachable on phones (Google
-  // recovery) and an existing signed-in session is never locked out; flag-off
-  // preview builds keep the foundation preview.
-  if (accountEnabled && isMobileViewport && !isAccountRoute && authStatus !== "signed-in") {
-    return <MobileGate />;
-  }
-
   if (isAccountRoute && !accountEnabled) {
     return <AccountRolloutGate onBack={goToChats} />;
   }
@@ -323,7 +315,11 @@ export default function App() {
       return !bareLanding || isAccountRoute || welcomeSignin ? (
         <AuthScreen onBackToChats={() => setWelcomeSignin(false)} />
       ) : (
-        <WelcomePage onSignIn={() => setWelcomeSignin(true)} navigate={navigate} />
+        <WelcomePage
+          onSignIn={() => setWelcomeSignin(true)}
+          navigate={navigate}
+          showMobileBanner={isMobileViewport}
+        />
       );
     }
 
@@ -360,20 +356,28 @@ export default function App() {
     ? (user.displayName || user.username).trim().slice(0, 2).toUpperCase()
     : "KP";
 
+  const showPreviewBanner = !(
+    accountEnabled &&
+    messagingEnabled &&
+    statusesEnabled &&
+    callsEnabled
+  );
+
   return (
     <div className="kp-app">
-      <div className="preview-banner" role="status">
-        <span className="preview-banner__dot" />
-        <strong>Foundation preview</strong>
-        <span className="preview-banner__divider" />
-        <span>{bannerCopy}</span>
-      </div>
+      {showPreviewBanner && (
+        <div className="preview-banner" role="status">
+          <span className="preview-banner__dot" />
+          <strong>Foundation preview</strong>
+          <span className="preview-banner__divider" />
+          <span>{bannerCopy}</span>
+        </div>
+      )}
 
       <div className="workspace">
         <aside className="nav-rail" aria-label="KuchuPuchu navigation">
           <div className="brand-lockup" role="img" aria-label="KuchuPuchu Web">
-            <BrandMark />
-            <span className="brand-wordmark">kp</span>
+            <BrandMark size={40} />
           </div>
 
           <nav className="primary-nav" aria-label="Main sections">

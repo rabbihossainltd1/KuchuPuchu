@@ -38,7 +38,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { Icon } from "../icons";
+import { BrandMark, Icon } from "../icons";
 import { messagingApi } from "./messagingApi";
 import { AiHistoryPane } from "./AiHistoryPane";
 import { MessageInfoSheet, ReactionPickerSheet } from "./MessageSheets";
@@ -809,7 +809,7 @@ export function ChatPane({
         <header className="conversation-header">
           <div className="conversation-header__identity">
             <div className="conversation-avatar conversation-avatar--empty">
-              <Icon name="message" size={20} />
+              <BrandMark size={38} />
             </div>
             <div className="conversation-header__copy">
               <h2 id="conversation-heading">Choose a conversation</h2>

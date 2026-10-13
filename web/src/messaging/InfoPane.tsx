@@ -28,12 +28,14 @@ import {
 import type { MessagingController } from "./useMessaging";
 
 function MemberRow({
+  api,
   member,
   meId,
   isOwner,
   busy,
   onRemove,
 }: {
+  api: ApiClient | null;
   member: ConversationMember;
   meId: string;
   isOwner: boolean;
@@ -41,7 +43,7 @@ function MemberRow({
   onRemove: (userId: string) => void;
 }) {
   const [confirm, setConfirm] = useState(false);
-  const url = useAvatar(null, member.user.avatarRef);
+  const url = useAvatar(api, member.user.avatarRef);
   const self = member.user.id === meId;
   const removable = isOwner && !self && member.role !== "owner";
 
@@ -384,6 +386,7 @@ export function InfoPane({
                 {conversation.members.map((member) => (
                   <MemberRow
                     key={member.user.id}
+                    api={api}
                     member={member}
                     meId={meId}
                     isOwner={isOwner}

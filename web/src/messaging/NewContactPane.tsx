@@ -13,6 +13,7 @@ import type { ApiClient } from "../auth/authApi";
 import type { Navigate } from "../useBrowserRouter";
 import type { MessagingController } from "./useMessaging";
 import { messagingApi } from "./messagingApi";
+import { useAvatar } from "./avatars";
 import { inviteUrl, toE164, type ContactMatchUser } from "./contacts";
 import { Icon } from "../icons";
 
@@ -72,6 +73,7 @@ export function NewContactPane({ controller, api, navigate }: Props) {
   };
 
   const showResult = checkedPhone !== "" && checkedPhone === e164;
+  const matchAvatar = useAvatar(api, match?.avatarRef ?? match?.avatarUrl ?? "");
 
   return (
     <section className="list-pane contacts-pane" aria-labelledby="new-contact-heading">
@@ -134,10 +136,14 @@ export function NewContactPane({ controller, api, navigate }: Props) {
         {showResult && match && (
           <div className="conversation-row contact-row new-contact__result">
             <span className="new-contact__avatar" aria-hidden="true">
-              {(match.displayName || match.username || checkedPhone)
-                .trim()
-                .slice(0, 2)
-                .toUpperCase()}
+              {matchAvatar ? (
+                <img className="avatar-img" src={matchAvatar} alt="" draggable={false} />
+              ) : (
+                (match.displayName || match.username || checkedPhone)
+                  .trim()
+                  .slice(0, 2)
+                  .toUpperCase()
+              )}
             </span>
             <span className="conversation-row__body">
               <span className="conversation-row__name">

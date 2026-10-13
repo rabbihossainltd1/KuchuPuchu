@@ -227,28 +227,19 @@ check(
 
 /* 6 — fb#9: the hedged brain */
 check(
-  "v166 fb#9: the brain is hedged — AI_HEDGE_MS 800 since v168 (was 1 600), hedge() racing the primary against the gated secondary through Promise.any, hfThenCf capped at 2 HF models × 7 s then Workers AI, aiBrain = Gemini primary (or the HF chain alone without a key); the photo turn hedges Gemini against the HF vision leg and the voice turn against Whisper",
-  src.includes("const AI_HEDGE_MS = 800;") &&
-    src.includes("async function hedge(") &&
+  "v166 fb#9: the brain is Gemini-only — aiBrain delegates directly to geminiChat, aiBrainStream streams via geminiStream, photo reads stream inline image parts on Gemini, and voice turns transcribe directly on Gemini without Hugging Face",
+  src.includes("async function geminiChat(") &&
+    src.includes("async function aiBrain(") &&
+    src.includes("return geminiChat(env, messages, maxTokens);") &&
+    src.includes("async function geminiStream(") &&
+    src.includes("async function aiBrainStream(") &&
+    src.includes("return geminiStream(env, prompt, [], maxTokens, onChunk, 12_000);") &&
     src.includes(
-      "return await Promise.any([answered(primary()), answered(gate.then(secondary))]);",
+      "(await geminiStream(env, fullPrompt, [{ mime: src.mime, b64 }], 900, push, 20_000)) ??",
     ) &&
-    src.includes(
-      "function hfThenCf(env: Env, messages: HfChatMessage[], maxTokens: number): Promise<string | null> {",
-    ) &&
-    src.includes("hfChat(env, messages, maxTokens, HF_CHAT_MODELS.slice(0, 2), 7_000)") &&
-    src.includes("if (!env.GEMINI_API_KEY) return hfThenCf(env, messages, maxTokens);") &&
-    src.includes(
-      "() => geminiChat(env, messages, maxTokens),\n    () => hfThenCf(env, messages, maxTokens),",
-    ) &&
-    // v167 (owner: "ai reply live Hobe … word by word"): the SAME hedge and the
-    // same hedge (800 ms since v168), but the primary now paints through the stream — the photo
-    // turn's Gemini leg streams and its HF leg is painted whole when it wins.
-    src.includes(
-      "answer = await hedgeStream(\n          (live) => geminiStream(env, fullPrompt, [{ mime: src.mime, b64 }], 900, live, 20_000),\n          hfLeg,",
-    ) &&
-    src.includes("const heard = await hedge(") &&
-    src.includes("if (hf) return hf;\n        return aiBrain("),
+    !src.includes("HF_TOKEN") &&
+    !src.includes("hfThenCf") &&
+    !src.includes("hfChat"),
 );
 
 /* 7 — new#1: the voice bubble is smaller again */
@@ -409,10 +400,9 @@ check(
 
 /* 17 — v167: the live AI reply */
 check(
-  "v167 item 5: the AI answer is LIVE — Gemini's streamGenerateContent feeds a throttled (140 ms) `ai_delta` frame into the chat's room with the text SO FAR, the streaming brain keeps the hedge (800 ms since v168) and the same 900-token legs, and the app renders the growing text in the reply's own bubble (caret at the end, cleared and never re-typed when the finished row lands)",
+  "v167 item 5: the AI answer is LIVE — Gemini's streamGenerateContent feeds a throttled (140 ms) `ai_delta` frame into the chat's room with the text SO FAR, the streaming brain uses the same 900-token budget, and the app renders the growing text in the reply's own bubble (caret at the end, cleared and never re-typed when the finished row lands)",
   src.includes(":streamGenerateContent?alt=sse") &&
     src.includes("async function geminiStream(") &&
-    src.includes("async function hedgeStream(") &&
     src.includes("async function aiBrainStream(") &&
     src.includes("const AI_DELTA_MS = 140;") &&
     src.includes("const liveText = firstReplyIntro ? `${firstReplyIntro} ${text}` : text;") &&

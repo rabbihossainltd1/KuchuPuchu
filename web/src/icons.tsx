@@ -1,4 +1,4 @@
-import { useId, type ReactNode, type SVGProps } from "react";
+import { type ReactNode, type SVGProps } from "react";
 
 export type IconName =
   | "chats"
@@ -471,34 +471,21 @@ export function Icon({ name, size = 20, ...props }: IconProps) {
 }
 
 export function BrandMark({ size = 34 }: { size?: number }) {
-  const gradientId = `kp-brand-${useId().replace(/:/g, "")}`;
-
   return (
-    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 40 40" fill="none">
-      <defs>
-        <linearGradient
-          id={gradientId}
-          x1="6"
-          y1="5"
-          x2="34"
-          y2="36"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop stopColor="#68a8ff" />
-          <stop offset="1" stopColor="#2f6fed" />
-        </linearGradient>
-      </defs>
-      <rect x="2" y="2" width="36" height="36" rx="13" fill={`url(#${gradientId})`} />
-      <path
-        d="M29.2 18.8a9.3 9.3 0 0 1-9.6 9.1 9.8 9.8 0 0 1-3.6-.7l-5.3 1.8 1.9-5a8.8 8.8 0 0 1-1.3-4.6 9.2 9.2 0 0 1 9.5-9 9.2 9.2 0 0 1 8.4 5.2"
-        stroke="white"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="17" cy="19" r="1.1" fill="white" />
-      <circle cx="21" cy="19" r="1.1" fill="white" />
-      <circle cx="25" cy="19" r="1.1" fill="white" />
-    </svg>
+    <img
+      aria-hidden="true"
+      src="/logo.png"
+      alt=""
+      width={size}
+      height={size}
+      draggable={false}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: Math.round(size * 0.28),
+        objectFit: "cover",
+        display: "block",
+      }}
+    />
   );
 }

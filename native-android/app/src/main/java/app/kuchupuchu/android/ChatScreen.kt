@@ -7604,6 +7604,7 @@ private fun LoginApprovalMessage(m: JSONObject) {
     val codeSurface = if (KpThemeMode.darkBlue) Color(0xFF21395F) else Color(0xFFD8E8FF)
     Column(
         Modifier
+            .widthIn(max = 268.dp)
             .fillMaxWidth()
             .padding(vertical = 4.dp)
             .clip(RoundedCornerShape(12.dp))
@@ -7613,57 +7614,51 @@ private fun LoginApprovalMessage(m: JSONObject) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier
-                    .size(23.dp)
-                    .clip(RoundedCornerShape(7.dp))
+                    .size(20.dp)
+                    .clip(RoundedCornerShape(6.dp))
                     .background(securityBlue),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("K", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text("K", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.5.sp)
             }
-            Spacer(Modifier.width(7.dp))
+            Spacer(Modifier.width(6.dp))
             Column {
-                Text("KuchuPuchu · Security", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = securityBlueText)
-                Text(time + " · Bangladesh time", fontSize = 9.5.sp, color = Muted, maxLines = 1)
+                Text("KuchuPuchu · Security", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = securityBlueText)
+                Text("$time · Bangladesh time", fontSize = 9.sp, color = Muted, maxLines = 1)
             }
         }
-        Spacer(Modifier.height(5.dp))
-        Text("New sign-in attempt", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = Ink)
-        Text(
-            "Device: $device wants to sign in to your account.",
-            fontSize = 11.sp,
-            color = Ink,
-        )
+        Spacer(Modifier.height(4.dp))
+        Text("New sign-in attempt · $device", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 2)
         // Full origin details (owner rule): where the attempt came from.
         val ip = meta.optString("ip").takeIf { it.isNotBlank() && it != "unknown" }
         val city = meta.optString("city").takeIf { it.isNotBlank() }
         val country = meta.optString("country").takeIf { it.isNotBlank() }
         val place = listOfNotNull(city, country).joinToString(", ")
-        if (place.isNotBlank()) {
-            Text("Location: $place", fontSize = 10.5.sp, color = Ink, maxLines = 1)
-        }
-        if (ip != null) {
-            Text("IP: $ip", fontSize = 10.5.sp, color = Ink, maxLines = 1)
+        val originMeta = listOfNotNull(place.takeIf { it.isNotBlank() }, ip?.let { "IP $it" }).joinToString(" · ")
+        if (originMeta.isNotBlank()) {
+            Text(originMeta, fontSize = 10.sp, color = Muted, maxLines = 1)
         }
         if (status == "PENDING" || status == "OTP_LOCKED") {
-            Spacer(Modifier.height(5.dp))
+            Spacer(Modifier.height(4.dp))
             when {
                 otpCode != null -> {
-                    Text("Sign-in code · enter on the new device", fontSize = 10.sp, color = Muted)
-                    Spacer(Modifier.height(3.dp))
+                    Text("Sign-in code", fontSize = 9.5.sp, color = Muted)
+                    Spacer(Modifier.height(2.dp))
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(9.dp))
+                            .clip(RoundedCornerShape(8.dp))
                             .background(codeSurface)
-                            .padding(start = 10.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+                            .padding(start = 10.dp, end = 4.dp, top = 3.dp, bottom = 3.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
                             otpCode,
                             modifier = Modifier.weight(1f),
-                            fontSize = 21.sp,
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
-                            letterSpacing = 4.sp,
+                            fontFamily = FontFamily.Monospace,
+                            letterSpacing = 2.sp,
                             color = securityBlueText,
                             maxLines = 1,
                         )
@@ -7683,32 +7678,38 @@ private fun LoginApprovalMessage(m: JSONObject) {
                                     ).show()
                                 }
                             },
+                            modifier = Modifier.height(28.dp),
+                            shape = RoundedCornerShape(7.dp),
+                            colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                                containerColor = securityBlue.copy(alpha = 0.24f),
+                                contentColor = securityBlueText,
+                            ),
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                         ) {
                             Icon(
                                 Icons.Filled.ContentCopy,
                                 contentDescription = "Copy sign-in code",
                                 tint = securityBlueText,
-                                modifier = Modifier.size(15.dp),
+                                modifier = Modifier.size(13.dp),
                             )
                             Spacer(Modifier.width(4.dp))
-                            Text("Copy", color = securityBlueText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Copy", color = securityBlueText, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
                 otpLocked -> Text(
-                    "Five incorrect codes used. The code is cleared, but approval is still available.",
-                    fontSize = 10.sp,
+                    "Five incorrect codes used. Approval is still available.",
+                    fontSize = 9.5.sp,
                     color = Muted,
                 )
                 else -> Text(
-                    "No code is available. You can still approve this sign-in.",
-                    fontSize = 10.sp,
+                    "Approve or decline this sign-in below.",
+                    fontSize = 9.5.sp,
                     color = Muted,
                 )
             }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(6.dp))
         if (canApprove) {
             Row {
                 androidx.compose.material3.Button(
@@ -7730,17 +7731,17 @@ private fun LoginApprovalMessage(m: JSONObject) {
                         }.start()
                     },
                     enabled = !busy,
-                    shape = RoundedCornerShape(9.dp),
+                    shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                     colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                         containerColor = securityBlue,
                         contentColor = Color.White,
                     ),
-                    modifier = Modifier.weight(1f).height(34.dp),
+                    modifier = Modifier.weight(1f).height(30.dp),
                 ) {
-                    Text("Accept", maxLines = 1, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Accept", maxLines = 1, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 }
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(6.dp))
                 androidx.compose.material3.Button(
                     onClick = {
                         if (busy) return@Button
@@ -7760,15 +7761,15 @@ private fun LoginApprovalMessage(m: JSONObject) {
                         }.start()
                     },
                     enabled = !busy,
-                    shape = RoundedCornerShape(9.dp),
+                    shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                     colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                         containerColor = securityBlue.copy(alpha = 0.12f),
                         contentColor = securityBlueText,
                     ),
-                    modifier = Modifier.weight(1f).height(34.dp),
+                    modifier = Modifier.weight(1f).height(30.dp),
                 ) {
-                    Text("Decline", maxLines = 1, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Decline", maxLines = 1, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         } else {
@@ -7779,7 +7780,7 @@ private fun LoginApprovalMessage(m: JSONObject) {
                 "CANCELLED" -> "Login request cancelled" to Muted
                 else -> "⏰ Expired" to Muted
             }
-            Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = color, maxLines = 1)
+            Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = color, maxLines = 1)
         }
     }
 }

@@ -323,6 +323,45 @@ export function isPassphraseBackup(blob: string): boolean {
   return typeof blob === "string" && blob.startsWith(KP2_PREFIX);
 }
 
+/** Seal an identity as a KP2 passphrase backup (PBKDF2-SHA256 200k + AES-256-GCM). */
+export async function sealPassphraseBackup(
+  identity: E2eeIdentity,
+  passphrase: string,
+): Promise<string | null> {
+  if (!isIdentity(identity) || !passphrase || passphrase.length < 6) return null;
+  try {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const passwordKey = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(passphrase),
+      "PBKDF2",
+      false,
+      ["deriveBits"],
+    );
+    const keyBytes = await crypto.subtle.deriveBits(
+      {
+        name: "PBKDF2",
+        hash: "SHA-256",
+        salt: salt as BufferSource,
+        iterations: KP2_ITERATIONS,
+      },
+      passwordKey,
+      256,
+    );
+    const key = await crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, ["encrypt"]);
+    const plaintext = new TextEncoder().encode(`${identity.p}\n${identity.u}`);
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv: iv as BufferSource },
+      key,
+      plaintext,
+    );
+    return `${KP2_PREFIX}${bytesToBase64(salt)}.${bytesToBase64(iv)}.${bytesToBase64(new Uint8Array(ciphertext))}`;
+  } catch {
+    return null;
+  }
+}
+
 /** First-device behaviour: mint a keypair when the account has no backup at all. */
 export async function generateIdentity(): Promise<E2eeIdentity> {
   const pair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [

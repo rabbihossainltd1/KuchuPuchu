@@ -6,7 +6,7 @@ const BUILD_ID = "__BUILD_ID__";
 const CACHE_NAME = `${CACHE_PREFIX}${BUILD_ID}`;
 const PRECACHE_URLS = __PRECACHE_URLS__;
 const APP_SHELL = "/index.html";
-const API_OR_WS_PATH = /^\/(?:api|ws)(?:\/|$)/;
+const API_OR_WS_PATH = /^\/(?:api|ws|download)(?:\/|$)/;
 // Slice J cutover: installs that still carry the RETIRED legacy shell caches
 // (public/sw.js, kp-shell-v1/v2) get them deleted when this worker activates,
 // so no stale legacy bytes survive the migration (and a rollback to the

@@ -571,10 +571,11 @@ fun rememberAvatarUrl(url: String?, avatarRef: String?): String? {
     val ctx = LocalContext.current
     // The persistent per-version cache wins, so a contact's photo survives an app
     // restart and a light row resolves to the bytes fetched for the FULL shape.
-    val state = remember(ref) { mutableStateOf(AvatarRefs.get(ctx, ref) ?: inline) }
-    LaunchedEffect(ref) {
-        val have = state.value
+    val state = remember(ref, inline) { mutableStateOf(AvatarRefs.get(ctx, ref) ?: inline) }
+    LaunchedEffect(ref, inline, ScreenStore.profileVersion, ScreenStore.poke) {
+        val have = state.value ?: AvatarRefs.get(ctx, ref) ?: inline
         if (have != null) {
+            if (state.value == null) state.value = have
             // We are rendering an inline data-URI (chat box header, /api/me):
             // file it under the ref so the next open — and every light row that
             // shows the same person — paints from cache instead of re-decoding
@@ -588,18 +589,19 @@ fun rememberAvatarUrl(url: String?, avatarRef: String?): String? {
         }
         val fetched =
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching {
-                    val ownerId = ref.substringBefore("@v")
-                    // Owner round 31: `g:<convId>@v<n>` is a GROUP picture — same
-                    // cache, different endpoint.
-                    val data =
-                        if (ownerId.startsWith("g:")) {
-                            Api.get("/api/conversations/${ownerId.removePrefix("g:")}/avatar", force = true)
-                        } else {
-                            Api.get("/api/users/$ownerId/avatar", force = true)
-                        }
-                    data.optString("avatarUrl").takeIf { it.startsWith("data:") }
-                }.getOrNull()
+                AvatarRefs.get(ctx, ref)
+                    ?: runCatching {
+                        val ownerId = ref.substringBefore("@v")
+                        // Owner round 31: `g:<convId>@v<n>` is a GROUP picture — same
+                        // cache, different endpoint.
+                        val data =
+                            if (ownerId.startsWith("g:")) {
+                                Api.get("/api/conversations/${ownerId.removePrefix("g:")}/avatar", force = true)
+                            } else {
+                                Api.get("/api/users/$ownerId/avatar", force = true)
+                            }
+                        data.optString("avatarUrl").takeIf { it.startsWith("data:") }
+                    }.getOrNull()
             }
         if (fetched != null) {
             AvatarRefs.put(ctx, ref, fetched)

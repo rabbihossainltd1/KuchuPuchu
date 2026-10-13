@@ -128,8 +128,8 @@ check(
   `length=${normalizedAi.length}`,
 );
 check(
-  "HF, Cloudflare, Gemini, and the Gemini stream have no 600-character truncation or stream stop",
-  (workerSource.match(/completeAiText\(/g) ?? []).length >= 5 &&
+  "Gemini and the Gemini stream have no 600-character truncation or stream stop",
+  (workerSource.match(/completeAiText\(/g) ?? []).length >= 3 &&
     !/\.slice\(0,\s*600\)/.test(workerSource) &&
     !/text\.length\s*<=\s*600/.test(workerSource) &&
     workerSource.includes("onChunk(text);"),

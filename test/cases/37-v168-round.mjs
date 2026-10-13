@@ -138,8 +138,8 @@ check(
 
 /* 5 — the AI reply starts sooner and types word by word */
 check(
-  "v168 item 5 (r55 update): the typing bubble hedges the model after 800 ms (was 1_600) and the LIVE AI bubble reveals through a FRAME-SMOOTH fractional-char pen (dt-timed 26/55/90 cps, 16/30 ms frames - the r55 realtime fix; the word staircase is gone by design); the completed answer lands whole and the handover guards stay",
-  worker.includes("const AI_HEDGE_MS = 800;") &&
+  "v168 item 5 (r55 update): the typing bubble streams Gemini directly and the LIVE AI bubble reveals through a FRAME-SMOOTH fractional-char pen (dt-timed 26/55/90 cps, 16/30 ms frames - the r55 realtime fix; the word staircase is gone by design); the completed answer lands whole and the handover guards stay",
+  worker.includes("async function geminiStream(") &&
     !worker.includes("AI_HEDGE_MS = 1_600") &&
     chat.includes("var liveReveal by remember { mutableStateOf(0) }") &&
     chat.includes("behind > 120 -> 90f") &&

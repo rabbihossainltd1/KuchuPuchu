@@ -33,7 +33,7 @@ function versionedServiceWorker(): Plugin {
         // legacy kp-shell cache had, minus the stale-prone unversioned app.js.
         // Their real bytes feed the build id, so an icon/manifest change also
         // rotates the service worker.
-        const publicExtras = ["icon.svg", "manifest.webmanifest"].map((name) => ({
+        const publicExtras = ["icon.svg", "logo.png", "manifest.webmanifest"].map((name) => ({
           url: `/${name}`,
           bytes: readFileSync(resolve(process.cwd(), "web/public", name)),
         }));

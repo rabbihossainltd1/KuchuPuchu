@@ -589,3 +589,28 @@ test("account sign-in and profile settings are accessible on desktop and mobile"
     .analyze();
   expect(results.violations.map((violation) => `${violation.id}: ${violation.help}`)).toEqual([]);
 });
+
+test("account settings saves KP2 key backups", async ({ page }) => {
+  let savedBlob = "";
+  const { calls } = await mockWorker(page, {
+    "/api/auth/verify-phone": () =>
+      jsonResponse({ status: "SESSION", token: "backup-session", user: baseProfile }),
+    "/api/e2ee/backup": (req) => {
+      if (req.method === "PUT") {
+        savedBlob = String(req.body?.blob ?? "");
+        return jsonResponse({ ok: true });
+      }
+      return jsonResponse({ blob: savedBlob || null });
+    },
+  });
+
+  await page.goto("/account");
+  await enterPhone(page);
+  await expect(page.getByRole("heading", { name: "Account & settings" })).toBeVisible();
+
+  await page.getByLabel("Backup passphrase (6+ characters)").fill("my-strong-passphrase");
+  await page.getByRole("button", { name: "Save key backup" }).click();
+  await expect(page.getByText("Encrypted KP2 key backup saved.")).toBeVisible();
+  expect(savedBlob.startsWith("KP2.")).toBe(true);
+  expect(calls.some((c) => c.path === "/api/e2ee/backup" && c.method === "PUT")).toBe(true);
+});

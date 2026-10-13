@@ -1074,142 +1074,20 @@
   font-size: 12.5px;
 }
 
-/* Slice I — Light Cream overrides for the account/auth surfaces. The cards
- * already ride var(--kp-card) (white in light); these flip the literal inks
- * so copy never sits light-on-light. Semantic reds/greens keep their meaning
- * but deepen for contrast on cream. */
-:root[data-kp-theme="light"] .settings-header .eyebrow,
-:root[data-kp-theme="light"] .account-hero__identity .eyebrow {
-  color: #92400e;
-}
-
-:root[data-kp-theme="light"] .notice-card h1,
-:root[data-kp-theme="light"] .settings-header h1,
-:root[data-kp-theme="light"] .account-hero__identity h2,
-:root[data-kp-theme="light"] .settings-card__heading h2,
-:root[data-kp-theme="light"] .auth-brand h1,
-:root[data-kp-theme="light"] .approval-summary strong {
-  color: #1c1917;
-}
-
-/* Owner (2026-10-13): the auth card's heading was the one surface the light
- * palette never re-inked — "Confirm this sign-in" sat near-white on white.
- * The eyebrow and the text buttons deepen with it so every label on the card
- * stays readable on cream. */
-:root[data-kp-theme="light"] .auth-brand .eyebrow {
-  color: #92400e;
-}
-
-:root[data-kp-theme="light"] .text-button {
-  color: #1d4ed8;
-}
-
-:root[data-kp-theme="light"] .approval-summary {
-  border-color: rgba(13, 21, 36, 0.12);
-  background: #f4f6fb;
-}
-
-:root[data-kp-theme="light"] .approval-summary__label,
-:root[data-kp-theme="light"] .auth-footnote {
-  color: var(--kp-muted);
-}
-
-:root[data-kp-theme="light"] .auth-copy,
-:root[data-kp-theme="light"] .field-label,
-:root[data-kp-theme="light"] .account-hero__details span,
-:root[data-kp-theme="light"] .phone-dial {
-  color: #44403c;
-}
-
-:root[data-kp-theme="light"] .auth-input {
-  color: #1c1917;
-  background: #ffffff;
-}
-
-:root[data-kp-theme="light"] .auth-input::placeholder {
-  color: var(--kp-muted);
-}
-
-:root[data-kp-theme="light"] .settings-footnote,
-:root[data-kp-theme="light"] .auth-footer p,
-:root[data-kp-theme="light"] .approval-summary__expiry,
-:root[data-kp-theme="light"] .account-hero__identity p:last-child,
-:root[data-kp-theme="light"] .account-hero__details strong,
-:root[data-kp-theme="light"] .google-action__loading {
-  color: var(--kp-muted);
-}
-
-:root[data-kp-theme="light"] .secondary-button {
-  border-color: rgba(122, 111, 99, 0.35);
-  color: #44403c;
-}
-
-:root[data-kp-theme="light"] .secondary-button:hover:not(:disabled) {
-  border-color: rgba(180, 83, 9, 0.45);
-  color: #1c1917;
-}
-
-:root[data-kp-theme="light"] .auth-back-link,
-:root[data-kp-theme="light"] .settings-card__icon {
-  color: #92400e;
-}
-
-:root[data-kp-theme="light"] .auth-back-link:hover {
-  color: #78350f;
-}
-
-:root[data-kp-theme="light"] .auth-notice--info {
-  border-color: rgba(29, 78, 216, 0.25);
-  color: #1e40af;
-}
-
-:root[data-kp-theme="light"] .auth-notice--success {
-  border-color: rgba(22, 101, 52, 0.3);
-  color: #166534;
-}
-
-:root[data-kp-theme="light"] .auth-inline-error,
-:root[data-kp-theme="light"] .settings-error,
-:root[data-kp-theme="light"] .google-action__error {
-  border-color: rgba(185, 28, 28, 0.3);
-  color: #b91c1c;
-}
-
-:root[data-kp-theme="light"] .account-avatar {
-  color: #78350f;
-}
-
-:root[data-kp-theme="light"] .rollout-note {
-  color: #713f12;
-}
-
-:root[data-kp-theme="light"] .rollout-note svg {
-  color: #b45309;
-}
-
-:root[data-kp-theme="light"] .settings-success {
-  color: #15803d;
-}
-
-:root[data-kp-theme="light"] .field-help--checking {
-  color: #92400e;
-}
-
-:root[data-kp-theme="light"] .auth-page {
-  background: #f7f6f4;
-}
-
-:root[data-kp-theme="light"] .auth-card,
-:root[data-kp-theme="light"] .notice-card {
-  background: #ffffff;
-}
-
 /* Real brand logo tile on the auth card. */
 .auth-logo {
   width: 46px;
   height: 46px;
   border-radius: 12px;
-  box-shadow: 0 8px 22px rgba(240, 180, 60, 0.25);
+  box-shadow: 0 8px 22px rgba(47, 111, 237, 0.28);
+}
+
+.settings-avatar-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
 /* Full-screen OTP entry: six digit boxes over the hidden real input. */
@@ -1249,13 +1127,13 @@
 /* Owner (2026-10-13): a digit landing in a box pops it; the box that types
    next breathes so the eye is always on the cursor. */
 .otp-box--filled {
-  border-color: #f0b43c;
-  color: #f0b43c;
+  border-color: #60a5fa;
+  color: #93c5fd;
   transform: translateY(-2px);
   animation: kp-otp-pop 180ms ease-out;
 }
 .otp-box--active {
-  border-color: rgba(246, 198, 91, 0.75);
+  border-color: rgba(96, 165, 250, 0.75);
   animation: kp-otp-breathe 1.6s ease-in-out infinite;
 }
 /* Any tap inside the row (or keyboard focus) lights the row up — the boxes
@@ -1264,8 +1142,8 @@
   background: rgba(255, 255, 255, 0.09);
 }
 .otp-boxes:focus-within .otp-box--active {
-  border-color: #f6c65b;
-  box-shadow: 0 0 0 3px rgba(246, 198, 91, 0.16);
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.18);
 }
 /* Verifying: the row runs a light wave while the request is in flight. */
 .otp-boxes--verifying .otp-box {
@@ -1308,10 +1186,10 @@
 @keyframes kp-otp-breathe {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(246, 198, 91, 0);
+    box-shadow: 0 0 0 0 rgba(96, 165, 250, 0);
   }
   50% {
-    box-shadow: 0 0 0 4px rgba(246, 198, 91, 0.14);
+    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.16);
   }
 }
 @keyframes kp-otp-wave {
@@ -1322,7 +1200,7 @@
   }
   50% {
     transform: translateY(-3px);
-    border-color: rgba(246, 198, 91, 0.65);
+    border-color: rgba(96, 165, 250, 0.65);
   }
 }
 @keyframes kp-otp-shake {
@@ -1350,17 +1228,6 @@
   .otp-full--error .otp-boxes {
     animation: none;
   }
-}
-:root[data-kp-theme="light"] .otp-box {
-  border-color: rgba(13, 21, 36, 0.22);
-  background: rgba(13, 21, 36, 0.04);
-}
-:root[data-kp-theme="light"] .otp-box--filled {
-  border-color: #b57a10;
-  color: #b57a10;
-}
-:root[data-kp-theme="light"] .otp-boxes:focus-within .otp-box {
-  background: rgba(13, 21, 36, 0.07);
 }
 /* Visually hidden (clip-path, not a nested input): the accessible label for
    the real field, kept out of the flex row so it never eats a tap. */
@@ -1396,8 +1263,8 @@
   padding: 13px 26px;
   font-weight: 800;
   font-size: 15px;
-  color: #241a05;
-  background: linear-gradient(135deg, #f6c65b, #e29a1f);
+  color: #ffffff;
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
   cursor: pointer;
 }
 .otp-full__verify:disabled {
@@ -1410,8 +1277,8 @@
   height: 15px;
   flex: none;
   border-radius: 50%;
-  border: 2.5px solid rgba(36, 26, 5, 0.28);
-  border-top-color: #241a05;
+  border: 2.5px solid rgba(255, 255, 255, 0.28);
+  border-top-color: #ffffff;
   animation: kp-otp-spin 700ms linear infinite;
 }
 @keyframes kp-otp-spin {

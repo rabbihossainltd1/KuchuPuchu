@@ -12,6 +12,7 @@
 
 import { useCallback, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
+import { useProfileAvatar } from "../auth/useProfileAvatar";
 import { useE2eeIdentity } from "../messaging/useE2eeIdentity";
 import { StatusComposer } from "./StatusComposer";
 import { StatusFeed } from "./StatusFeed";
@@ -29,8 +30,9 @@ type Props = {
 
 export function StatusWorkspace({ onOpenChat, poke = 0 }: Props) {
   const { api, token, user } = useAuth();
+  const profileAvatar = useProfileAvatar(api, user);
   const meName = user ? user.displayName || user.username || "Me" : "";
-  const meAvatar = typeof user?.avatarUrl === "string" ? user.avatarUrl : "";
+  const meAvatar = profileAvatar.src ?? (typeof user?.avatarUrl === "string" ? user.avatarUrl : "");
 
   const identity = useE2eeIdentity(api, Boolean(token && user?.id), user?.e2eePublicKey ?? "");
   const controller = useStatuses({ api: token ? api : null, identity: identity.identity, poke });
