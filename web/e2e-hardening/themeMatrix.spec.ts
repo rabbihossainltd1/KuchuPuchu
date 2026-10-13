@@ -19,10 +19,23 @@ const BREAKPOINTS = [
   { name: "1920x1080", width: 1920, height: 1080 },
 ] as const;
 
-const THEMES = [
-  { name: "dark-blue", storage: "dark_blue", attribute: "dark_blue" },
-  { name: "light-cream", storage: "light", attribute: "light" },
-] as const;
+/* Owner (2026-10-13): the Web ships dark blue only — the light-cream matrix
+   row is gone from the product (see appTheme.ts). The legacy-storage test
+   below proves an old "light" choice cannot resurrect the cream palette. */
+const THEMES = [{ name: "dark-blue", storage: "dark_blue", attribute: "dark_blue" }] as const;
+
+test("a legacy stored light choice still paints dark blue", async ({ page }) => {
+  await signIn(page);
+  await page.addInitScript(() => {
+    window.localStorage.setItem("kp.app_theme", "light");
+  });
+  const worker = await createMockWorker();
+  await worker.install(page);
+  await page.goto("/");
+
+  await expect(page.locator("html")).toHaveAttribute("data-kp-theme", "dark_blue");
+  expect(await page.evaluate(() => window.localStorage.getItem("kp.app_theme"))).toBe("dark_blue");
+});
 
 for (const theme of THEMES) {
   for (const breakpoint of BREAKPOINTS) {
@@ -86,22 +99,24 @@ for (const theme of THEMES) {
   });
 }
 
-test("the appearance card lists both themes and switches live", async ({ page }) => {
+test("the Web is dark blue only — no appearance card can flip it to cream", async ({ page }) => {
   await signIn(page);
   const worker = await createMockWorker();
   await worker.install(page);
   await page.goto("/account");
 
-  const darkRadio = page.getByRole("radio", { name: /Dark Blue/ });
-  const lightRadio = page.getByRole("radio", { name: /Light Cream/ });
-  await expect(darkRadio).toBeChecked();
+  // Owner (2026-10-13): the account card that listed Dark Blue / Light Cream
+  // was removed with the light palette.
+  await expect(page.getByRole("region", { name: "App theme" })).toHaveCount(0);
+  await expect(page.getByRole("radio", { name: /Light Cream/ })).toHaveCount(0);
+  await expect(page.locator("html")).toHaveAttribute("data-kp-theme", "dark_blue");
 
-  await lightRadio.check();
-  await expect(page.locator("html")).toHaveAttribute("data-kp-theme", "light");
+  // The locked default is what gets stored, even if an attacker (or an old
+  // tab) writes the legacy value straight into storage.
+  await page.evaluate(() => window.localStorage.setItem("kp.app_theme", "light"));
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-kp-theme", "dark_blue");
   await expect
     .poll(() => page.evaluate(() => window.localStorage.getItem("kp.app_theme")))
-    .toBe("light");
-
-  await darkRadio.check();
-  await expect(page.locator("html")).toHaveAttribute("data-kp-theme", "dark_blue");
+    .toBe("dark_blue");
 });

@@ -5212,13 +5212,17 @@ const convBetween = (db, a, b) =>
     src.indexOf("async function resolveApprovalMessage("),
   );
   check(
-    "r32-27: login-alert card has a Decline action (no Approve): the push carries kp_login_req; KpNotify adds Decline instead of Like when it is present; the receiver posts /api/auth/login/decline with that id, then marks read; manifest filter declares the action",
+    // Owner (2026-10-13): the login alert is ONE compact Decline action now —
+    // "approve decline button taw onek boro" — so the read action only rides
+    // regular message cards (the else branch), never the security prompt.
+    "r32-27: login-alert card has a single compact Decline action (no Approve, no Mark-as-read): the push carries kp_login_req; KpNotify adds Decline instead of Like when it is present; the receiver posts /api/auth/login/decline with that id; manifest filter declares the action",
     sam.includes("kp_login_req: requestId,") &&
       notify.includes("loginRequestId: String? = null,") &&
       notify.includes(".setAction(KpNotifActionReceiver.ACTION_DECLINE_LOGIN)") &&
-      notify.includes(
-        "if (declineAction != null) addAction(declineAction) else addAction(likeAction)",
-      ) &&
+      notify.includes("if (declineAction != null) {") &&
+      notify.includes("addAction(declineAction)") &&
+      notify.includes("addAction(likeAction)") &&
+      notify.includes("addAction(readAction)") &&
       notify.includes(
         'Api.post("/api/auth/login/decline", org.json.JSONObject().put("requestId", req))',
       ) &&
@@ -6082,7 +6086,7 @@ const convBetween = (db, a, b) =>
         ),
     );
     check(
-      "r32-35: app — bounded fetch (Api.downloadWithin via Bitmaps.fetchWithin, cache-first, stored for the chat), only an /api/ path is fetched, the actual image takes BigPictureStyle precedence over stacked-thread style, and Reply / Like / Mark-as-read remain",
+      "r32-35: app — bounded fetch (Api.downloadWithin via Bitmaps.fetchWithin, cache-first, stored for the chat), only an /api/ path is fetched, the actual image takes BigPictureStyle precedence over stacked-thread style, and message cards keep Reply / Like / Mark-as-read (login alerts take the decline-only branch above)",
       api.includes("fun downloadWithin(pathOrKey: String, millis: Long): ByteArray? {") &&
         api.includes("http.newBuilder().callTimeout(millis, TimeUnit.MILLISECONDS).build()") &&
         ui.includes("fun fetchWithin(url: String, millis: Long, maxSide: Int = 720): Bitmap? {") &&
@@ -6100,7 +6104,7 @@ const convBetween = (db, a, b) =>
         cardStyle.includes("setLargeIcon(picture)") &&
         notify.indexOf("NotificationCompat.BigPictureStyle()") <
           notify.indexOf('if (!convoId.contains("kp_official_bot")) addAction(replyAction)') &&
-        notify.includes(".addAction(readAction)"),
+        notify.includes("addAction(readAction)"),
     );
   }
   // Item 36: KuchuPuchu in the system share sheet. A dedicated translucent

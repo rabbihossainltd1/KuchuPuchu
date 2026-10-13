@@ -33,24 +33,35 @@ function browserStorage(): ThemeStorage | null {
   }
 }
 
+/**
+ * Owner (2026-10-13): "website er colour theme dark blue hobe" — the Web is
+ * dark-blue only now. The light palette is gone from the product: this
+ * function always resolves to {DEFAULT_APP_THEME}, and a device that still
+ * carries a stored legacy "light" value is migrated back on the spot. The
+ * Android app keeps its own Appearance switch; only the browser is locked.
+ */
 export function storedAppTheme(storage: ThemeStorage | null = browserStorage()): AppTheme {
   try {
-    const raw = storage?.getItem(APP_THEME_STORAGE_KEY);
-    return isAppTheme(raw) ? raw : DEFAULT_APP_THEME;
+    if (storage?.getItem(APP_THEME_STORAGE_KEY) === "light") {
+      storage.setItem(APP_THEME_STORAGE_KEY, DEFAULT_APP_THEME);
+    }
   } catch {
-    return DEFAULT_APP_THEME;
+    // A blocked storage API is fine — the dark default applies regardless.
   }
+  return DEFAULT_APP_THEME;
 }
 
+/** Kept for parity with the Android preference; the Web only ever stores the
+ *  dark default (a legacy "light" write is coerced, never persisted). */
 export function persistAppTheme(
   theme: AppTheme,
   storage: ThemeStorage | null = browserStorage(),
 ): void {
   try {
-    storage?.setItem(APP_THEME_STORAGE_KEY, theme);
+    storage?.setItem(APP_THEME_STORAGE_KEY, theme === "light" ? DEFAULT_APP_THEME : theme);
   } catch {
-    // A blocked storage API must not break the live switch; the attribute
-    // below still re-skins this session.
+    // A blocked storage API must not break the app; the attribute already
+    // carries the theme for this session.
   }
 }
 

@@ -7731,14 +7731,14 @@ private fun LoginApprovalMessage(m: JSONObject) {
                     },
                     enabled = !busy,
                     shape = RoundedCornerShape(9.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                     colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                         containerColor = securityBlue,
                         contentColor = Color.White,
                     ),
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).height(34.dp),
                 ) {
-                    Text("Accept", maxLines = 1, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Accept", maxLines = 1, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Spacer(Modifier.width(8.dp))
                 androidx.compose.material3.Button(
@@ -7761,14 +7761,14 @@ private fun LoginApprovalMessage(m: JSONObject) {
                     },
                     enabled = !busy,
                     shape = RoundedCornerShape(9.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                     colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                         containerColor = securityBlue.copy(alpha = 0.12f),
                         contentColor = securityBlueText,
                     ),
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).height(34.dp),
                 ) {
-                    Text("Decline", maxLines = 1, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Decline", maxLines = 1, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         } else {

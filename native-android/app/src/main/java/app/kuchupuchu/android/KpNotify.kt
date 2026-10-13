@@ -543,11 +543,19 @@ object KpNotify {
                 // only bounce off the API's NO_REPLIES refusal.
                 .apply {
                     if (!convoId.contains("kp_official_bot")) addAction(replyAction)
-                    // A login alert: Decline + Mark as read only (Like is
-                    // meaningless on a security prompt).
-                    if (declineAction != null) addAction(declineAction) else addAction(likeAction)
+                    // Owner (2026-10-13): the login alert keeps ONE compact
+                    // action — Decline. The old Decline + Mark-as-read pair
+                    // rendered as two huge buttons across the shade (owner:
+                    // "approve decline button taw onek boro"); read-marking is
+                    // meaningless for a security prompt — the card clears
+                    // itself when the request resolves.
+                    if (declineAction != null) {
+                        addAction(declineAction)
+                    } else {
+                        addAction(likeAction)
+                        addAction(readAction)
+                    }
                 }
-                .addAction(readAction)
                 // Muted: no heads-up, no sound — channel is silent anyway,
                 // and PRIORITY_DEFAULT keeps it out of the full-intent path.
                 .setPriority(if (muted) NotificationCompat.PRIORITY_DEFAULT else NotificationCompat.PRIORITY_HIGH)

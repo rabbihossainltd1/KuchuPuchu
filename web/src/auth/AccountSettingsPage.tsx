@@ -4,7 +4,6 @@ import { isWebFeatureEnabled } from "../featureFlags";
 import { BrandMark, Icon } from "../icons";
 import { CallSettingsSection } from "../calls/CallSettingsSection";
 import { PushSettingsSection } from "../push/PushSettingsSection";
-import { AppearanceSection } from "../theme/AppearanceSection";
 import { RouteLink } from "../RouteLink";
 import { useAuth } from "./AuthContext";
 import { useProfileAvatar } from "./useProfileAvatar";
@@ -494,8 +493,6 @@ export function AccountSettingsPage({
               device revocation is not available here; sign out on that device to end its session.
             </p>
           </section>
-
-          <AppearanceSection />
 
           {isWebFeatureEnabled("push") && <PushSettingsSection api={api} />}
 

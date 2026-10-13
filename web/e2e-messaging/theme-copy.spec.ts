@@ -12,16 +12,17 @@ async function mount(page: Parameters<typeof signIn>[0]) {
   await page.goto("/");
 }
 
-test("app appearance labels and notes are English", async ({ page }) => {
+test("the account page offers no light theme — the Web is dark blue only", async ({ page }) => {
+  // Owner (2026-10-13): "website er colour theme dark blue hobe" — the light
+  // option is gone from the Web. Even a device that still carries a legacy
+  // stored choice paints dark blue.
+  await page.addInitScript(() => window.localStorage.setItem("kp.app_theme", "light"));
   await mount(page);
   await page.goto("/account");
-  const appearance = page.getByRole("region", { name: "App theme" });
-  await expect(appearance.getByText("Dark Blue", { exact: true })).toBeVisible();
-  await expect(appearance.getByText("Light Cream", { exact: true })).toBeVisible();
-  const hasBengali = await appearance.evaluate((element) =>
-    /[\u0980-\u09ff]/u.test(element.textContent ?? ""),
-  );
-  expect(hasBengali).toBe(false);
+  await expect(page.getByRole("heading", { name: "Account & settings" })).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("data-kp-theme", "dark_blue");
+  await expect(page.getByRole("region", { name: "App theme" })).toHaveCount(0);
+  expect(await page.evaluate(() => window.localStorage.getItem("kp.app_theme"))).toBe("dark_blue");
 });
 
 test("chat theme choices and current label are English", async ({ page }) => {
