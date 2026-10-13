@@ -85,12 +85,25 @@ test("signed-out mobile visitors see feature banners, no login buttons, footer l
   await expect(
     mobilePage.getByRole("heading", { name: "Built for everyday privacy" }),
   ).toBeVisible();
+  await expect(
+    mobilePage.getByRole("heading", {
+      name: "Every feature built into KuchuPuchu Android & Web",
+    }),
+  ).toBeVisible();
+  await expect(
+    mobilePage.getByRole("heading", { name: "How to Hide & Unhide Secret Chats" }),
+  ).toBeVisible();
   await expect(mobilePage.getByRole("button", { name: "Open KuchuPuchu Web" })).toHaveCount(0);
 
   await nav.getByRole("link", { name: "Encryption" }).click();
   await expect(mobilePage).toHaveURL(/\/encryption$/);
   await expect(
     mobilePage.getByRole("heading", { name: "End-to-end encryption (KP1 & KP2)" }),
+  ).toBeVisible();
+  await expect(
+    mobilePage.getByRole("heading", {
+      name: "Visual Cryptography & Privacy Shield Banners",
+    }),
   ).toBeVisible();
 
   await nav.getByRole("link", { name: "Overview" }).click();

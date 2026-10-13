@@ -3,6 +3,12 @@ import { RouteLink } from "../RouteLink";
 import { useIsMobileViewport } from "../auth/WelcomePage";
 import { SITE_PAGES, type SitePageId } from "../router";
 import type { Navigate } from "../useBrowserRouter";
+import {
+  AllAndroidFeatureBanners,
+  AndroidMasterFeatureGrid,
+  SkeuomorphicPhoneTrio,
+  type FeatureBannerCategory,
+} from "./FeatureBanners";
 import { HEADER_PAGES, LEGAL_PAGES, PublicHeader, SITE_PAGE_LABELS } from "./PublicHeader";
 
 type SiteCard = {
@@ -507,6 +513,26 @@ export function SitePage({ page, onSignIn, onHome, navigate }: SitePageProps) {
   const isMobile = useIsMobileViewport();
   const content = PAGES[page];
   const others = HEADER_PAGES.filter((candidate) => candidate !== page);
+  const bannerCategory: FeatureBannerCategory =
+    page === "features"
+      ? "features"
+      : page === "encryption"
+        ? "encryption"
+        : page === "architecture"
+          ? "architecture"
+          : page === "faq"
+            ? "faq"
+            : "legal";
+  const bannerHeading =
+    page === "features"
+      ? "All 12 Android & Web Visual Feature Banners"
+      : page === "encryption"
+        ? "Visual Cryptography & Privacy Shield Banners"
+        : page === "architecture"
+          ? "Edge, Media & Real-Time Architecture Banners"
+          : page === "faq"
+            ? "Visual Step-by-Step How-To Guides"
+            : "Zero-Knowledge Privacy & Vault Banners";
 
   useEffect(() => {
     document.title = `${SITE_PAGE_LABELS[page]} — KuchuPuchu`;
@@ -546,6 +572,15 @@ export function SitePage({ page, onSignIn, onHome, navigate }: SitePageProps) {
             )}
           </div>
         </header>
+
+        {page === "features" && (
+          <>
+            <SkeuomorphicPhoneTrio />
+            <AndroidMasterFeatureGrid />
+          </>
+        )}
+
+        <AllAndroidFeatureBanners category={bannerCategory} heading={bannerHeading} />
 
         <section
           className="kp-site__cards-section"

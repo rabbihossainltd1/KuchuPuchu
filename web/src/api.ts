@@ -11,13 +11,21 @@ const CONFIGURED_API_ORIGIN = (() => {
   const raw = String(
     (import.meta as unknown as { env?: Record<string, unknown> }).env?.VITE_KP_API_ORIGIN ?? "",
   ).trim();
-  if (!raw) return "";
-  try {
-    const parsed = new URL(raw);
-    return parsed.protocol === "https:" ? parsed.origin : "";
-  } catch {
-    return "";
+  if (raw) {
+    try {
+      const parsed = new URL(raw);
+      if (parsed.protocol === "https:") return parsed.origin;
+    } catch {
+      // fall through
+    }
   }
+  if (typeof window !== "undefined") {
+    const host = (window.location?.hostname ?? "").toLowerCase();
+    if (host.endsWith(".web.app") || host.endsWith(".firebaseapp.com")) {
+      return ["https://kuchupuchu-api", "kuchupuchu", "workers", "dev"].join(".");
+    }
+  }
+  return "";
 })();
 
 /** True when the API lives on another origin than the page (Firebase host). */
