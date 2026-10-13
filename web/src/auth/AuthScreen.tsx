@@ -66,7 +66,12 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
   const [googleClientId, setGoogleClientId] = useState<string | null>(null);
   const [googleConfigLoading, setGoogleConfigLoading] = useState(false);
   const [googleConfigFailed, setGoogleConfigFailed] = useState(false);
+  // Owner (2026-10-13): the OTP boxes visibly react — a wrong code shakes the
+  // row, typing clears the state, and a successful submit is never followed by
+  // a dead form (the tap-to-focus fix below keeps the input reachable).
+  const [otpError, setOtpError] = useState(false);
   const otpAttempted = useRef(false);
+  const otpInputRef = useRef<HTMLInputElement | null>(null);
   const actionController = useRef<AbortController | null>(null);
 
   const selectedCountry = useMemo(
@@ -77,6 +82,13 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
   useEffect(() => {
     return () => actionController.current?.abort();
   }, []);
+
+  // Owner (2026-10-13): the input is disabled while a code is being checked,
+  // so a focus() fired mid-flight lands nowhere. Once the failed attempt
+  // settles, hand the focus straight back — the next digit needs no tap.
+  useEffect(() => {
+    if (otpError && !busy && flow.kind === "approval") otpInputRef.current?.focus();
+  }, [otpError, busy, flow.kind]);
 
   useEffect(() => {
     if (flow.kind !== "google") {
@@ -331,6 +343,7 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
 
     otpAttempted.current = true;
     const controller = startAction();
+    setOtpError(false);
     setBusy(true);
     setNotice({ kind: "info", text: "Checking the one-time code…" });
     try {
@@ -345,6 +358,10 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
       }
       if (result.status === "INVALID_CODE") {
         setOtp("");
+        setOtpError(true);
+        // The row shakes on the error frame; the input keeps the focus so the
+        // next digit can be typed without touching the mouse again.
+        otpInputRef.current?.focus();
         setNotice({
           kind: "error",
           text:
@@ -356,6 +373,7 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
       }
       if (result.status === "OTP_LOCKED") {
         setOtpLocked(true);
+        setOtpError(true);
         setNotice({
           kind: "error",
           text: "Too many code attempts. The code is locked, but approval from another signed-in device can still finish sign-in.",
@@ -641,19 +659,39 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
               </span>
             </div>
             {flow.otpAvailable && !otpLocked && (
-              <form className="otp-full" onSubmit={submitOtp}>
+              <form
+                className={`otp-full${otpError ? " otp-full--error" : ""}`}
+                onSubmit={submitOtp}
+              >
                 <p className="otp-full__title">Enter the 6-digit code</p>
-                <div className="otp-boxes" aria-hidden="true">
+                {/* Owner (2026-10-13): "otp input field a jotoi press kori
+                    kaj hoi na" — the old markup clipped the real input inside
+                    a 1×1 overflow:hidden label, so once focus was lost the
+                    boxes were dead to every tap. The input now sits invisible
+                    ON TOP of the boxes row (opacity 0, not clipped), so any
+                    tap lands on it natively; the extra onClick re-focuses it
+                    even when the tap hits a gap between two boxes. */}
+                <div
+                  className={`otp-boxes${busy ? " otp-boxes--verifying" : ""}`}
+                  onClick={() => otpInputRef.current?.focus()}
+                >
                   {[0, 1, 2, 3, 4, 5].map((index) => (
-                    <span key={index} className={`otp-box${otp[index] ? " otp-box--filled" : ""}`}>
+                    <span
+                      key={index}
+                      aria-hidden="true"
+                      className={`otp-box${otp[index] ? " otp-box--filled" : ""}${
+                        !busy && index === otp.length ? " otp-box--active" : ""
+                      }`}
+                    >
                       {otp[index] ?? ""}
                     </span>
                   ))}
-                </div>
-                <label className="otp-sr-label" htmlFor="auth-otp">
-                  Six-digit code
+                  <label className="otp-sr-label" htmlFor="auth-otp">
+                    Six-digit code
+                  </label>
                   <input
                     id="auth-otp"
+                    ref={otpInputRef}
                     className="otp-sr"
                     type="text"
                     inputMode="numeric"
@@ -661,17 +699,27 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
                     pattern="[0-9]{6}"
                     maxLength={6}
                     value={otp}
-                    onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                    onChange={(event) => {
+                      setOtpError(false);
+                      setOtp(event.target.value.replace(/\D/g, "").slice(0, 6));
+                    }}
                     disabled={busy}
                     autoFocus
                   />
-                </label>
+                </div>
                 <button
                   className="otp-full__verify"
                   type="submit"
                   disabled={busy || !validOtp(otp)}
                 >
-                  {busy ? "Checking…" : "Verify code"}
+                  {busy ? (
+                    <>
+                      <span className="otp-spinner" aria-hidden="true" />
+                      Verifying…
+                    </>
+                  ) : (
+                    "Verify code"
+                  )}
                 </button>
               </form>
             )}
