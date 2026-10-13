@@ -17,6 +17,12 @@ import {
   DEVICE_ID_STORAGE_KEY,
 } from "../../web/src/auth/storage.ts";
 import {
+  generateIdentity,
+  isPassphraseBackup,
+  sealPassphraseBackup,
+  unlockPassphraseBackup,
+} from "../../web/src/messaging/e2ee.ts";
+import {
   buildE164 as legacyBuildE164,
   validOtp as legacyValidOtp,
 } from "../../public/login-utils.mjs";
@@ -238,6 +244,17 @@ check(
   authErrorCopy(new ApiError({ kind: "http", status: 403, code: "PHONE_MISMATCH" })).includes(
     "This browser cannot read a SIM",
   ),
+);
+
+const generatedId = await generateIdentity();
+const sealedBackup = await sealPassphraseBackup(generatedId, "correct-horse-battery");
+const unlockedBackup = await unlockPassphraseBackup(sealedBackup, "correct-horse-battery");
+check(
+  "KP2 passphrase backup seals and unlocks the P-256 identity round-trip",
+  isPassphraseBackup(sealedBackup) &&
+    unlockedBackup !== null &&
+    unlockedBackup.p === generatedId.p &&
+    unlockedBackup.u === generatedId.u,
 );
 
 console.log(lines.join("\n"));

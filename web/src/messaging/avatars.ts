@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { ApiError } from "../api";
 import type { ApiClient } from "../auth/authApi";
 
 type AvatarPayload = { avatarUrl?: string | null; avatarRef?: string | null };
@@ -18,9 +19,14 @@ const cache = new Map<string, string>();
 const missing = new Set<string>();
 const inflight = new Map<string, Promise<string | null>>();
 
+function isDirectUrl(value: string): boolean {
+  return value.startsWith("data:") || /^https?:/.test(value);
+}
+
 /** Fetch (once per session per ref) and cache the avatar for `ref`. */
 export async function resolveAvatar(api: ApiClient, ref: string): Promise<string | null> {
   if (!ref) return null;
+  if (isDirectUrl(ref)) return ref;
   const hit = cache.get(ref);
   if (hit) return hit;
   if (missing.has(ref)) return null;
@@ -29,7 +35,14 @@ export async function resolveAvatar(api: ApiClient, ref: string): Promise<string
   if (pending) return pending;
 
   const at = ref.lastIndexOf("@");
-  const owner = ref.startsWith("g:") ? ref.slice(2, at) : ref.slice(0, at);
+  const owner =
+    at > 0
+      ? ref.startsWith("g:")
+        ? ref.slice(2, at)
+        : ref.slice(0, at)
+      : ref.startsWith("g:")
+        ? ref.slice(2)
+        : ref;
   if (!owner) {
     missing.add(ref);
     return null;
@@ -45,10 +58,12 @@ export async function resolveAvatar(api: ApiClient, ref: string): Promise<string
       if (url) cache.set(ref, url);
       else missing.add(ref);
       return url;
-    } catch {
-      // 404 = privacy-walled or no picture; transient errors just retry on
-      // the next ref change / mount, the list keeps showing initials.
-      missing.add(ref);
+    } catch (err) {
+      // 404 = privacy-walled or no picture; transient errors retry on the next
+      // ref change / mount so a brief blip never permanently hides avatars.
+      if (err instanceof ApiError && err.status === 404) {
+        missing.add(ref);
+      }
       return null;
     } finally {
       inflight.delete(ref);
@@ -63,11 +78,23 @@ export async function resolveAvatar(api: ApiClient, ref: string): Promise<string
  * Returns null while unknown, so callers fall back to their initials tile.
  */
 export function useAvatar(api: ApiClient | null, ref: string): string | null {
-  const [url, setUrl] = useState<string | null>(() => (ref ? (cache.get(ref) ?? null) : null));
+  const [url, setUrl] = useState<string | null>(() => {
+    if (!ref) return null;
+    if (isDirectUrl(ref)) return ref;
+    return cache.get(ref) ?? null;
+  });
 
   useEffect(() => {
-    if (!api || !ref) {
+    if (!ref) {
       setUrl(null);
+      return;
+    }
+    if (isDirectUrl(ref)) {
+      setUrl(ref);
+      return;
+    }
+    if (!api) {
+      setUrl(cache.get(ref) ?? null);
       return;
     }
     const hit = cache.get(ref);

@@ -77,18 +77,8 @@ export type Env = {
   GOOGLE_WEB_CLIENT_ID?: string;
   /** Dedicated private HMAC key for six-digit login-code verifiers. */
   LOGIN_OTP_HMAC_SECRET?: string;
-  /** Cloudflare account id — the Workers-AI rescue brain's run route (r48). */
-  CF_ACCOUNT?: string;
-  /** Cloudflare API token with Workers-AI run rights (r48 rescue brain). */
-  CF_AI_TOKEN?: string;
-  /** Gemini key kept from the pre-HF era — the last-resort brain (r48). */
+  /** Gemini API key — powers all KuchuPuchu AI chat, vision, voice, and image turns. */
   GEMINI_API_KEY?: string;
-  /** Hugging Face token — since the 2026-09-16 migration EVERY KuchuPuchu AI
-   *  call (chat text, photo reading, picture create/edit, voice notes) runs
-   *  on HF Inference Providers and nothing else. Unset ⇒ the welcome/reply
-   *  fall back to fixed friendly lines and picture requests answer
-   *  "switched off", never a hole. */
-  HF_TOKEN?: string;
   /** Slice J cutover: the Workers Assets binding for the built React PWA
    *  (web/dist). Present in the production config ([assets] binding =
    *  "ASSETS"); absent in binding-free preview uploads, where the worker is
@@ -975,7 +965,7 @@ async function resolveApprovalMessage(
  * A second verified bot account, "KuchuPuchu AI", whose first message
  * welcomes every new user the moment their account goes live (at Google
  * bind — the exact moment they land in the app for the first time). The
- * greeting is generated on Hugging Face when HF_TOKEN is set and falls
+ * greeting is generated on Gemini when GEMINI_API_KEY is set and falls
  * back to a fixed warm line otherwise, so the welcome never depends on
  * a third-party API being awake.
  */
@@ -1080,173 +1070,20 @@ async function ensureAiBot(db: D1Database): Promise<string> {
   return AI_BOT_ID;
 }
 
-/** The fixed line used when HF is not configured or unreachable. */
+/** The fixed line used when Gemini is not configured or unreachable. */
 const AI_WELCOME_FALLBACK =
   "Welcome to KuchuPuchu! 🎉 I'm KuchuPuchu AI, your in-app helper — glad you're here. Enjoy staying close to your people!";
 
-/** Owner round 2026-09-16 (the HF migration): EVERY KuchuPuchu AI call runs
- *  on Hugging Face Inference Providers — chat text, photo READING (vision),
- *  picture create/edit, and voice-note transcription. One HF_TOKEN secret,
- *  no Gemini, no Workers AI. All live-verified 2026-09-16 against
- *  router.huggingface.co with the owner's token:
- *   • chat: moonshotai/Kimi-K2-Instruct, failover DeepSeek-V3 (Bengali
- *     replies + the English-owner-name rule verified on both)
- *   • vision: Qwen/Qwen3.8-27B with an image_url part (base64 data URL)
- *   • pictures: stabilityai/stable-diffusion-3-medium-diffusers via the
- *     hf-inference route (raw JPEG bytes)
- *   • voice: openai/whisper-large-v3-turbo (raw audio bytes → { text })
- *  No img2img model is served on any provider this account has enabled, so
- *  an EDIT runs as describe-then-vary: the vision model reads the source
- *  photo and SD3-medium draws the requested change from that description
- *  (the old schnell safety net degraded the same way). */
-const HF_ROUTER = "https://router.huggingface.co";
-// Owner round 48 (item 2 — "shob message e can't reach its brain"): the
-// account's HF credit ran out (error_log showed hf-stt 402) AND the old
-// failover id was retired by the router, so chat had one working model and
-// zero visibility — hfChat never logged a word. The chain now tracks ids
-// verified live on router.huggingface.co/v1/models (fetched 2026-09-17),
-// and every exhausted chain writes its verdicts to error_log.
-const HF_CHAT_MODELS = [
-  "moonshotai/Kimi-K2-Instruct",
-  "moonshotai/Kimi-K2.5",
-  "deepseek-ai/DeepSeek-V3.2",
-  "meta-llama/Llama-3.3-70B-Instruct",
-] as const;
-/** Rescue brains: Workers AI (free quota idle since the HF move), then the
- *  Gemini key still living as a secret. The reply path never plays dead
- *  over a single vendor's meter again. */
-const CF_CHAT_MODELS = [
-  "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-  "@cf/meta/llama-3.1-8b-instruct",
-] as const;
-const HF_VISION_MODEL = "Qwen/Qwen3.8-27B";
-const HF_IMAGE_MODEL = "stabilityai/stable-diffusion-3-medium-diffusers";
-const HF_STT_MODEL = "openai/whisper-large-v3-turbo";
-
-/** One bounded HF chat completion: models tried in order under a shared
- *  wall-clock budget, any failure ⇒ null. Never throws — callers own the
- *  fallback text. Each model gets at most 12s by default (a cold provider
- *  can sit on a load before answering; callers on a longer chain pass a
- *  tighter per-call cap) and the loop keeps going while ≥4s remain. */
-const HF_CALL_BUDGET_MS = 25_000;
-
-type HfChatMessage = { role: string; content: unknown };
-
-async function hfChat(
-  env: Env,
-  messages: HfChatMessage[],
-  maxTokens = 120,
-  models: readonly string[] = HF_CHAT_MODELS,
-  perCallMs = 12_000,
-): Promise<string | null> {
-  if (!env.HF_TOKEN) return null;
-  const started = Date.now();
-  const lastErrs: string[] = [];
-  for (const model of models) {
-    const remaining = HF_CALL_BUDGET_MS - (Date.now() - started);
-    if (remaining < 4_000) break; // no point starting a call that can't finish
-    try {
-      const res = await fetch(`${HF_ROUTER}/v1/chat/completions`, {
-        method: "POST",
-        headers: { "content-type": "application/json", Authorization: `Bearer ${env.HF_TOKEN}` },
-        body: JSON.stringify({ model, messages, max_tokens: maxTokens }),
-        signal: AbortSignal.timeout(Math.min(remaining, perCallMs)),
-      });
-      if (!res.ok) {
-        lastErrs.push(`${model} ${res.status}`);
-        continue;
-      }
-      const data = (await res.json()) as {
-        choices?: { message?: { content?: string | { type?: string; text?: string }[] } }[];
-      };
-      const content = data.choices?.[0]?.message?.content;
-      const text = completeAiText(
-        typeof content === "string" ? content : (content ?? []).map((p) => p.text ?? "").join(""),
-      );
-      if (text) return text;
-      lastErrs.push(`${model} empty`);
-    } catch (e) {
-      lastErrs.push(`${model} ${e instanceof Error ? e.name : "err"}`);
-    }
-  }
-  if (lastErrs.length) {
-    // Chat alone failed silently (image/stt already logged) — never again.
-    try {
-      await env.DB.prepare("INSERT INTO error_log (id, stack, created_at) VALUES (?, ?, ?)")
-        .bind(crypto.randomUUID(), `hf-chat ${lastErrs.join(" ; ")}`.slice(0, 1900), nowIso())
-        .run();
-    } catch {}
-  }
-  return null;
-}
-
-/** Owner round 48 (item 2): the rescue brain. Cloudflare Workers AI —
- *  the free neuron quota sat idle after every feature moved to HF — then
- *  the Gemini key kept as a secret. Text answers only; picture/voice turn
- *  still owns their honest HF-only error paths. */
-async function cfAiChat(
-  env: Env,
-  messages: HfChatMessage[],
-  maxTokens = 120,
-): Promise<string | null> {
-  if (!env.CF_AI_TOKEN || !env.CF_ACCOUNT) return null;
-  const errs: string[] = [];
-  for (const model of CF_CHAT_MODELS) {
-    try {
-      const res = await fetch(
-        `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT}/ai/run/${model}`,
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            Authorization: `Bearer ${env.CF_AI_TOKEN}`,
-          },
-          body: JSON.stringify({
-            messages: messages.map((m) => ({
-              role: m.role === "assistant" || m.role === "system" ? m.role : "user",
-              content: typeof m.content === "string" ? m.content : "",
-            })),
-            max_tokens: maxTokens,
-          }),
-          signal: AbortSignal.timeout(12_000),
-        },
-      );
-      if (!res.ok) {
-        errs.push(`${model} ${res.status}`);
-        continue;
-      }
-      const data = (await res.json()) as { result?: { response?: string } };
-      const text = completeAiText(data.result?.response ?? "");
-      if (text) return text;
-      errs.push(`${model} empty`);
-    } catch (e) {
-      errs.push(`${model} ${e instanceof Error ? e.name : "err"}`);
-    }
-  }
-  if (errs.length) {
-    try {
-      await env.DB.prepare("INSERT INTO error_log (id, stack, created_at) VALUES (?, ?, ?)")
-        .bind(crypto.randomUUID(), `cf-ai-chat ${errs.join(" ; ")}`.slice(0, 1900), nowIso())
-        .run();
-    } catch {}
-  }
-  return null;
-}
-
-/**
- * v165 (owner: "kp ai er jonno system hobe messaging voice messaging shob
- * kichur jonno gemini use hobe but image create/edit request a hugging face ai
- * use hobe"): Gemini is the assistant's brain — chat text, a photo the user
- * sends to be READ, and a voice note to be HEARD — while picture create/edit
- * stays on Hugging Face (see hfImage) exactly as before.
- *
- * Gemini takes images and audio as inline parts, so [geminiParts] is the one
- * entry point: text-only turns pass a plain string, a turn with media passes
- * `{ inline_data: { mime_type, data } }` parts. Both return the same shape as
- * [geminiChat] so every caller can fall back to the HF chain on a null.
- */
+type AiChatMessage = { role: string; content: unknown };
 type GeminiPart = { text: string } | { inline_data: { mime_type: string; data: string } };
 
+/**
+ * Gemini is the sole brain for KuchuPuchu AI — chat text, welcome messages,
+ * photo reading (vision), voice-note transcription, and image creation/editing.
+ *
+ * Gemini takes images and audio as inline parts, so [geminiParts] is the direct
+ * entry point for single-shot multimodal and text turns.
+ */
 async function geminiParts(
   env: Env,
   prompt: string,
@@ -1296,7 +1133,7 @@ async function geminiParts(
 
 async function geminiChat(
   env: Env,
-  messages: HfChatMessage[],
+  messages: AiChatMessage[],
   maxTokens = 120,
 ): Promise<string | null> {
   if (!env.GEMINI_API_KEY) return null;
@@ -1339,82 +1176,17 @@ async function geminiChat(
   }
 }
 
-/**
- * The one brain for every assistant text answer.
- *
- * v165 (owner rule): GEMINI first — "messaging … shob kichur jonno gemini use
- * hobe". The HF chain and Workers AI stay behind it as honest fallbacks, so a
- * Gemini outage or a spent key still answers instead of going silent (which is
- * what the r48 chain was built for). Picture create/edit never comes here:
- * that path is hfImage on Hugging Face, by the same owner rule.
- */
-/**
- * v166 (owner: "ai reply dite onek late korche"): the brains used to run in a
- * LINE — Gemini, then the whole Hugging Face chain, then the Workers-AI chain —
- * so a slow provider was paid for IN FULL before the next one was even asked
- * (12 s Gemini cap, then up to 25 s of HF calls, then 2 x 12 s of CF: a minute
- * of silence on a bad day, and the owner's app sat on its typing row).
- *
- * Firing them together is not free of cost but it is free of WAITING: the
- * first brain to answer wins. [hedge] starts [primary] at once and, only if it
- * is still quiet after `delayMs`, starts [secondary] beside it — a fast
- * Gemini is never slowed down, and a Gemini that is cold, rate-limited or
- * unconfigured costs the user one short delay instead of its whole timeout.
- * The loser is dropped (its own AbortSignal still bounds it).
- */
-// v168 (owner: "ai response slow fast daw"): 800 ms - the reply starts
-// streaming twice as early; the word-by-word reveal on the app side
-// (r42-5) carries the human feel from here.
-const AI_HEDGE_MS = 800;
-
 /** v167: the live reply frames are throttled — at most one per 140 ms — so a
  *  fast model cannot turn one answer into a broadcast storm on the room's
  *  Durable Object. 7 frames a second is faster than the eye reads. */
 const AI_DELTA_MS = 140;
 
-async function hedge(
-  primary: () => Promise<string | null>,
-  secondary: () => Promise<string | null>,
-  delayMs: number,
-): Promise<string | null> {
-  const answered = (p: Promise<string | null>) =>
-    p.then(
-      (v) => (v == null ? Promise.reject(new Error("no-answer")) : v),
-      () => Promise.reject(new Error("no-answer")),
-    );
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const gate = new Promise<void>((resolve) => {
-    timer = setTimeout(resolve, delayMs);
-  });
-  try {
-    return await Promise.any([answered(primary()), answered(gate.then(secondary))]);
-  } catch {
-    return null;
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
-}
-
-/** The HF chain, capped so a called-beside-Gemini hedge cannot run long: two
- *  models x 7 s, then the Workers-AI rescue. */
-function hfThenCf(env: Env, messages: HfChatMessage[], maxTokens: number): Promise<string | null> {
-  return hfChat(env, messages, maxTokens, HF_CHAT_MODELS.slice(0, 2), 7_000).then(
-    (hf) => hf ?? cfAiChat(env, messages, maxTokens),
-  );
-}
-
 async function aiBrain(
   env: Env,
-  messages: HfChatMessage[],
+  messages: AiChatMessage[],
   maxTokens = 160,
 ): Promise<string | null> {
-  // No Gemini configured: there is nothing to hedge with, go straight to HF.
-  if (!env.GEMINI_API_KEY) return hfThenCf(env, messages, maxTokens);
-  return hedge(
-    () => geminiChat(env, messages, maxTokens),
-    () => hfThenCf(env, messages, maxTokens),
-    AI_HEDGE_MS,
-  );
+  return geminiChat(env, messages, maxTokens);
 }
 
 /**
@@ -1424,13 +1196,7 @@ async function aiBrain(
  * `streamGenerateContent` (SSE) sends one JSON object per `data:` line, each
  * carrying the next piece of the answer, so [onChunk] is handed the answer SO
  * FAR every time a piece lands — the chat paints the bubble while the model is
- * still talking instead of waiting for the whole thing. The joined text is the
- * return value, byte-for-byte what the non-streaming call would have produced,
- * so the caller's fallback chain and the message row are unchanged.
- *
- * A stream that dies half-way is NOT an answer: it resolves null (and logs the
- * same `gemini-chat <status>` breadcrumb the plain call does), and the caller
- * hedges to the HF chain exactly as before. Never throws.
+ * still talking instead of waiting for the whole thing.
  */
 async function geminiStream(
   env: Env,
@@ -1510,73 +1276,25 @@ async function geminiStream(
   }
 }
 
-/**
- * v167: [hedge] with a live primary. [primary] paints through the `push` it is
- * handed (the stream above), [secondary] answers in one piece and is painted
- * whole the moment it wins; the first answer takes it and the loser stops
- * painting, so a late chunk can never overwrite a delivered answer. With no
- * Gemini key there is nothing to stream — the HF chain answers as before, in
- * one piece.
- */
-async function hedgeStream(
-  primary: (push: (text: string) => void) => Promise<string | null>,
-  secondary: () => Promise<string | null>,
-  delayMs: number,
-  onChunk: (text: string) => void,
-): Promise<string | null> {
-  let closed = false;
-  const push = (t: string) => {
-    if (!closed) onChunk(t);
-  };
-  try {
-    return await hedge(
-      () => primary(push),
-      async () => {
-        const whole = await secondary();
-        if (whole) {
-          closed = true;
-          onChunk(whole);
-        }
-        return whole;
-      },
-      delayMs,
-    );
-  } finally {
-    closed = true;
-  }
-}
-
-/** v167: [aiBrain] with the live stream on its primary leg — the assistant's
- *  text answers are painted as they are written, the hedge and the fallbacks
- *  are the round-166 ones (Gemini first, HF chain + Workers AI beside it). */
+/** v167: [aiBrain] with the live stream on Gemini — the assistant's
+ *  text answers are painted as they are written. */
 async function aiBrainStream(
   env: Env,
-  messages: HfChatMessage[],
+  messages: AiChatMessage[],
   maxTokens: number,
   onChunk: (text: string) => void,
 ): Promise<string | null> {
-  const whole = async () => {
-    const t = await hfThenCf(env, messages, maxTokens);
-    if (t) onChunk(t);
-    return t;
-  };
-  if (!env.GEMINI_API_KEY) return whole();
-  // The streaming entry point takes Gemini's own flattened prompt shape.
+  if (!env.GEMINI_API_KEY) return null;
   const prompt = messages
     .map(
       (m) =>
         `${m.role === "assistant" ? "Assistant" : "User"}: ${typeof m.content === "string" ? m.content : ""}`,
     )
     .join("\n");
-  return hedgeStream(
-    (push) => geminiStream(env, prompt, [], maxTokens, push, 12_000),
-    () => hfThenCf(env, messages, maxTokens),
-    AI_HEDGE_MS,
-    onChunk,
-  );
+  return geminiStream(env, prompt, [], maxTokens, onChunk, 12_000);
 }
 
-/** The welcome line rides the same brain (Gemini → HF). */
+/** The welcome line rides Gemini. */
 async function aiWelcomeText(env: Env, displayName: string | null): Promise<string | null> {
   const name =
     displayName && displayName !== "KuchuPuchu user"
@@ -1588,9 +1306,7 @@ async function aiWelcomeText(env: Env, displayName: string | null): Promise<stri
     name +
     " Write a short, warm welcome message to them: 1–2 sentences, at most 35 words, in English, at most one emoji. " +
     "Do not use hashtags, quotes, or a signature line. Reply with the message text only.";
-  const gem = await geminiParts(env, prompt, [], 120);
-  if (gem) return gem;
-  return hfChat(env, [{ role: "user", content: prompt }]);
+  return geminiParts(env, prompt, [], 120);
 }
 
 /** Drops the AI welcome message into a fresh 1:1 chat, exactly once per
@@ -1854,22 +1570,6 @@ async function aiPhotoBytes(
   }
 }
 
-/** A photo the user sent, as an OpenAI-style image_url part (base64 data URL)
- *  for the HF vision model — or null when the object is missing / not an
- *  image / too large. Never throws. */
-async function aiPhotoVisionPart(
-  env: Env,
-  media: string | null | undefined,
-  hint: string,
-): Promise<{ type: "image_url"; image_url: { url: string } } | null> {
-  const src = await aiPhotoBytes(env, media, hint);
-  if (!src) return null;
-  return {
-    type: "image_url",
-    image_url: { url: `data:${src.mime};base64,${arrayBufferToBase64(src.bytes.buffer)}` },
-  };
-}
-
 function arrayBufferToBase64(buf: ArrayBuffer): string {
   let bin = "";
   const bytes = new Uint8Array(buf);
@@ -1880,226 +1580,130 @@ function arrayBufferToBase64(buf: ArrayBuffer): string {
   return btoa(bin);
 }
 
-/** Voice-note bytes ≤ this go to Whisper (a 60s note is ~0.5 MB). */
-const AI_VOICE_MAX_BYTES = 6_000_000;
-
-/** Owner round 43 (item 5): 0.1s of 8kHz silence as a valid WAV — the cron's
- *  Whisper warmup (a model that only ever hears real voices is always cold
- *  for the first one). */
-function wavSilence(): Uint8Array<ArrayBuffer> {
-  const n = 800;
-  const out = new Uint8Array(new ArrayBuffer(44 + n * 2));
-  const v = new DataView(out.buffer);
-  const ascii = (o: number, s: string) => {
-    for (let i = 0; i < s.length; i++) out[o + i] = s.charCodeAt(i);
-  };
-  ascii(0, "RIFF");
-  v.setUint32(4, 36 + n * 2, true);
-  ascii(8, "WAVE");
-  ascii(12, "fmt ");
-  v.setUint32(16, 16, true);
-  v.setUint16(20, 1, true);
-  v.setUint16(22, 1, true);
-  v.setUint32(24, 8000, true);
-  v.setUint32(28, 16000, true);
-  v.setUint16(32, 2, true);
-  v.setUint16(34, 16, true);
-  ascii(36, "data");
-  v.setUint32(40, n * 2, true);
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 }
 
+/** Voice-note bytes ≤ this go to Gemini (a 60s note is ~0.5 MB). */
+const AI_VOICE_MAX_BYTES = 6_000_000;
+
 /**
- * v165 (owner: "voice messaging … gemini use hobe"): a voice note to the
- * assistant is transcribed by GEMINI first — audio goes up as an inline part
- * and the transcript comes back as text. Whisper on Hugging Face stays as the
- * fallback (the cron warmup keeps it loaded), so a Gemini refusal, a spent key
- * or an unsupported container still ends in words rather than silence.
- * Returns the same shape as [hfTranscribe]: never throws.
+ * A voice note to the assistant is transcribed by Gemini — audio goes up as an
+ * inline part and the transcript comes back as text. Never throws.
  */
 async function aiTranscribe(
   env: Env,
   bytes: ArrayBuffer,
   mime: string,
 ): Promise<{ text: string | null; err: string }> {
-  // v166: a voice note used to wait out Gemini's whole 20 s cap before Whisper
-  // was even asked — the reply then arrived twice as late as it had to. The two
-  // transcribers now work the same way the text brains do: Gemini immediately,
-  // Whisper 1.6 s later, first transcript wins.
-  if (env.GEMINI_API_KEY && bytes.byteLength <= AI_VOICE_MAX_BYTES) {
-    const b64 = arrayBufferToBase64(bytes);
-    let hfErr = "";
-    const hfLeg = async () => {
-      const fb = await hfTranscribe(env, bytes, mime);
-      hfErr = fb.err;
-      return fb.text;
-    };
-    const heard = await hedge(
-      () =>
-        geminiParts(
-          env,
-          "Transcribe this voice message exactly as spoken. Reply with the transcript only — no " +
-            "quotes, no translation, no commentary. Keep the language it was spoken in.",
-          [{ mime: mime || "audio/m4a", b64 }],
-          400,
-          20_000,
-        ),
-      hfLeg,
-      AI_HEDGE_MS,
-    );
-    if (heard) return { text: heard.trim().slice(0, 800), err: "" };
-    return { text: null, err: hfErr ? `gemini-miss; ${hfErr}` : "gemini-miss" };
+  if (!env.GEMINI_API_KEY) return { text: null, err: "" };
+  if (bytes.byteLength <= 0 || bytes.byteLength > AI_VOICE_MAX_BYTES) {
+    return { text: null, err: "voice-bounds" };
   }
-  const fb = await hfTranscribe(env, bytes, mime);
-  return { text: fb.text, err: fb.err ? `gemini-miss; ${fb.err}` : fb.err };
+  const b64 = arrayBufferToBase64(bytes);
+  const heard = await geminiParts(
+    env,
+    "Transcribe this voice message exactly as spoken. Reply with the transcript only — no " +
+      "quotes, no translation, no commentary. Keep the language it was spoken in.",
+    [{ mime: mime || "audio/m4a", b64 }],
+    400,
+    20_000,
+  );
+  if (heard) return { text: heard.trim().slice(0, 800), err: "" };
+  return { text: null, err: "gemini-stt-empty" };
 }
 
-/** Owner round 31 (item 17) + the 2026-09-16 HF migration: a voice note is
- *  transcribed by Whisper on HF (raw audio bytes in, `{ text }` out) and
- *  the transcript is answered as chat text. Owner round 42 (item 3): two
- *  attempts like the image path — a loading model (503 + estimated_time)
- *  usually answers seconds later, and every failure persists to error_log
- *  (model + status, never audio) so a deaf spell is debuggable. The caller
- *  says the clip couldn't be heard only when both tries fail. Never throws. */
-async function hfTranscribe(
-  env: Env,
-  bytes: ArrayBuffer,
-  mime: string,
-): Promise<{ text: string | null; err: string }> {
-  if (!env.HF_TOKEN) return { text: null, err: "" };
-  let err = "";
-  for (let attempt = 0; attempt < 2; attempt++) {
-    let st = "no-response";
-    try {
-      const res = await fetch(`${HF_ROUTER}/hf-inference/models/${HF_STT_MODEL}`, {
-        method: "POST",
-        headers: { "content-type": mime || "audio/m4a", Authorization: `Bearer ${env.HF_TOKEN}` },
-        body: bytes,
-        signal: AbortSignal.timeout(20_000),
-      });
-      st = String(res.status);
-      if (res.status === 503) {
-        const over = (await res.json().catch(() => ({}))) as { estimated_time?: number };
-        const loading = new Error("hf-stt-loading");
-        (loading as { estimatedTime?: number }).estimatedTime =
-          typeof over.estimated_time === "number" ? over.estimated_time : undefined;
-        throw loading;
-      }
-      if (!res.ok) throw new Error(`hf-stt-http-${res.status}`);
-      const data = (await res.json()) as { text?: string };
-      const text = (data.text ?? "").trim().slice(0, 800);
-      if (text) return { text, err: "" };
-      throw new Error("hf-stt-empty");
-    } catch (e) {
-      const wait = (e as { estimatedTime?: number }).estimatedTime;
-      const s = `whisper ${st} ${e instanceof Error ? e.message : e}`;
-      err = err ? `${err}; ${s}` : s;
-      console.error("hf-stt", s);
-      // A loading model usually answers seconds later — sleep its estimate
-      // (capped) so the retry lands instead of failing the same way.
-      if (wait && wait > 0 && attempt === 0) {
-        await new Promise((r) => setTimeout(r, Math.min(wait * 1000, 8_000)));
-      }
-    }
-  }
-  return { text: null, err };
-}
-
-/** HF picture call (owner round 2026-09-16: the HF migration) — SD3-medium
- *  draws from a text prompt; an edit arrives with the vision read of the
- *  source photo already folded into the prompt (no img2img model is served
- *  on this account's enabled providers, so a true pixel edit is impossible
- *  and the draw is a variation). Up to two attempts under a shared budget;
- *  a loading-503 sleeps its estimated_time so the retry lands. The whole
- *  picture path MUST fit inside ~25s: the reply runs in ctx.waitUntil and
- *  the runtime reaps it ~30s after the response — the first live cold draw
- *  died exactly that way (no IMAGE, no fallback, no error_log). Text and
- *  photo READING run on the HF chat/vision models. Never throws. */
-const HF_IMAGE_BUDGET_MS = 25_000;
 type AiImage = { bytes: Uint8Array; mime: string; text: string };
 type AiPhotoSrc = { bytes: Uint8Array<ArrayBuffer>; mime: string };
-/** SD3-medium answers raw image bytes. A failure is JSON `{ error }` (a
- *  loading-503 carries `estimated_time`); either throws so the attempt loop
- *  can retry, and the caller persists model + status to error_log. */
-async function hfImageBytes(res: Response): Promise<AiImage> {
-  const sniff = (bytes: Uint8Array) =>
-    bytes[0] === 0x89 && bytes[1] === 0x50
-      ? "image/png"
-      : bytes[0] === 0xff && bytes[1] === 0xd8
-        ? "image/jpeg"
-        : "image/png";
-  const ct = res.headers.get("content-type") || "";
-  if (ct.includes("application/json")) {
-    const data = (await res.json()) as { error?: string; estimated_time?: number };
-    const err = new Error(String(data.error || "hf-image-failed"));
-    (err as { estimatedTime?: number }).estimatedTime =
-      typeof data.estimated_time === "number" ? data.estimated_time : undefined;
-    throw err;
-  }
-  if (!res.ok) throw new Error(`hf-image-http-${res.status}`);
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  if (bytes.length === 0 || bytes.length > 9_500_000) throw new Error("hf-image-empty");
-  return { bytes, mime: sniff(bytes), text: "" };
-}
-async function hfImage(
+
+const GEMINI_IMAGE_MODEL = "gemini-2.0-flash-preview-image-generation";
+
+/**
+ * Gemini image creation & editing. Supports both Gemini's multimodal JSON
+ * `inlineData` / `inline_data` response parts and raw image bytes. Never throws.
+ */
+async function geminiImage(
   env: Env,
   parts: { text: string; raw: string; src: AiPhotoSrc | null },
-  scene: string | null = null,
   clean: string | null = null,
 ): Promise<{ image: AiImage | null; off: boolean; err: string }> {
-  if (!env.HF_TOKEN) return { image: null, off: true, err: "no-token" };
-  // An EDIT has no img2img model on this account's enabled providers, so it
-  // runs as describe-then-vary: the vision model rewrites photo + change
-  // into a ready-made image prompt. When even that failed, the draw degrades
-  // to a plain text variation (the old schnell safety net did the same).
-  // `scene` (edit) and `clean` (create) arrive as ready-made English image
-  // prompts from the chat/vision models; only the last-resort degrade sends
-  // the raw user words to SD3 (which would paint Banglish as gibberish text).
-  const prompt =
-    parts.src && scene
-      ? scene
-      : parts.src
-        ? `Create one image: ${parts.raw}`
-        : (clean ?? parts.text);
-  // Returned to the caller for error_log: model + HTTP status per attempt
-  // (never prompt text or tokens).
-  let err = "";
-  const started = Date.now();
-  const remaining = () => HF_IMAGE_BUDGET_MS - (Date.now() - started);
-  for (let attempt = 0; attempt < 2 && remaining() >= 6_000; attempt++) {
-    // A failed draw stays visible in tail — the status tells quota (429)
-    // from outage (5xx) from auth (401/403). Prompt text and tokens never
-    // hit the log, only model + status.
-    let st = "no-response";
-    try {
-      const res = await fetch(`${HF_ROUTER}/hf-inference/models/${HF_IMAGE_MODEL}`, {
+  if (!env.GEMINI_API_KEY) return { image: null, off: true, err: "no-key" };
+  const prompt = parts.src ? parts.text : (clean ?? parts.text);
+  const reqParts: GeminiPart[] = [{ text: prompt }];
+  if (parts.src) {
+    reqParts.push({
+      inline_data: {
+        mime_type: parts.src.mime || "image/jpeg",
+        data: arrayBufferToBase64(parts.src.bytes.buffer),
+      },
+    });
+  }
+  let st = "no-response";
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_IMAGE_MODEL}:generateContent?key=${env.GEMINI_API_KEY}`,
+      {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.HF_TOKEN}` },
-        body: JSON.stringify({ inputs: prompt, parameters: { width: 1024, height: 1024 } }),
-        signal: AbortSignal.timeout(Math.min(remaining(), 20_000)),
-      });
-      st = String(res.status);
-      const img = await hfImageBytes(res);
-      return { image: img, off: false, err: "" };
-    } catch (e) {
-      const wait = (e as { estimatedTime?: number }).estimatedTime;
-      const s = `sd3-medium ${st} ${e instanceof Error ? e.message : e}`;
-      err = err ? `${err}; ${s}` : s;
-      console.error("hf-image", s);
-      // A loading model usually answers seconds later — sleep its estimate
-      // (capped) so the retry lands instead of failing the same way.
-      if (wait && wait > 0 && attempt === 0 && remaining() > 14_000) {
-        await new Promise((r) => setTimeout(r, Math.min(wait * 1000, 8_000)));
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: reqParts }],
+          generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+        }),
+        signal: AbortSignal.timeout(22_000),
+      },
+    );
+    st = String(res.status);
+    if (!res.ok) throw new Error(`gemini-image-http-${res.status}`);
+    const ct = (res.headers.get("content-type") || "").toLowerCase();
+    if (ct.startsWith("image/")) {
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      if (bytes.length === 0 || bytes.length > 9_500_000) throw new Error("gemini-image-empty");
+      return {
+        image: { bytes, mime: ct.split(";")[0]!.trim(), text: "" },
+        off: false,
+        err: "",
+      };
+    }
+    const data = (await res.json()) as {
+      candidates?: {
+        content?: {
+          parts?: {
+            text?: string;
+            inlineData?: { mimeType?: string; data?: string };
+            inline_data?: { mime_type?: string; data?: string };
+          }[];
+        };
+      }[];
+    };
+    const resParts = data.candidates?.[0]?.content?.parts ?? [];
+    for (const p of resParts) {
+      const inline = p.inlineData ?? p.inline_data;
+      const b64 = inline?.data;
+      if (b64) {
+        const bytes = base64ToBytes(b64);
+        if (bytes.length > 0 && bytes.length <= 9_500_000) {
+          const mime =
+            (p.inlineData?.mimeType ?? p.inline_data?.mime_type) ||
+            (bytes[0] === 0xff && bytes[1] === 0xd8 ? "image/jpeg" : "image/png");
+          return { image: { bytes, mime, text: "" }, off: false, err: "" };
+        }
       }
     }
+    throw new Error("gemini-image-empty");
+  } catch (e) {
+    const err = `${GEMINI_IMAGE_MODEL} ${st} ${e instanceof Error ? e.message : e}`;
+    console.error("gemini-image", err);
+    return { image: null, off: false, err };
   }
-  return { image: null, off: false, err };
 }
 
 /** KuchuPuchu AI answers a user message in its chat (owner feature). Runs in
  *  ctx.waitUntil so the user's send stays instant. The transcript keeps the
- *  last few turns only; the limiter keeps a hammering user from firing an
- *  HF call per message (the reply is skipped, the send never fails). */
+ *  last few turns only; the limiter keeps a hammering user from firing a
+ *  Gemini call per message (the reply is skipped, the send never fails). */
 async function sendAiReply(
   env: Env,
   db: D1Database,
@@ -2216,12 +1820,6 @@ async function sendAiReply(
       "Never PROMISE a picture in chat text (no 'dicchi / sending / baniye dicchi'): the picture " +
       "arrives as its own message or not at all — if one was asked for and none is coming, say the " +
       "creation failed instead of promising.";
-    // Owner round 2026-09-04: photo creation + editing. The NEWEST message is
-    // the user's: an IMAGE with a caption = edit request; a TEXT with a
-    // creation verb + a picture noun = generation request. The result is
-    // uploaded to R2 and sent as an IMAGE message from the bot. Any failure
-    // (no key, no image model answer, no media bucket) falls through to the
-    // normal text reply, so the user is never left silent.
     const latestTwo = await all<{
       sender_id: string;
       kind: string;
@@ -2234,15 +1832,8 @@ async function sendAiReply(
       convId,
     );
     const newest = latestTwo[0];
-    const previous = latestTwo[1];
-    // Owner round 31 (item 17): a VOICE note to the AI is heard, not ignored —
-    // Whisper transcribes the clip on HF and the transcript is answered as
-    // chat text. (Before, the mic in this chat was disabled and its dead
-    // button froze the app.)
     let voicePrompt = "";
-    // v165: the photo this turn is a READ of, hoisted out of the block below —
-    // the reply stage looks at it with Gemini first (see there).
-    let readPhoto: { media: string | null; meta_json: string | null } | null = null;
+    let readPhoto: { media: string | null; meta_json: string | null; kind: string } | null = null;
     if (
       newest &&
       newest.sender_id === userId &&
@@ -2261,22 +1852,19 @@ async function sendAiReply(
           if (obj) {
             const buf = await new Response(obj.body).arrayBuffer();
             if (buf.byteLength > 0 && buf.byteLength <= AI_VOICE_MAX_BYTES) {
-              // v165: Gemini first (owner rule), Whisper as the fallback.
               const heard = await aiTranscribe(
                 env,
                 buf,
                 type || obj.httpMetadata?.contentType || "",
               );
               const said = heard.text;
-              // Persist the HF cause (quota/outage/auth) — tail is too flaky
-              // to be the only witness, and the user must never see it.
               if (heard.err) {
                 try {
                   await run(
                     db,
                     "INSERT INTO error_log (id, stack, created_at) VALUES (?, ?, ?)",
                     id(),
-                    `hf-stt ${heard.err}`.slice(0, 500),
+                    `gemini-stt ${heard.err}`.slice(0, 500),
                     nowIso(),
                   );
                 } catch {}
@@ -2303,30 +1891,9 @@ async function sendAiReply(
       firstAiReply && !asksAboutOwner(newestUserTextForIntro)
         ? ownerIntroFor(languageHintForIntro)
         : "";
-    // Owner round 2026-09-04 / round 33 (item 11a): photos in the AI chat.
-    // Three flows, decided from the NEWEST message (always the user's):
-    //  • CREATE — a text with a creation verb + a picture noun ("ekta chobi
-    //    banao", "একটা বিড়ালের ছবি এঁকে দাও") → the image model draws it and
-    //    the picture is sent as an IMAGE from the bot.
-    //  • EDIT — a photo with a caption asking for a change, or a change
-    //    request ("background remove koro", "eta cartoon banao") typed after a
-    //    photo → the photo + instruction go to the image model; the result
-    //    comes back as a new IMAGE. A NEW-picture request ("ekta chobi banao")
-    //    typed after a photo still CREATES unless it points at the photo.
-    //  • READ — a bare photo, a question in its caption, or a follow-up right
-    //    after it ("eta ki", "ki dekhte paccho") → the photo goes to the HF
-    //    vision model with the text prompt and the answer describes / answers
-    //    what is in it. Before, the model never saw the bytes and said "ami
-    //    kono chobi dekhte pacchi na".
-    // Every failure (no key, model refusal, no media bucket) falls through to
-    // the text reply — the user is never left silent; when a picture was
-    // asked for and the image tool failed, the text model is told so it
-    // apologises instead of promising a picture that never arrives.
     const photoOf = (r: (typeof rows)[number] | undefined) =>
       r && r.sender_id === userId && isPhotoRow(r) ? r : null;
     const newestPhoto = photoOf(newest);
-    // the most recent photo the user sent before their newest message, and
-    // how far back it sits (1 = the row right above)
     let recentPhoto: (typeof rows)[number] | null = null;
     let recentPhotoDistance = 0;
     if (newest && newest.kind === "TEXT" && newest.sender_id === userId) {
@@ -2340,11 +1907,8 @@ async function sendAiReply(
       }
     }
     const newestText = newest && newest.kind === "TEXT" ? (newest.body ?? "").trim() : "";
-    const photoParts: unknown[] = [];
+    let hasPhotoRead = false;
     let photoPrompt = "";
-    // Owner round 33 (item 11a): "ekta chobi banao" also matches the owner
-    // intent ("banao"); a message that took the picture path is an image
-    // request, not a question about the owner — no card for it.
     let pictureTurn = false;
     const bucket = env.MEDIA;
     if (newest && newest.sender_id === userId && bucket) {
@@ -2438,17 +2002,15 @@ async function sendAiReply(
       if (newestPhoto) {
         const caption = (newestPhoto.body ?? "").trim();
         if (caption && (IMAGE_EDIT_HINT.test(caption) || wantsPicture(caption))) {
-          // photo + a caption that asks for a change → edit
           const src = await aiPhotoBytes(env, newestPhoto.media, photoMime(newestPhoto));
           if (src) parts = { text: `Edit this photo as requested: ${caption}`, raw: caption, src };
         }
         if (!parts) {
-          readSource = newestPhoto; // bare photo / a question about it
+          readSource = newestPhoto;
           readPhoto = newestPhoto;
         }
       } else if (newestText) {
         if (recentPhoto && wantsEdit(newestText)) {
-          // photo first, then the instruction → edit that photo
           const src = await aiPhotoBytes(env, recentPhoto.media, photoMime(recentPhoto));
           if (src)
             parts = { text: `Edit this photo as requested: ${newestText}`, raw: newestText, src };
@@ -2462,92 +2024,30 @@ async function sendAiReply(
           };
         } else if (
           recentPhoto &&
-          // the photo is the user's previous turn (photo → reply → this text),
-          // or the text points at a picture ("eta", "chobi ta", "dekho")
           (recentPhotoDistance <= 2 ||
             IMAGE_REF.test(newestText) ||
             IMAGE_NOUN.test(newestText) ||
             /dekh|দেখ/i.test(newestText))
         ) {
-          readSource = recentPhoto; // a follow-up question about the photo
+          readSource = recentPhoto;
           readPhoto = recentPhoto;
           readIsPrior = true;
         }
       }
       if (parts) {
         pictureTurn = true;
-        // SD3-medium is a pure text-to-image model: raw Banglish/Bengali
-        // words in its prompt get PAINTED as gibberish text (live-verified —
-        // "ekta bagher chobi banao" drew a notebook of fake script). So the
-        // user words are rewritten into a clean English image prompt first —
-        // an edit folds the source photo into that rewrite via the vision
-        // model. A null falls back to the raw request. Both rewrites are
-        // tightly capped: the picture path shares one 30s waitUntil.
-        let scene: string | null = null;
-        let clean: string | null = null;
-        if (parts.src) {
-          scene = await hfChat(
-            env,
-            [
-              {
-                role: "user",
-                content: [
-                  {
-                    type: "text",
-                    text:
-                      `The user sent this photo and wants this change: "${parts.raw}". Write ONE ` +
-                      "text-to-image prompt in plain English that recreates this exact photo WITH that " +
-                      "change applied, max 80 words. Describe only the final picture (subject, setting, " +
-                      'colours, style). End with "no text, no letters, no words in the image". Reply ' +
-                      "with the prompt only, no quotes, no preamble, no Bengali or Banglish words.",
-                  },
-                  {
-                    type: "image_url",
-                    image_url: {
-                      url: `data:${parts.src.mime};base64,${arrayBufferToBase64(parts.src.bytes.buffer)}`,
-                    },
-                  },
-                ],
-              },
-            ],
-            300,
-            [HF_VISION_MODEL],
-            // An edit chains vision + draw inside one 30s waitUntil — the
-            // scene rewrite gets 8s so the draw keeps its full budget.
-            8_000,
-          );
-        } else {
-          clean = await hfChat(
-            env,
-            [
-              {
-                role: "user",
-                content:
-                  "Rewrite this picture request as ONE text-to-image prompt in plain English, max " +
-                  "60 words. Describe ONLY the final picture (subject, setting, colours, style, mood). " +
-                  'End with "no text, no letters, no words in the image". Reply with the prompt only, ' +
-                  `no quotes, no preamble.\nRequest: "${parts.raw}"`,
-              },
-            ],
-            150,
-            HF_CHAT_MODELS,
-            6_000,
-          );
-        }
-        const drawn = await hfImage(env, parts, scene, clean);
+        const drawn = await geminiImage(env, parts);
         if (drawn.image) {
           await sendBotImage(drawn.image, firstReplyIntro);
           return;
         }
-        // Persist the HF cause (quota/outage/auth) — tail is too flaky to
-        // be the only witness, and the user must never see it.
-        if (drawn.err) {
+        if (drawn.err && !drawn.off) {
           try {
             await run(
               db,
               "INSERT INTO error_log (id, stack, created_at) VALUES (?, ?, ?)",
               id(),
-              `hf-image ${drawn.err}`.slice(0, 500),
+              `gemini-image ${drawn.err}`.slice(0, 500),
               nowIso(),
             );
           } catch {}
@@ -2559,27 +2059,16 @@ async function sendAiReply(
           : " The user asked you for a picture but the image tool failed this time: apologise in one " +
             "short line and ask them to try again in a moment or rephrase. Do not describe a picture.";
       } else if (readSource) {
-        const part = await aiPhotoVisionPart(env, readSource.media, photoMime(readSource));
-        if (part) {
-          photoParts.push(part);
-          photoPrompt =
-            " The attached PHOTO is the one the user sent" +
-            (readIsPrior ? " just before their latest message" : "") +
-            ". Look at it carefully and answer about it: describe what you see, read any text in it, " +
-            "answer their question about it, or react to it naturally. If their latest message is " +
-            "clearly about something else, answer that instead. Never say you cannot see images.";
-        }
+        hasPhotoRead = true;
+        photoPrompt =
+          " The attached PHOTO is the one the user sent" +
+          (readIsPrior ? " just before their latest message" : "") +
+          ". Look at it carefully and answer about it: describe what you see, read any text in it, " +
+          "answer their question about it, or react to it naturally. If their latest message is " +
+          "clearly about something else, answer that instead. Never say you cannot see images.";
       }
     }
 
-    // v167 (owner: "ai reply live Hobe joto ta output pabe realtime update
-    // hobe massage word by word"): the answer is painted WHILE it is written.
-    // Every chunk the streaming brain produces is broadcast into this chat's
-    // room as an `ai_delta` frame (the text so far), and the app renders it in
-    // the bubble the dots used to occupy. Frames are throttled to
-    // AI_DELTA_MS; a chat with no socket simply never sees them and gets the
-    // finished row exactly as before — the live layer is an ADDITION to the
-    // reply, never a replacement for it.
     let lastDelta = 0;
     const push = (text: string) => {
       const now = Date.now();
@@ -2594,65 +2083,21 @@ async function sendAiReply(
         }),
       );
     };
-    // A photo turn goes to the HF vision model; when the vision call fails
-    // the text models still answer, honestly blind instead of silent.
     let answer: string | null = null;
-    if (photoParts.length > 0) {
-      // v165 (owner rule): a photo the user sends to be READ is messaging, so
-      // Gemini looks at it first (inline image part); the HF vision model is
-      // the fallback. Picture CREATE / EDIT never lands here — that is the
-      // HF image path above.
-      const seen = readPhoto;
+    if (hasPhotoRead && readPhoto) {
       const fullPrompt = prompt + voicePrompt + photoPrompt;
-      // v166: reading a photo is hedged exactly like text — Gemini looks at it
-      // while, 1.6 s later, the HF vision model starts on the same bytes; the
-      // first description wins. The text-only apology rides behind the HF leg
-      // so a photo the models cannot see still gets an answer, never silence.
-      const hfLeg = async () => {
-        const hf = await hfChat(
-          env,
-          [{ role: "user", content: [{ type: "text", text: fullPrompt }, ...photoParts] }],
-          900,
-          [HF_VISION_MODEL],
-          12_000,
-        );
-        if (hf) return hf;
-        return aiBrain(
-          env,
-          [
-            {
-              role: "user",
-              content:
-                fullPrompt +
-                " The user sent a photo but it cannot be seen right now: say so briefly in one " +
-                "short line and ask them to describe it or try again.",
-            },
-          ],
-          900,
-        );
-      };
-      const src =
-        seen && seen.media ? await aiPhotoBytes(env, seen.media, photoMime(seen as never)) : null;
+      const src = readPhoto.media
+        ? await aiPhotoBytes(env, readPhoto.media, photoMime(readPhoto))
+        : null;
       if (!src) {
-        // No bytes to look at: the text legs answer (as before) — live.
         answer = await aiBrainStream(env, [{ role: "user", content: fullPrompt }], 900, push);
-      } else if (!env.GEMINI_API_KEY) {
-        answer = await hfLeg();
-      } else {
+      } else if (env.GEMINI_API_KEY) {
         const b64 = arrayBufferToBase64(src.bytes.buffer);
-        // v167: the photo's read streams through the same live path (the
-        // sentence appears while the model looks at the picture); hfLeg
-        // answers in one piece and is painted whole when it wins.
-        answer = await hedgeStream(
-          (live) => geminiStream(env, fullPrompt, [{ mime: src.mime, b64 }], 900, live, 20_000),
-          hfLeg,
-          AI_HEDGE_MS,
-          push,
-        );
+        answer =
+          (await geminiStream(env, fullPrompt, [{ mime: src.mime, b64 }], 900, push, 20_000)) ??
+          (await geminiParts(env, fullPrompt, [{ mime: src.mime, b64 }], 900, 20_000));
       }
     } else {
-      // v167: the everyday path — chat text and voice-note answers — is the
-      // live one (a voice note's answer starts appearing while it is written).
       answer = await aiBrainStream(
         env,
         [{ role: "user", content: prompt + voicePrompt + photoPrompt }],
@@ -2660,10 +2105,7 @@ async function sendAiReply(
         push,
       );
     }
-    // v165: with Gemini as the primary brain, "the service is off" is only
-    // true when NO brain is configured — a spent Gemini key still has HF + CF.
-    const answerBody =
-      answer ?? (!env.GEMINI_API_KEY && !env.HF_TOKEN ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);
+    const answerBody = answer ?? (!env.GEMINI_API_KEY ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);
     const body = firstReplyIntro ? `${firstReplyIntro} ${answerBody}` : answerBody;
     const botId = await ensureAiBot(db);
     const mid = id();
@@ -2934,6 +2376,7 @@ function mediaHeaders(contentType: string, disposition: string) {
     "x-content-type-options": "nosniff",
     "content-disposition": disposition,
     "cache-control": "private, max-age=604800",
+    "access-control-allow-origin": "*",
   };
 }
 
@@ -3581,6 +3024,7 @@ async function ensureSchema(db: D1Database) {
     `CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)`,
     `CREATE INDEX IF NOT EXISTS idx_typing_at ON typing(at)`,
     `CREATE INDEX IF NOT EXISTS idx_statuses_expires ON statuses(expires_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_files_unattached ON files(conv_id, created_at)`,
     // Lightweight migrations: columns added after the first deploy. These are
     // deliberately outside the batch — a duplicate-column error must not roll the
     // whole batch back — and each one is individually tolerant.
@@ -5497,7 +4941,7 @@ export async function probeBackendLatency(
   if (origin) {
     const url = `${origin.replace(/\/+$/, "")}${LAT_PROBE_PATH}`;
     for (let i = 0; i < LAT_SAMPLES; i++) {
-      const started = Date.now();
+      const started = performance.now();
       try {
         const res = await fetcher(url, {
           method: "GET",
@@ -5505,7 +4949,7 @@ export async function probeBackendLatency(
         });
         if (res.ok) {
           count++;
-          sumMs += Date.now() - started;
+          sumMs += Math.max(1, Math.round(performance.now() - started));
         } else {
           errors++;
         }
@@ -6173,6 +5617,7 @@ async function storedMediaResponse(
   headers.set("x-content-type-options", "nosniff");
   headers.set("content-disposition", `attachment; filename="${filename}"`);
   headers.set("cache-control", "private, max-age=604800");
+  headers.set("access-control-allow-origin", "*");
   return new Response(object.body, { headers });
 }
 
@@ -6332,11 +5777,11 @@ export default {
           metrics = await rollupMetrics(env.DB, mNow);
           // §52's latency line rides the same hourly gate for the same reason: a
           // per-minute probe would be 4 320 requests a day against our own origin.
-          // M6: in-process, not egress — the cron subrequest to SELF_ORIGIN failed
-          // 100% (the egress leg, not the backend); handle() measures the worker.
-          lat = await probeBackendLatency(env.DB, env.SELF_ORIGIN, mNow, (url, init) =>
-            handle(new Request(url, { method: "GET", signal: init?.signal }), env, ctx),
-          );
+          // M6: in-process handle() + D1 ping, not egress.
+          lat = await probeBackendLatency(env.DB, env.SELF_ORIGIN, mNow, async (url, init) => {
+            await one(env.DB, "SELECT 1 AS ok");
+            return handle(new Request(url, { method: "GET", signal: init?.signal }), env, ctx);
+          });
         } catch (mErr) {
           console.error(
             "cron_metrics_error",
@@ -6344,20 +5789,10 @@ export default {
           );
         }
       }
-      // `error_log` is append-only from two places (the catch-all below and
-      // /api/debug/clientlog) and used to never shrink, so the table that exists to
-      // diagnose a bad day became a slow leak on the free tier's row reads. Seven
-      // days is far longer than any of our debugging windows; `devices` gets 60.
-      //
-      // This used to run on EVERY cron tick — 1 440 times a day over a 22 k-row
-      // `error_log` with no index to seek on — and that is how the account exhausted
-      // D1's free-tier row reads on 2026-09-02, after which every tick failed. It is
-      // now once a day (`pruneAgedRows`, marker-row gated), and the tables it deletes
-      // from are indexed. Placed after the hourly gate on purpose: the gate runs
-      // `ensureSchema`, so on a deployed-and-idle worker the tables and the new
-      // indexes exist before the first prune touches them, and no tick pays
-      // `ensureSchema` unconditionally. The stale-RINGING reap above stays per-tick,
-      // because a call has to become MISSED promptly — it is index-served too.
+      // Age-based cleanup is once a day (`pruneAgedRows`, marker-row gated), and
+      // the tables it deletes from are indexed. Placed after the hourly gate on
+      // purpose: the gate runs `ensureSchema`, so on a deployed-and-idle worker
+      // the tables and indexes exist before the first prune touches them.
       // Its own try: a failed prune (quota, maintenance) must never skip the rollups
       // or the latency probe, and vice versa.
       let pruned = 0;
@@ -6399,46 +5834,15 @@ export default {
       // outside test 27's source window. The minute cron is the offline fallback;
       // open clients also call /expire at the exact deadline.
       ctx.waitUntil(sweepExpiredVanishMessages(env, env.DB).catch(() => 0));
-      // Owner round 39 (item 2): HF warmup — the chat + vision providers
-      // scale to zero when idle, so the first user turn of a quiet stretch
-      // pays cold-start seconds ("reply aste onek somoy ney"). Every 10th
-      // minute tick fires one tiny ping per model (5 tokens ≈ 288 calls a
-      // day, negligible) in waitUntil so the tick itself stays fast; its
-      // own try, and hfChat already no-ops without a token. The SD3 draw
-      // is NOT warmed — a warm draw would be a full image generation.
-      // Placed AFTER the reap log on purpose: test 27 reads scheduled()
-      // through a fixed 4000-char window, and this block must not push the
-      // prune/log shape out of it.
-      if (new Date().getMinutes() % 10 === 0) {
-        ctx.waitUntil(
-          (async () => {
-            try {
-              await hfChat(env, [{ role: "user", content: "ping" }], 5, [HF_CHAT_MODELS[0]], 8_000);
-              await hfChat(env, [{ role: "user", content: "ping" }], 5, [HF_VISION_MODEL], 8_000);
-              // Owner round 43 (item 5): Whisper scales to zero too — a cold
-              // first voice paid 20s+ of model load against an 8s retry cap
-              // ("could not be heard" every quiet stretch). A 0.1s silence
-              // keeps it warm; the result is ignored (even a 503 triggers
-              // the load it needs).
-              if (env.HF_TOKEN) {
-                await fetch(`${HF_ROUTER}/hf-inference/models/${HF_STT_MODEL}`, {
-                  method: "POST",
-                  headers: {
-                    "content-type": "audio/wav",
-                    Authorization: `Bearer ${env.HF_TOKEN}`,
-                  },
-                  body: wavSilence(),
-                  signal: AbortSignal.timeout(8_000),
-                }).catch(() => null);
-              }
-            } catch (wErr) {
-              console.error(
-                "cron_hf_warmup_error",
-                JSON.stringify({ err: wErr instanceof Error ? wErr.message : String(wErr) }),
-              );
-            }
-          })(),
-        );
+      if (pruneRan) {
+        try {
+          await sweepUnattachedFiles(env, env.DB);
+        } catch (uErr) {
+          console.error(
+            "cron_unattached_files_error",
+            JSON.stringify({ err: uErr instanceof Error ? uErr.message : String(uErr) }),
+          );
+        }
       }
       // v163 (owner): "status 24h por server thekei permanently delete" — the
       // sweep existed but only ran when somebody LISTED statuses, so a quiet
@@ -6513,15 +5917,40 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   // Public APK download for the Web landing page / mobile gate. The release
   // pipeline drops the newest signed APK at this bucket key; no auth because
   // the offer lives on the pre-login welcome screen.
-  if (path === "/download/apk" && method === "GET") {
+  if (path === "/download/apk" && (method === "GET" || method === "HEAD")) {
     if (!env.MEDIA) fail(503, "Media storage is not configured.");
+    const headFn = (
+      env.MEDIA as unknown as { head?: (key: string) => Promise<{ size?: number } | null> }
+    ).head;
+    if (method === "HEAD") {
+      const meta = headFn
+        ? await headFn.call(env.MEDIA, "apk/kuchupuchu-latest.apk")
+        : await env.MEDIA.get("apk/kuchupuchu-latest.apk");
+      if (!meta) fail(404, "The latest APK is not uploaded yet.");
+      const size =
+        (meta as { size?: number }).size ?? (meta as { body?: Uint8Array }).body?.byteLength;
+      return new Response(null, {
+        headers: {
+          "content-type": "application/vnd.android.package-archive",
+          "content-disposition": 'attachment; filename="kuchupuchu-latest.apk"',
+          "cache-control": "public, max-age=600",
+          "access-control-allow-origin": "*",
+          ...(typeof size === "number" ? { "content-length": String(size) } : {}),
+        },
+      });
+    }
     const object = await env.MEDIA.get("apk/kuchupuchu-latest.apk");
     if (!object) fail(404, "The latest APK is not uploaded yet.");
+    const size =
+      (object as unknown as { size?: number }).size ??
+      (object as unknown as { body?: Uint8Array }).body?.byteLength;
     return new Response(object.body, {
       headers: {
         "content-type": "application/vnd.android.package-archive",
         "content-disposition": 'attachment; filename="kuchupuchu-latest.apk"',
         "cache-control": "public, max-age=600",
+        "access-control-allow-origin": "*",
+        ...(typeof size === "number" ? { "content-length": String(size) } : {}),
       },
     });
   }
@@ -7963,7 +7392,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const version = row?.avatar_version ?? 0;
     const etag = `"gav-${gid.slice(0, 8)}-v${version}"`;
     if (request.headers.get("if-none-match") === etag) {
-      return new Response(null, { status: 304, headers: { etag } });
+      return new Response(null, {
+        status: 304,
+        headers: { etag, "access-control-allow-origin": "*" },
+      });
     }
     return new Response(
       JSON.stringify({
@@ -7975,6 +7407,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           "content-type": "application/json",
           etag,
           "cache-control": row?.avatar_url ? "private, max-age=86400" : "private, max-age=300",
+          "access-control-allow-origin": "*",
         },
       },
     );
@@ -8008,7 +7441,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const version = row?.avatar_version ?? 0;
     const etag = `"av-${avatarMatch[1]!.slice(0, 8)}-v${version}"`;
     if (request.headers.get("if-none-match") === etag) {
-      return new Response(null, { status: 304, headers: { etag } });
+      return new Response(null, {
+        status: 304,
+        headers: { etag, "access-control-allow-origin": "*" },
+      });
     }
     if (!row?.avatar_url)
       return new Response(JSON.stringify({ avatarUrl: null, avatarRef: null }), {
@@ -8016,6 +7452,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           "content-type": "application/json",
           etag,
           "cache-control": "private, max-age=300",
+          "access-control-allow-origin": "*",
         },
       });
     return new Response(
@@ -8026,6 +7463,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           etag,
           // data-URIs are immutable per version; let the client keep them.
           "cache-control": "private, max-age=86400",
+          "access-control-allow-origin": "*",
         },
       },
     );
@@ -11617,6 +11055,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       headers.set("x-content-type-options", "nosniff");
       headers.set("content-disposition", 'attachment; filename="media"');
       headers.set("cache-control", "no-store");
+      headers.set("access-control-allow-origin", "*");
       return new Response(object.body, { headers });
     }
     return storedMediaResponse(env, row.media, row.kind === "VIDEO" ? "video/mp4" : "image/jpeg");
@@ -13742,7 +13181,6 @@ async function sweepStaleUploads(env: Env, db: D1Database): Promise<number> {
 
 async function collectOrphanedMedia(env: Env, db: D1Database, keys: Array<string | null>) {
   const bucket = env.MEDIA;
-  if (!bucket) return 0;
   const candidates = [...new Set(keys.filter((k): k is string => !!k && !k.startsWith("data:")))];
   let removed = 0;
   for (const key of candidates) {
@@ -13751,7 +13189,7 @@ async function collectOrphanedMedia(env: Env, db: D1Database, keys: Array<string
       if (inMessages) continue;
       const inStatuses = await one(db, "SELECT 1 AS x FROM statuses WHERE media = ? LIMIT 1", key);
       if (inStatuses) continue;
-      await bucket.delete(key);
+      if (bucket) await bucket.delete(key);
       await run(db, "DELETE FROM files WHERE key = ?", key);
       removed++;
     } catch {
@@ -13759,6 +13197,29 @@ async function collectOrphanedMedia(env: Env, db: D1Database, keys: Array<string
     }
   }
   return removed;
+}
+
+/**
+ * Daily sweep of single-POST `files` rows (`conv_id IS NULL`) that were never
+ * attached to a message or status after 24 hours.
+ */
+export async function sweepUnattachedFiles(
+  env: Env,
+  db: D1Database,
+  now = new Date(),
+): Promise<number> {
+  const cutoff = new Date(now.getTime() - 86_400_000).toISOString();
+  const rows = await all<{ key: string }>(
+    db,
+    "SELECT key FROM files WHERE conv_id IS NULL AND created_at < ? LIMIT 100",
+    cutoff,
+  );
+  if (!rows.length) return 0;
+  return collectOrphanedMedia(
+    env,
+    db,
+    rows.map((r) => r.key),
+  );
 }
 
 /**

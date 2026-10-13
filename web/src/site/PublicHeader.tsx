@@ -20,9 +20,10 @@ type PublicHeaderProps = {
   readonly onSignIn: () => void;
   /** Present when the brand should lead back to the landing page. */
   readonly onHome?: () => void;
+  readonly active?: "welcome" | SitePageId;
 };
 
-export function PublicHeader({ navigate, onSignIn, onHome }: PublicHeaderProps) {
+export function PublicHeader({ navigate, onSignIn, onHome, active }: PublicHeaderProps) {
   const brand = (
     <>
       <img src="/logo.png" alt="KuchuPuchu logo" />
@@ -44,8 +45,22 @@ export function PublicHeader({ navigate, onSignIn, onHome }: PublicHeaderProps) 
         <span className="kp-welcome__brand">{brand}</span>
       )}
       <nav className="kp-welcome__nav" aria-label="Page sections">
+        <RouteLink
+          route={{ kind: "section", section: "chats" }}
+          navigate={navigate}
+          className={active === "welcome" ? "is-active" : undefined}
+          aria-current={active === "welcome" ? "page" : undefined}
+        >
+          Overview
+        </RouteLink>
         {SITE_PAGES.map((page) => (
-          <RouteLink key={page} route={{ kind: "site", page }} navigate={navigate}>
+          <RouteLink
+            key={page}
+            route={{ kind: "site", page }}
+            navigate={navigate}
+            className={active === page ? "is-active" : undefined}
+            aria-current={active === page ? "page" : undefined}
+          >
             {SITE_PAGE_LABELS[page]}
           </RouteLink>
         ))}

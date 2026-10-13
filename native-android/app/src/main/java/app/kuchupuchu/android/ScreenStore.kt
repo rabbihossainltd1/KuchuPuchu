@@ -759,8 +759,10 @@ object ScreenStore {
             append(c.optBoolean("muted")).append('|')
             append(c.optBoolean("hidden")).append('|')
             append(c.optString("hiddenKey")).append('|')
+            append(c.optString("avatarRef")).append('|')
             append(other?.optString("displayName")).append('|')
             append(other?.optString("avatarUrl")).append('|')
+            append(other?.optString("avatarRef")).append('|')
             append(other?.optBoolean("online"))
         }
     }

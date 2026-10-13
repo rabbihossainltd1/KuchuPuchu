@@ -30,12 +30,14 @@ assert.ok(
     (url) =>
       url === "/index.html" ||
       url === "/icon.svg" ||
+      url === "/logo.png" ||
       url === "/manifest.webmanifest" ||
       /\.(?:js|css)$/i.test(url),
   ),
   "only the app shell, its identity files, JavaScript and CSS may be cached; media stays network-only",
 );
 assert.ok(precache.includes("/icon.svg"), "precache must include the PWA icon");
+assert.ok(precache.includes("/logo.png"), "precache must include the app logo");
 assert.ok(precache.includes("/manifest.webmanifest"), "precache must include the manifest");
 
 for (const url of precache) {
@@ -307,6 +309,7 @@ assert.equal(networkRequests.length, 0, "pre-cached JS must be served without ne
 const bypassRequests = [
   new Request(`${origin}/api/profile`),
   new Request(`${origin}/ws/socket`),
+  new Request(`${origin}/download/apk`),
   new Request(`${origin}/live/events`),
   new Request(`${origin}/media/private-video.mp4`),
   new Request(`https://cdn.example.test/assets/video.mp4`),

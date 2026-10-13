@@ -1,11 +1,18 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { ApiError } from "../api";
 import { isWebFeatureEnabled } from "../featureFlags";
 import { BrandMark, Icon } from "../icons";
 import { CallSettingsSection } from "../calls/CallSettingsSection";
+import {
+  generateIdentity,
+  isPassphraseBackup,
+  parseStoredIdentity,
+  sealPassphraseBackup,
+} from "../messaging/e2ee";
 import { PushSettingsSection } from "../push/PushSettingsSection";
 import { RouteLink } from "../RouteLink";
 import { useAuth } from "./AuthContext";
+import { E2EE_STORAGE_KEY } from "./storage";
 import { useProfileAvatar } from "./useProfileAvatar";
 import {
   authApi,
@@ -65,6 +72,39 @@ function safeProfileError(error: unknown): string {
   return authErrorCopy(error);
 }
 
+async function readAvatarDataUrl(file: File): Promise<string> {
+  const raw = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error("Could not read image file."));
+    reader.readAsDataURL(file);
+  });
+  if (raw.startsWith("data:image/") && raw.length <= 75_000) {
+    return raw;
+  }
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("Unsupported image format."));
+    el.src = raw;
+  });
+  const maxSide = 256;
+  const scale = Math.min(1, maxSide / Math.max(img.width || 1, img.height || 1));
+  const width = Math.max(1, Math.round((img.width || 1) * scale));
+  const height = Math.max(1, Math.round((img.height || 1) * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Image processing is unavailable.");
+  ctx.drawImage(img, 0, 0, width, height);
+  const jpeg = canvas.toDataURL("image/jpeg", 0.82);
+  if (jpeg.length > 80_000) {
+    return canvas.toDataURL("image/jpeg", 0.6);
+  }
+  return jpeg;
+}
+
 export function AccountSettingsPage({
   onBackToChats,
   onLogout,
@@ -74,6 +114,7 @@ export function AccountSettingsPage({
 }) {
   const { api, user, updateUser } = useAuth();
   const profileAvatar = useProfileAvatar(api, user);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
   const [username, setUsername] = useState(user?.username ?? "");
   const [about, setAbout] = useState(user?.about ?? "");
@@ -83,11 +124,18 @@ export function AccountSettingsPage({
   const [profileBusy, setProfileBusy] = useState(false);
   const [profileError, setProfileError] = useState("");
   const [profileSaved, setProfileSaved] = useState(false);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarMessage, setAvatarMessage] = useState("");
   const [devices, setDevices] = useState<AuthDevice[]>([]);
   const [devicesLoading, setDevicesLoading] = useState(true);
   const [devicesError, setDevicesError] = useState("");
   const [privacyBusy, setPrivacyBusy] = useState<string | null>(null);
   const [privacyError, setPrivacyError] = useState("");
+  const [backupPassphrase, setBackupPassphrase] = useState("");
+  const [backupHasServerCopy, setBackupHasServerCopy] = useState(false);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupError, setBackupError] = useState("");
+  const [backupSaved, setBackupSaved] = useState("");
 
   const privacy = useMemo(() => ({ ...defaultPrivacy, ...(user?.privacy ?? {}) }), [user?.privacy]);
   const profileChanged =
@@ -153,7 +201,97 @@ export function AccountSettingsPage({
 
   useEffect(() => {
     void loadDevices();
+    let active = true;
+    void authApi
+      .getE2eeBackup(api)
+      .then((res) => {
+        if (active) setBackupHasServerCopy(isPassphraseBackup(res.blob ?? ""));
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
   }, [api, user?.id]);
+
+  async function handleAvatarChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || avatarBusy) return;
+    setAvatarBusy(true);
+    setProfileError("");
+    setAvatarMessage("");
+    try {
+      const dataUrl = await readAvatarDataUrl(file);
+      const result = await authApi.updateMe(api, { avatarUrl: dataUrl });
+      updateUser(result.user);
+      setAvatarMessage("Profile photo updated.");
+    } catch (error) {
+      setProfileError(safeProfileError(error));
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
+  async function handleAvatarRemove() {
+    if (avatarBusy) return;
+    setAvatarBusy(true);
+    setProfileError("");
+    setAvatarMessage("");
+    try {
+      const result = await authApi.updateMe(api, { avatarUrl: "" });
+      updateUser(result.user);
+      setAvatarMessage("Profile photo removed.");
+    } catch (error) {
+      setProfileError(safeProfileError(error));
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
+  async function saveE2eeBackup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (backupBusy || backupPassphrase.length < 6) return;
+    setBackupBusy(true);
+    setBackupError("");
+    setBackupSaved("");
+    try {
+      let identity = parseStoredIdentity(window.localStorage.getItem(E2EE_STORAGE_KEY));
+      if (!identity) {
+        identity = await generateIdentity();
+        window.localStorage.setItem(E2EE_STORAGE_KEY, JSON.stringify(identity));
+      }
+      if (user?.e2eePublicKey !== identity.u) {
+        const updated = await authApi.updateMe(api, { e2eePublicKey: identity.u });
+        updateUser(updated.user);
+      }
+      const sealed = await sealPassphraseBackup(identity, backupPassphrase);
+      if (!sealed) throw new Error("Could not encrypt key backup.");
+      await authApi.putE2eeBackup(api, sealed);
+      setBackupHasServerCopy(true);
+      setBackupPassphrase("");
+      setBackupSaved("Encrypted KP2 key backup saved.");
+    } catch (error) {
+      setBackupError(authErrorCopy(error));
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  async function clearE2eeBackup() {
+    if (backupBusy) return;
+    setBackupBusy(true);
+    setBackupError("");
+    setBackupSaved("");
+    try {
+      await authApi.putE2eeBackup(api, "");
+      setBackupHasServerCopy(false);
+      setBackupSaved("Server key backup cleared.");
+    } catch (error) {
+      setBackupError(authErrorCopy(error));
+    } finally {
+      setBackupBusy(false);
+    }
+  }
 
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -266,14 +404,6 @@ export function AccountSettingsPage({
           </div>
         </section>
 
-        <div className="rollout-note" role="note">
-          <Icon name="lock" size={16} />
-          <span>
-            Account and profile settings are connected in this opt-in build. Messaging, status,
-            media and calls remain disabled.
-          </span>
-        </div>
-
         <div className="settings-grid">
           <section className="settings-card" aria-labelledby="profile-heading">
             <div className="settings-card__heading">
@@ -284,6 +414,40 @@ export function AccountSettingsPage({
               <span className="settings-card__icon">
                 <Icon name="profile" size={19} />
               </span>
+            </div>
+            <div className="settings-avatar-controls">
+              <input
+                ref={avatarInputRef}
+                id="profile-avatar-upload"
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                className="sr-only"
+                aria-label="Upload profile photo"
+                onChange={(event) => void handleAvatarChange(event)}
+              />
+              <button
+                type="button"
+                className="secondary-button secondary-button--compact"
+                disabled={avatarBusy}
+                onClick={() => avatarInputRef.current?.click()}
+              >
+                {avatarBusy ? "Updating photo…" : "Change photo"}
+              </button>
+              {(profileAvatar.src || user.avatarUrl || user.avatarRef) && (
+                <button
+                  type="button"
+                  className="text-button"
+                  disabled={avatarBusy}
+                  onClick={() => void handleAvatarRemove()}
+                >
+                  Remove photo
+                </button>
+              )}
+              {avatarMessage && (
+                <span className="settings-success" role="status">
+                  {avatarMessage}
+                </span>
+              )}
             </div>
             <form className="settings-form" onSubmit={saveProfile}>
               <label className="field-label" htmlFor="profile-display-name">
@@ -494,6 +658,72 @@ export function AccountSettingsPage({
             </p>
           </section>
 
+          <section className="settings-card" aria-labelledby="e2ee-backup-heading">
+            <div className="settings-card__heading">
+              <div>
+                <p className="eyebrow">END-TO-END ENCRYPTION</p>
+                <h2 id="e2ee-backup-heading">Message key backup</h2>
+              </div>
+              <span className="settings-card__icon">
+                <Icon name="lock" size={18} />
+              </span>
+            </div>
+            <p className="field-help">
+              {backupHasServerCopy
+                ? "An encrypted KP2 key backup is stored on the server."
+                : "Seal your P-256 message identity with a passphrase (PBKDF2-SHA256 + AES-GCM) so another browser or phone can adopt the same keypair."}
+            </p>
+            <form className="settings-form" onSubmit={saveE2eeBackup}>
+              <label className="field-label" htmlFor="e2ee-backup-passphrase">
+                Backup passphrase (6+ characters)
+              </label>
+              <input
+                id="e2ee-backup-passphrase"
+                type="password"
+                className="auth-input"
+                value={backupPassphrase}
+                minLength={6}
+                autoComplete="new-password"
+                placeholder="Enter a strong passphrase"
+                onChange={(event) => {
+                  setBackupPassphrase(event.target.value);
+                  setBackupSaved("");
+                }}
+              />
+              <div className="form-footer-row">
+                {backupHasServerCopy ? (
+                  <button
+                    type="button"
+                    className="text-button"
+                    disabled={backupBusy}
+                    onClick={() => void clearE2eeBackup()}
+                  >
+                    Remove backup
+                  </button>
+                ) : (
+                  <span className="field-help">Passphrase never leaves this browser</span>
+                )}
+                <button
+                  className="primary-button primary-button--small"
+                  type="submit"
+                  disabled={backupBusy || backupPassphrase.length < 6}
+                >
+                  {backupBusy ? "Sealing…" : "Save key backup"}
+                </button>
+              </div>
+              {backupError && (
+                <p className="settings-error" role="alert">
+                  {backupError}
+                </p>
+              )}
+              {backupSaved && (
+                <p className="settings-success" role="status">
+                  {backupSaved}
+                </p>
+              )}
+            </form>
+          </section>
+
           {isWebFeatureEnabled("push") && <PushSettingsSection api={api} />}
 
           {isWebFeatureEnabled("calls") && <CallSettingsSection />}
@@ -505,7 +735,7 @@ export function AccountSettingsPage({
             navigate={() => onBackToChats()}
             className="settings-footer__link"
           >
-            Return to Chats preview
+            {isWebFeatureEnabled("messaging") ? "Return to Chats" : "Return to Chats preview"}
           </RouteLink>
           <span>Account data is loaded from the KuchuPuchu Worker.</span>
         </footer>

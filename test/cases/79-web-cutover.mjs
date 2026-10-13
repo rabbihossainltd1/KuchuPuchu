@@ -130,9 +130,10 @@ check(
   !swTemplate.includes("skipWaiting"),
 );
 check(
-  "icon and manifest join the precache and rotate the build id",
-  viteConfig.includes('const publicExtras = ["icon.svg", "manifest.webmanifest"]') &&
+  "icon, logo, and manifest join the precache and rotate the build id",
+  viteConfig.includes('const publicExtras = ["icon.svg", "logo.png", "manifest.webmanifest"]') &&
     verifySw.includes('precache.includes("/icon.svg")') &&
+    verifySw.includes('precache.includes("/logo.png")') &&
     verifySw.includes('precache.includes("/manifest.webmanifest")'),
 );
 check(

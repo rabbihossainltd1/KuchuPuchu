@@ -42,8 +42,9 @@ const PAGES: Record<SitePageId, PageContent> = {
         only carry sealed bytes.
       </>,
       <>
-        <strong>Photos, video, voice &amp; docs</strong> — media is encrypted with per-file keys
-        before upload.
+        <strong>Photos, video, voice &amp; docs</strong> — text captions are end-to-end encrypted
+        inside <code>KP1.</code> envelopes, while media attachments are stored in private,
+        access-controlled Cloudflare R2 buckets readable only by conversation members.
       </>,
       <>
         <strong>Voice &amp; video calls</strong> — 1:1 calls on Android and in the desktop browser,
@@ -83,8 +84,10 @@ const PAGES: Record<SitePageId, PageContent> = {
         see in transit). Only a device holding the matching private key can open it.
       </>,
       <>
-        Photos, videos, voice notes and documents get a random per-file key; the encrypted bytes
-        live in storage, the key travels inside the sealed message.
+        Photos, videos, voice notes and documents are uploaded over TLS to private,
+        access-controlled Cloudflare R2 storage where only verified members of that conversation can
+        fetch them, while their 1:1 captions travel inside the sealed <code>KP1.</code> message
+        envelope.
       </>,
       <>
         The server never holds plaintext text or media keys. If a device has no key yet, the chat
@@ -183,7 +186,7 @@ export function SitePage({ page, navigate, onSignIn, onHome }: SitePageProps) {
 
   return (
     <main className="kp-welcome kp-site" aria-labelledby="site-title">
-      <PublicHeader onSignIn={onSignIn} navigate={navigate} onHome={onHome} />
+      <PublicHeader active={page} onSignIn={onSignIn} navigate={navigate} onHome={onHome} />
 
       <article className="kp-site__body">
         <p className="kp-site__eyebrow">{content.eyebrow}</p>

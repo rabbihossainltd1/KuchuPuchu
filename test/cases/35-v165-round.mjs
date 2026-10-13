@@ -182,34 +182,26 @@ check(
 
 /* 8 — KP AI routing */
 check(
-  "v165: KP AI — Gemini is the brain (chat text, the welcome line, a photo the user sends to be READ, a voice note to be HEARD) and Hugging Face keeps the picture CREATE / EDIT path; Whisper, the HF chain and Workers AI stay behind Gemini as honest fallbacks",
+  "v165: KP AI — Gemini is the sole brain (chat text, the welcome line, a photo the user sends to be READ, a voice note to be HEARD, and picture CREATE / EDIT); Hugging Face is completely removed",
   src.includes("async function geminiParts(") &&
     src.includes('inline_data: { mime_type: m.mime || "application/octet-stream", data: m.b64 }') &&
     src.includes(
       "generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent",
     ) &&
-    // v166 (owner: "ai reply dite onek late korche"): Gemini still LEADS the
-    // text / photo / voice turns, but it is raced against the HF chain — the
-    // fallback starts mid-hedge instead of after Gemini's whole timeout.
-    // v168: that hedge is 800 ms now (was 1.6 s).
-    src.includes("const AI_HEDGE_MS = 800;") &&
-    src.includes(
-      "() => geminiChat(env, messages, maxTokens),\n    () => hfThenCf(env, messages, maxTokens),",
-    ) &&
+    src.includes("async function geminiChat(") &&
+    src.includes("async function aiBrain(") &&
+    src.includes("async function aiBrainStream(") &&
     src.includes("async function aiTranscribe(") &&
     src.includes("const heard = await aiTranscribe(") &&
-    src.includes("const fb = await hfTranscribe(env, bytes, mime);") &&
     src.includes("async function aiWelcomeText(") &&
-    src.includes("const gem = await geminiParts(env, prompt, [], 120);") &&
-    src.includes("const seen = readPhoto;") &&
-    src.includes(
-      "seen && seen.media ? await aiPhotoBytes(env, seen.media, photoMime(seen as never)) : null;",
-    ) &&
-    src.includes("const drawn = await hfImage(env, parts, scene, clean);") &&
-    src.includes('const HF_IMAGE_MODEL = "stabilityai/stable-diffusion-3-medium-diffusers";') &&
-    src.includes(
-      "answer ?? (!env.GEMINI_API_KEY && !env.HF_TOKEN ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);",
-    ),
+    src.includes("return geminiParts(env, prompt, [], 120);") &&
+    src.includes("async function geminiImage(") &&
+    src.includes("const drawn = await geminiImage(env, parts);") &&
+    src.includes("answer ?? (!env.GEMINI_API_KEY ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);") &&
+    !src.includes("HF_TOKEN") &&
+    !src.includes("hfChat") &&
+    !src.includes("hfImage") &&
+    !src.includes("hfTranscribe"),
 );
 
 /* 9 — smooth double-tap zoom */

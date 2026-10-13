@@ -48,3 +48,16 @@ test("Settings and My Profile land on the account page", async ({ page }) => {
   await page.getByRole("menuitem", { name: "My Profile" }).click();
   await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
 });
+
+test("signed-out mobile visitors see the full welcome tabs and APK banner", async ({ browser }) => {
+  const mobileCtx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const mobilePage = await mobileCtx.newPage();
+  await mobilePage.goto("/");
+  await expect(
+    mobilePage.getByRole("heading", { name: "Messages that stay yours." }),
+  ).toBeVisible();
+  await expect(mobilePage.getByRole("tab", { name: "Features" })).toBeVisible();
+  await mobilePage.getByRole("tab", { name: "Architecture" }).click();
+  await expect(mobilePage.getByRole("heading", { name: "System architecture" })).toBeVisible();
+  await mobileCtx.close();
+});

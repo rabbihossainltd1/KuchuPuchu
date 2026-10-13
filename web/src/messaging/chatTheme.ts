@@ -67,7 +67,7 @@ function accent(theme: ChatTheme): string {
     case "night":
       return "#818cf8";
     case "default":
-      return "#f59e0b"; // Gold
+      return "#2f6fed";
     default:
       return "#2f6fed";
   }
@@ -82,7 +82,7 @@ function mineFill(theme: ChatTheme): [string, string] {
     case "night":
       return ["#818cf8", "#4f46e5"];
     case "default":
-      return ["#f59e0b", "#f5a623"]; // goldFill(): Gold → GoldDeep
+      return ["#2f6fed", "#1e40af"];
     default:
       return ["#2f6fed", "#1e40af"];
   }
@@ -123,9 +123,7 @@ export function chatThemeStyle(theme: ChatTheme, appTheme: AppTheme): ChatThemeS
   const darkBlue = appTheme === "dark_blue";
   const [mineFrom, mineTo] = mineFill(theme);
   const inks = otherInks(theme, darkBlue);
-  // Gold bubbles (the `default` theme) carry the near-white AmberInk, exactly
-  // like Android; every other own-bubble gradient carries white.
-  const mineInk = theme === "default" ? "#fffbeb" : "#ffffff";
+  const mineInk = "#ffffff";
   return {
     wallpaper: wallpaper(theme, darkBlue),
     accent: accent(theme),
