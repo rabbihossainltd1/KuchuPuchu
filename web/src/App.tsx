@@ -7,6 +7,7 @@ import { useConnectivity } from "./useConnectivity";
 import { AccountSettingsPage } from "./auth/AccountSettingsPage";
 import { AuthScreen } from "./auth/AuthScreen";
 import { MobileGate, WelcomePage, useIsMobileViewport } from "./auth/WelcomePage";
+import { SitePage } from "./site/SitePages";
 import { useAuth } from "./auth/AuthContext";
 import { useProfileAvatar } from "./auth/useProfileAvatar";
 
@@ -253,6 +254,27 @@ export default function App() {
     });
   };
 
+  // Owner (2026-10-13): the five static pages (features / encryption /
+  // privacy / data / terms) are public content — they render for everyone,
+  // signed in or not, and stay reachable even on phones, because a link to
+  // /privacy must never dead-end on the app-download gate.
+  if (route.kind === "site") {
+    return (
+      <SitePage
+        page={route.page}
+        navigate={navigate}
+        onSignIn={() => {
+          setWelcomeSignin(true);
+          navigate({ kind: "section", section: "chats" });
+        }}
+        onHome={() => {
+          setWelcomeSignin(false);
+          navigate({ kind: "section", section: "chats" });
+        }}
+      />
+    );
+  }
+
   // The web client is a desktop product: signed-out phones and tablets get
   // the app download gate. /account stays reachable on phones (Google
   // recovery) and an existing signed-in session is never locked out; flag-off
@@ -301,7 +323,7 @@ export default function App() {
       return !bareLanding || isAccountRoute || welcomeSignin ? (
         <AuthScreen onBackToChats={() => setWelcomeSignin(false)} />
       ) : (
-        <WelcomePage onSignIn={() => setWelcomeSignin(true)} />
+        <WelcomePage onSignIn={() => setWelcomeSignin(true)} navigate={navigate} />
       );
     }
 

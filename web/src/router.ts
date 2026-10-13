@@ -10,14 +10,24 @@ export const SECTIONS = [
 
 export type SectionId = (typeof SECTIONS)[number];
 
+/* Owner (2026-10-13): the landing page's policy sections are real, separate
+ * static pages now (/features, /encryption, /privacy, /data, /terms) instead
+ * of one endless scroll with #anchors — each has its own URL that can be
+ * shared or linked from outside (store listings, support replies). */
+export const SITE_PAGES = ["features", "encryption", "privacy", "data", "terms"] as const;
+
+export type SitePageId = (typeof SITE_PAGES)[number];
+
 export type AppRoute =
   | { kind: "section"; section: SectionId }
   | { kind: "conversation"; conversationId: string }
+  | { kind: "site"; page: SitePageId }
   | { kind: "not-found" };
 
 export type NavigableRoute = Exclude<AppRoute, { kind: "not-found" }>;
 
 const sectionSet = new Set<string>(SECTIONS);
+const sitePageSet = new Set<string>(SITE_PAGES);
 const invalidSegmentCharacters = /[\\/?#\u0000-\u001f\u007f]/;
 
 function decodeSegment(segment: string): string | null {
@@ -55,6 +65,12 @@ export function parseRoute(pathname: string): AppRoute {
     return { kind: "section", section: section as SectionId };
   }
 
+  // The public static pages resolve before the app sections so their URLs are
+  // plain, shareable paths with no anchors.
+  if (segments.length === 1 && sitePageSet.has(section)) {
+    return { kind: "site", page: section as SitePageId };
+  }
+
   if (section === "chats" && segments.length === 2) {
     const conversationId = decodeSegment(segments[1]!);
     if (conversationId) return { kind: "conversation", conversationId };
@@ -71,6 +87,7 @@ export function routeRequiresAuthentication(route: AppRoute): boolean {
 /** Build a canonical same-origin path. Route IDs are opaque path segments. */
 export function pathForRoute(route: NavigableRoute): string {
   if (route.kind === "section") return `/${route.section}`;
+  if (route.kind === "site") return `/${route.page}`;
   return `/chats/${encodeURIComponent(route.conversationId)}`;
 }
 
