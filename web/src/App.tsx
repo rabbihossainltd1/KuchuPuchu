@@ -313,7 +313,12 @@ export default function App() {
       // their own sign-in tap — goes straight to the form.
       const bareLanding = route.kind === "section" && route.section === "chats";
       return !bareLanding || isAccountRoute || welcomeSignin ? (
-        <AuthScreen onBackToChats={() => setWelcomeSignin(false)} />
+        <AuthScreen
+          onBackToChats={() => {
+            setWelcomeSignin(false);
+            if (!bareLanding) goToChats();
+          }}
+        />
       ) : (
         <WelcomePage
           onSignIn={() => setWelcomeSignin(true)}

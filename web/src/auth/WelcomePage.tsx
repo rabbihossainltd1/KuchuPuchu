@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import { RouteLink } from "../RouteLink";
-import { PublicHeader, SITE_PAGE_LABELS } from "../site/PublicHeader";
+import { HEADER_PAGES, PublicHeader, SITE_PAGE_LABELS } from "../site/PublicHeader";
 import { SITE_PAGE_BLURBS } from "../site/SitePages";
 import type { Navigate } from "../useBrowserRouter";
-import { SITE_PAGES } from "../router";
 import "./welcome.css";
 
 const APK_URL = "/download/apk";
@@ -55,6 +54,29 @@ type WelcomeProps = {
   showMobileBanner?: boolean;
 };
 
+const HIGHLIGHTS = [
+  {
+    title: "Sealed KP1 personal chats",
+    badge: "ECDH P-256",
+    body: "1:1 messages are encrypted on your device with AES-256-GCM before upload.",
+  },
+  {
+    title: "1:1 voice & video calls",
+    badge: "WebRTC",
+    body: "Peer-to-peer DTLS-SRTP audio and video calls across Android and Web.",
+  },
+  {
+    title: "Media, voice notes & 24h status",
+    badge: "View-Once",
+    body: "Share HD photos, documents, voice notes, and ephemeral 24-hour stories.",
+  },
+  {
+    title: "KuchuPuchu AI assistant",
+    badge: "Gemini AI",
+    body: "Built-in assistant for Bengali, Banglish, and English text and image help.",
+  },
+] as const;
+
 export function WelcomePage({ onSignIn, navigate }: WelcomeProps) {
   useEffect(() => {
     document.title = "KuchuPuchu — Private Messenger for Android & Web";
@@ -66,14 +88,11 @@ export function WelcomePage({ onSignIn, navigate }: WelcomeProps) {
 
       <section className="kp-welcome__hero">
         <div className="kp-welcome__hero-copy">
-          <div className="kp-welcome__hero-brand">
-            <img className="kp-welcome__logo" src="/logo.png" alt="KuchuPuchu app logo" />
-            <span className="kp-welcome__badge">DARK BLUE EDITION · ANDROID &amp; WEB</span>
-          </div>
+          <p className="kp-welcome__eyebrow">END-TO-END ENCRYPTED · ANDROID &amp; WEB</p>
           <h1 id="welcome-title">Messages that stay yours.</h1>
           <p className="kp-welcome__sub">
-            Private, end-to-end encrypted personal chats, 1:1 voice &amp; video calls, 24-hour
-            status updates, and KuchuPuchu AI — built for Android and the companion Web app.
+            Private personal chats, 1:1 voice &amp; video calls, 24-hour status stories, and
+            KuchuPuchu AI — synced across your Android phone and browser.
           </p>
           <div className="kp-welcome__cta">
             <button type="button" onClick={onSignIn}>
@@ -81,27 +100,33 @@ export function WelcomePage({ onSignIn, navigate }: WelcomeProps) {
             </button>
             <a href={APK_URL}>Download Android APK</a>
           </div>
-          <div className="kp-welcome__highlights" aria-label="Platform highlights">
-            <span>KP1 E2EE · ECDH P-256 + AES-256-GCM</span>
-            <span>WebRTC DTLS-SRTP 1:1 Calls</span>
-            <span>Mobile &amp; Desktop Web Ready</span>
-          </div>
         </div>
         <div className="kp-welcome__hero-art" aria-hidden="true">
           <img src="/banner.jpg" alt="" />
         </div>
       </section>
 
+      <section className="kp-welcome__overview-cards" aria-label="Core capabilities">
+        <div className="kp-site__grid">
+          {HIGHLIGHTS.map((item) => (
+            <div key={item.title} className="kp-site__card">
+              <div className="kp-site__card-head">
+                <strong>{item.title}</strong>
+                <span className="kp-site__badge">{item.badge}</span>
+              </div>
+              <p>{item.body}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
       <section className="kp-welcome__pages" aria-labelledby="pages-heading">
         <div className="kp-welcome__pages-head">
-          <h2 id="pages-heading">Explore dedicated pages</h2>
-          <p>
-            Every section lives on its own standalone page — select any tab above or open a page
-            below.
-          </p>
+          <h2 id="pages-heading">Dedicated pages</h2>
+          <p>Switch tabs at the top or open any page directly below.</p>
         </div>
         <div className="kp-welcome__page-grid">
-          {SITE_PAGES.map((page) =>
+          {HEADER_PAGES.map((page) =>
             navigate ? (
               <RouteLink
                 key={page}
@@ -111,13 +136,11 @@ export function WelcomePage({ onSignIn, navigate }: WelcomeProps) {
               >
                 <strong>{SITE_PAGE_LABELS[page]}</strong>
                 <span>{SITE_PAGE_BLURBS[page]}</span>
-                <em>Open /{page} →</em>
               </RouteLink>
             ) : (
               <a key={page} href={`/${page}`} className="kp-welcome__page-card">
                 <strong>{SITE_PAGE_LABELS[page]}</strong>
                 <span>{SITE_PAGE_BLURBS[page]}</span>
-                <em>Open /{page} →</em>
               </a>
             ),
           )}
@@ -127,7 +150,7 @@ export function WelcomePage({ onSignIn, navigate }: WelcomeProps) {
       <footer className="kp-welcome__foot">
         <span>KuchuPuchu · End-to-end encrypted · </span>
         <a href={APK_URL}>Android APK</a>
-        {SITE_PAGES.map((page) => (
+        {HEADER_PAGES.map((page) => (
           <span key={page}>
             {" · "}
             {navigate ? (

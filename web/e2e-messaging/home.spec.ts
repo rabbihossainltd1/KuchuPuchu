@@ -66,8 +66,10 @@ test("signed-out mobile visitors see real separate page tabs and can navigate ac
     mobilePage.getByRole("heading", { name: "Built for everyday privacy" }),
   ).toBeVisible();
 
-  await nav.getByRole("link", { name: "Architecture" }).click();
-  await expect(mobilePage).toHaveURL(/\/architecture$/);
-  await expect(mobilePage.getByRole("heading", { name: "System architecture" })).toBeVisible();
+  await nav.getByRole("link", { name: "Encryption" }).click();
+  await expect(mobilePage).toHaveURL(/\/encryption$/);
+  await expect(
+    mobilePage.getByRole("heading", { name: "End-to-end encryption (KP1 & KP2)" }),
+  ).toBeVisible();
   await mobileCtx.close();
 });

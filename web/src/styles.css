@@ -845,7 +845,7 @@ input:disabled {
     left: 0;
     display: grid;
     min-height: 58px;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     padding: 5px 9px max(7px, env(safe-area-inset-bottom));
     border-top: 1px solid rgba(113, 136, 175, 0.17);
     background: rgba(15, 24, 40, 0.97);
