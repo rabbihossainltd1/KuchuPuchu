@@ -5,7 +5,6 @@ import { SITE_PAGES, type SitePageId } from "../router";
 import type { Navigate } from "../useBrowserRouter";
 import {
   AllAndroidFeatureBanners,
-  AndroidMasterFeatureGrid,
   SkeuomorphicPhoneTrio,
   type FeatureBannerCategory,
 } from "./FeatureBanners";
@@ -525,7 +524,7 @@ export function SitePage({ page, onSignIn, onHome, navigate }: SitePageProps) {
             : "legal";
   const bannerHeading =
     page === "features"
-      ? "All 12 Android & Web Visual Feature Banners"
+      ? "Every feature built into KuchuPuchu Android & Web"
       : page === "encryption"
         ? "Visual Cryptography & Privacy Shield Banners"
         : page === "architecture"
@@ -558,11 +557,7 @@ export function SitePage({ page, onSignIn, onHome, navigate }: SitePageProps) {
               Download Android APK
             </a>
             {navigate ? (
-              <RouteLink
-                route={{ kind: "section", section: "chats" }}
-                navigate={navigate}
-                className="kp-site__home"
-              >
+              <RouteLink route={{ kind: "home" }} navigate={navigate} className="kp-site__home">
                 ← Back to Overview
               </RouteLink>
             ) : (
@@ -573,31 +568,28 @@ export function SitePage({ page, onSignIn, onHome, navigate }: SitePageProps) {
           </div>
         </header>
 
-        {page === "features" && (
-          <>
-            <SkeuomorphicPhoneTrio />
-            <AndroidMasterFeatureGrid />
-          </>
-        )}
+        {page === "features" && <SkeuomorphicPhoneTrio />}
 
         <AllAndroidFeatureBanners category={bannerCategory} heading={bannerHeading} />
 
-        <section
-          className="kp-site__cards-section"
-          aria-label={`${SITE_PAGE_LABELS[page]} highlights`}
-        >
-          <div className="kp-site__grid">
-            {content.cards.map((card) => (
-              <div key={card.title} className="kp-site__card">
-                <div className="kp-site__card-head">
-                  <strong>{card.title}</strong>
-                  <span className="kp-site__badge">{card.badge}</span>
+        {page !== "features" && (
+          <section
+            className="kp-site__cards-section"
+            aria-label={`${SITE_PAGE_LABELS[page]} highlights`}
+          >
+            <div className="kp-site__grid">
+              {content.cards.map((card) => (
+                <div key={card.title} className="kp-site__card">
+                  <div className="kp-site__card-head">
+                    <strong>{card.title}</strong>
+                    <span className="kp-site__badge">{card.badge}</span>
+                  </div>
+                  <p>{card.body}</p>
                 </div>
-                <p>{card.body}</p>
-              </div>
-            ))}
-          </div>
-        </section>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="kp-site__detail-section" aria-labelledby="site-detail-heading">
           <h2 id="site-detail-heading">{content.detailsHeading}</h2>

@@ -9,7 +9,7 @@ async function mount(page: Parameters<typeof signIn>[0]) {
   await worker.install(page);
   await page.routeWebSocket(/\/ws\/chat\//, () => {});
   await page.routeWebSocket(/\/ws\/user/, () => {});
-  await page.goto("/");
+  await page.goto("/chats");
 }
 
 test("the account page offers no light theme — the Web is dark blue only", async ({ page }) => {

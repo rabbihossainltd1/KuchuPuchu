@@ -1,156 +1,2222 @@
+import type { ReactElement } from "react";
+
 export type FeatureBannerCategory =
   "all" | "overview" | "features" | "encryption" | "architecture" | "faq" | "legal";
 
-export type AndroidFeatureItem = {
-  num: string;
-  tag: string;
-  title: string;
-  summary: string;
+export interface FeatureBannerItem {
+  id: string;
+  number: string;
+  badge: string;
   modules: string;
-};
+  title: string;
+  subtitle: string;
+  steps: [string, string, string];
+  categories: readonly FeatureBannerCategory[];
+}
 
 /**
- * Exhaustive inventory of all 17 feature pillars in the KuchuPuchu Android app
- * (`native-android/app/src/main/java/app/kuchupuchu/android/`).
+ * Complete 24-banner visual showcase — one dedicated 3D Skeuomorphic banner
+ * with a bespoke SVG illustration and 3-step guide for EVERY single feature
+ * across KuchuPuchu Android & Web.
  */
-export const ANDROID_APP_FEATURES: readonly AndroidFeatureItem[] = [
+export const FEATURE_BANNERS: readonly FeatureBannerItem[] = [
   {
-    num: "01",
-    tag: "E2EE CRYPTO",
-    title: "KP1 Sealed 1:1 Personal Chats",
-    summary:
-      "On-device ECDH P-256 key agreement, HKDF-SHA256, and AES-256-GCM authenticated encryption with a fail-closed transport guard.",
-    modules: "E2eeMsg.kt · E2eePolicy.kt",
-  },
-  {
-    num: "02",
-    tag: "KEY VAULT",
-    title: "KP2 Cross-Device Key Backups",
-    summary:
-      "Lock your P-256 private key with a 6+ character passphrase (PBKDF2-SHA256, 210,000 iterations + AES-256-GCM) to restore history on Android & Web.",
-    modules: "E2eeBackup.kt",
-  },
-  {
-    num: "03",
-    tag: "SECRET VAULT",
-    title: "Hidden Chats with Secret Key Unlock",
-    summary:
-      "Hide any chat behind a custom free-form Secret Key. Hidden threads vanish from your inbox, mute all alerts, and reveal when you type the key in Search.",
+    id: "hide-chats",
+    number: "01",
+    badge: "SECRET CHAT VAULT",
     modules: "ChatListScreen.kt · SearchScreen.kt",
+    title: "How to Hide & Unhide Secret Chats",
+    subtitle:
+      "Move sensitive conversations out of your main inbox behind a per-chat Secret Key. Hidden threads vanish completely from your chat list, unread badges, and notifications until you unlock them from the Search bar.",
+    steps: [
+      "Long-press any chat in your inbox (or open its menu) and tap Hide Chat.",
+      "Create a Secret Key passphrase for that conversation — it disappears from the inbox immediately and mutes lock-screen alerts.",
+      "To open or unhide it, tap Search, enter your exact Secret Key, or open Menu → Hidden Chats → Unhide.",
+    ],
+    categories: ["encryption", "faq", "legal"],
   },
   {
-    num: "04",
-    tag: "2.0S GESTURE",
-    title: "Archived Chats & 2-Second Pull-to-Open Ring",
-    summary:
-      "Pull down from the top of your inbox for 2 seconds to fill the tactile progress ring and jump into Archived Chats, or archive/unarchive from the chat menu.",
+    id: "archive-chats",
+    number: "02",
+    badge: "2.0S PULL GESTURE",
     modules: "ArchiveList.kt · ChatListScreen.kt",
+    title: "How to Archive Chats & Use the 2-Second Pull Gesture",
+    subtitle:
+      "Keep low-priority threads tucked away without losing history. KuchuPuchu hides even the Archive entry until you perform an intentional 2-second pull-down gesture on the inbox.",
+    steps: [
+      "Long-press any conversation and select Archive Chat to move it out of your active inbox.",
+      "Pull down from the top of the chat list and hold for 2 full seconds to fill the circular gauge and reveal Archived Chats.",
+      "Open Archived Chats anytime to read muted messages or tap Unarchive to restore a thread to the main inbox.",
+    ],
+    categories: ["faq"],
   },
   {
-    num: "05",
-    tag: "INBOX CONTROL",
-    title: "Pin, Separate Call/Msg Mute, Multi-Select & Unread Privacy",
-    summary:
-      "Pin up to 3 top chats, mute messages or calls independently (1h, 8h, 24h, Forever), batch-select with rounded checkboxes, and mask unread previews.",
+    id: "inbox-organization",
+    number: "03",
+    badge: "INBOX ORGANIZATION",
     modules: "ChatListScreen.kt · ChatPreviewText.kt",
+    title: "Pin Top Chats, Separate Call/Msg Mute & Unread Preview Privacy",
+    subtitle:
+      "Stay in total control of busy inboxes with pinned priority threads, independent message vs. call mute timers (1h, 8h, 24h, Forever), batch multi-select, and unread preview masking.",
+    steps: [
+      "Long-press up to 3 important chats and tap Pin to lock them at the very top of your inbox.",
+      "Mute message notifications or incoming call rings independently for 1 hour, 8 hours, 24 hours, or Forever.",
+      "Toggle Unread Preview Privacy so locked or shared screens mask unread message text behind 'New message'.",
+    ],
+    categories: ["encryption", "legal"],
   },
   {
-    num: "06",
-    tag: "3D FX & REPLY",
-    title: "Swipe-to-Reply, Bare Emoji Reactions & 3D Lottie Emoji Burst FX",
-    summary:
-      "Swipe any message or photo to quote-reply, react with bare emojis, and tap animated 3D Lottie emojis to trigger full-screen particle bursts on both phones.",
-    modules: "MessageReplySwipePolicy.kt · EmojiAnim.kt · ChatFx.kt",
+    id: "kp1-encryption",
+    number: "04",
+    badge: "ZERO-KNOWLEDGE CRYPTO",
+    modules: "E2eeMsg.kt · E2eePolicy.kt",
+    title: "KP1 End-to-End Encrypted 1:1 Personal Chats",
+    subtitle:
+      "Every personal 1:1 message is sealed on your device before upload using ECDH P-256 key agreement, HKDF-SHA256 key derivation, and AES-256-GCM authenticated encryption with a fail-closed guard.",
+    steps: [
+      "Your device generates an identity keypair in Android Keystore / Web Crypto API and derives a shared secret with your peer.",
+      "Every message is encrypted locally into a KP1.<iv>.<ciphertext> AES-256-GCM envelope with a fresh 96-bit random IV.",
+      "Verify peer identity anytime by comparing the safety fingerprint or scanning keys in Chat Info → Encryption.",
+    ],
+    categories: ["encryption", "architecture", "legal"],
   },
   {
-    num: "07",
-    tag: "COMPOSER MAGIC",
-    title: "Slash Commands (/magic), Markdown Formatting & @Mentions",
-    summary:
-      "Send floating wave animations with /magic, format text with bold/italic/code/strikethrough markup, and autocomplete @mentions in groups.",
+    id: "kp2-backup",
+    number: "05",
+    badge: "ROAMING KEY VAULT",
+    modules: "E2eeBackup.kt · Web Crypto PBKDF2",
+    title: "KP2 Cross-Device Passphrase Key Backup (210,000 Iterations)",
+    subtitle:
+      "Switch phones or sign in on KuchuPuchu Web without losing your encrypted chat history. Your private key is wrapped locally using PBKDF2-HMAC-SHA256 (210,000 iterations) and AES-256-GCM.",
+    steps: [
+      "Open Settings → Encrypted Key Backup and create a 6+ character recovery passphrase.",
+      "Your device derives a 256-bit wrapping key via 210,000 PBKDF2-SHA256 iterations with a random 16-byte salt.",
+      "Only the sealed KP2 ciphertext is uploaded — enter your passphrase on KuchuPuchu Web or a new phone to unlock history.",
+    ],
+    categories: ["encryption", "architecture", "faq"],
+  },
+  {
+    id: "rich-messaging",
+    number: "06",
+    badge: "CORE MESSAGING",
+    modules: "MessageReplySwipePolicy.kt · ChatScreen.kt",
+    title: "Swipe-to-Reply Quotes, Multi-Select & Batch Forwarding",
+    subtitle:
+      "Respond to exact messages in fast-moving threads with spring-physics swipe-to-reply, tap quoted headers to jump to the original bubble, and batch-forward across chats.",
+    steps: [
+      "Swipe right on any message bubble or photo (or click Reply on Web) to quote it above the composer.",
+      "Tap any quoted reply chip inside a conversation to scroll and highlight the original message.",
+      "Long-press to multi-select messages with rounded checkboxes and copy or forward them to multiple chats at once.",
+    ],
+    categories: ["faq"],
+  },
+  {
+    id: "emoji-fx",
+    number: "07",
+    badge: "3D LOTTIE EMOJI FX",
+    modules: "EmojiAnim.kt · ChatFx.kt",
+    title: "Animated 3D Emoji Reactions & Fullscreen Particle Celebrations",
+    subtitle:
+      "Bring conversations to life with bare floating emoji reactions, jumbo animated single-emoji bubbles, and synchronized fullscreen particle bursts on both phones.",
+    steps: [
+      "Long-press or hover over any message bubble to pop up the floating bare emoji reaction bar.",
+      "Send a single emoji on its own to render an oversized animated 3D Lottie sticker bubble.",
+      "Tap an animated emoji or react with ❤️, 🔥, 🎉, or 😂 to trigger a fullscreen particle burst across both devices.",
+    ],
+    categories: ["faq"],
+  },
+  {
+    id: "magic-commands",
+    number: "08",
+    badge: "COMPOSER /MAGIC",
     modules: "ComposerCommands.kt · MagicMessageEffect.kt · MessageMarkup.kt",
+    title: "/magic Floating Wave Commands, Rich Markdown & @Mentions",
+    subtitle:
+      "Trigger iridescent floating-wave bubble animations with /magic, style text with inline bold/italic/code/strikethrough markup, and autocomplete @mentions in groups.",
+    steps: [
+      "Type / in the message composer to open the command popup and choose /magic followed by your message.",
+      "Format text naturally using *bold*, _italic_, ~strikethrough~, and `inline code` markup.",
+      "Type @ in any group conversation to filter members with instant avatar autocomplete pills.",
+    ],
+    categories: ["faq"],
   },
   {
-    num: "08",
-    tag: "TIMERS & SCHEDULE",
-    title: "Disappearing Messages, Scheduled Delivery & Permanent Delete",
-    summary:
-      "Set per-chat auto-expiry timers (24h, 7d, 30d), schedule messages for future Dhaka delivery, and permanently delete messages for everyone with particle FX.",
-    modules: "Reminders.kt · DeleteAnim.kt · ChatScreen.kt",
+    id: "disappearing-messages",
+    number: "09",
+    badge: "EPHEMERAL PRIVACY",
+    modules: "ChatScreen.kt · Worker Cron Sweep",
+    title: "Disappearing Messages Auto-Expiry Timer (24h · 7d · 30d)",
+    subtitle:
+      "Set a per-conversation vanish timer so messages automatically erase themselves from both devices and Cloudflare D1 storage once their countdown expires.",
+    steps: [
+      "Open any conversation's top menu or Chat Info sheet and tap Disappearing Messages.",
+      "Select 24 Hours, 7 Days, or 30 Days (or turn the timer Off anytime).",
+      "Every new message carries an expiry timestamp and is purged automatically by the client and Worker cron job.",
+    ],
+    categories: ["encryption", "legal"],
   },
   {
-    num: "09",
-    tag: "CUSTOMIZATION",
-    title: "Conversation Nicknames & 5 Custom Per-Chat Themes",
-    summary:
-      "Assign custom nicknames inside any conversation and style each chat with Classic, Ocean, Forest, Sunset, or Midnight wallpapers.",
+    id: "scheduled-messages",
+    number: "10",
+    badge: "SCHEDULED DELIVERY",
+    modules: "Reminders.kt · Scheduled Queue",
+    title: "Scheduled Messages & Dhaka Timezone Auto-Dispatch",
+    subtitle:
+      "Compose messages now and queue them for automatic delivery at an exact future date and time — even if your phone or browser goes offline afterwards.",
+    steps: [
+      "Type your message, then open the Schedule action from the composer to pick a future delivery time.",
+      "Inspect all pending messages in the Scheduled Messages sheet inside the conversation.",
+      "Edit, reschedule, send immediately, or cancel any queued message before the Worker dispatches it.",
+    ],
+    categories: ["architecture", "faq"],
+  },
+  {
+    id: "delete-for-everyone",
+    number: "11",
+    badge: "TOTAL ERASURE FX",
+    modules: "DeleteAnim.kt · R2 Object Purge",
+    title: "Permanent Delete for Everyone with 3D Particle Shatter",
+    subtitle:
+      "Erase sent messages for yourself or permanently for everyone in the chat — complete with a custom 3D particle-disintegration animation and immediate R2 media object wipe.",
+    steps: [
+      "Long-press any message you sent (or select it on Web) and tap Delete.",
+      "Choose Delete for Everyone to remove the message from every participant's device and server database.",
+      "Watch the bubble disintegrate into glowing particles while any attached R2 media blob is permanently deleted.",
+    ],
+    categories: ["encryption", "legal"],
+  },
+  {
+    id: "themes-nicknames",
+    number: "12",
+    badge: "PERSONALIZATION",
     modules: "ConversationNicknamesSheet.kt · Theme.kt",
+    title: "Conversation Nicknames & 5 Custom Per-Chat Themes",
+    subtitle:
+      "Give every relationship its own identity with custom per-chat nicknames and five curated 3D skeuomorphic themes (Classic, Ocean, Forest, Sunset, and Midnight).",
+    steps: [
+      "Open Chat Info and tap Theme to preview Classic Blue, Ocean, Forest, Sunset, or Midnight.",
+      "Tap Conversation Nicknames to assign custom display names for yourself and your chat partner.",
+      "Your chosen theme and nicknames synchronize in real time across Android and KuchuPuchu Web.",
+    ],
+    categories: ["faq"],
   },
   {
-    num: "10",
-    tag: "1× MEDIA STUDIO",
-    title: "View-Once (1×) Media & Built-in Photo/Video Crop, Draw & Trim Editor",
-    summary:
-      "Send 1× photos, videos, and voice notes that auto-wipe from R2 on first view, plus edit photos (crop, draw, text) and trim videos with an accidental-exit gate.",
-    modules: "ViewOnceIcon.kt · MediaEditScreen.kt · CropTrimKit.kt · AttachmentExitGate.kt",
+    id: "view-once-media",
+    number: "13",
+    badge: "1× EPHEMERAL MEDIA",
+    modules: "ViewOnceIcon.kt · R2 Single-Open Wipe",
+    title: "View-Once (1×) Self-Destructing Photos, Videos & Voice Notes",
+    subtitle:
+      "Send sensitive photos, videos, and voice notes that can only be opened a single time. View-Once media blocks screenshots and wipes its encrypted R2 bytes the instant it closes.",
+    steps: [
+      "Attach a photo, video, or voice note and tap the 1× View-Once toggle badge before sending.",
+      "The recipient taps the sealed 1× bubble to open it inside a screenshot-protected fullscreen viewer.",
+      "On close, the server deletes the R2 media object and permanently marks the message as Opened.",
+    ],
+    categories: ["encryption", "legal"],
   },
   {
-    num: "11",
-    tag: "AUDIO & STICKERS",
-    title: "Waveform Voice Notes (1×/1.5×/2×), 1,150+ Stickers & GIF Picker",
-    summary:
-      "Hold mic to record (slide to lock or cancel), scrub interactive waveforms at 1×/1.5×/2× speed with earpiece routing, and send 1,150+ stickers & GIFs.",
-    modules: "VoiceNote.kt · AudioRouter.kt · StickerSheet.kt · GifRepo.kt",
+    id: "media-studio",
+    number: "14",
+    badge: "CREATIVE STUDIO",
+    modules: "MediaEditScreen.kt · CropTrimKit.kt · AttachmentExitGate.kt",
+    title: "Built-in Photo & Video Studio (Crop, Draw, Text & Trim)",
+    subtitle:
+      "Edit photos and videos before sending without leaving KuchuPuchu. Crop aspect ratios, draw freehand neon annotations, add text overlays, trim video clips, and prevent accidental discard.",
+    steps: [
+      "Pick any photo or video from your camera or gallery to launch the built-in Media Edit Studio.",
+      "Use the studio toolbar to crop/rotate, draw freehand strokes, place text labels, or trim video start/end frames.",
+      "If you press back while editing, AttachmentExitGate prompts before discarding your unsaved work.",
+    ],
+    categories: ["faq"],
   },
   {
-    num: "12",
-    tag: "5 GB FILES & DOCS",
+    id: "voice-notes",
+    number: "15",
+    badge: "VOICE MESSAGING",
+    modules: "VoiceNote.kt · AudioRouter.kt",
+    title: "Voice Notes with 48-Bar Waveform Scrubbing & Speed Control",
+    subtitle:
+      "Record crystal-clear voice notes with hands-free slide-to-lock, interactive 48-bar waveform scrubbing, automatic ear-proximity earpiece routing, and 1× / 1.5× / 2× playback speed.",
+    steps: [
+      "Hold the microphone button to record, slide up to lock hands-free mode, or slide left to cancel.",
+      "Drag anywhere along the 48-bar visual waveform to seek to an exact second in the voice note.",
+      "Tap the 1× / 1.5× / 2× speed pill or raise your phone to your ear for private earpiece playback.",
+    ],
+    categories: ["faq"],
+  },
+  {
+    id: "large-files",
+    number: "16",
+    badge: "5 GB CLOUD FILES",
+    modules: "Files.kt · DocViewerScreen.kt · TiffDecoder.kt",
     title: "Up to 5 GB Resumable Multipart Uploads & Built-in Document Viewer",
-    summary:
-      "8 MB chunked multipart uploads to Cloudflare R2 (up to 5 GB docs, 2 GB videos, 100 MB photos/audio) with in-app PDF, code, CSV, Markdown & TIFF preview.",
-    modules: "Files.kt · DocViewerScreen.kt · ChatMediaScreen.kt · TiffDecoder.kt",
+    subtitle:
+      "Send full-resolution videos, archives, and project files up to 5 GB via 8 MB chunked Cloudflare R2 multipart uploads — and preview PDFs, code, Markdown, CSV, and TIFF files in-app.",
+    steps: [
+      "Tap the attachment button and choose Document or File (up to 5 GB docs, 2 GB videos, 100 MB photos/audio).",
+      "Large files stream in 8 MB multipart chunks to Cloudflare R2 with live progress and retry resilience.",
+      "Tap any received PDF, source code, Markdown, CSV, or multi-page TIFF to open the built-in Document Viewer.",
+    ],
+    categories: ["architecture"],
   },
   {
-    num: "13",
-    tag: "WEBRTC + SCREEN",
-    title: "1:1 E2EE Audio/Video Calls, Live Screen Share + System Audio & Voice Isolation",
-    summary:
-      "DTLS-SRTP calls with 5-layer ring delivery, live Screen Sharing with System Audio Tap for gaming, Voice Isolation noise suppression, and minimized call timer banner.",
-    modules: "CallEngine.kt · KpScreenCapturer.kt · SystemAudioTap.kt · VoiceIsolation.kt",
+    id: "stickers-gifs",
+    number: "17",
+    badge: "STICKERS & GIFS",
+    modules: "StickerSheet.kt · GifRepo.kt · EmojiRepo.kt",
+    title: "1,150+ Stickers (10 Curated Packs) & Live GIF Picker",
+    subtitle:
+      "Express every mood with 10 built-in high-resolution sticker packs (over 1,150 stickers), a live trending GIF search engine, favorites syncing, and recent sticker memory.",
+    steps: [
+      "Tap the Sticker icon in the composer to browse 10 packs including Koko, Blu, Mochi, and animated sets.",
+      "Long-press any sticker to save it to your synced Favorites tab or access your Recent stickers.",
+      "Switch to the GIF tab to search trending reaction GIFs and send with a single tap.",
+    ],
+    categories: ["faq"],
   },
   {
-    num: "14",
-    tag: "24H STORIES",
-    title: "24-Hour Status Stories with Video Trim, Status Rings & Quote Replies",
-    summary:
-      "Post 24h photo, trimmed video, or styled text stories with unseen/viewed avatar rings, hold-to-pause, emoji reactions, viewer list, and chat quote replies.",
+    id: "encrypted-calls",
+    number: "18",
+    badge: "WEBRTC CALLING",
+    modules: "CallEngine.kt · CallScreens.kt · E2eeCall.kt · KpTelecom.kt",
+    title: "1:1 Encrypted WebRTC Audio & HD Video Calls",
+    subtitle:
+      "Place low-latency 1:1 voice and HD video calls secured by DTLS-SRTP and per-call E2eeCall key verification, backed by 5-layer ring delivery and Android Telecom integration.",
+    steps: [
+      "Tap the Voice or Video Call icon in any 1:1 chat header to start an encrypted WebRTC session.",
+      "Switch between Speaker, Earpiece, and Bluetooth or flip front/back cameras with a minimized call timer banner.",
+      "Answer incoming rings straight from your Android lock screen or KuchuPuchu Web call banner.",
+    ],
+    categories: ["encryption", "architecture"],
+  },
+  {
+    id: "screen-share-audio",
+    number: "19",
+    badge: "SCREEN SHARE + AUDIO",
+    modules: "KpScreenCapturer.kt · SystemAudioTap.kt · VoiceIsolation.kt",
+    title: "Live Screen Sharing with System Audio Tap & AI Voice Isolation",
+    subtitle:
+      "Share your phone or desktop screen during live calls complete with synchronized device system audio for gaming/videos and hardware-accelerated Voice Isolation noise suppression.",
+    steps: [
+      "During any active 1:1 call, tap the Screen Share button in the 3D call control dock.",
+      "SystemAudioTap streams your device's internal game, video, or music audio alongside your live screen.",
+      "Toggle Voice Isolation to strip wind, fan, and street background noise so only your voice comes through.",
+    ],
+    categories: ["architecture"],
+  },
+  {
+    id: "status-stories",
+    number: "20",
+    badge: "24-HOUR STORIES",
     modules: "StatusScreens.kt · StatusPickScreen.kt · VideoExport.kt",
+    title: "24-Hour Status Stories with Video Trim, Rings & Quote Replies",
+    subtitle:
+      "Post 24-hour photo, trimmed video, or styled text stories with unseen/viewed avatar rings, hold-to-pause viewer controls, quick emoji reactions, and private 1:1 quote replies.",
+    steps: [
+      "Open the Status tab and tap + Add Status to share a photo, trimmed video clip, or custom color card.",
+      "Tap any contact's glowing status ring to watch full-screen (5-second auto-advance, hold to pause).",
+      "React with ❤️ 🔥 👏 or type a reply to send a quoted status message directly into their 1:1 chat.",
+    ],
+    categories: ["faq"],
   },
   {
-    num: "15",
-    tag: "GROUPS & SHIELD",
-    title: "Group Chats, Private Profile (FLAG_SECURE Screenshot Block) & Block/Unblock",
-    summary:
-      "Create groups with member & theme controls, enable Private Profile to hardware-block screenshots/recording and media saves, or block/unblock peers.",
-    modules: "CreateGroupScreen.kt · GroupInfoScreen.kt · KpSecure.kt · ProfileScreen.kt",
+    id: "group-chats",
+    number: "21",
+    badge: "GROUP CONVERSATIONS",
+    modules: "CreateGroupScreen.kt · GroupInfoScreen.kt",
+    title: "Group Chats, Owner Admin Controls & Shared Media",
+    subtitle:
+      "Create multi-member group conversations with custom avatars, owner crown badges, member add/remove controls, owner-locked group themes, and live multi-user typing indicators.",
+    steps: [
+      "Open the main menu and tap New Group to select contacts, name the group, and upload a group photo.",
+      "Group owners can add or remove members, manage group settings, and lock or customize the group theme.",
+      "Browse all shared group photos, videos, files, and links from the Group Info media tabs.",
+    ],
+    categories: ["architecture"],
   },
   {
-    num: "16",
-    tag: "AUTH & OTP",
-    title: "SIM-Aware Phone Auth, Compact 6-Digit Approval OTP & Google Recovery",
-    summary:
-      "Passwordless E.164 login with compact 6-digit copyable approval OTP in the official chat, Google Identity lost-device recovery, and 1 Android + 1 Web session.",
+    id: "flag-secure",
+    number: "22",
+    badge: "SCREEN SHIELD",
+    modules: "KpSecure.kt · ProfileScreen.kt",
+    title: "Private Profile Shield & Screenshot Protection (FLAG_SECURE)",
+    subtitle:
+      "Enable Private Profile to activate Android hardware FLAG_SECURE across chats and calls with you — blocking screenshots, screen recording, and photo saving or forwarding.",
+    steps: [
+      "Open Account & Profile Settings and toggle Private Profile ON alongside granular field visibility.",
+      "Android hardware FLAG_SECURE immediately blocks screenshots, screen recorders, and task-switcher previews.",
+      "Media sent in protected chats disables Save to Gallery and Forward so your photos stay in the conversation.",
+    ],
+    categories: ["encryption", "legal"],
+  },
+  {
+    id: "sim-auth-otp",
+    number: "23",
+    badge: "IDENTITY & OTP",
     modules: "LoginScreen.kt · PhoneVerifier.kt · GoogleAuth.kt",
+    title: "SIM-Aware Phone Auth, Compact 6-Digit Copyable OTP & Google Recovery",
+    subtitle:
+      "Sign in with SIM-aware E.164 phone verification on Android, bind Google Identity for lost-device recovery, and approve Desktop Web logins with a compact 6-digit OTP + Copy button.",
+    steps: [
+      "Verify your phone number on Android and optionally link your Google account for one-tap recovery.",
+      "On Desktop Web (/chats), enter your phone number to receive a live login approval card inside your Official chat.",
+      "Tap Approve on your phone — or tap the compact Copy button next to the 6-digit OTP code to sign in.",
+    ],
+    categories: ["encryption", "faq", "legal"],
   },
   {
-    num: "17",
-    tag: "GEMINI AI & OTA",
-    title: "Verified KuchuPuchu Gemini AI, Launcher Camera, Shortcuts & In-App OTA Updater",
-    summary:
-      "Chat with verified KuchuPuchu AI (Google Gemini) in Bangla/Banglish/English with session history, plus Launcher Camera, Share Sheet intake, and R2 OTA APK updates.",
-    modules: "AIHistoryScreen.kt · LauncherCameraScreen.kt · ShareIntake.kt · KpUpdate.kt",
+    id: "ai-push-ota",
+    number: "24",
+    badge: "GEMINI AI & ANDROID OTA",
+    modules: "AIHistoryScreen.kt · LauncherCameraScreen.kt · PushSeal.kt · KpUpdate.kt",
+    title: "Verified KuchuPuchu Gemini AI, Launcher Camera, Sealed Push & OTA Updater",
+    subtitle:
+      "Chat with the verified KuchuPuchu AI assistant powered exclusively by Google Gemini, capture from the Android Launcher Camera, receive PushSeal notifications, and install R2 OTA APK updates.",
+    steps: [
+      "Open KuchuPuchu AI from your inbox to chat in Bangla, Banglish, or English with multi-session history.",
+      "Use Android Launcher Camera, dynamic app shortcuts, and Direct Share targets for instant media sharing.",
+      "Receive content-free/sealed push notifications and install signed Android APK updates in-app via KpUpdate.",
+    ],
+    categories: ["architecture", "faq"],
   },
 ];
+
+export const ANDROID_APP_FEATURES = FEATURE_BANNERS.map((b) => ({
+  num: b.number,
+  tag: b.badge,
+  title: b.title,
+  summary: b.subtitle,
+  modules: b.modules,
+}));
+
+function BannerVisual({ id }: { id: string }): ReactElement {
+  switch (id) {
+    case "hide-chats":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <defs>
+            <linearGradient id="hb-panel" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="#1b3564" />
+              <stop offset="100%" stopColor="#0a162c" />
+            </linearGradient>
+            <linearGradient id="hb-gold" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="#ffe28a" />
+              <stop offset="100%" stopColor="#d99616" />
+            </linearGradient>
+            <linearGradient id="hb-blue" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="#4f96ff" />
+              <stop offset="100%" stopColor="#1e56cc" />
+            </linearGradient>
+          </defs>
+          <rect
+            x="8"
+            y="10"
+            width="114"
+            height="200"
+            rx="16"
+            fill="url(#hb-panel)"
+            stroke="#4c78c8"
+            strokeOpacity="0.45"
+          />
+          <text x="20" y="30" fill="#9bc2ff" fontSize="9.5" fontWeight="700">
+            1 · LONG-PRESS CHAT
+          </text>
+          <rect
+            x="16"
+            y="40"
+            width="98"
+            height="34"
+            rx="9"
+            fill="#102244"
+            stroke="#6aa6ff"
+            strokeOpacity="0.4"
+          />
+          <circle cx="30" cy="57" r="9" fill="url(#hb-blue)" />
+          <text x="44" y="54" fill="#f0f6ff" fontSize="8.5" fontWeight="700">
+            Rahi Ahmed
+          </text>
+          <text x="44" y="65" fill="#8cb4f5" fontSize="7.5">
+            Secret plan tonight…
+          </text>
+          <rect
+            x="20"
+            y="82"
+            width="90"
+            height="72"
+            rx="10"
+            fill="#0d1b36"
+            stroke="#fbbf24"
+            strokeOpacity="0.55"
+          />
+          <text x="30" y="99" fill="#cbd5e1" fontSize="8">
+            Pin Conversation
+          </text>
+          <rect x="25" y="106" width="80" height="22" rx="6" fill="url(#hb-gold)" />
+          <text x="33" y="120" fill="#091326" fontSize="8.5" fontWeight="800">
+            🔒 Hide Chat
+          </text>
+          <text x="30" y="143" fill="#cbd5e1" fontSize="8">
+            Archive Chat
+          </text>
+
+          <rect
+            x="133"
+            y="10"
+            width="114"
+            height="200"
+            rx="16"
+            fill="url(#hb-panel)"
+            stroke="#fbbf24"
+            strokeOpacity="0.5"
+          />
+          <text x="145" y="30" fill="#fde68a" fontSize="9.5" fontWeight="700">
+            2 · SET SECRET KEY
+          </text>
+          <circle cx="190" cy="72" r="22" fill="#102244" stroke="url(#hb-gold)" strokeWidth="2" />
+          <path d="M183 72v-5a7 7 0 0 1 14 0v5" fill="none" stroke="#fde68a" strokeWidth="2.2" />
+          <rect x="180" y="72" width="20" height="15" rx="4" fill="url(#hb-gold)" />
+          <rect
+            x="147"
+            y="108"
+            width="86"
+            height="26"
+            rx="8"
+            fill="#081224"
+            stroke="#60a5fa"
+            strokeOpacity="0.5"
+          />
+          <text x="163" y="125" fill="#fde68a" fontSize="12" fontWeight="800" letterSpacing="3">
+            ••••••
+          </text>
+          <rect x="152" y="146" width="76" height="24" rx="8" fill="url(#hb-blue)" />
+          <text x="167" y="161" fill="#ffffff" fontSize="8.5" fontWeight="700">
+            Seal &amp; Hide
+          </text>
+
+          <rect
+            x="258"
+            y="10"
+            width="114"
+            height="200"
+            rx="16"
+            fill="url(#hb-panel)"
+            stroke="#38bdf8"
+            strokeOpacity="0.5"
+          />
+          <text x="269" y="30" fill="#7dd3fc" fontSize="9.5" fontWeight="700">
+            3 · SEARCH TO UNLOCK
+          </text>
+          <rect
+            x="268"
+            y="42"
+            width="94"
+            height="26"
+            rx="8"
+            fill="#081224"
+            stroke="#38bdf8"
+            strokeOpacity="0.7"
+          />
+          <text x="276" y="58" fill="#e0f2fe" fontSize="8.5" fontWeight="700">
+            🔍 Key: ••••••
+          </text>
+          <rect
+            x="268"
+            y="78"
+            width="94"
+            height="62"
+            rx="10"
+            fill="#10264a"
+            stroke="#fde68a"
+            strokeOpacity="0.65"
+          />
+          <text x="276" y="95" fill="#fde68a" fontSize="8" fontWeight="800">
+            🔓 HIDDEN VAULT
+          </text>
+          <circle cx="283" cy="115" r="9" fill="url(#hb-gold)" />
+          <text x="297" y="113" fill="#ffffff" fontSize="8.5" fontWeight="700">
+            Rahi Ahmed
+          </text>
+          <text x="297" y="125" fill="#93c5fd" fontSize="7.5">
+            Tap to unhide/open
+          </text>
+        </svg>
+      );
+
+    case "archive-chats":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="10"
+            y="12"
+            width="172"
+            height="196"
+            rx="16"
+            fill="#112344"
+            stroke="#5b8def"
+            strokeOpacity="0.45"
+          />
+          <text x="24" y="34" fill="#9bc2ff" fontSize="9.5" fontWeight="700">
+            PULL &amp; HOLD 2.0 SECONDS
+          </text>
+          <circle cx="96" cy="94" r="34" fill="#0a162c" stroke="#2b4c85" strokeWidth="5" />
+          <path
+            d="M96 60 A34 34 0 1 1 64 106"
+            fill="none"
+            stroke="#38bdf8"
+            strokeWidth="5"
+            strokeLinecap="round"
+          />
+          <text x="79" y="98" fill="#f0f9ff" fontSize="12" fontWeight="800">
+            2.0s
+          </text>
+          <path
+            d="M96 135v22m-8-8 8 8 8-8"
+            fill="none"
+            stroke="#fbbf24"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+          />
+          <text x="38" y="182" fill="#bae6fd" fontSize="8.5" fontWeight="600">
+            Hold pull gesture to reveal
+          </text>
+
+          <rect
+            x="198"
+            y="12"
+            width="172"
+            height="196"
+            rx="16"
+            fill="#112344"
+            stroke="#fbbf24"
+            strokeOpacity="0.5"
+          />
+          <text x="214" y="34" fill="#fde68a" fontSize="9.5" fontWeight="700">
+            ARCHIVED CHATS VAULT
+          </text>
+          <rect
+            x="212"
+            y="48"
+            width="144"
+            height="40"
+            rx="10"
+            fill="#0b1830"
+            stroke="#4f86eb"
+            strokeOpacity="0.4"
+          />
+          <circle cx="230" cy="68" r="11" fill="#1e40af" />
+          <text x="247" y="65" fill="#f8fafc" fontSize="9" fontWeight="700">
+            Project Group
+          </text>
+          <text x="247" y="77" fill="#93c5fd" fontSize="7.5">
+            Muted · 12 new messages
+          </text>
+          <rect
+            x="212"
+            y="96"
+            width="144"
+            height="40"
+            rx="10"
+            fill="#0b1830"
+            stroke="#4f86eb"
+            strokeOpacity="0.4"
+          />
+          <circle cx="230" cy="116" r="11" fill="#0284c7" />
+          <text x="247" y="113" fill="#f8fafc" fontSize="9" fontWeight="700">
+            University Alumni
+          </text>
+          <text x="247" y="125" fill="#93c5fd" fontSize="7.5">
+            Archived · Tap to restore
+          </text>
+          <rect x="226" y="152" width="116" height="28" rx="9" fill="#1d4ed8" />
+          <text x="246" y="170" fill="#ffffff" fontSize="9" fontWeight="700">
+            📤 Unarchive Chat
+          </text>
+        </svg>
+      );
+
+    case "inbox-organization":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="12"
+            y="12"
+            width="356"
+            height="196"
+            rx="16"
+            fill="#102242"
+            stroke="#5b8def"
+            strokeOpacity="0.45"
+          />
+          <rect x="28" y="26" width="64" height="24" rx="12" fill="#1e3a6d" />
+          <text x="44" y="42" fill="#cbd5e1" fontSize="9" fontWeight="700">
+            All · 18
+          </text>
+          <rect
+            x="100"
+            y="26"
+            width="84"
+            height="24"
+            rx="12"
+            fill="#2563eb"
+            stroke="#93c5fd"
+            strokeOpacity="0.6"
+          />
+          <text x="114" y="42" fill="#ffffff" fontSize="9" fontWeight="800">
+            Unread · 4
+          </text>
+          <rect
+            x="216"
+            y="26"
+            width="136"
+            height="24"
+            rx="12"
+            fill="#0b172e"
+            stroke="#fbbf24"
+            strokeOpacity="0.55"
+          />
+          <text x="228" y="42" fill="#fde68a" fontSize="8.5" fontWeight="700">
+            👁 Preview Mask: ON
+          </text>
+
+          <rect
+            x="28"
+            y="62"
+            width="324"
+            height="42"
+            rx="11"
+            fill="#162e58"
+            stroke="#fbbf24"
+            strokeOpacity="0.55"
+          />
+          <circle cx="50" cy="83" r="13" fill="#2563eb" />
+          <text x="72" y="79" fill="#ffffff" fontSize="10" fontWeight="800">
+            Nadia Islam
+          </text>
+          <text x="72" y="93" fill="#93c5fd" fontSize="8.5">
+            📌 Pinned · Call Mute: 8h
+          </text>
+          <rect x="290" y="72" width="48" height="20" rx="10" fill="#f59e0b" />
+          <text x="302" y="85" fill="#091326" fontSize="8.5" fontWeight="800">
+            PIN
+          </text>
+
+          <rect
+            x="28"
+            y="112"
+            width="324"
+            height="42"
+            rx="11"
+            fill="#0b1830"
+            stroke="#3b82f6"
+            strokeOpacity="0.4"
+          />
+          <circle cx="50" cy="133" r="13" fill="#0ea5e9" />
+          <text x="72" y="129" fill="#ffffff" fontSize="10" fontWeight="700">
+            Tanvir Hasan
+          </text>
+          <text x="72" y="143" fill="#fde68a" fontSize="8.5">
+            🔒 New message (Preview hidden for privacy)
+          </text>
+          <circle cx="332" cy="133" r="10" fill="#3b82f6" />
+          <text x="329" y="137" fill="#ffffff" fontSize="8.5" fontWeight="800">
+            2
+          </text>
+
+          <rect
+            x="28"
+            y="160"
+            width="324"
+            height="34"
+            rx="10"
+            fill="#0b1830"
+            stroke="#38bdf8"
+            strokeOpacity="0.3"
+          />
+          <text x="44" y="181" fill="#7dd3fc" fontSize="8.5" fontWeight="700">
+            ☑ Multi-Select Mode · Independent Msg &amp; Call Mute Timers
+          </text>
+        </svg>
+      );
+
+    case "kp1-encryption":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="10"
+            y="24"
+            width="102"
+            height="172"
+            rx="15"
+            fill="#112447"
+            stroke="#60a5fa"
+            strokeOpacity="0.5"
+          />
+          <text x="22" y="48" fill="#93c5fd" fontSize="9" fontWeight="800">
+            SENDER DEVICE
+          </text>
+          <rect x="20" y="60" width="82" height="36" rx="8" fill="#0a162c" />
+          <text x="27" y="75" fill="#e2e8f0" fontSize="8" fontWeight="700">
+            ECDH P-256
+          </text>
+          <text x="27" y="88" fill="#38bdf8" fontSize="7.5">
+            HKDF-SHA256
+          </text>
+          <rect x="20" y="106" width="82" height="36" rx="8" fill="#1e3a8a" />
+          <text x="26" y="121" fill="#ffffff" fontSize="8" fontWeight="700">
+            AES-256-GCM
+          </text>
+          <text x="26" y="133" fill="#fde68a" fontSize="7.5">
+            96-bit fresh IV
+          </text>
+          <text x="22" y="166" fill="#86efac" fontSize="8" fontWeight="700">
+            ✓ Sealed Locally
+          </text>
+
+          <rect
+            x="132"
+            y="38"
+            width="116"
+            height="144"
+            rx="15"
+            fill="#0a152a"
+            stroke="#fbbf24"
+            strokeOpacity="0.65"
+          />
+          <text x="148" y="60" fill="#fde68a" fontSize="9" fontWeight="800">
+            KP1 CIPHERTEXT
+          </text>
+          <rect x="144" y="72" width="92" height="52" rx="9" fill="#132548" />
+          <text x="152" y="90" fill="#93c5fd" fontSize="8" fontFamily="monospace">
+            0x9F4A..E81C
+          </text>
+          <text x="152" y="104" fill="#93c5fd" fontSize="8" fontFamily="monospace">
+            TAG: 128-BIT
+          </text>
+          <text x="152" y="117" fill="#fbbf24" fontSize="7.5" fontWeight="700">
+            Zero Plaintext
+          </text>
+          <text x="145" y="150" fill="#cbd5e1" fontSize="7.5">
+            Worker sees only
+          </text>
+          <text x="145" y="162" fill="#cbd5e1" fontSize="7.5">
+            sealed binary blobs
+          </text>
+
+          <rect
+            x="268"
+            y="24"
+            width="102"
+            height="172"
+            rx="15"
+            fill="#112447"
+            stroke="#60a5fa"
+            strokeOpacity="0.5"
+          />
+          <text x="280" y="48" fill="#93c5fd" fontSize="9" fontWeight="800">
+            PEER DEVICE
+          </text>
+          <rect
+            x="278"
+            y="60"
+            width="82"
+            height="50"
+            rx="8"
+            fill="#0a162c"
+            stroke="#38bdf8"
+            strokeOpacity="0.4"
+          />
+          <text x="285" y="76" fill="#fde68a" fontSize="7.5" fontWeight="700">
+            KEY VERIFICATION
+          </text>
+          <text x="285" y="89" fill="#e2e8f0" fontSize="7.5" fontFamily="monospace">
+            48291 04921
+          </text>
+          <text x="285" y="101" fill="#e2e8f0" fontSize="7.5" fontFamily="monospace">
+            88310 77419
+          </text>
+          <rect x="278" y="122" width="82" height="36" rx="8" fill="#065f46" />
+          <text x="286" y="139" fill="#ecfdf5" fontSize="8" fontWeight="700">
+            🔓 Decrypted
+          </text>
+          <text x="286" y="151" fill="#a7f3d0" fontSize="7.5">
+            Verified Peer
+          </text>
+        </svg>
+      );
+
+    case "kp2-backup":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="14"
+            y="18"
+            width="352"
+            height="184"
+            rx="18"
+            fill="#102244"
+            stroke="#fbbf24"
+            strokeOpacity="0.5"
+          />
+          <text x="30" y="42" fill="#fde68a" fontSize="10" fontWeight="800">
+            KP2 ROAMING KEY VAULT · PBKDF2-HMAC-SHA256 (210,000 ITERATIONS)
+          </text>
+          <rect
+            x="30"
+            y="58"
+            width="98"
+            height="118"
+            rx="12"
+            fill="#09152b"
+            stroke="#60a5fa"
+            strokeOpacity="0.45"
+          />
+          <text x="40" y="80" fill="#93c5fd" fontSize="8.5" fontWeight="700">
+            1 · PASSPHRASE
+          </text>
+          <rect x="40" y="92" width="78" height="24" rx="6" fill="#13284c" />
+          <text x="48" y="108" fill="#fde68a" fontSize="10" fontWeight="800">
+            ••••••••••
+          </text>
+          <text x="40" y="136" fill="#cbd5e1" fontSize="7.5">
+            Never leaves your
+          </text>
+          <text x="40" y="148" fill="#cbd5e1" fontSize="7.5">
+            device or browser
+          </text>
+
+          <rect
+            x="141"
+            y="58"
+            width="98"
+            height="118"
+            rx="12"
+            fill="#09152b"
+            stroke="#fbbf24"
+            strokeOpacity="0.55"
+          />
+          <text x="151" y="80" fill="#fde68a" fontSize="8.5" fontWeight="700">
+            2 · 210K PBKDF2
+          </text>
+          <circle cx="190" cy="115" r="22" fill="#172e58" stroke="#fbbf24" strokeWidth="2" />
+          <text x="174" y="119" fill="#ffffff" fontSize="9" fontWeight="800">
+            KP2
+          </text>
+          <text x="149" y="154" fill="#93c5fd" fontSize="7.5">
+            AES-256-GCM Key Wrap
+          </text>
+
+          <rect
+            x="252"
+            y="58"
+            width="98"
+            height="118"
+            rx="12"
+            fill="#09152b"
+            stroke="#34d399"
+            strokeOpacity="0.5"
+          />
+          <text x="262" y="80" fill="#6ee7b7" fontSize="8.5" fontWeight="700">
+            3 · RESTORE ANYWHERE
+          </text>
+          <rect x="264" y="94" width="74" height="28" rx="7" fill="#064e3b" />
+          <text x="271" y="112" fill="#ecfdf5" fontSize="8" fontWeight="700">
+            📱 Android + 💻 Web
+          </text>
+          <text x="264" y="142" fill="#a7f3d0" fontSize="7.5">
+            Instant history unlock
+          </text>
+          <text x="264" y="154" fill="#a7f3d0" fontSize="7.5">
+            across devices
+          </text>
+        </svg>
+      );
+
+    case "rich-messaging":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="12"
+            y="14"
+            width="356"
+            height="192"
+            rx="16"
+            fill="#102242"
+            stroke="#60a5fa"
+            strokeOpacity="0.45"
+          />
+          <text x="28" y="38" fill="#93c5fd" fontSize="9.5" fontWeight="800">
+            SWIPE-TO-REPLY · QUOTED THREADS · MULTI-FORWARD
+          </text>
+          <path
+            d="M36 74h18m-6-6 6 6-6 6"
+            fill="none"
+            stroke="#fbbf24"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+          />
+          <rect
+            x="64"
+            y="52"
+            width="220"
+            height="44"
+            rx="12"
+            fill="#1b386b"
+            stroke="#60a5fa"
+            strokeOpacity="0.5"
+          />
+          <text x="78" y="70" fill="#fde68a" fontSize="8.5" fontWeight="700">
+            ↩ Swipe Right to Quote
+          </text>
+          <text x="78" y="85" fill="#f8fafc" fontSize="9">
+            Are we launching v4 tonight at 9 PM?
+          </text>
+
+          <rect
+            x="96"
+            y="108"
+            width="252"
+            height="56"
+            rx="12"
+            fill="#1e40af"
+            stroke="#93c5fd"
+            strokeOpacity="0.6"
+          />
+          <rect x="106" y="115" width="232" height="20" rx="6" fill="#0f2347" />
+          <text x="114" y="128" fill="#93c5fd" fontSize="8" fontWeight="700">
+            Rahi: Are we launching v4 tonight at 9 PM?
+          </text>
+          <text x="108" y="152" fill="#ffffff" fontSize="9.5" fontWeight="700">
+            Yes! Everything is green &amp; ready 🚀
+          </text>
+
+          <rect x="28" y="172" width="324" height="24" rx="8" fill="#09152b" />
+          <text x="42" y="188" fill="#fde68a" fontSize="8.5" fontWeight="700">
+            ✓ 3 Selected · [↩ Reply] · [📋 Copy] · [↪ Forward to 5 Chats]
+          </text>
+        </svg>
+      );
+
+    case "emoji-fx":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="12"
+            y="14"
+            width="356"
+            height="192"
+            rx="16"
+            fill="#102242"
+            stroke="#f59e0b"
+            strokeOpacity="0.5"
+          />
+          <circle cx="52" cy="54" r="6" fill="#fbbf24" />
+          <circle cx="328" cy="48" r="5" fill="#38bdf8" />
+          <circle cx="300" cy="170" r="7" fill="#f43f5e" />
+          <circle cx="72" cy="168" r="5" fill="#a855f7" />
+          <rect
+            x="64"
+            y="34"
+            width="252"
+            height="44"
+            rx="22"
+            fill="#09152b"
+            stroke="#60a5fa"
+            strokeOpacity="0.65"
+          />
+          <text x="84" y="62" fontSize="20">
+            ❤️ 🔥 😂 🎉 👍 😢
+          </text>
+
+          <rect
+            x="92"
+            y="96"
+            width="196"
+            height="58"
+            rx="16"
+            fill="#1d4ed8"
+            stroke="#93c5fd"
+            strokeOpacity="0.65"
+          />
+          <text x="112" y="122" fill="#ffffff" fontSize="10" fontWeight="800">
+            3D Lottie Emoji Burst!
+          </text>
+          <text x="112" y="139" fill="#dbeafe" fontSize="8.5">
+            Synchronized fullscreen confetti FX
+          </text>
+          <rect x="246" y="140" width="54" height="24" rx="12" fill="#09152b" stroke="#fbbf24" />
+          <text x="256" y="156" fill="#fde68a" fontSize="9.5" fontWeight="800">
+            ❤️ 🔥 4
+          </text>
+        </svg>
+      );
+
+    case "magic-commands":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <defs>
+            <linearGradient id="magic-grad" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#2563eb" />
+              <stop offset="50%" stopColor="#7c3aed" />
+              <stop offset="100%" stopColor="#db2777" />
+            </linearGradient>
+          </defs>
+          <rect
+            x="12"
+            y="14"
+            width="356"
+            height="192"
+            rx="16"
+            fill="#102242"
+            stroke="#a855f7"
+            strokeOpacity="0.55"
+          />
+          <text x="28" y="38" fill="#e9d5ff" fontSize="9.5" fontWeight="800">
+            /MAGIC SLASH COMMANDS &amp; @MENTION AUTOCOMPLETE
+          </text>
+          <rect
+            x="28"
+            y="52"
+            width="324"
+            height="54"
+            rx="14"
+            fill="url(#magic-grad)"
+            stroke="#fde68a"
+            strokeOpacity="0.7"
+          />
+          <text x="46" y="76" fill="#fde68a" fontSize="9" fontWeight="800">
+            ✨ /magic FLOATING WAVE EFFECT ACTIVE
+          </text>
+          <text x="46" y="94" fill="#ffffff" fontSize="10" fontWeight="700">
+            Happy Anniversary! ✨ Glowing animated bubble
+          </text>
+
+          <rect
+            x="28"
+            y="118"
+            width="324"
+            height="40"
+            rx="10"
+            fill="#09152b"
+            stroke="#60a5fa"
+            strokeOpacity="0.45"
+          />
+          <text x="42" y="135" fill="#93c5fd" fontSize="8.5" fontWeight="700">
+            COMMAND &amp; MENTION PALETTE
+          </text>
+          <text x="42" y="149" fill="#fde68a" fontSize="8.5" fontFamily="monospace">
+            /magic *bold* _italic_ @rahi @nadia
+          </text>
+
+          <rect x="28" y="166" width="324" height="28" rx="9" fill="#152c55" />
+          <text x="42" y="184" fill="#ffffff" fontSize="9" fontFamily="monospace">
+            &gt; /magic Welcome to KuchuPuchu 3D!
+          </text>
+        </svg>
+      );
+
+    case "disappearing-messages":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="12"
+            y="14"
+            width="356"
+            height="192"
+            rx="16"
+            fill="#102242"
+            stroke="#38bdf8"
+            strokeOpacity="0.5"
+          />
+          <circle cx="88" cy="110" r="54" fill="#09152b" stroke="#2563eb" strokeWidth="4" />
+          <path
+            d="M88 56 A54 54 0 1 1 42 138"
+            fill="none"
+            stroke="#fbbf24"
+            strokeWidth="5"
+            strokeLinecap="round"
+          />
+          <text x="64" y="106" fill="#fde68a" fontSize="13" fontWeight="800">
+            24h
+          </text>
+          <text x="58" y="124" fill="#93c5fd" fontSize="8.5" fontWeight="700">
+            7d · 30d · Off
+          </text>
+
+          <rect
+            x="164"
+            y="42"
+            width="188"
+            height="58"
+            rx="12"
+            fill="#17305c"
+            stroke="#fbbf24"
+            strokeOpacity="0.55"
+          />
+          <text x="178" y="64" fill="#ffffff" fontSize="9.5" fontWeight="700">
+            Door code is 8492#
+          </text>
+          <text x="178" y="84" fill="#fde68a" fontSize="8.5" fontWeight="700">
+            ⏱ Self-destructs in 23:59:41
+          </text>
+
+          <rect
+            x="164"
+            y="114"
+            width="188"
+            height="64"
+            rx="12"
+            fill="#09152b"
+            stroke="#60a5fa"
+            strokeOpacity="0.4"
+          />
+          <text x="178" y="136" fill="#93c5fd" fontSize="9" fontWeight="800">
+            AUTOMATIC SERVER SWEEP
+          </text>
+          <text x="178" y="152" fill="#cbd5e1" fontSize="8">
+            Erased from Android, Web &amp;
+          </text>
+          <text x="178" y="165" fill="#cbd5e1" fontSize="8">
+            Cloudflare D1 when timer hits 0s.
+          </text>
+        </svg>
+      );
+
+    case "scheduled-messages":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="12"
+            y="14"
+            width="356"
+            height="192"
+            rx="16"
+            fill="#102242"
+            stroke="#fbbf24"
+            strokeOpacity="0.5"
+          />
+          <text x="28" y="38" fill="#fde68a" fontSize="9.5" fontWeight="800">
+            SCHEDULED DELIVERY &amp; DHAKA TIMEZONE DISPATCH
+          </text>
+          <rect
+            x="28"
+            y="52"
+            width="150"
+            height="134"
+            rx="12"
+            fill="#09152b"
+            stroke="#60a5fa"
+            strokeOpacity="0.45"
+          />
+          <text x="42" y="74" fill="#93c5fd" fontSize="8.5" fontWeight="700">
+            📅 PICK DATE &amp; TIME
+          </text>
+          <rect x="42" y="86" width="122" height="26" rx="7" fill="#162e58" />
+          <text x="52" y="103" fill="#ffffff" fontSize="8.5" fontWeight="700">
+            Tomorrow · Oct 15
+          </text>
+          <rect x="42" y="118" width="122" height="26" rx="7" fill="#162e58" />
+          <text x="52" y="135" fill="#fde68a" fontSize="8.5" fontWeight="700">
+            🕘 09:00 AM (BST)
+          </text>
+          <rect x="42" y="152" width="122" height="22" rx="7" fill="#2563eb" />
+          <text x="60" y="167" fill="#ffffff" fontSize="8" fontWeight="800">
+            Schedule Send
+          </text>
+
+          <rect
+            x="194"
+            y="52"
+            width="158"
+            height="134"
+            rx="12"
+            fill="#09152b"
+            stroke="#fbbf24"
+            strokeOpacity="0.45"
+          />
+          <text x="208" y="74" fill="#fde68a" fontSize="8.5" fontWeight="700">
+            ⏳ QUEUED TRAY (2)
+          </text>
+          <rect x="208" y="86" width="130" height="42" rx="8" fill="#152c55" />
+          <text x="216" y="102" fill="#ffffff" fontSize="8.5" fontWeight="700">
+            Happy Birthday! 🎂
+          </text>
+          <text x="216" y="118" fill="#93c5fd" fontSize="7.5">
+            Sends at 12:00 AM · [Cancel]
+          </text>
+          <rect x="208" y="136" width="130" height="38" rx="8" fill="#152c55" />
+          <text x="216" y="152" fill="#ffffff" fontSize="8.5" fontWeight="700">
+            🔔 Standup notes
+          </text>
+          <text x="216" y="166" fill="#fde68a" fontSize="7.5">
+            Auto-dispatched by Worker
+          </text>
+        </svg>
+      );
+
+    case "delete-for-everyone":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="12"
+            y="14"
+            width="356"
+            height="192"
+            rx="16"
+            fill="#102242"
+            stroke="#f43f5e"
+            strokeOpacity="0.5"
+          />
+          <text x="28" y="38" fill="#fda4af" fontSize="9.5" fontWeight="800">
+            DELETE FOR EVERYONE · 3D PARTICLE DISINTEGRATION
+          </text>
+          <rect
+            x="28"
+            y="56"
+            width="164"
+            height="58"
+            rx="12"
+            fill="#172e58"
+            stroke="#f43f5e"
+            strokeDasharray="5 3"
+          />
+          <text x="42" y="78" fill="#cbd5e1" fontSize="9">
+            Sent attachment_v1.pdf
+          </text>
+          <text x="42" y="96" fill="#fda4af" fontSize="8" fontWeight="700">
+            🗑 Disintegrating…
+          </text>
+          <circle cx="212" cy="64" r="5" fill="#fb7185" />
+          <circle cx="228" cy="78" r="4" fill="#fbbf24" />
+          <circle cx="244" cy="60" r="6" fill="#60a5fa" />
+          <circle cx="262" cy="86" r="3.5" fill="#fb7185" />
+          <circle cx="220" cy="98" r="4.5" fill="#38bdf8" />
+          <circle cx="250" cy="104" r="3" fill="#fde68a" />
+
+          <rect
+            x="28"
+            y="128"
+            width="324"
+            height="60"
+            rx="12"
+            fill="#09152b"
+            stroke="#fbbf24"
+            strokeOpacity="0.45"
+          />
+          <rect x="42" y="142" width="144" height="32" rx="8" fill="#be123c" />
+          <text x="58" y="162" fill="#ffffff" fontSize="9" fontWeight="800">
+            🗑 Delete for Everyone
+          </text>
+          <text x="200" y="155" fill="#93c5fd" fontSize="8.5" fontWeight="700">
+            ✓ Wipes D1 message row
+          </text>
+          <text x="200" y="170" fill="#93c5fd" fontSize="8.5" fontWeight="700">
+            ✓ Purges R2 media objects
+          </text>
+        </svg>
+      );
+
+    case "themes-nicknames":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="12"
+            y="14"
+            width="356"
+            height="192"
+            rx="16"
+            fill="#102242"
+            stroke="#60a5fa"
+            strokeOpacity="0.45"
+          />
+          <text x="28" y="38" fill="#93c5fd" fontSize="9.5" fontWeight="800">
+            5 PER-CHAT 3D THEMES &amp; CUSTOM CONVERSATION NICKNAMES
+          </text>
+          <circle cx="58" cy="78" r="18" fill="#2563eb" stroke="#ffffff" strokeWidth="2.5" />
+          <circle cx="112" cy="78" r="18" fill="#0284c7" stroke="#7dd3fc" strokeWidth="1.5" />
+          <circle cx="166" cy="78" r="18" fill="#059669" stroke="#6ee7b7" strokeWidth="1.5" />
+          <circle cx="220" cy="78" r="18" fill="#ea580c" stroke="#fed7aa" strokeWidth="1.5" />
+          <circle cx="274" cy="78" r="18" fill="#4f46e5" stroke="#c7d2fe" strokeWidth="1.5" />
+          <text x="42" y="108" fill="#dbeafe" fontSize="7.5" fontWeight="700">
+            Classic
+          </text>
+          <text x="99" y="108" fill="#bae6fd" fontSize="7.5" fontWeight="700">
+            Ocean
+          </text>
+          <text x="152" y="108" fill="#a7f3d0" fontSize="7.5" fontWeight="700">
+            Forest
+          </text>
+          <text x="206" y="108" fill="#fed7aa" fontSize="7.5" fontWeight="700">
+            Sunset
+          </text>
+          <text x="256" y="108" fill="#c7d2fe" fontSize="7.5" fontWeight="700">
+            Midnight
+          </text>
+
+          <rect
+            x="28"
+            y="124"
+            width="324"
+            height="64"
+            rx="12"
+            fill="#09152b"
+            stroke="#fbbf24"
+            strokeOpacity="0.5"
+          />
+          <text x="44" y="146" fill="#fde68a" fontSize="9" fontWeight="800">
+            ✏️ NICKNAME SHEET · SYNCED ACROSS ANDROID &amp; WEB
+          </text>
+          <text x="44" y="166" fill="#ffffff" fontSize="9.5" fontWeight="700">
+            Peer Nickname: &quot;My KuchuPuchu 💙&quot; · Your Nickname: &quot;Captain&quot;
+          </text>
+        </svg>
+      );
+
+    case "view-once-media":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="12"
+            y="14"
+            width="356"
+            height="192"
+            rx="16"
+            fill="#102242"
+            stroke="#fbbf24"
+            strokeOpacity="0.5"
+          />
+          <text x="28" y="38" fill="#fde68a" fontSize="9.5" fontWeight="800">
+            VIEW-ONCE (1×) EPHEMERAL PHOTOS, VIDEOS &amp; VOICE
+          </text>
+          <rect
+            x="28"
+            y="54"
+            width="152"
+            height="132"
+            rx="14"
+            fill="#09152b"
+            stroke="#fbbf24"
+            strokeOpacity="0.6"
+          />
+          <circle
+            cx="104"
+            cy="102"
+            r="24"
+            fill="#172e58"
+            stroke="#fbbf24"
+            strokeWidth="2.5"
+            strokeDasharray="5 3"
+          />
+          <text x="93" y="108" fill="#fde68a" fontSize="15" fontWeight="800">
+            1×
+          </text>
+          <text x="52" y="146" fill="#ffffff" fontSize="9.5" fontWeight="700">
+            View-Once Media
+          </text>
+          <text x="44" y="164" fill="#93c5fd" fontSize="8">
+            Tap to open · Screenshot blocked
+          </text>
+
+          <rect
+            x="200"
+            y="54"
+            width="152"
+            height="132"
+            rx="14"
+            fill="#09152b"
+            stroke="#60a5fa"
+            strokeOpacity="0.45"
+          />
+          <circle cx="276" cy="102" r="24" fill="#112240" stroke="#64748b" strokeWidth="2" />
+          <text x="268" y="108" fill="#94a3b8" fontSize="14" fontWeight="800">
+            ✓
+          </text>
+          <text x="234" y="146" fill="#cbd5e1" fontSize="9.5" fontWeight="700">
+            Opened · Erased
+          </text>
+          <text x="218" y="164" fill="#6ee7b7" fontSize="8">
+            R2 ciphertext wiped on close
+          </text>
+        </svg>
+      );
+
+    case "media-studio":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="12"
+            y="14"
+            width="356"
+            height="192"
+            rx="16"
+            fill="#102242"
+            stroke="#38bdf8"
+            strokeOpacity="0.5"
+          />
+          <text x="28" y="36" fill="#7dd3fc" fontSize="9.5" fontWeight="800">
+            BUILT-IN PHOTO &amp; VIDEO STUDIO · CROP · DRAW · TEXT · TRIM
+          </text>
+          <rect
+            x="28"
+            y="48"
+            width="210"
+            height="110"
+            rx="12"
+            fill="#09152b"
+            stroke="#60a5fa"
+            strokeDasharray="6 3"
+          />
+          <path
+            d="M52 126 Q95 68 142 112 T214 82"
+            fill="none"
+            stroke="#fbbf24"
+            strokeWidth="3.5"
+            strokeLinecap="round"
+          />
+          <rect x="78" y="64" width="96" height="24" rx="6" fill="#1d4ed8" />
+          <text x="88" y="80" fill="#ffffff" fontSize="8.5" fontWeight="800">
+            ✨ Sunset Vibes
+          </text>
+
+          <rect
+            x="250"
+            y="48"
+            width="102"
+            height="110"
+            rx="12"
+            fill="#09152b"
+            stroke="#fbbf24"
+            strokeOpacity="0.45"
+          />
+          <text x="262" y="70" fill="#fde68a" fontSize="8.5" fontWeight="700">
+            🛠 STUDIO TOOLS
+          </text>
+          <text x="262" y="90" fill="#e2e8f0" fontSize="8">
+            📐 crop / rotate
+          </text>
+          <text x="262" y="108" fill="#e2e8f0" fontSize="8">
+            🖌 neon brush
+          </text>
+          <text x="262" y="126" fill="#e2e8f0" fontSize="8">
+            🔤 text sticker
+          </text>
+          <text x="262" y="144" fill="#e2e8f0" fontSize="8">
+            🎬 video trim
+          </text>
+
+          <rect
+            x="28"
+            y="168"
+            width="324"
+            height="24"
+            rx="7"
+            fill="#09152b"
+            stroke="#f59e0b"
+            strokeOpacity="0.5"
+          />
+          <text x="42" y="184" fill="#fde68a" fontSize="8.5" fontWeight="700">
+            🎞 Video Timeline: [00:02 ━━━━━━━━●━━ 00:18] · AttachmentExitGate Protected
+          </text>
+        </svg>
+      );
+
+    case "voice-notes":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="12"
+            y="14"
+            width="356"
+            height="192"
+            rx="16"
+            fill="#102242"
+            stroke="#60a5fa"
+            strokeOpacity="0.5"
+          />
+          <text x="28" y="38" fill="#93c5fd" fontSize="9.5" fontWeight="800">
+            VOICE NOTES · 48-BAR WAVEFORM SCRUBBING · SPEED CONTROL
+          </text>
+          <rect
+            x="28"
+            y="54"
+            width="324"
+            height="72"
+            rx="16"
+            fill="#162e58"
+            stroke="#60a5fa"
+            strokeOpacity="0.55"
+          />
+          <circle cx="58" cy="90" r="18" fill="#2563eb" />
+          <polygon points="53,81 53,99 68,90" fill="#ffffff" />
+          <g fill="#fbbf24">
+            <rect x="90" y="78" width="4" height="24" rx="2" />
+            <rect x="98" y="70" width="4" height="40" rx="2" />
+            <rect x="106" y="74" width="4" height="32" rx="2" />
+            <rect x="114" y="64" width="4" height="52" rx="2" />
+            <rect x="122" y="72" width="4" height="36" rx="2" />
+            <rect x="130" y="68" width="4" height="44" rx="2" />
+            <rect x="138" y="76" width="4" height="28" rx="2" />
+            <rect x="146" y="62" width="4" height="56" rx="2" />
+            <rect x="154" y="70" width="4" height="40" rx="2" />
+            <rect x="162" y="74" width="4" height="32" rx="2" />
+          </g>
+          <g fill="#60a5fa" opacity="0.65">
+            <rect x="170" y="78" width="4" height="24" rx="2" />
+            <rect x="178" y="68" width="4" height="44" rx="2" />
+            <rect x="186" y="74" width="4" height="32" rx="2" />
+            <rect x="194" y="80" width="4" height="20" rx="2" />
+            <rect x="202" y="72" width="4" height="36" rx="2" />
+            <rect x="210" y="66" width="4" height="48" rx="2" />
+            <rect x="218" y="76" width="4" height="28" rx="2" />
+            <rect x="226" y="82" width="4" height="16" rx="2" />
+          </g>
+          <rect x="284" y="76" width="52" height="28" rx="14" fill="#09152b" stroke="#fbbf24" />
+          <text x="296" y="94" fill="#fde68a" fontSize="10" fontWeight="800">
+            1.5×
+          </text>
+
+          <rect
+            x="28"
+            y="140"
+            width="324"
+            height="48"
+            rx="12"
+            fill="#09152b"
+            stroke="#38bdf8"
+            strokeOpacity="0.4"
+          />
+          <text x="44" y="161" fill="#fde68a" fontSize="8.5" fontWeight="700">
+            🔒 Slide-Up Mic Lock (Hands-Free)
+          </text>
+          <text x="44" y="177" fill="#93c5fd" fontSize="8">
+            👂 AudioRouter Ear-Proximity Earpiece Switch · 1× / 1.5× / 2× Speed
+          </text>
+        </svg>
+      );
+
+    case "large-files":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="12"
+            y="14"
+            width="356"
+            height="192"
+            rx="16"
+            fill="#102242"
+            stroke="#38bdf8"
+            strokeOpacity="0.5"
+          />
+          <text x="28" y="38" fill="#7dd3fc" fontSize="9.5" fontWeight="800">
+            UP TO 5 GB MULTIPART R2 UPLOADS &amp; BUILT-IN DOC VIEWER
+          </text>
+          <rect
+            x="28"
+            y="52"
+            width="324"
+            height="68"
+            rx="12"
+            fill="#09152b"
+            stroke="#60a5fa"
+            strokeOpacity="0.5"
+          />
+          <rect x="42" y="66" width="40" height="40" rx="9" fill="#1d4ed8" />
+          <text x="49" y="90" fill="#ffffff" fontSize="10" fontWeight="800">
+            5GB
+          </text>
+          <text x="94" y="78" fill="#ffffff" fontSize="9.5" fontWeight="800">
+            4K_Master_Archive.zip (4.2 GB)
+          </text>
+          <rect x="94" y="88" width="200" height="10" rx="5" fill="#1e293b" />
+          <rect x="94" y="88" width="168" height="10" rx="5" fill="#38bdf8" />
+          <text x="94" y="111" fill="#fde68a" fontSize="8" fontWeight="700">
+            8 MB Chunks · 84% · Resumable R2 Stream
+          </text>
+
+          <rect
+            x="28"
+            y="132"
+            width="324"
+            height="56"
+            rx="12"
+            fill="#152c55"
+            stroke="#fbbf24"
+            strokeOpacity="0.45"
+          />
+          <text x="44" y="153" fill="#fde68a" fontSize="8.5" fontWeight="800">
+            📄 BUILT-IN DOCUMENT &amp; MEDIA VIEWER
+          </text>
+          <text x="44" y="172" fill="#e2e8f0" fontSize="8.5">
+            PDF · Source Code · Markdown · JSON/CSV · Multi-page TIFF · Shared Media Tabs
+          </text>
+        </svg>
+      );
+
+    case "stickers-gifs":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="12"
+            y="14"
+            width="356"
+            height="192"
+            rx="16"
+            fill="#102242"
+            stroke="#fbbf24"
+            strokeOpacity="0.5"
+          />
+          <text x="28" y="38" fill="#fde68a" fontSize="9.5" fontWeight="800">
+            1,150+ STICKERS (10 PACKS) &amp; LIVE GIF ENGINE
+          </text>
+          <rect x="28" y="50" width="324" height="26" rx="8" fill="#09152b" />
+          <text x="40" y="67" fill="#93c5fd" fontSize="8.5" fontWeight="700">
+            ⭐ Favorites · 🕒 Recents · 🐻 Koko · 🦊 Blu · 🐼 Mochi · 🎬 GIFs
+          </text>
+
+          <rect
+            x="28"
+            y="86"
+            width="74"
+            height="64"
+            rx="12"
+            fill="#162e58"
+            stroke="#60a5fa"
+            strokeOpacity="0.4"
+          />
+          <text x="52" y="126" fontSize="24">
+            🐻
+          </text>
+          <rect
+            x="111"
+            y="86"
+            width="74"
+            height="64"
+            rx="12"
+            fill="#162e58"
+            stroke="#60a5fa"
+            strokeOpacity="0.4"
+          />
+          <text x="135" y="126" fontSize="24">
+            🦊
+          </text>
+          <rect
+            x="194"
+            y="86"
+            width="74"
+            height="64"
+            rx="12"
+            fill="#162e58"
+            stroke="#60a5fa"
+            strokeOpacity="0.4"
+          />
+          <text x="218" y="126" fontSize="24">
+            🐼
+          </text>
+          <rect x="277" y="86" width="75" height="64" rx="12" fill="#1d4ed8" stroke="#fbbf24" />
+          <text x="295" y="122" fill="#fde68a" fontSize="14" fontWeight="800">
+            GIF
+          </text>
+
+          <rect x="28" y="160" width="324" height="30" rx="8" fill="#09152b" />
+          <text x="42" y="179" fill="#cbd5e1" fontSize="8.5">
+            🔍 Instant sticker &amp; GIF search · Synced across Android &amp; KuchuPuchu Web
+          </text>
+        </svg>
+      );
+
+    case "encrypted-calls":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="12"
+            y="14"
+            width="356"
+            height="192"
+            rx="16"
+            fill="#102242"
+            stroke="#34d399"
+            strokeOpacity="0.5"
+          />
+          <rect x="28" y="28" width="184" height="22" rx="11" fill="#064e3b" stroke="#34d399" />
+          <text x="40" y="43" fill="#ecfdf5" fontSize="8.5" fontWeight="800">
+            🔒 E2EE DTLS-SRTP · 🔑🔥🎧🚀
+          </text>
+
+          <rect
+            x="28"
+            y="58"
+            width="210"
+            height="92"
+            rx="12"
+            fill="#09152b"
+            stroke="#60a5fa"
+            strokeOpacity="0.5"
+          />
+          <circle cx="133" cy="94" r="20" fill="#1d4ed8" />
+          <text x="125" y="100" fill="#ffffff" fontSize="12" fontWeight="800">
+            RA
+          </text>
+          <text x="92" y="134" fill="#e2e8f0" fontSize="9" fontWeight="700">
+            Rahi Ahmed · 04:18 HD
+          </text>
+
+          <rect
+            x="250"
+            y="58"
+            width="102"
+            height="92"
+            rx="12"
+            fill="#162e58"
+            stroke="#fbbf24"
+            strokeOpacity="0.5"
+          />
+          <text x="266" y="96" fill="#fde68a" fontSize="9" fontWeight="700">
+            📱 You (PiP)
+          </text>
+          <text x="262" y="114" fill="#93c5fd" fontSize="8">
+            Front Cam 60fps
+          </text>
+
+          <rect
+            x="58"
+            y="160"
+            width="264"
+            height="34"
+            rx="17"
+            fill="#09152b"
+            stroke="#60a5fa"
+            strokeOpacity="0.4"
+          />
+          <circle cx="96" cy="177" r="11" fill="#1e3a8a" />
+          <circle cx="148" cy="177" r="11" fill="#1e3a8a" />
+          <circle cx="200" cy="177" r="11" fill="#1e3a8a" />
+          <circle cx="268" cy="177" r="12" fill="#e11d48" />
+        </svg>
+      );
+
+    case "screen-share-audio":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="12"
+            y="14"
+            width="356"
+            height="192"
+            rx="16"
+            fill="#102242"
+            stroke="#38bdf8"
+            strokeOpacity="0.5"
+          />
+          <text x="28" y="38" fill="#7dd3fc" fontSize="9.5" fontWeight="800">
+            LIVE SCREEN SHARE + SYSTEM AUDIO TAP &amp; VOICE ISOLATION
+          </text>
+          <rect
+            x="28"
+            y="52"
+            width="196"
+            height="136"
+            rx="12"
+            fill="#09152b"
+            stroke="#38bdf8"
+            strokeOpacity="0.6"
+          />
+          <text x="42" y="74" fill="#38bdf8" fontSize="8.5" fontWeight="800">
+            🖥 LIVE SCREEN CAST (60 FPS)
+          </text>
+          <rect x="42" y="84" width="168" height="60" rx="8" fill="#152c55" />
+          <text x="54" y="112" fill="#ffffff" fontSize="8.5" fontWeight="700">
+            Sharing App Window + Audio
+          </text>
+          <text x="54" y="128" fill="#fde68a" fontSize="8">
+            🔊 SystemAudioTap Stereo Stream
+          </text>
+          <text x="42" y="168" fill="#93c5fd" fontSize="8">
+            KpScreenCapturer · Android &amp; Web
+          </text>
+
+          <rect
+            x="238"
+            y="52"
+            width="114"
+            height="136"
+            rx="12"
+            fill="#09152b"
+            stroke="#fbbf24"
+            strokeOpacity="0.55"
+          />
+          <text x="250" y="74" fill="#fde68a" fontSize="8.5" fontWeight="800">
+            🎙 VOICE ISOLATION
+          </text>
+          <rect x="250" y="90" width="90" height="32" rx="8" fill="#065f46" />
+          <text x="258" y="110" fill="#ecfdf5" fontSize="8.5" fontWeight="700">
+            Noise Cut: -38 dB
+          </text>
+          <text x="250" y="144" fill="#cbd5e1" fontSize="7.5">
+            Strips fan, wind &amp;
+          </text>
+          <text x="250" y="156" fill="#cbd5e1" fontSize="7.5">
+            street background
+          </text>
+          <text x="250" y="168" fill="#6ee7b7" fontSize="7.5" fontWeight="700">
+            ✓ Crystal Voice
+          </text>
+        </svg>
+      );
+
+    case "status-stories":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="12"
+            y="14"
+            width="356"
+            height="192"
+            rx="16"
+            fill="#102242"
+            stroke="#fbbf24"
+            strokeOpacity="0.5"
+          />
+          <text x="28" y="38" fill="#fde68a" fontSize="9.5" fontWeight="800">
+            24-HOUR STATUS STORIES · PHOTO, VIDEO &amp; COLOR CARDS
+          </text>
+          <circle
+            cx="62"
+            cy="96"
+            r="26"
+            fill="#09152b"
+            stroke="#38bdf8"
+            strokeWidth="3.5"
+            strokeDasharray="16 4"
+          />
+          <circle cx="62" cy="96" r="19" fill="#1d4ed8" />
+          <text x="55" y="101" fill="#ffffff" fontSize="11" fontWeight="800">
+            +
+          </text>
+          <text x="40" y="138" fill="#e2e8f0" fontSize="8" fontWeight="700">
+            My Status
+          </text>
+
+          <circle
+            cx="132"
+            cy="96"
+            r="26"
+            fill="#09152b"
+            stroke="#fbbf24"
+            strokeWidth="3.5"
+            strokeDasharray="22 5"
+          />
+          <circle cx="132" cy="96" r="19" fill="#0284c7" />
+          <text x="124" y="101" fill="#ffffff" fontSize="10" fontWeight="800">
+            NI
+          </text>
+          <text x="116" y="138" fill="#fde68a" fontSize="8" fontWeight="700">
+            Nadia
+          </text>
+
+          <rect
+            x="184"
+            y="54"
+            width="168"
+            height="132"
+            rx="14"
+            fill="#162e58"
+            stroke="#60a5fa"
+            strokeOpacity="0.5"
+          />
+          <rect x="196" y="64" width="144" height="4" rx="2" fill="#fbbf24" />
+          <text x="200" y="88" fill="#ffffff" fontSize="9.5" fontWeight="800">
+            Chattogram Sunset 🌅
+          </text>
+          <text x="200" y="106" fill="#93c5fd" fontSize="8">
+            5s Auto-Advance · Hold to Pause
+          </text>
+          <rect x="196" y="148" width="144" height="24" rx="12" fill="#09152b" />
+          <text x="208" y="164" fill="#fde68a" fontSize="8" fontWeight="700">
+            👁 14 Viewers · ❤️ 🔥 👏 Reply…
+          </text>
+        </svg>
+      );
+
+    case "group-chats":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="12"
+            y="14"
+            width="356"
+            height="192"
+            rx="16"
+            fill="#102242"
+            stroke="#60a5fa"
+            strokeOpacity="0.5"
+          />
+          <text x="28" y="38" fill="#93c5fd" fontSize="9.5" fontWeight="800">
+            GROUP CHATS · OWNER ADMIN CONTROLS &amp; SHARED MEDIA
+          </text>
+          <rect
+            x="28"
+            y="50"
+            width="324"
+            height="46"
+            rx="12"
+            fill="#162e58"
+            stroke="#fbbf24"
+            strokeOpacity="0.5"
+          />
+          <circle cx="52" cy="73" r="14" fill="#2563eb" />
+          <text x="76" y="70" fill="#ffffff" fontSize="10" fontWeight="800">
+            Product Launch Squad (18 Members)
+          </text>
+          <text x="76" y="85" fill="#fde68a" fontSize="8" fontWeight="700">
+            👑 Owner Theme Lock · @mentions · Live Group Typing
+          </text>
+
+          <rect
+            x="28"
+            y="106"
+            width="324"
+            height="82"
+            rx="12"
+            fill="#09152b"
+            stroke="#60a5fa"
+            strokeOpacity="0.4"
+          />
+          <text x="44" y="128" fill="#ffffff" fontSize="9" fontWeight="700">
+            👑 Rabbi Hossain (Owner) · [Manage Group]
+          </text>
+          <text x="44" y="148" fill="#93c5fd" fontSize="8.5">
+            👤 Rahi Ahmed · Member · [Remove]
+          </text>
+          <text x="44" y="168" fill="#6ee7b7" fontSize="8.5" fontWeight="700">
+            ➕ Add Members · Shared Group Media Gallery
+          </text>
+        </svg>
+      );
+
+    case "flag-secure":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="12"
+            y="14"
+            width="356"
+            height="192"
+            rx="16"
+            fill="#102242"
+            stroke="#fbbf24"
+            strokeOpacity="0.55"
+          />
+          <text x="28" y="38" fill="#fde68a" fontSize="9.5" fontWeight="800">
+            PRIVATE PROFILE SHIELD &amp; ANDROID FLAG_SECURE
+          </text>
+          <rect
+            x="28"
+            y="54"
+            width="154"
+            height="132"
+            rx="14"
+            fill="#09152b"
+            stroke="#fbbf24"
+            strokeOpacity="0.6"
+          />
+          <circle cx="105" cy="100" r="24" fill="#1d4ed8" stroke="#fbbf24" strokeWidth="2.5" />
+          <text x="95" y="106" fill="#ffffff" fontSize="12" fontWeight="800">
+            🛡️
+          </text>
+          <text x="46" y="144" fill="#ffffff" fontSize="9" fontWeight="800">
+            Private Profile ON
+          </text>
+          <text x="44" y="162" fill="#93c5fd" fontSize="8">
+            Disables Save &amp; Forward
+          </text>
+
+          <rect
+            x="198"
+            y="54"
+            width="154"
+            height="132"
+            rx="14"
+            fill="#09152b"
+            stroke="#f43f5e"
+            strokeOpacity="0.6"
+          />
+          <circle cx="275" cy="100" r="24" fill="#4c0519" stroke="#f43f5e" strokeWidth="2.5" />
+          <line x1="258" y1="83" x2="292" y2="117" stroke="#fda4af" strokeWidth="3" />
+          <text x="214" y="144" fill="#fda4af" fontSize="9" fontWeight="800">
+            Screenshot Blocked
+          </text>
+          <text x="212" y="162" fill="#cbd5e1" fontSize="8">
+            FLAG_SECURE hardware lock
+          </text>
+        </svg>
+      );
+
+    case "sim-auth-otp":
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="12"
+            y="14"
+            width="356"
+            height="192"
+            rx="16"
+            fill="#102242"
+            stroke="#60a5fa"
+            strokeOpacity="0.5"
+          />
+          <text x="28" y="38" fill="#93c5fd" fontSize="9.5" fontWeight="800">
+            SIM-AWARE AUTH · COMPACT 6-DIGIT OTP + COPY · GOOGLE LINK
+          </text>
+          <rect
+            x="28"
+            y="52"
+            width="144"
+            height="134"
+            rx="12"
+            fill="#09152b"
+            stroke="#38bdf8"
+            strokeOpacity="0.5"
+          />
+          <text x="42" y="74" fill="#7dd3fc" fontSize="8.5" fontWeight="800">
+            📱 ANDROID SIM VERIFY
+          </text>
+          <rect x="42" y="86" width="116" height="28" rx="7" fill="#162e58" />
+          <text x="50" y="104" fill="#ffffff" fontSize="8.5" fontWeight="700">
+            SIM 1: +880 17•• ••••
+          </text>
+          <rect x="42" y="124" width="116" height="28" rx="7" fill="#065f46" />
+          <text x="50" y="142" fill="#ecfdf5" fontSize="8" fontWeight="700">
+            ✓ Google Recovery Linked
+          </text>
+
+          <rect
+            x="188"
+            y="52"
+            width="164"
+            height="134"
+            rx="12"
+            fill="#09152b"
+            stroke="#fbbf24"
+            strokeOpacity="0.6"
+          />
+          <text x="202" y="74" fill="#fde68a" fontSize="8.5" fontWeight="800">
+            💻 WEB LOGIN APPROVAL
+          </text>
+          <rect
+            x="202"
+            y="86"
+            width="136"
+            height="32"
+            rx="8"
+            fill="#152c55"
+            stroke="#fbbf24"
+            strokeOpacity="0.6"
+          />
+          <text
+            x="212"
+            y="106"
+            fill="#fde68a"
+            fontSize="11"
+            fontWeight="800"
+            fontFamily="monospace"
+          >
+            482 910
+          </text>
+          <rect x="286" y="92" width="44" height="20" rx="5" fill="#2563eb" />
+          <text x="296" y="105" fill="#ffffff" fontSize="8" fontWeight="800">
+            Copy
+          </text>
+          <rect x="202" y="132" width="64" height="26" rx="7" fill="#059669" />
+          <text x="215" y="149" fill="#ffffff" fontSize="8.5" fontWeight="800">
+            Approve
+          </text>
+          <rect x="274" y="132" width="64" height="26" rx="7" fill="#be123c" />
+          <text x="294" y="149" fill="#ffffff" fontSize="8.5" fontWeight="800">
+            Deny
+          </text>
+        </svg>
+      );
+
+    case "ai-push-ota":
+    default:
+      return (
+        <svg viewBox="0 0 380 220" className="kp-banner-svg" aria-hidden="true">
+          <rect
+            x="12"
+            y="14"
+            width="356"
+            height="192"
+            rx="16"
+            fill="#102242"
+            stroke="#38bdf8"
+            strokeOpacity="0.5"
+          />
+          <text x="28" y="38" fill="#7dd3fc" fontSize="9.5" fontWeight="800">
+            KUCHUPUCHU AI (GOOGLE GEMINI) · SEALED PUSH · OTA UPDATER
+          </text>
+          <rect
+            x="28"
+            y="52"
+            width="324"
+            height="62"
+            rx="12"
+            fill="#162e58"
+            stroke="#fbbf24"
+            strokeOpacity="0.55"
+          />
+          <circle cx="54" cy="83" r="16" fill="#2563eb" />
+          <text x="46" y="88" fill="#ffffff" fontSize="11" fontWeight="800">
+            AI
+          </text>
+          <text x="80" y="76" fill="#fde68a" fontSize="9.5" fontWeight="800">
+            KuchuPuchu AI ✓ · Powered by Google Gemini
+          </text>
+          <text x="80" y="95" fill="#e2e8f0" fontSize="8.5">
+            Bangla, Banglish &amp; English · Session History · Image Q&amp;A
+          </text>
+
+          <rect
+            x="28"
+            y="124"
+            width="156"
+            height="64"
+            rx="12"
+            fill="#09152b"
+            stroke="#60a5fa"
+            strokeOpacity="0.45"
+          />
+          <text x="40" y="146" fill="#93c5fd" fontSize="8.5" fontWeight="800">
+            🔔 PUSHSEAL &amp; CAMERA
+          </text>
+          <text x="40" y="164" fill="#cbd5e1" fontSize="8">
+            Zero-knowledge sealed push
+          </text>
+          <text x="40" y="177" fill="#cbd5e1" fontSize="8">
+            + Launcher Camera &amp; Share
+          </text>
+
+          <rect
+            x="196"
+            y="124"
+            width="156"
+            height="64"
+            rx="12"
+            fill="#09152b"
+            stroke="#34d399"
+            strokeOpacity="0.5"
+          />
+          <text x="208" y="146" fill="#6ee7b7" fontSize="8.5" fontWeight="800">
+            📲 IN-APP OTA UPDATER
+          </text>
+          <rect x="208" y="156" width="132" height="10" rx="5" fill="#065f46" />
+          <rect x="208" y="156" width="118" height="10" rx="5" fill="#34d399" />
+          <text x="208" y="179" fill="#a7f3d0" fontSize="8">
+            KpUpdate R2 signed APK ready
+          </text>
+        </svg>
+      );
+  }
+}
 
 export function SkeuomorphicPhoneTrio() {
   return (
@@ -315,1272 +2381,57 @@ export function SkeuomorphicPhoneTrio() {
   );
 }
 
-export function AndroidMasterFeatureGrid() {
-  return (
-    <section className="kp-master-grid-section" aria-labelledby="kp-master-grid-heading">
-      <div className="kp-section-head">
-        <p className="eyebrow">COMPLETE ANDROID APP FEATURE INVENTORY (17 PILLARS)</p>
-        <h2 id="kp-master-grid-heading">Every feature built into KuchuPuchu Android &amp; Web</h2>
-        <p className="kp-section-sub">
-          All 17 feature modules from the native Android app (v282 / 3.9.205) and Cloudflare Worker
-          edge platform — sculpted in 3D Skeuomorphism.
-        </p>
-      </div>
-
-      <div className="kp-master-grid">
-        {ANDROID_APP_FEATURES.map((item) => (
-          <article key={item.num} className="kp-master-card">
-            <div className="kp-master-card__top">
-              <span className="kp-master-card__num">{item.num}</span>
-              <span className="kp-master-card__tag">{item.tag}</span>
-            </div>
-            <h3>{item.title}</h3>
-            <p>{item.summary}</p>
-            <span className="kp-master-card__modules">{item.modules}</span>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 export function AllAndroidFeatureBanners({
   category = "all",
-  heading = "Visual Feature & How-To Banners",
-  subheading = "Step-by-step 3D Skeuomorphic visual banners for hiding chats, archiving with the 2s pull gesture, swipe-to-reply, 3D emoji FX, /magic commands, disappearing timers, view-once studio, 5 GB files, screen-share calls, 24h stories, and Gemini AI.",
+  heading = "Every feature built into KuchuPuchu Android & Web",
+  subheading = "All 24 features from the KuchuPuchu Android app and Web platform — each presented as its own dedicated 3D Skeuomorphic visual banner with custom diagram and step-by-step guide.",
 }: {
   category?: FeatureBannerCategory;
   heading?: string;
   subheading?: string;
 }) {
-  const show = (cats: FeatureBannerCategory[]) =>
-    category === "all" ||
-    category === "overview" ||
-    category === "features" ||
-    cats.includes(category);
+  const items =
+    category === "all" || category === "overview" || category === "features"
+      ? FEATURE_BANNERS
+      : FEATURE_BANNERS.filter((item) => item.categories.includes(category));
 
   return (
     <section className="kp-feature-banners" aria-label={heading}>
       <div className="kp-section-head">
-        <p className="eyebrow">VISUAL FEATURE BANNERS &amp; STEP-BY-STEP GUIDES</p>
+        <p className="eyebrow">
+          3D SKEUOMORPHIC VISUAL FEATURE BANNERS ({items.length} DEDICATED BANNERS)
+        </p>
         <h2>{heading}</h2>
         <p className="kp-section-sub">{subheading}</p>
       </div>
 
-      {/* BANNER 1: How to Hide & Unhide Secret Chats */}
-      {show(["encryption", "faq", "legal"]) && (
-        <article className="kp-feature-banner">
+      {items.map((banner, idx) => (
+        <article
+          key={banner.id}
+          id={`banner-${banner.id}`}
+          className={`kp-feature-banner${idx % 2 === 1 ? " kp-feature-banner--reverse" : ""}`}
+        >
           <div className="kp-feature-banner__copy">
-            <span className="kp-banner-badge">BANNER 01 · SECRET CHAT VAULT</span>
-            <h3>How to Hide &amp; Unhide Secret Chats</h3>
-            <p>
-              Keep sensitive conversations completely invisible in your main inbox while preserving
-              every KP1 encrypted message, voice note, and attachment.
-            </p>
+            <span className="kp-banner-badge">
+              BANNER {banner.number} · {banner.badge} · {banner.modules}
+            </span>
+            <h3>{banner.title}</h3>
+            <p>{banner.subtitle}</p>
             <ol className="kp-step-list">
-              <li>
-                <strong>Set a Secret Key &amp; Hide:</strong> Long-press any conversation row in
-                your inbox (or open the peer profile / top-right <code>⋮</code> menu), choose{" "}
-                <strong>Hide chat</strong>, and assign your free-form Secret Key.
-              </li>
-              <li>
-                <strong>Zero inbox &amp; lock-screen trace:</strong> Hidden conversations vanish
-                from your chat list and suppress all lock-screen notification banners and sounds.
-              </li>
-              <li>
-                <strong>Reveal via Search or Unhide anytime:</strong> Type your exact{" "}
-                <strong>Secret Key</strong> into the Search bar to reveal the thread, or open the
-                home <code>⋮</code> menu → <strong>Hidden chats</strong> → tap{" "}
-                <strong>Unhide</strong>.
-              </li>
+              {banner.steps.map((step, stepIdx) => (
+                <li key={stepIdx}>{step}</li>
+              ))}
             </ol>
           </div>
           <div className="kp-feature-banner__art" aria-hidden="true">
-            <svg viewBox="0 0 420 250" className="kp-banner-svg">
-              <rect
-                x="14"
-                y="14"
-                width="392"
-                height="222"
-                rx="22"
-                fill="#111d34"
-                stroke="#2d4673"
-                strokeWidth="1.5"
-              />
-              <rect x="30" y="32" width="175" height="62" rx="14" fill="#182846" stroke="#3b82f6" />
-              <circle cx="56" cy="63" r="16" fill="#2563eb" />
-              <text x="51" y="68" fill="#ffffff" fontSize="13" fontWeight="700">
-                R
-              </text>
-              <text x="80" y="57" fill="#f0f5ff" fontSize="12" fontWeight="700">
-                Rahi · Secret Key
-              </text>
-              <text x="80" y="75" fill="#93c5fd" fontSize="10">
-                Long-press → Hide chat
-              </text>
-              <path d="M212 63 H236" stroke="#60a5fa" strokeWidth="2.5" strokeDasharray="4 4" />
-              <rect
-                x="244"
-                y="32"
-                width="146"
-                height="62"
-                rx="14"
-                fill="#0b1426"
-                stroke="#4f8ff7"
-              />
-              <text x="262" y="56" fill="#60a5fa" fontSize="10" fontWeight="700">
-                HIDDEN VAULT
-              </text>
-              <text x="262" y="74" fill="#e2ecff" fontSize="12" fontWeight="700">
-                Locked &amp; Muted
-              </text>
-              <rect
-                x="30"
-                y="112"
-                width="360"
-                height="104"
-                rx="16"
-                fill="#15233d"
-                stroke="#2c446e"
-              />
-              <text x="48" y="136" fill="#93c5fd" fontSize="10" fontWeight="700">
-                HOW TO REVEAL OR UNHIDE SECRET CHATS
-              </text>
-              <rect
-                x="48"
-                y="148"
-                width="104"
-                height="48"
-                rx="10"
-                fill="#0d172a"
-                stroke="#2b446e"
-              />
-              <text x="58" y="170" fill="#dbeafe" fontSize="10" fontWeight="600">
-                1. Type Secret Key
-              </text>
-              <text x="58" y="184" fill="#93a2be" fontSize="9">
-                in Search bar
-              </text>
-              <rect
-                x="164"
-                y="148"
-                width="104"
-                height="48"
-                rx="10"
-                fill="#0d172a"
-                stroke="#2b446e"
-              />
-              <text x="174" y="170" fill="#dbeafe" fontSize="10" fontWeight="600">
-                2. Or Tap ⋮ Menu
-              </text>
-              <text x="174" y="184" fill="#93a2be" fontSize="9">
-                → Hidden chats
-              </text>
-              <rect x="280" y="148" width="92" height="48" rx="10" fill="#2563eb" />
-              <text x="296" y="176" fill="#ffffff" fontSize="11" fontWeight="700">
-                3. Unhide ✓
-              </text>
-            </svg>
+            <BannerVisual id={banner.id} />
           </div>
         </article>
-      )}
-
-      {/* BANNER 2: How to Archive Chats & 2-Second Pull Gesture */}
-      {show(["faq"]) && (
-        <article className="kp-feature-banner kp-feature-banner--reverse">
-          <div className="kp-feature-banner__copy">
-            <span className="kp-banner-badge">BANNER 02 · ARCHIVE DRAWER &amp; 2S GESTURE</span>
-            <h3>How to Archive Chats &amp; Use the 2-Second Pull Gesture</h3>
-            <p>
-              Declutter your primary chat list by moving low-priority or inactive threads into the
-              Archived drawer without losing a single message.
-            </p>
-            <ol className="kp-step-list">
-              <li>
-                <strong>Archive any chat:</strong> Long-press any conversation (or open its{" "}
-                <code>⋮</code> menu) and select <strong>Archive chat</strong>.
-              </li>
-              <li>
-                <strong>2-second pull-and-hold gesture:</strong> Pull down from the top of your chat
-                list and hold for <strong>2 seconds</strong> — watch the 3D circular progress ring
-                fill to 100% to jump straight into <strong>Archived Chats</strong>.
-              </li>
-              <li>
-                <strong>One-tap Unarchive:</strong> Open the Archived drawer and tap{" "}
-                <strong>Unarchive</strong> on any thread to return it to your main inbox.
-              </li>
-            </ol>
-          </div>
-          <div className="kp-feature-banner__art" aria-hidden="true">
-            <svg viewBox="0 0 420 250" className="kp-banner-svg">
-              <rect
-                x="14"
-                y="14"
-                width="392"
-                height="222"
-                rx="22"
-                fill="#111d34"
-                stroke="#2d4673"
-                strokeWidth="1.5"
-              />
-              <circle cx="96" cy="125" r="56" fill="#0b1426" stroke="#23385c" strokeWidth="10" />
-              <circle
-                cx="96"
-                cy="125"
-                r="56"
-                fill="none"
-                stroke="#3b82f6"
-                strokeWidth="10"
-                strokeDasharray="285 360"
-                strokeLinecap="round"
-              />
-              <text x="72" y="122" fill="#ffffff" fontSize="18" fontWeight="800">
-                2.0s
-              </text>
-              <text x="64" y="140" fill="#93c5fd" fontSize="10" fontWeight="700">
-                PULL &amp; HOLD
-              </text>
-              <rect
-                x="182"
-                y="42"
-                width="202"
-                height="48"
-                rx="12"
-                fill="#182846"
-                stroke="#3b82f6"
-              />
-              <text x="200" y="71" fill="#ffffff" fontSize="12" fontWeight="700">
-                Archived Chats (4) · Open →
-              </text>
-              <rect
-                x="182"
-                y="102"
-                width="202"
-                height="48"
-                rx="12"
-                fill="#15223b"
-                stroke="#2b426b"
-              />
-              <circle cx="206" cy="126" r="12" fill="#2563eb" />
-              <text x="202" y="130" fill="#ffffff" fontSize="10" fontWeight="700">
-                S
-              </text>
-              <text x="226" y="123" fill="#e2ecff" fontSize="11" fontWeight="700">
-                Squad Group
-              </text>
-              <text x="226" y="138" fill="#93c5fd" fontSize="9.5">
-                Muted · Tap Unarchive
-              </text>
-              <rect
-                x="182"
-                y="160"
-                width="202"
-                height="48"
-                rx="12"
-                fill="#15223b"
-                stroke="#2b426b"
-              />
-              <circle cx="206" cy="184" r="12" fill="#1d4ed8" />
-              <text x="202" y="188" fill="#ffffff" fontSize="10" fontWeight="700">
-                A
-              </text>
-              <text x="226" y="181" fill="#e2ecff" fontSize="11" fontWeight="700">
-                Amina
-              </text>
-              <text x="226" y="196" fill="#93c5fd" fontSize="9.5">
-                Archived · History intact
-              </text>
-            </svg>
-          </div>
-        </article>
-      )}
-
-      {/* BANNER 3: Inbox Pin, Mute, Multi-Select & Unread Privacy */}
-      {show(["faq"]) && (
-        <article className="kp-feature-banner">
-          <div className="kp-feature-banner__copy">
-            <span className="kp-banner-badge">BANNER 03 · SMART INBOX &amp; UNREAD PRIVACY</span>
-            <h3>Pin Top Chats, Independent Call/Msg Mute &amp; Masked Unread Previews</h3>
-            <p>
-              Organize your inbox with long-press bottom sheets, rounded multi-select checkboxes,
-              and privacy-first unread message masking.
-            </p>
-            <ul className="kp-step-list">
-              <li>
-                <strong>Pin &amp; Multi-Select:</strong> Long-press any chat row to{" "}
-                <strong>Pin</strong> priority conversations to the top, batch-select multiple rows
-                with rounded checkboxes, or create a group immediately.
-              </li>
-              <li>
-                <strong>Separate Message &amp; Call Mute:</strong> Mute notifications for{" "}
-                <strong>1 hour, 8 hours, 24 hours, or Forever</strong> with independent toggles for
-                chat messages (`muted_msg`) and incoming calls (`muted_call`).
-              </li>
-              <li>
-                <strong>Unread Preview Privacy:</strong> Unread threads mask message text behind a
-                category/count badge until you open the conversation.
-              </li>
-            </ul>
-          </div>
-          <div className="kp-feature-banner__art" aria-hidden="true">
-            <svg viewBox="0 0 420 250" className="kp-banner-svg">
-              <rect
-                x="14"
-                y="14"
-                width="392"
-                height="222"
-                rx="22"
-                fill="#111d34"
-                stroke="#2d4673"
-                strokeWidth="1.5"
-              />
-              <rect x="32" y="32" width="356" height="54" rx="14" fill="#182846" stroke="#3b82f6" />
-              <rect x="48" y="49" width="20" height="20" rx="6" fill="#2563eb" />
-              <text x="54" y="63" fill="#ffffff" fontSize="12" fontWeight="800">
-                ✓
-              </text>
-              <text x="80" y="56" fill="#ffffff" fontSize="12" fontWeight="700">
-                Rahi · Pinned to Top
-              </text>
-              <text x="80" y="72" fill="#93c5fd" fontSize="10">
-                2 new messages · Unread content masked
-              </text>
-              <rect x="314" y="46" width="58" height="24" rx="12" fill="#0d172a" />
-              <text x="326" y="62" fill="#60a5fa" fontSize="10" fontWeight="700">
-                PINNED
-              </text>
-              <rect x="32" y="98" width="356" height="54" rx="14" fill="#15233d" stroke="#2c446e" />
-              <text x="52" y="122" fill="#e2ecff" fontSize="12" fontWeight="700">
-                Mute Options: 1h · 8h · 24h · Forever
-              </text>
-              <text x="52" y="138" fill="#93c5fd" fontSize="10">
-                Independent toggles: Mute Messages | Mute Calls
-              </text>
-              <rect
-                x="32"
-                y="164"
-                width="356"
-                height="52"
-                rx="14"
-                fill="#0b1426"
-                stroke="#2c446e"
-              />
-              <text x="52" y="194" fill="#93c5fd" fontSize="11" fontWeight="700">
-                Long-Press Sheet: Pin · Mute · Hide · Archive · Select · Delete
-              </text>
-            </svg>
-          </div>
-        </article>
-      )}
-
-      {/* BANNER 4: Swipe-to-Reply, Reactions, 3D Lottie Emoji FX & /magic */}
-      {show(["faq"]) && (
-        <article className="kp-feature-banner kp-feature-banner--reverse">
-          <div className="kp-feature-banner__copy">
-            <span className="kp-banner-badge">BANNER 04 · EXPRESSIVE CHAT &amp; 3D EMOJI FX</span>
-            <h3>
-              Swipe-to-Reply, Bare Emoji Reactions, 3D Lottie Emojis &amp; <code>/magic</code> Slash
-              Commands
-            </h3>
-            <p>
-              Every conversation is tactile and alive with gesture replies, synchronized 3D emoji
-              bursts, and live text formatting.
-            </p>
-            <ul className="kp-step-list">
-              <li>
-                <strong>Swipe-to-Reply &amp; Bare Reactions:</strong> Swipe right on any text,
-                photo, or voice bubble to quote-reply, or long-press to react with any emoji.
-              </li>
-              <li>
-                <strong>3D Lottie Animated Emojis &amp; Tap-to-Replay Burst:</strong> Single,
-                double, and triple emoji messages animate in 3D; tap the emoji to trigger a
-                synchronized full-screen particle burst on both devices.
-              </li>
-              <li>
-                <strong>
-                  <code>/magic</code> &amp; Rich Markup:
-                </strong>{" "}
-                Type <code>/magic</code> for floating wave text, use <code>*bold*</code>,{" "}
-                <code>_italic_</code>, <code>~strike~</code>, and <code>`code`</code>, or tag{" "}
-                <code>@mentions</code> in groups.
-              </li>
-            </ul>
-          </div>
-          <div className="kp-feature-banner__art" aria-hidden="true">
-            <svg viewBox="0 0 420 250" className="kp-banner-svg">
-              <rect
-                x="14"
-                y="14"
-                width="392"
-                height="222"
-                rx="22"
-                fill="#111d34"
-                stroke="#2d4673"
-                strokeWidth="1.5"
-              />
-              <rect x="32" y="34" width="235" height="56" rx="14" fill="#182846" stroke="#3b82f6" />
-              <text x="48" y="56" fill="#93c5fd" fontSize="9.5" fontWeight="700">
-                ↪ SWIPE RIGHT TO QUOTE-REPLY
-              </text>
-              <text x="48" y="75" fill="#ffffff" fontSize="12" fontWeight="700">
-                Dropping into Free Fire lobby at 9 PM!
-              </text>
-              <rect x="234" y="74" width="44" height="22" rx="11" fill="#2563eb" />
-              <text x="244" y="89" fill="#ffffff" fontSize="11">
-                🔥 2
-              </text>
-              <rect
-                x="286"
-                y="34"
-                width="102"
-                height="96"
-                rx="18"
-                fill="#0b1426"
-                stroke="#4f8ff7"
-              />
-              <text x="322" y="78" fontSize="28">
-                🎉
-              </text>
-              <text x="300" y="102" fill="#ffffff" fontSize="10" fontWeight="700">
-                3D Lottie FX
-              </text>
-              <text x="302" y="116" fill="#93c5fd" fontSize="9">
-                Tap for burst
-              </text>
-              <rect
-                x="32"
-                y="144"
-                width="356"
-                height="72"
-                rx="16"
-                fill="#15233d"
-                stroke="#2c446e"
-              />
-              <text x="50" y="170" fill="#60a5fa" fontSize="11" fontWeight="700">
-                /magic · Floating Animated Wave Bubble + @mentions
-              </text>
-              <text x="50" y="192" fill="#e2ecff" fontSize="11">
-                Supports *bold*, _italic_, ~strikethrough~, and `inline code`
-              </text>
-            </svg>
-          </div>
-        </article>
-      )}
-
-      {/* BANNER 5: Disappearing Messages, Scheduled Delivery & Permanent Delete */}
-      {show(["faq"]) && (
-        <article className="kp-feature-banner">
-          <div className="kp-feature-banner__copy">
-            <span className="kp-banner-badge">
-              BANNER 05 · TIMERS, SCHEDULING &amp; CLEAN DELETE
-            </span>
-            <h3>
-              Disappearing Timers, Scheduled Messages (Dhaka Time) &amp; Permanent Delete for
-              Everyone
-            </h3>
-            <p>
-              Control the exact lifetime and delivery schedule of your messages with server-enforced
-              timers and zero-trace deletion.
-            </p>
-            <ul className="kp-step-list">
-              <li>
-                <strong>Disappearing Message Timers:</strong> Set any conversation to auto-expire
-                messages after <strong>24 hours, 7 days, or 30 days</strong>, swept every minute by
-                the Cloudflare Worker cron.
-              </li>
-              <li>
-                <strong>Scheduled Messages:</strong> Write messages ahead of time and queue them in{" "}
-                <code>scheduled_messages</code> for automatic delivery at your chosen Dhaka time.
-              </li>
-              <li>
-                <strong>Permanent Delete for Everyone:</strong> Remove any message in 1:1 chats for
-                both participants with a particle disintegration animation and no lingering
-                &ldquo;Deleted&rdquo; or &ldquo;Edited&rdquo; banner.
-              </li>
-            </ul>
-          </div>
-          <div className="kp-feature-banner__art" aria-hidden="true">
-            <svg viewBox="0 0 420 250" className="kp-banner-svg">
-              <rect
-                x="14"
-                y="14"
-                width="392"
-                height="222"
-                rx="22"
-                fill="#111d34"
-                stroke="#2d4673"
-                strokeWidth="1.5"
-              />
-              <rect
-                x="30"
-                y="36"
-                width="112"
-                height="178"
-                rx="16"
-                fill="#0b1426"
-                stroke="#3b82f6"
-              />
-              <text x="44" y="66" fill="#60a5fa" fontSize="10" fontWeight="700">
-                AUTO-EXPIRE
-              </text>
-              <text x="44" y="96" fill="#ffffff" fontSize="15" fontWeight="800">
-                24 Hours
-              </text>
-              <text x="44" y="122" fill="#dbeafe" fontSize="13" fontWeight="700">
-                7 Days
-              </text>
-              <text x="44" y="148" fill="#dbeafe" fontSize="13" fontWeight="700">
-                30 Days
-              </text>
-              <text x="44" y="186" fill="#93c5fd" fontSize="9.5">
-                Worker Cron Sweep
-              </text>
-              <rect
-                x="154"
-                y="36"
-                width="236"
-                height="82"
-                rx="16"
-                fill="#182846"
-                stroke="#3b82f6"
-              />
-              <text x="172" y="62" fill="#93c5fd" fontSize="10" fontWeight="700">
-                SCHEDULED MESSAGE · ASIA/DHAKA
-              </text>
-              <text x="172" y="84" fill="#ffffff" fontSize="12" fontWeight="700">
-                Sends automatically at 10:30 PM
-              </text>
-              <text x="172" y="102" fill="#93c5fd" fontSize="10">
-                Delivered even if your phone is offline
-              </text>
-              <rect
-                x="154"
-                y="132"
-                width="236"
-                height="82"
-                rx="16"
-                fill="#15233d"
-                stroke="#2c446e"
-              />
-              <text x="172" y="158" fill="#60a5fa" fontSize="10" fontWeight="700">
-                PERMANENT DELETE FOR EVERYONE
-              </text>
-              <text x="172" y="180" fill="#ffffff" fontSize="12" fontWeight="700">
-                Particle Disintegration FX
-              </text>
-              <text x="172" y="198" fill="#93c5fd" fontSize="10">
-                Vanishes cleanly · No &ldquo;Edited&rdquo; trail
-              </text>
-            </svg>
-          </div>
-        </article>
-      )}
-
-      {/* BANNER 6: Conversation Nicknames & 5 Custom Per-Chat Themes */}
-      {show([]) && (
-        <article className="kp-feature-banner kp-feature-banner--reverse">
-          <div className="kp-feature-banner__copy">
-            <span className="kp-banner-badge">BANNER 06 · NICKNAMES &amp; 5 CHAT THEMES</span>
-            <h3>
-              Custom Conversation Nicknames &amp; 5 Per-Chat Themes (Classic, Ocean, Forest, Sunset,
-              Midnight)
-            </h3>
-            <p>
-              Personalize every 1:1 and group conversation with custom nicknames and distinct
-              per-chat gradient wallpapers synced across Android and Web.
-            </p>
-            <ul className="kp-step-list">
-              <li>
-                <strong>Conversation Nicknames:</strong> Open the chat info sheet to set custom
-                display nicknames for yourself and your peer inside that specific thread.
-              </li>
-              <li>
-                <strong>5 Per-Chat Wallpapers:</strong> Switch any chat between{" "}
-                <strong>Classic, Ocean, Forest, Sunset, and Midnight</strong> themes — owner-locked
-                in groups and instant in 1:1 chats.
-              </li>
-              <li>
-                <strong>Tap-to-Reveal Timestamps:</strong> Keep transcripts compact by showing the
-                latest status stamp by default and tapping any older bubble to inspect its exact
-                delivery/read time.
-              </li>
-            </ul>
-          </div>
-          <div className="kp-feature-banner__art" aria-hidden="true">
-            <svg viewBox="0 0 420 250" className="kp-banner-svg">
-              <rect
-                x="14"
-                y="14"
-                width="392"
-                height="222"
-                rx="22"
-                fill="#111d34"
-                stroke="#2d4673"
-                strokeWidth="1.5"
-              />
-              <rect x="32" y="34" width="356" height="58" rx="14" fill="#182846" stroke="#3b82f6" />
-              <text x="50" y="58" fill="#93c5fd" fontSize="10" fontWeight="700">
-                CONVERSATION NICKNAMES SHEET
-              </text>
-              <text x="50" y="77" fill="#ffffff" fontSize="12" fontWeight="700">
-                Rahi → &ldquo;Squad Captain&rdquo; · Synced in Chat Header
-              </text>
-              <rect x="32" y="110" width="64" height="96" rx="14" fill="#1b3a6b" />
-              <text x="44" y="164" fill="#ffffff" fontSize="10" fontWeight="700">
-                Classic
-              </text>
-              <rect x="105" y="110" width="64" height="96" rx="14" fill="#0e4f6e" />
-              <text x="119" y="164" fill="#ffffff" fontSize="10" fontWeight="700">
-                Ocean
-              </text>
-              <rect x="178" y="110" width="64" height="96" rx="14" fill="#14532d" />
-              <text x="192" y="164" fill="#ffffff" fontSize="10" fontWeight="700">
-                Forest
-              </text>
-              <rect x="251" y="110" width="64" height="96" rx="14" fill="#7c2d12" />
-              <text x="264" y="164" fill="#ffffff" fontSize="10" fontWeight="700">
-                Sunset
-              </text>
-              <rect x="324" y="110" width="64" height="96" rx="14" fill="#1e1b4b" />
-              <text x="333" y="164" fill="#ffffff" fontSize="10" fontWeight="700">
-                Midnight
-              </text>
-            </svg>
-          </div>
-        </article>
-      )}
-
-      {/* BANNER 7: View-Once (1x) Media & Built-in Photo/Video Editor */}
-      {show(["encryption"]) && (
-        <article className="kp-feature-banner">
-          <div className="kp-feature-banner__copy">
-            <span className="kp-banner-badge">BANNER 07 · VIEW-ONCE (1×) &amp; MEDIA STUDIO</span>
-            <h3>View-Once (1×) Self-Destructing Media &amp; Built-in Photo/Video Editor</h3>
-            <p>
-              Edit photos and videos right inside KuchuPuchu before sending, or mark sensitive media
-              as View-Once (`1×`) so the server deletes the bytes on first open.
-            </p>
-            <ul className="kp-step-list">
-              <li>
-                <strong>Server-Enforced View-Once (`1×`):</strong> Send photos, videos, voice notes,
-                or text as <code>1×</code> — the Cloudflare Worker spends the token on first fetch
-                and deletes the R2 object immediately.
-              </li>
-              <li>
-                <strong>Built-in Photo &amp; Video Editor:</strong> Crop, rotate, draw freehand
-                annotations, place text overlays on photos, and trim video clips (with a 1-minute
-                smart default) before upload.
-              </li>
-              <li>
-                <strong>Attachment Exit Gate:</strong> A protective bottom-sheet confirmation guards
-                your edited media batch against accidental Back gestures.
-              </li>
-            </ul>
-          </div>
-          <div className="kp-feature-banner__art" aria-hidden="true">
-            <svg viewBox="0 0 420 250" className="kp-banner-svg">
-              <rect
-                x="14"
-                y="14"
-                width="392"
-                height="222"
-                rx="22"
-                fill="#111d34"
-                stroke="#2d4673"
-                strokeWidth="1.5"
-              />
-              <rect
-                x="30"
-                y="34"
-                width="172"
-                height="182"
-                rx="18"
-                fill="#0b1426"
-                stroke="#3b82f6"
-              />
-              <circle cx="116" cy="96" r="34" fill="#182846" stroke="#60a5fa" strokeWidth="2.5" />
-              <text x="103" y="103" fill="#ffffff" fontSize="20" fontWeight="800">
-                1×
-              </text>
-              <text x="52" y="154" fill="#ffffff" fontSize="12" fontWeight="700">
-                View-Once Media
-              </text>
-              <text x="48" y="174" fill="#93c5fd" fontSize="10">
-                Wiped from R2 on fetch
-              </text>
-              <rect
-                x="218"
-                y="34"
-                width="172"
-                height="84"
-                rx="16"
-                fill="#182846"
-                stroke="#3b82f6"
-              />
-              <text x="234" y="60" fill="#93c5fd" fontSize="10" fontWeight="700">
-                PHOTO &amp; VIDEO STUDIO
-              </text>
-              <text x="234" y="80" fill="#ffffff" fontSize="12" fontWeight="700">
-                Crop · Draw · Text · Trim
-              </text>
-              <text x="234" y="98" fill="#93c5fd" fontSize="10">
-                JPEG q90 + 1-min Video Trim
-              </text>
-              <rect
-                x="218"
-                y="132"
-                width="172"
-                height="84"
-                rx="16"
-                fill="#15233d"
-                stroke="#2c446e"
-              />
-              <text x="234" y="158" fill="#60a5fa" fontSize="10" fontWeight="700">
-                ATTACHMENT EXIT GATE
-              </text>
-              <text x="234" y="178" fill="#ffffff" fontSize="11.5" fontWeight="700">
-                Protects Unsent Edits
-              </text>
-              <text x="234" y="196" fill="#93c5fd" fontSize="10">
-                Confirm sheet on Back press
-              </text>
-            </svg>
-          </div>
-        </article>
-      )}
-
-      {/* BANNER 8: Voice Notes, 1,150+ Stickers & Up to 5 GB Multipart File Sharing */}
-      {show(["architecture"]) && (
-        <article className="kp-feature-banner kp-feature-banner--reverse">
-          <div className="kp-feature-banner__copy">
-            <span className="kp-banner-badge">
-              BANNER 08 · VOICE NOTES, 1,150+ STICKERS &amp; 5 GB FILES
-            </span>
-            <h3>Waveform Voice Notes, 1,150+ Stickers &amp; Up to 5 GB Multipart File Uploads</h3>
-            <p>
-              Record crystal-clear voice notes with interactive waveform scrubbing, express yourself
-              with 1,150+ stickers, and send massive files via Cloudflare R2 multipart uploads.
-            </p>
-            <ul className="kp-step-list">
-              <li>
-                <strong>Interactive Voice Notes:</strong> Hold the mic button to record (slide left
-                to cancel, slide up to lock hands-free), scrub the live waveform bar, and toggle{" "}
-                <strong>1× / 1.5× / 2×</strong> playback speed with automatic earpiece routing.
-              </li>
-              <li>
-                <strong>Up to 5 GB Multipart Uploads &amp; Doc Viewer:</strong> Upload up to{" "}
-                <strong>5 GB documents, 2 GB videos, and 100 MB photos/audio</strong> in 8 MB
-                resumable chunks, and preview PDFs, code, CSV, Markdown, and TIFF files in-app.
-              </li>
-              <li>
-                <strong>1,150+ Stickers &amp; GIFs:</strong> Instant sticker pack browser and GIF
-                sheet built right into the composer pill.
-              </li>
-            </ul>
-          </div>
-          <div className="kp-feature-banner__art" aria-hidden="true">
-            <svg viewBox="0 0 420 250" className="kp-banner-svg">
-              <rect
-                x="14"
-                y="14"
-                width="392"
-                height="222"
-                rx="22"
-                fill="#111d34"
-                stroke="#2d4673"
-                strokeWidth="1.5"
-              />
-              <rect x="30" y="32" width="360" height="62" rx="16" fill="#182846" stroke="#3b82f6" />
-              <circle cx="58" cy="63" r="16" fill="#2563eb" />
-              <text x="53" y="68" fill="#ffffff" fontSize="12" fontWeight="800">
-                ▶
-              </text>
-              <rect x="86" y="54" width="6" height="18" rx="3" fill="#60a5fa" />
-              <rect x="98" y="46" width="6" height="34" rx="3" fill="#60a5fa" />
-              <rect x="110" y="52" width="6" height="22" rx="3" fill="#60a5fa" />
-              <rect x="122" y="42" width="6" height="42" rx="3" fill="#3b82f6" />
-              <rect x="134" y="50" width="6" height="26" rx="3" fill="#3b82f6" />
-              <rect x="146" y="56" width="6" height="14" rx="3" fill="#93c5fd" />
-              <text x="170" y="60" fill="#ffffff" fontSize="11.5" fontWeight="700">
-                Voice Note · Waveform Scrubber
-              </text>
-              <text x="170" y="76" fill="#93c5fd" fontSize="10">
-                Hold-to-Record · Earpiece Routing
-              </text>
-              <rect x="334" y="50" width="42" height="26" rx="8" fill="#0b1426" />
-              <text x="343" y="67" fill="#60a5fa" fontSize="10" fontWeight="700">
-                1.5×
-              </text>
-              <rect
-                x="30"
-                y="108"
-                width="174"
-                height="108"
-                rx="16"
-                fill="#0b1426"
-                stroke="#3b82f6"
-              />
-              <text x="46" y="136" fill="#60a5fa" fontSize="10" fontWeight="700">
-                R2 MULTIPART (8 MB PARTS)
-              </text>
-              <text x="46" y="158" fill="#ffffff" fontSize="13" fontWeight="800">
-                5 GB Docs · 2 GB Video
-              </text>
-              <text x="46" y="178" fill="#93c5fd" fontSize="10">
-                In-App PDF, Code, CSV &amp; TIFF
-              </text>
-              <text x="46" y="196" fill="#93c5fd" fontSize="10">
-                Shared Media / Docs / Links
-              </text>
-              <rect
-                x="216"
-                y="108"
-                width="174"
-                height="108"
-                rx="16"
-                fill="#15233d"
-                stroke="#2c446e"
-              />
-              <text x="232" y="136" fill="#60a5fa" fontSize="10" fontWeight="700">
-                STICKER &amp; GIF STUDIO
-              </text>
-              <text x="232" y="158" fill="#ffffff" fontSize="13" fontWeight="800">
-                1,150+ Stickers &amp; GIFs
-              </text>
-              <text x="232" y="178" fill="#93c5fd" fontSize="10">
-                Instant Composer Picker
-              </text>
-              <text x="232" y="196" fill="#93c5fd" fontSize="10">
-                Zero-lag WebP &amp; Animated Packs
-              </text>
-            </svg>
-          </div>
-        </article>
-      )}
-
-      {/* BANNER 9: 1:1 WebRTC Calls, Screen Share + System Audio & Voice Isolation */}
-      {show(["architecture", "encryption"]) && (
-        <article className="kp-feature-banner">
-          <div className="kp-feature-banner__copy">
-            <span className="kp-banner-badge">
-              BANNER 09 · 1:1 WEBRTC CALLS &amp; LIVE SCREEN SHARE
-            </span>
-            <h3>1:1 HD Audio/Video Calls, Screen Share with System Audio &amp; Voice Isolation</h3>
-            <p>
-              Engineered for gamers and everyday calling with DTLS-SRTP encryption, 5-layer ring
-              delivery, and live screen + game audio streaming.
-            </p>
-            <ul className="kp-step-list">
-              <li>
-                <strong>Live Screen Share + System Audio Tap:</strong> Share your phone screen and
-                internal game/media audio live during a call (`KpScreenCapturer.kt`,{" "}
-                `SystemAudioTap.kt`).
-              </li>
-              <li>
-                <strong>Voice Isolation &amp; Smart Audio Routing:</strong> Hardware/DSP noise
-                suppression (`VoiceIsolation.kt`) and seamless Bluetooth, speaker, and earpiece
-                switching with profile avatars on every call screen.
-              </li>
-              <li>
-                <strong>5-Layer Ring Delivery &amp; Call Minimize Banner:</strong> Combines
-                WebSocket DO, high-priority FCM, TelecomManager, and relay polling; press Back to
-                minimize into a floating Return-to-Call timer bar.
-              </li>
-            </ul>
-          </div>
-          <div className="kp-feature-banner__art" aria-hidden="true">
-            <svg viewBox="0 0 420 250" className="kp-banner-svg">
-              <rect
-                x="14"
-                y="14"
-                width="392"
-                height="222"
-                rx="22"
-                fill="#111d34"
-                stroke="#2d4673"
-                strokeWidth="1.5"
-              />
-              <rect
-                x="30"
-                y="32"
-                width="166"
-                height="186"
-                rx="20"
-                fill="#162644"
-                stroke="#3b82f6"
-              />
-              <circle cx="113" cy="82" r="26" fill="#2563eb" stroke="#93c5fd" strokeWidth="2" />
-              <text x="106" y="89" fill="#ffffff" fontSize="16" fontWeight="800">
-                R
-              </text>
-              <text x="68" y="128" fill="#ffffff" fontSize="12.5" fontWeight="700">
-                Rahi · HD Call
-              </text>
-              <text x="62" y="145" fill="#93c5fd" fontSize="10">
-                08:42 · DTLS-SRTP E2EE
-              </text>
-              <circle cx="76" cy="182" r="14" fill="#1e3a6d" />
-              <circle cx="113" cy="182" r="14" fill="#2563eb" />
-              <circle cx="150" cy="182" r="14" fill="#dc2626" />
-              <rect
-                x="212"
-                y="32"
-                width="178"
-                height="86"
-                rx="16"
-                fill="#0b1426"
-                stroke="#3b82f6"
-              />
-              <text x="228" y="58" fill="#60a5fa" fontSize="10" fontWeight="700">
-                SCREEN SHARE + SYSTEM AUDIO
-              </text>
-              <text x="228" y="78" fill="#ffffff" fontSize="12" fontWeight="700">
-                Stream Free Fire &amp; Audio
-              </text>
-              <text x="228" y="96" fill="#93c5fd" fontSize="10">
-                KpScreenCapturer + SystemAudioTap
-              </text>
-              <rect
-                x="212"
-                y="132"
-                width="178"
-                height="86"
-                rx="16"
-                fill="#15233d"
-                stroke="#2c446e"
-              />
-              <text x="228" y="158" fill="#60a5fa" fontSize="10" fontWeight="700">
-                VOICE ISOLATION + 5-LAYER RING
-              </text>
-              <text x="228" y="178" fill="#ffffff" fontSize="12" fontWeight="700">
-                Noise Cancel &amp; Telecom UI
-              </text>
-              <text x="228" y="196" fill="#93c5fd" fontSize="10">
-                Floating Return-to-Call Timer
-              </text>
-            </svg>
-          </div>
-        </article>
-      )}
-
-      {/* BANNER 10: 24-Hour Status Stories */}
-      {show([]) && (
-        <article className="kp-feature-banner kp-feature-banner--reverse">
-          <div className="kp-feature-banner__copy">
-            <span className="kp-banner-badge">BANNER 10 · 24-HOUR STATUS STORIES</span>
-            <h3>
-              24-Hour Status Stories with Video Crop/Trim, Avatar Rings, Reactions &amp; Viewer List
-            </h3>
-            <p>
-              Share ephemeral moments that automatically vanish after 24 hours, with rich viewer
-              analytics and one-tap quote replies into encrypted chat.
-            </p>
-            <ul className="kp-step-list">
-              <li>
-                <strong>Photo, Trimmed Video &amp; Styled Text Stories:</strong> Post photos,
-                cropped/trimmed videos (first-minute smart default), or custom-background text
-                cards.
-              </li>
-              <li>
-                <strong>Unseen Status Rings &amp; Hold-to-Pause:</strong> Avatars light up with a
-                dark-blue ring for unseen updates (gray once viewed); hold to pause the 5-second
-                timer and release to resume.
-              </li>
-              <li>
-                <strong>Viewer Sheet &amp; Quote Replies:</strong> Inspect who viewed your story and
-                their emoji reactions in the Viewer Sheet, or reply directly into your 1:1 chat.
-              </li>
-            </ul>
-          </div>
-          <div className="kp-feature-banner__art" aria-hidden="true">
-            <svg viewBox="0 0 420 250" className="kp-banner-svg">
-              <rect
-                x="14"
-                y="14"
-                width="392"
-                height="222"
-                rx="22"
-                fill="#111d34"
-                stroke="#2d4673"
-                strokeWidth="1.5"
-              />
-              <circle
-                cx="96"
-                cy="125"
-                r="52"
-                fill="#162644"
-                stroke="#3b82f6"
-                strokeWidth="4"
-                strokeDasharray="96 10"
-              />
-              <text x="86" y="132" fill="#ffffff" fontSize="22" fontWeight="800">
-                R
-              </text>
-              <text x="54" y="200" fill="#93c5fd" fontSize="10.5" fontWeight="700">
-                Unseen Status Ring
-              </text>
-              <rect
-                x="178"
-                y="36"
-                width="210"
-                height="82"
-                rx="16"
-                fill="#182846"
-                stroke="#3b82f6"
-              />
-              <text x="196" y="62" fill="#93c5fd" fontSize="10" fontWeight="700">
-                24H PHOTO · VIDEO · TEXT
-              </text>
-              <text x="196" y="82" fill="#ffffff" fontSize="12" fontWeight="700">
-                5s Auto-Advance · Hold to Pause
-              </text>
-              <text x="196" y="100" fill="#93c5fd" fontSize="10">
-                Auto-swept by Worker after 24 hours
-              </text>
-              <rect
-                x="178"
-                y="132"
-                width="210"
-                height="82"
-                rx="16"
-                fill="#0b1426"
-                stroke="#2c446e"
-              />
-              <text x="196" y="158" fill="#60a5fa" fontSize="10" fontWeight="700">
-                VIEWERS &amp; QUICK REACTIONS
-              </text>
-              <text x="196" y="178" fill="#ffffff" fontSize="12" fontWeight="700">
-                ❤️ 🔥 👏 Reactions + Quote Chip
-              </text>
-              <text x="196" y="196" fill="#93c5fd" fontSize="10">
-                Reactions land in Viewer Sheet
-              </text>
-            </svg>
-          </div>
-        </article>
-      )}
-
-      {/* BANNER 11: Groups, Private Profile (FLAG_SECURE) & Verified Gemini AI */}
-      {show(["encryption", "architecture"]) && (
-        <article className="kp-feature-banner">
-          <div className="kp-feature-banner__copy">
-            <span className="kp-banner-badge">
-              BANNER 11 · GROUPS, FLAG_SECURE SHIELD &amp; GEMINI AI
-            </span>
-            <h3>
-              Group Chats, Private Profile (<code>FLAG_SECURE</code>) &amp; Verified KuchuPuchu
-              Gemini AI
-            </h3>
-            <p>
-              Collaborate in multi-member groups, hardware-block screenshots of your conversations
-              with Private Profile, and chat with the verified Google Gemini assistant.
-            </p>
-            <ul className="kp-step-list">
-              <li>
-                <strong>Private Profile (`FLAG_SECURE` Protection):</strong> Turning on Private
-                Profile activates Android <code>FLAG_SECURE</code> in chats and calls with you —
-                blocking screenshots, screen recording, and photo saving/forwarding.
-              </li>
-              <li>
-                <strong>Group Conversations &amp; Owner Controls:</strong> Create groups, add/remove
-                members, browse Group Media, and lock group themes to the group owner.
-              </li>
-              <li>
-                <strong>Verified KuchuPuchu AI (Google Gemini):</strong> Dedicated AI assistant with
-                multi-session history (`AIHistoryScreen.kt`) fluent in Bangla, Banglish, and
-                English.
-              </li>
-            </ul>
-          </div>
-          <div className="kp-feature-banner__art" aria-hidden="true">
-            <svg viewBox="0 0 420 250" className="kp-banner-svg">
-              <rect
-                x="14"
-                y="14"
-                width="392"
-                height="222"
-                rx="22"
-                fill="#111d34"
-                stroke="#2d4673"
-                strokeWidth="1.5"
-              />
-              <rect
-                x="30"
-                y="34"
-                width="174"
-                height="182"
-                rx="16"
-                fill="#0b1426"
-                stroke="#3b82f6"
-              />
-              <text x="48" y="64" fill="#60a5fa" fontSize="10" fontWeight="700">
-                PRIVATE PROFILE SHIELD
-              </text>
-              <text x="48" y="90" fill="#ffffff" fontSize="14" fontWeight="800">
-                FLAG_SECURE ON
-              </text>
-              <text x="48" y="114" fill="#93c5fd" fontSize="10">
-                • Blocks Screenshots
-              </text>
-              <text x="48" y="134" fill="#93c5fd" fontSize="10">
-                • Blocks Screen Recording
-              </text>
-              <text x="48" y="154" fill="#93c5fd" fontSize="10">
-                • Disables Save &amp; Forward
-              </text>
-              <text x="48" y="188" fill="#dbeafe" fontSize="10" fontWeight="600">
-                Active in Chat + Calls
-              </text>
-              <rect
-                x="218"
-                y="34"
-                width="172"
-                height="84"
-                rx="16"
-                fill="#182846"
-                stroke="#3b82f6"
-              />
-              <text x="234" y="60" fill="#60a5fa" fontSize="10" fontWeight="700">
-                VERIFIED GOOGLE GEMINI AI
-              </text>
-              <text x="234" y="80" fill="#ffffff" fontSize="12" fontWeight="700">
-                KuchuPuchu AI ✓
-              </text>
-              <text x="234" y="98" fill="#93c5fd" fontSize="10">
-                Bangla · Banglish · Session History
-              </text>
-              <rect
-                x="218"
-                y="132"
-                width="172"
-                height="84"
-                rx="16"
-                fill="#15233d"
-                stroke="#2c446e"
-              />
-              <text x="234" y="158" fill="#60a5fa" fontSize="10" fontWeight="700">
-                GROUPS &amp; MODERATION
-              </text>
-              <text x="234" y="178" fill="#ffffff" fontSize="12" fontWeight="700">
-                Owner Themes &amp; Media
-              </text>
-              <text x="234" y="196" fill="#93c5fd" fontSize="10">
-                @mentions · Block &amp; Unblock
-              </text>
-            </svg>
-          </div>
-        </article>
-      )}
-
-      {/* BANNER 12: KP1/KP2 Crypto, Compact OTP Login, Launcher Camera & OTA Updater */}
-      {show(["encryption", "architecture", "faq", "legal"]) && (
-        <article className="kp-feature-banner kp-feature-banner--reverse">
-          <div className="kp-feature-banner__copy">
-            <span className="kp-banner-badge">
-              BANNER 12 · KP1/KP2 CRYPTO, COMPACT OTP &amp; ANDROID INTEGRATIONS
-            </span>
-            <h3>
-              KP1/KP2 Encryption, Compact 6-Digit Login OTP, Google Recovery &amp; OTA APK Updater
-            </h3>
-            <p>
-              End-to-end cryptographic security paired with SIM-aware login, one-tap OTP copy,
-              Android Launcher Camera, and in-app R2 APK updates.
-            </p>
-            <ul className="kp-step-list">
-              <li>
-                <strong>KP1 E2EE + KP2 Key Backup:</strong> ECDH P-256 + AES-256-GCM personal chat
-                sealing with PBKDF2-SHA256 (210,000 iterations) passphrase key backup across Android
-                and Desktop Web.
-              </li>
-              <li>
-                <strong>Compact 6-Digit Login Approval OTP &amp; Google Recovery:</strong> Approve
-                new devices from the official KuchuPuchu chat with a compact copyable 6-digit OTP,
-                or recover your account via bound Google Identity.
-              </li>
-              <li>
-                <strong>Launcher Camera, Shortcuts, Sealed Push &amp; OTA Updater:</strong> Capture
-                photos straight from the Android launcher, reply/👍 from sealed notifications, and
-                update your APK in-app from Cloudflare R2.
-              </li>
-            </ul>
-          </div>
-          <div className="kp-feature-banner__art" aria-hidden="true">
-            <svg viewBox="0 0 420 250" className="kp-banner-svg">
-              <rect
-                x="14"
-                y="14"
-                width="392"
-                height="222"
-                rx="22"
-                fill="#111d34"
-                stroke="#2d4673"
-                strokeWidth="1.5"
-              />
-              <rect x="28" y="34" width="112" height="92" rx="14" fill="#182846" stroke="#3b82f6" />
-              <text x="42" y="58" fill="#60a5fa" fontSize="9.5" fontWeight="700">
-                KP1 ON-DEVICE
-              </text>
-              <text x="42" y="78" fill="#ffffff" fontSize="11.5" fontWeight="700">
-                ECDH P-256
-              </text>
-              <text x="42" y="96" fill="#93c5fd" fontSize="10">
-                AES-256-GCM
-              </text>
-              <rect
-                x="154"
-                y="34"
-                width="112"
-                height="92"
-                rx="14"
-                fill="#0b1426"
-                stroke="#4f8ff7"
-              />
-              <text x="168" y="58" fill="#60a5fa" fontSize="9.5" fontWeight="700">
-                KP2 KEY BACKUP
-              </text>
-              <text x="168" y="78" fill="#ffffff" fontSize="11.5" fontWeight="700">
-                PBKDF2 210k
-              </text>
-              <text x="168" y="96" fill="#93c5fd" fontSize="10">
-                Passphrase Vault
-              </text>
-              <rect
-                x="280"
-                y="34"
-                width="112"
-                height="92"
-                rx="14"
-                fill="#182846"
-                stroke="#3b82f6"
-              />
-              <text x="294" y="58" fill="#60a5fa" fontSize="9.5" fontWeight="700">
-                COMPACT OTP
-              </text>
-              <text x="294" y="78" fill="#ffffff" fontSize="11.5" fontWeight="700">
-                482910 [Copy]
-              </text>
-              <text x="294" y="96" fill="#93c5fd" fontSize="10">
-                + Google Recovery
-              </text>
-              <rect
-                x="28"
-                y="142"
-                width="364"
-                height="74"
-                rx="16"
-                fill="#15233d"
-                stroke="#2c446e"
-              />
-              <text x="46" y="168" fill="#60a5fa" fontSize="10" fontWeight="700">
-                NATIVE ANDROID INTEGRATIONS · V282 (3.9.205)
-              </text>
-              <text x="46" y="190" fill="#ffffff" fontSize="11.5" fontWeight="700">
-                Launcher Camera · Dynamic Shortcuts · Share Sheet · Sealed Push · R2 OTA Updater
-              </text>
-            </svg>
-          </div>
-        </article>
-      )}
+      ))}
     </section>
   );
+}
+
+export function AndroidMasterFeatureGrid() {
+  return <AllAndroidFeatureBanners category="all" />;
 }

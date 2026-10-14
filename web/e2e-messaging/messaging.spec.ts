@@ -42,7 +42,7 @@ test.beforeEach(async ({ page }) => {
     userSocket = ws;
   });
 
-  await page.goto("/");
+  await page.goto("/chats");
   await expect(page.getByRole("heading", { level: 1, name: "Chats" })).toBeVisible();
 });
 
@@ -638,7 +638,7 @@ test.describe("Web messaging", () => {
       calls.push(new URL(route.request().url()).pathname);
       return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
-    await fresh.goto("/");
+    await fresh.goto("/chats");
     await expect(fresh.getByRole("heading", { level: 1 })).toBeVisible();
     expect(calls.filter((path) => path.startsWith("/api/conversations"))).toEqual([]);
   });

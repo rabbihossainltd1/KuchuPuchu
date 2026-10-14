@@ -273,8 +273,28 @@ export default function App() {
         }
         onHome={() => {
           setWelcomeSignin(false);
-          navigate({ kind: "section", section: "chats" });
+          navigate({ kind: "home" });
         }}
+      />
+    );
+  }
+
+  if (
+    route.kind === "home" &&
+    (accountEnabled || messagingEnabled || statusesEnabled || callsEnabled)
+  ) {
+    return (
+      <WelcomePage
+        onSignIn={
+          isMobileViewport
+            ? undefined
+            : () => {
+                setWelcomeSignin(true);
+                navigate({ kind: "section", section: "chats" });
+              }
+        }
+        navigate={navigate}
+        showMobileBanner={isMobileViewport}
       />
     );
   }
@@ -315,22 +335,12 @@ export default function App() {
       if (isMobileViewport) {
         return <WelcomePage navigate={navigate} showMobileBanner />;
       }
-      // Only the bare chats landing shows the welcome page. Anywhere a
-      // visitor arrived with intent — /account, a protected deep link, or
-      // their own sign-in tap — goes straight to the form.
-      const bareLanding = route.kind === "section" && route.section === "chats";
-      return !bareLanding || isAccountRoute || welcomeSignin ? (
+      return (
         <AuthScreen
           onBackToChats={() => {
             setWelcomeSignin(false);
-            if (!bareLanding) goToChats();
+            navigate({ kind: "home" });
           }}
-        />
-      ) : (
-        <WelcomePage
-          onSignIn={() => setWelcomeSignin(true)}
-          navigate={navigate}
-          showMobileBanner={false}
         />
       );
     }
@@ -341,11 +351,13 @@ export default function App() {
   }
 
   const activeViewId =
-    route.kind === "section" && route.section !== "account"
-      ? route.section
-      : isConversation
-        ? "chats"
-        : null;
+    route.kind === "home"
+      ? "chats"
+      : route.kind === "section" && route.section !== "account"
+        ? route.section
+        : isConversation
+          ? "chats"
+          : null;
   const active = views.find((view) => view.id === activeViewId) ?? views[0]!;
   const sectionHeading = isNotFound ? "Not found" : active.label;
   const callsLine = callsEnabled

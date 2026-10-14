@@ -10,7 +10,7 @@ test.beforeEach(async ({ page }) => {
   await worker.install(page);
   await page.routeWebSocket(/\/ws\/chat\//, () => {});
   await page.routeWebSocket(/\/ws\/user/, () => {});
-  await page.goto("/");
+  await page.goto("/chats");
   await page.getByRole("link", { name: new RegExp(PEER_NAME) }).click();
   await expect(page.getByText(ownPlaintextBody())).toBeVisible();
 });

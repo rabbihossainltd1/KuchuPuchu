@@ -34,7 +34,7 @@ test.beforeEach(async ({ page }) => {
     userSocket = ws;
   });
 
-  await page.goto("/");
+  await page.goto("/chats");
   await expect(page.getByRole("heading", { level: 1, name: "Chats" })).toBeVisible();
 });
 

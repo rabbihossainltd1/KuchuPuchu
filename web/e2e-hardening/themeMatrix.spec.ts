@@ -31,7 +31,7 @@ test("a legacy stored light choice still paints dark blue", async ({ page }) => 
   });
   const worker = await createMockWorker();
   await worker.install(page);
-  await page.goto("/");
+  await page.goto("/chats");
 
   await expect(page.locator("html")).toHaveAttribute("data-kp-theme", "dark_blue");
   expect(await page.evaluate(() => window.localStorage.getItem("kp.app_theme"))).toBe("dark_blue");
@@ -52,7 +52,7 @@ for (const theme of THEMES) {
       const worker = await createMockWorker();
       await worker.install(page);
       await page.setViewportSize({ width: breakpoint.width, height: breakpoint.height });
-      await page.goto("/");
+      await page.goto("/chats");
 
       // The attribute is the whole theme contract: tokens re-key off it.
       await expect(page.locator("html")).toHaveAttribute("data-kp-theme", theme.attribute);
@@ -82,7 +82,7 @@ for (const theme of THEMES) {
     const worker = await createMockWorker();
     await worker.install(page);
     await page.setViewportSize({ width: 1366, height: 768 });
-    await page.goto("/");
+    await page.goto("/chats");
 
     await page.getByText("Rahi").first().click();
     await expect(page.locator(".conversation-heading, #conversation-heading")).toBeVisible();
