@@ -21,7 +21,7 @@ test("signing out deletes the messaging database", async ({ page }) => {
   const worker = await createMockWorker();
   await worker.install(page);
 
-  await page.goto("/");
+  await page.goto("/chats");
   await page.getByText("Rahi").first().click();
 
   // Create a durable draft so the database really exists.
@@ -47,7 +47,7 @@ test("a 401-forced sign-out wipes the database too", async ({ page }) => {
   const worker = await createMockWorker();
   await worker.install(page);
 
-  await page.goto("/");
+  await page.goto("/chats");
   await page.getByText("Rahi").first().click();
   const composer = page.locator("#composer, textarea").first();
   await composer.click();

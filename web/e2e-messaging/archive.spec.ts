@@ -44,7 +44,7 @@ test.beforeEach(async ({ page }) => {
   await worker.install(page);
   await page.routeWebSocket(/\/ws\/chat\//, () => {});
   await page.routeWebSocket(/\/ws\/user/, () => {});
-  await page.goto("/");
+  await page.goto("/chats");
   await expect(page.getByRole("link", { name: /^Rahi/ })).toBeVisible();
 });
 

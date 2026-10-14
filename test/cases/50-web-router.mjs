@@ -17,7 +17,7 @@ const routeIs = (name, pathname, expected) =>
     JSON.stringify(parseRoute(pathname)),
   );
 
-routeIs("root resolves to the chat section", "/", { kind: "section", section: "chats" });
+routeIs("root resolves to the home overview route", "/", { kind: "home" });
 routeIs("chat section parses", "/chats", { kind: "section", section: "chats" });
 routeIs("trailing slash parses to its section", "/statuses/", {
   kind: "section",
@@ -73,7 +73,9 @@ check(
   "account settings path is canonical",
   pathForRoute({ kind: "section", section: "account" }) === "/account",
 );
-check("root canonicalizes to chats", canonicalPath("/") === "/chats");
+check("root stays on home overview", canonicalPath("/") === "/");
+check("home route path is root", pathForRoute({ kind: "home" }) === "/");
+check("chats route path is /chats", canonicalPath("/chats") === "/chats");
 check("trailing slash canonicalizes", canonicalPath("/calls/") === "/calls");
 check("unknown path is not rewritten", canonicalPath("/unknown") === null);
 check(

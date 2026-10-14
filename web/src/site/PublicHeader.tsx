@@ -41,7 +41,7 @@ export function PublicHeader({ active, navigate, onSignIn, onHome }: PublicHeade
       <div className="kp-welcome__top-bar">
         {navigate ? (
           <RouteLink
-            route={{ kind: "section", section: "chats" }}
+            route={{ kind: "home" }}
             navigate={navigate}
             className="kp-welcome__brand"
             aria-label="KuchuPuchu Home"
@@ -79,7 +79,7 @@ export function PublicHeader({ active, navigate, onSignIn, onHome }: PublicHeade
       <nav className="kp-welcome__nav" aria-label="Site pages">
         {navigate ? (
           <RouteLink
-            route={{ kind: "section", section: "chats" }}
+            route={{ kind: "home" }}
             navigate={navigate}
             className={`kp-welcome__page-tab${active === "welcome" ? " is-active" : ""}`}
             aria-current={active === "welcome" ? "page" : undefined}

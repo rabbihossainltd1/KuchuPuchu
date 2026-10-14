@@ -66,7 +66,7 @@ test.beforeEach(async ({ page }) => {
     userSocket = ws;
   });
 
-  await page.goto("/");
+  await page.goto("/chats");
   await expect(page.getByRole("heading", { level: 1, name: "Chats" })).toBeVisible();
 });
 
@@ -273,7 +273,7 @@ test.describe("Web multi-select and forwarding", () => {
         }),
       }),
     );
-    await page.goto("/");
+    await page.goto("/chats");
     await openChat(page);
 
     await selectButton(page, "m_1");
@@ -412,7 +412,7 @@ test.describe("Web media save permission", () => {
     await page.routeWebSocket(/\/ws\/user/, (ws) => {
       userSocket = ws;
     });
-    await page.goto("/");
+    await page.goto("/chats");
     await expect(page.getByRole("heading", { level: 1, name: "Chats" })).toBeVisible();
     await openChat(page);
 

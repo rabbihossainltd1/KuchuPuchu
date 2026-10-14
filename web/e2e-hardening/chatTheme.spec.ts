@@ -32,7 +32,7 @@ test("picking a chat theme repaints the pane and PATCHes the server once", async
   await worker.install(page);
   const patches = await captureThemePatches(page);
 
-  await page.goto("/");
+  await page.goto("/chats");
   await page.getByText("Rahi").first().click();
   const pane = page.locator("main.conversation-pane");
   await expect(pane).toHaveAttribute("data-chat-theme", "darkblue");
@@ -83,7 +83,7 @@ test("a refused theme save rolls back and explains", async ({ page }) => {
     });
   });
 
-  await page.goto("/");
+  await page.goto("/chats");
   await page.getByText("Rahi").first().click();
   const pane = page.locator("main.conversation-pane");
 
@@ -104,7 +104,7 @@ test("a non-owner group says who may change the theme instead of showing a picke
   const worker = await createMockWorker();
   await worker.install(page);
 
-  await page.goto("/");
+  await page.goto("/chats");
   await page.getByText("Squad").first().click();
 
   // The lock is disclosed inside the ⋮ sheet's theme view, not as a banner.
@@ -120,7 +120,7 @@ test("all five Android themes apply distinct wallpapers", async ({ page }) => {
   await worker.install(page);
   await captureThemePatches(page);
 
-  await page.goto("/");
+  await page.goto("/chats");
   await page.getByText("Rahi").first().click();
   await page.getByRole("button", { name: "More options" }).click();
   await page.getByRole("button", { name: "Chat theme" }).click();

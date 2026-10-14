@@ -1,10 +1,6 @@
 import { useEffect, useState } from "react";
 import { RouteLink } from "../RouteLink";
-import {
-  AllAndroidFeatureBanners,
-  AndroidMasterFeatureGrid,
-  SkeuomorphicPhoneTrio,
-} from "../site/FeatureBanners";
+import { AllAndroidFeatureBanners, SkeuomorphicPhoneTrio } from "../site/FeatureBanners";
 import { HEADER_PAGES, LEGAL_PAGES, PublicHeader, SITE_PAGE_LABELS } from "../site/PublicHeader";
 import { SITE_PAGE_BLURBS } from "../site/SitePages";
 import type { Navigate } from "../useBrowserRouter";
@@ -107,14 +103,11 @@ export function WelcomePage({
       {/* 3D SKEUOMORPHIC PHONE TRIO SHOWCASE */}
       <SkeuomorphicPhoneTrio />
 
-      {/* ALL 17 ANDROID APP FEATURES MASTER INVENTORY */}
-      <AndroidMasterFeatureGrid />
-
-      {/* ALL 12 VISUAL FEATURE & HOW-TO BANNERS */}
+      {/* ALL 24 DEDICATED 3D SKEUOMORPHIC VISUAL FEATURE BANNERS */}
       <AllAndroidFeatureBanners
         category="overview"
-        heading="All 12 Visual Feature & How-To Banners"
-        subheading="Interactive-style 3D Skeuomorphic banners illustrating every feature in the KuchuPuchu Android app and how to use it."
+        heading="Every feature built into KuchuPuchu Android & Web"
+        subheading="All 24 features in the KuchuPuchu Android app and Web platform — each with its own dedicated 3D Skeuomorphic visual banner and step-by-step guide."
       />
 
       {/* EXPLORE PRODUCT & TECHNICAL PAGES */}

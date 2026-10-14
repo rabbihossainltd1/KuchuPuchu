@@ -17,7 +17,7 @@ test("motion tokens are zero under prefers-reduced-motion", async ({ page }) => 
   await signIn(page);
   const worker = await createMockWorker();
   await worker.install(page);
-  await page.goto("/");
+  await page.goto("/chats");
 
   const tokens = await page.evaluate(() => {
     const style = getComputedStyle(document.documentElement);
@@ -35,7 +35,7 @@ test("motion tokens keep their durations without the preference", async ({ page 
   await signIn(page);
   const worker = await createMockWorker();
   await worker.install(page);
-  await page.goto("/");
+  await page.goto("/chats");
 
   const tokens = await page.evaluate(() => {
     const style = getComputedStyle(document.documentElement);
@@ -53,7 +53,7 @@ test("conversation rows are effectively still under reduced motion", async ({ pa
   await signIn(page);
   const worker = await createMockWorker();
   await worker.install(page);
-  await page.goto("/");
+  await page.goto("/chats");
 
   const row = page.locator(".conversation-row").first();
   await expect(row).toBeVisible();

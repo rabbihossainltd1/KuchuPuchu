@@ -8,7 +8,7 @@ const groupCreates: GroupCreateBody[] = [];
 let worker: MockWorker;
 
 const openChatList = async (page: Page) => {
-  await page.goto("/");
+  await page.goto("/chats");
   await expect(page.getByRole("heading", { level: 1, name: "Chats" })).toBeVisible();
 };
 

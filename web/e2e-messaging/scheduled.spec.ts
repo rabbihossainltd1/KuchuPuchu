@@ -41,7 +41,7 @@ test.beforeEach(async ({ page }) => {
       body: JSON.stringify({ ok: true }),
     });
   });
-  await page.goto("/");
+  await page.goto("/chats");
   await page.getByRole("link", { name: /Rahi/ }).click();
   await expect(page.getByRole("textbox", { name: /Message/ })).toBeVisible();
 });

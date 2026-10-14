@@ -14,7 +14,7 @@ test.beforeEach(async ({ page }) => {
   await worker.install(page);
   await page.routeWebSocket(/\/ws\/chat\//, () => {});
   await page.routeWebSocket(/\/ws\/user/, () => {});
-  await page.goto("/");
+  await page.goto("/chats");
   await expect(page.getByRole("link", { name: /^Rahi/ })).toBeVisible();
 });
 
@@ -93,6 +93,7 @@ test("signed-out mobile visitors see feature banners, no login buttons, footer l
   await expect(
     mobilePage.getByRole("heading", { name: "How to Hide & Unhide Secret Chats" }),
   ).toBeVisible();
+  await expect(mobilePage.locator(".kp-feature-banner")).toHaveCount(24);
   await expect(mobilePage.getByRole("button", { name: "Open KuchuPuchu Web" })).toHaveCount(0);
 
   await nav.getByRole("link", { name: "Encryption" }).click();
@@ -107,6 +108,7 @@ test("signed-out mobile visitors see feature banners, no login buttons, footer l
   ).toBeVisible();
 
   await nav.getByRole("link", { name: "Overview" }).click();
+  await expect(mobilePage).toHaveURL(/\/$/);
   await expect(
     mobilePage.getByRole("heading", { name: "Messages that stay yours." }),
   ).toBeVisible();
@@ -116,4 +118,33 @@ test("signed-out mobile visitors see feature banners, no login buttons, footer l
     .analyze();
   expect(scan.violations).toEqual([]);
   await mobileCtx.close();
+});
+
+test("signed-in desktop user keeps / as Home Overview and /chats as Chat page without mixing", async ({
+  page,
+}) => {
+  // Currently on /chats from beforeEach
+  await expect(page).toHaveURL(/\/chats$/);
+  await expect(page.getByRole("link", { name: /^Rahi/ })).toBeVisible();
+
+  // Visiting / while signed in renders the Home / Overview page (WelcomePage), NOT the chat page
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "Messages that stay yours." })).toBeVisible();
+  await expect(page.locator(".kp-feature-banner")).toHaveCount(24);
+
+  // Navigating to /features and clicking Overview returns to / (Home Overview), not /chats
+  const nav = page.getByRole("navigation", { name: "Site pages" });
+  await nav.getByRole("link", { name: "Features" }).click();
+  await expect(page).toHaveURL(/\/features$/);
+  await expect(page.locator(".kp-feature-banner")).toHaveCount(24);
+
+  await nav.getByRole("link", { name: "Overview" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "Messages that stay yours." })).toBeVisible();
+
+  // Clicking Open KuchuPuchu Web on Home navigates to /chats and opens the signed-in Chat page
+  await page.getByRole("button", { name: "Open KuchuPuchu Web" }).click();
+  await expect(page).toHaveURL(/\/chats$/);
+  await expect(page.getByRole("link", { name: /^Rahi/ })).toBeVisible();
 });

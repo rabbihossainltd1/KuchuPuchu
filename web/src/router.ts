@@ -27,6 +27,7 @@ export const SITE_PAGES = [
 export type SitePageId = (typeof SITE_PAGES)[number];
 
 export type AppRoute =
+  | { kind: "home" }
   | { kind: "section"; section: SectionId }
   | { kind: "conversation"; conversationId: string }
   | { kind: "site"; page: SitePageId }
@@ -63,7 +64,7 @@ export function parseRoute(pathname: string): AppRoute {
   const segments = pathname.slice(1).split("/");
   while (segments.at(-1) === "") segments.pop();
   if (segments.some((segment) => segment.length === 0)) return { kind: "not-found" };
-  if (segments.length === 0) return { kind: "section", section: "chats" };
+  if (segments.length === 0) return { kind: "home" };
 
   const rawSection = decodeSegment(segments[0]!);
   if (!rawSection) return { kind: "not-found" };
@@ -94,6 +95,7 @@ export function routeRequiresAuthentication(route: AppRoute): boolean {
 
 /** Build a canonical same-origin path. Route IDs are opaque path segments. */
 export function pathForRoute(route: NavigableRoute): string {
+  if (route.kind === "home") return "/";
   if (route.kind === "section") return `/${route.section}`;
   if (route.kind === "site") return `/${route.page}`;
   return `/chats/${encodeURIComponent(route.conversationId)}`;
