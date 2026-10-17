@@ -6927,7 +6927,12 @@ export default {
       // more reads on the failing path (that is how yesterday's last hour went from
       // slow to everything-500 and STAYED there). 503 + Retry-After is the honest
       // answer, and Api.inCooldown() is how the app's pollers honour it.
-      const quota = /free tier|row read limit|read limit/i.test(stack);
+      //
+      // A schema walk that stopped at a quota refusal counts as the same thing:
+      // the table the statement wanted was never created, so the write fails with
+      // "no such table" — which is the same refusal wearing a different hat. The
+      // client must back off, not retry, and 503 + Retry-After says exactly that.
+      const quota = /free tier|row read limit|read limit/i.test(stack) || schemaQuotaBlocked;
       return json(
         {
           error: {
