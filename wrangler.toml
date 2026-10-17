@@ -22,9 +22,17 @@ class_name = "ChatRoom"
 name = "CALL_SIGNAL"
 class_name = "CallSignal"
 
+[[durable_objects.bindings]]
+name = "CLASSROOM_SIGNAL"
+class_name = "ClassroomSignal"
+
 [[migrations]]
 tag = "v1-realtime-do"
 new_sqlite_classes = ["ChatRoom", "CallSignal"]
+
+[[migrations]]
+tag = "v2-classroom-mesh"
+new_sqlite_classes = ["ClassroomSignal"]
 
 [[d1_databases]]
 binding = "DB"
@@ -43,6 +51,9 @@ SELF_ORIGIN = "https://kuchupuchu-api.kuchupuchu.workers.dev"
 # Owner round 48: the Workers-AI rescue brain needs the account id at
 # runtime (the token stays a secret; this is config, not a secret).
 CF_ACCOUNT = "92081fac7caf54a46a756c382081544b"
+# Laravel remains authoritative for classroom entitlement and room access.
+# This is a public origin; the shared assertion key remains a Worker secret.
+LARAVEL_CLASSROOM_ORIGIN = "https://vintoxbd.online"
 
 
 [[r2_buckets]]

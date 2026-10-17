@@ -13,15 +13,15 @@
  * - A row is a real `<button>` that opens the chat, so it is reachable by
  *   keyboard, middle-click and screen reader alike.
  *
- * What the browser cannot do is stated here rather than hidden: calls from a
- * hidden chat are not filtered away (there is no Hidden screen in this build),
- * and a group row's call-back is refused with the reason, because no measured
+ * Calls from hidden chats are filtered by the server-supplied per-viewer flag.
+ * A group row's call-back is refused with the reason because no measured
  * participant cap exists yet for a Web mesh.
  */
 
 import { useCallback } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { Icon } from "../icons";
+import { RealmBadge } from "../messaging/RealmBadge";
 import { useAvatar } from "../messaging/avatars";
 import {
   CALL_COPY,
@@ -55,8 +55,6 @@ export function CallsWorkspace({ controller, meId, onOpenChat, onCall }: Props) 
           Refresh
         </button>
       </header>
-
-      <p className="calls-tab__note">{CALL_COPY.historyHiddenNote}</p>
 
       {error && state === "error" ? (
         <div className="calls-tab__error" role="alert">
@@ -188,7 +186,10 @@ function CallHistoryRow({
           )}
         </span>
         <span className="call-row__copy">
-          <span className="call-row__name">{view.name}</span>
+          <span className="call-row__name">
+            {view.name}
+            <RealmBadge realm={view.realm} />
+          </span>
           <span className="call-row__line">
             <Icon name={view.incoming ? "callIn" : "callOut"} size={13} />
             <span>

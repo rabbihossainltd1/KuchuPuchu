@@ -26,6 +26,7 @@ import { completeAiText } from "./aiText.js";
 // Re-exported here because src/worker/index.ts is the upload entrypoint.
 export { ChatRoom } from "./durable-objects/ChatRoom.js";
 export { CallSignal } from "./durable-objects/CallSignal.js";
+export { ClassroomSignal } from "./durable-objects/ClassroomSignal.js";
 
 export type Env = {
   DB: D1Database;
@@ -47,6 +48,32 @@ export type Env = {
    *  answers 503 and sockets fall back to the legacy query-token path —
    *  fail-closed, never fail-open. */
   WS_TICKET_KEY?: string;
+  /** VintoxBd website bridge (plan §13.2/§13.15, phase R2): 32 random bytes,
+   *  base64url, shared with Laravel. Laravel signs a short-lived assertion
+   *  (sub = its own user id, handle, exp) with this key; the core verifies it
+   *  and provisions/returns the VX-origin account. Unset => the exchange route
+   *  answers 503 and no VX-origin account can exist — fail-closed, like the
+   *  VAPID and Google gates. */
+  LARAVEL_BRIDGE_KEY?: string;
+  /** Private Laravel origin for the R7 classroom entitlement bridge. Only
+   * server-to-server requests are made; unset means classroom routes fail
+   * closed. Example: https://www.vintoxbd.com */
+  LARAVEL_CLASSROOM_ORIGIN?: string;
+  /** VintoxBd student panel (phase R3, plan §13.3/§13.15): comma-separated
+   *  origins allowed to EMBED the web shell in an iframe and hand it a session
+   *  over postMessage — e.g. "https://vintoxbd.online,http://localhost:8000".
+   *  Unset => the shell stays un-frameable (CSP `frame-ancestors 'self'`) and
+   *  the handoff route answers {enabled:false}: fail-closed, exactly like the
+   *  other gates. Never a wildcard. */
+  PANEL_ORIGINS?: string;
+  /** Legacy KuchuPuchu API origin, read-only (phase R2, plan §13.13).
+   *  The Android app is KuchuPuchu and holds a KuchuPuchu session; this is the
+   *  only oracle that can say WHICH legacy account a presented session token
+   *  belongs to. The core reads `GET {origin}/api/me` and never writes there —
+   *  it is a migration-era bridge, removed once the app talks to the core
+   *  directly. Unset => POST /api/auth/app/exchange answers 503 and no app
+   *  account can be provisioned — fail-closed, like the other gates. */
+  KP_LEGACY_ORIGIN?: string;
   /** Optional self-hosted/purchased TURN for reliable calls on strict NATs.
    *  Comma-separated URLs, e.g. "turn:turn.example.com:3478,turns:turn.example.com:5349". */
   TURN_URLS?: string;
@@ -67,6 +94,7 @@ export type Env = {
    *  path — every broadcast call guards on presence and no-ops without it. */
   CHAT_ROOM?: DurableObjectNamespace;
   CALL_SIGNAL?: DurableObjectNamespace;
+  CLASSROOM_SIGNAL?: DurableObjectNamespace;
   /** Phone-auth Google binding: the OAuth 2.0 Web Client ID from the Firebase
    *  console (Authentication → Sign-in method → Google). The Android client
    *  gets it from /api/config/firebase and Credential Manager mints ID tokens
@@ -2472,6 +2500,773 @@ function parseJson<T>(raw: string | null | undefined, fallback: T): T {
   }
 }
 
+/* ---------------- realm-aware identity (phase R2, plan §13.2/§13.3) --------
+ *
+ * Two account realms share one network:
+ *   kp = KuchuPuchu-origin account (this core's existing population);
+ *   vx = VintoxBd website-origin account (provisioned by Laravel's signature).
+ *
+ * `origin_realm` is IMMUTABLE: it is read from the stored row — or, for a
+ * brand-new website account, from Laravel's signed assertion that creates it —
+ * and never from a request body, device, username, phone or email. Handles are
+ * unique PER REALM, so KP/@rahim and VX/@rahim coexist; the pair
+ * (realm, handle) is a directory address, never the primary key.
+ */
+
+type OriginRealm = "kp" | "vx";
+
+/** Stored realm of a row. Anything unknown or legacy reads as kp. */
+function realmOf(row: { origin_realm?: string | null }): OriginRealm {
+  return row.origin_realm === "vx" ? "vx" : "kp";
+}
+
+/**
+ * The student-panel allowlist (plan §13.3, phase R3). Every entry must be a
+ * bare origin — scheme, host, optional port, NO path, NO credentials and NO
+ * wildcard — because it is used both as a CSP `frame-ancestors` value and as
+ * the `targetOrigin` of a postMessage. Anything malformed is dropped rather
+ * than trusted: a typo must not silently become an open frame policy.
+ */
+function panelOrigins(env: Env): string[] {
+  const raw = env.PANEL_ORIGINS ?? "";
+  const out: string[] = [];
+  for (const piece of raw.split(",")) {
+    // Anchored on the whole entry, so a wildcard, a path, a query or an
+    // embedded credential cannot survive: only scheme://host[:port] matches.
+    const parsed = /^(https?):\/\/([a-z0-9.-]+)(:\d{1,5})?$/i.exec(piece.trim());
+    if (!parsed) continue;
+    const scheme = parsed[1]!.toLowerCase();
+    const host = parsed[2]!.toLowerCase();
+    // Plain http is a local-development affordance only.
+    if (scheme === "http" && host !== "localhost" && host !== "127.0.0.1") continue;
+    const origin = `${scheme}://${host}${parsed[3] ?? ""}`;
+    if (!out.includes(origin)) out.push(origin);
+  }
+  return out;
+}
+
+function isRealm(value: unknown): value is OriginRealm {
+  return value === "kp" || value === "vx";
+}
+
+/** Owner-approved handle policy (2026-10-14): lowercase a-z 0-9 _, 3–20. */
+const HANDLE_RE = /^[a-z0-9_]{3,20}$/;
+
+/** Normalize a requested handle; null when it can never be one. */
+function handleFrom(value: unknown): string | null {
+  const h = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/^@/, "");
+  return HANDLE_RE.test(h) ? h : null;
+}
+
+type HandleRefusal = "invalid" | "reserved" | "taken";
+
+const HANDLE_REFUSAL_MESSAGES: Record<HandleRefusal, string> = {
+  invalid: "Usernames are 3-20 characters: lowercase letters, numbers, underscore.",
+  reserved: "That username is reserved.",
+  taken: "That username is taken.",
+};
+
+/**
+ * One place decides whether `handle` may be used inside `realm` — the edit
+ * screen, the website bridge and any future admin tool all call it, so the
+ * rules can never disagree. `selfId` exempts the caller's own handle, so
+ * re-saving an unchanged username is not "taken".
+ */
+async function handleRefusal(
+  db: D1Database,
+  handle: string,
+  realm: OriginRealm,
+  selfId: string | null,
+): Promise<HandleRefusal | null> {
+  const h = handleFrom(handle);
+  if (!h) return "invalid";
+  const reserved = await one(
+    db,
+    "SELECT handle FROM reserved_handles WHERE handle = ? AND realm IN (?, '*')",
+    h,
+    realm,
+  );
+  if (reserved) return "reserved";
+  const taken = selfId
+    ? await one(
+        db,
+        "SELECT id FROM users WHERE username = ? AND origin_realm = ? AND id != ?",
+        h,
+        realm,
+        selfId,
+      )
+    : await one(db, "SELECT id FROM users WHERE username = ? AND origin_realm = ?", h, realm);
+  return taken ? "taken" : null;
+}
+
+/* ---------------- account linking (phase R2, plan §13.2) --------------------
+ *
+ * A website account and an app account may be linked ONLY by this ceremony:
+ *
+ *   initiate (signed-in client A)  ->  short code + HMAC signature + deep link
+ *   authenticate on the other side ->  lookup shows BOTH identities + the
+ *                                      permissions being requested
+ *   explicit approve                ->  one ACTIVE identity_links row + audit
+ *
+ * The code is single-use (approving flips the row's status), expires in ten
+ * minutes, is bound to the initiating account and the target realm, and can be
+ * presented either as the human code or as (approval id + HMAC signature) from
+ * the deep link. Nothing about a profile is merged, copied or replaced: the two
+ * accounts keep their own handle, name, avatar and — above all — their own
+ * immutable origin realm.
+ */
+
+const LINK_APPROVAL_TTL_MS = 10 * 60_000;
+/** 8 chars from a 32-symbol alphabet: no I/L/O/0/1 to survive being read aloud. */
+const LINK_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+/** What a link is FOR — shown on the approval screen before anyone agrees. */
+const LINK_PERMISSIONS = [
+  {
+    key: "enrolments",
+    label: "See the courses and batches this website account bought",
+  },
+  {
+    key: "classroom",
+    label: "Join those live classes and record attendance",
+  },
+] as const;
+
+let linkKeyCache: { source: string; key: CryptoKey } | null = null;
+
+/**
+ * Purpose-bound subkey: HMAC-SHA256(bridge key, "vintoxbd/link-approval/v1").
+ * The ceremony therefore never signs with the bridge key itself, yet needs no
+ * second operator secret. Absent bridge key ⇒ linking is 503 (fail-closed).
+ */
+async function linkApprovalKey(env: Env): Promise<CryptoKey | null> {
+  const source = env.LARAVEL_BRIDGE_KEY;
+  if (!source) return null;
+  if (linkKeyCache && linkKeyCache.source === source) return linkKeyCache.key;
+  const raw = base64UrlDecode(source);
+  if (!raw || raw.length < 32) return null;
+  try {
+    const base = await crypto.subtle.importKey(
+      "raw",
+      raw,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const derived = await crypto.subtle.sign(
+      "HMAC",
+      base,
+      new TextEncoder().encode("vintoxbd/link-approval/v1"),
+    );
+    const key = await crypto.subtle.importKey(
+      "raw",
+      derived,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign", "verify"],
+    );
+    linkKeyCache = { source, key };
+    return key;
+  } catch {
+    return null;
+  }
+}
+
+type LinkApprovalRow = {
+  id: string;
+  code_hash: string;
+  initiator_id: string;
+  initiator_realm: string;
+  target_realm: string;
+  status: string;
+  created_at: string;
+  expires_at: string;
+  decided_at: string | null;
+  approved_by: string | null;
+};
+
+type IdentityLinkRow = {
+  id: string;
+  pair_key: string;
+  a_user_id: string;
+  b_user_id: string;
+  a_realm: string;
+  b_realm: string;
+  status: string;
+  created_at: string;
+  revoked_at: string | null;
+  revoked_by: string | null;
+};
+
+function randomLinkCode(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return [...bytes].map((b) => LINK_CODE_ALPHABET[b % LINK_CODE_ALPHABET.length]).join("");
+}
+
+/** Canonical pair key: sorted ids, so a pair has exactly one representation. */
+function linkPairKey(a: string, b: string): string {
+  return a < b ? `${a}:${b}` : `${b}:${a}`;
+}
+
+/** What the HMAC covers — every field that decides who may link to whom. */
+function linkSignaturePayload(row: {
+  id: string;
+  code_hash: string;
+  initiator_id: string;
+  initiator_realm: string;
+  target_realm: string;
+  expires_at: string;
+}): string {
+  return [
+    row.id,
+    row.code_hash,
+    row.initiator_id,
+    row.initiator_realm,
+    row.target_realm,
+    row.expires_at,
+  ].join("|");
+}
+
+async function linkSignature(key: CryptoKey, payload: string): Promise<string> {
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+  return base64UrlEncode(new Uint8Array(sig));
+}
+
+/** The public shape of an account inside a ceremony screen or a link list. */
+/**
+ * The roles this account provably holds, as the plan's summary spells them
+ * (plan §13.14). Nothing here is inferred from a client: a Laravel-bridge
+ * account IS a website student, and a linked app account INHERITS that side
+ * through the link (§13.2: "link to inherit private VintoxBd enrolments and
+ * class access"). The moderator flag is the core's own.
+ */
+function rolesOf(row: UserRow): string[] {
+  const roles: string[] = [];
+  if (row.bridge_subject || Number(row.linked ?? 0) === 1) roles.push("student");
+  if (row.moderator) roles.push("moderator");
+  return roles;
+}
+
+/**
+ * The normalized identity summary every API/event shape that names an identity
+ * carries (plan §13.14): `{id, origin_realm, username, display_name, avatar,
+ * roles, linked}`. `avatar` is the authorized media REFERENCE (the avatarRef
+ * token the clients cache per version), never a blob; `linked` is the
+ * cross-realm link state, kept on the row so no list pays a join for it.
+ */
+function identitySummary(row: UserRow, avatar: string | null) {
+  return {
+    id: row.id,
+    origin_realm: realmOf(row),
+    username: row.username,
+    display_name: row.display_name,
+    avatar,
+    roles: rolesOf(row),
+    linked: Number(row.linked ?? 0) === 1,
+  };
+}
+
+function identityOf(row: UserRow) {
+  const realm = realmOf(row);
+  return {
+    // The plan's summary first, then the camelCase aliases the clients
+    // already speak (removing either would break a shipped surface).
+    ...identitySummary(row, null),
+    communicationId: row.id,
+    displayName: row.display_name,
+    originRealm: realm,
+  };
+}
+
+function linkStatusOf(row: LinkApprovalRow, now = Date.now()): string {
+  if (row.status === "PENDING" && Date.parse(row.expires_at) <= now) return "EXPIRED";
+  return row.status;
+}
+
+/** Every ACTIVE link this account is part of, with the counterpart identity. */
+async function linkList(db: D1Database, uid: string) {
+  const rows = await all<IdentityLinkRow>(
+    db,
+    "SELECT * FROM identity_links WHERE status = 'ACTIVE' AND (a_user_id = ? OR b_user_id = ?) ORDER BY created_at",
+    uid,
+    uid,
+  );
+  if (rows.length === 0) return [];
+  const otherIds = rows.map((r) => (r.a_user_id === uid ? r.b_user_id : r.a_user_id));
+  const rowsUsers = await all<UserRow>(
+    db,
+    `SELECT * FROM users WHERE id IN (${inSql(otherIds.length)})`,
+    ...otherIds,
+  );
+  const byId = new Map(rowsUsers.map((u) => [u.id, u]));
+  return rows.map((r) => {
+    const other = byId.get(r.a_user_id === uid ? r.b_user_id : r.a_user_id);
+    return {
+      id: r.id,
+      createdAt: r.created_at,
+      counterpart: other ? identityOf(other) : null,
+      permissions: LINK_PERMISSIONS.map((p) => p.key),
+    };
+  });
+}
+
+/** The one ACTIVE link of this account, if any (one per account by design). */
+async function linkRowFor(db: D1Database, uid: string) {
+  return one<IdentityLinkRow>(
+    db,
+    "SELECT * FROM identity_links WHERE status = 'ACTIVE' AND (a_user_id = ? OR b_user_id = ?) LIMIT 1",
+    uid,
+    uid,
+  );
+}
+
+/* ---------------- classroom entitlement bridge (phase R7) ------------------ */
+
+type ClassroomIdentity = {
+  kpUserId: string;
+  vxCommunicationId: string;
+  websiteSubject: string;
+  actorCommunicationId: string;
+  actorRealm: OriginRealm;
+};
+
+let classroomKeyCache: { source: string; key: CryptoKey } | null = null;
+
+/** Purpose-separated from every other use of Laravel's bridge root key. */
+async function classroomBridgeKey(env: Env): Promise<CryptoKey | null> {
+  const source = env.LARAVEL_BRIDGE_KEY;
+  if (!source) return null;
+  if (classroomKeyCache?.source === source) return classroomKeyCache.key;
+  const raw = base64UrlDecode(source);
+  if (!raw || raw.length < 32) return null;
+  try {
+    const base = await crypto.subtle.importKey(
+      "raw",
+      raw,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const derived = await crypto.subtle.sign(
+      "HMAC",
+      base,
+      new TextEncoder().encode("vintoxbd/classroom-bridge/v1"),
+    );
+    const key = await crypto.subtle.importKey(
+      "raw",
+      derived,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    classroomKeyCache = { source, key };
+    return key;
+  } catch {
+    return null;
+  }
+}
+
+function dedicatedTurnConfigured(env: Env): boolean {
+  const cloudflare = !!env.TURN_KEY_ID && !!env.TURN_API_TOKEN;
+  const urls = String(env.TURN_URLS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => /^turns?:/i.test(value));
+  const staticallyProvisioned =
+    urls.length > 0 &&
+    !!String(env.TURN_USERNAME ?? "").trim() &&
+    !!String(env.TURN_CREDENTIAL ?? "").trim();
+  return cloudflare || staticallyProvisioned;
+}
+
+function classroomOrigin(env: Env): string | null {
+  const raw = (env.LARAVEL_CLASSROOM_ORIGIN ?? "").trim().replace(/\/$/, "");
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw);
+    const local = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+    if (
+      (parsed.protocol !== "https:" && !(local && parsed.protocol === "http:")) ||
+      parsed.pathname !== "/"
+    )
+      return null;
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve classroom authority only through an ACTIVE cross-realm link. */
+async function classroomIdentity(db: D1Database, me: UserRow): Promise<ClassroomIdentity | null> {
+  const myRealm = realmOf(me);
+  if (myRealm === "vx" && me.bridge_subject) {
+    return {
+      kpUserId: me.id,
+      vxCommunicationId: me.id,
+      websiteSubject: me.bridge_subject,
+      actorCommunicationId: me.id,
+      actorRealm: "vx",
+    };
+  }
+  if (myRealm !== "kp") return null;
+  const link = await linkRowFor(db, me.id);
+  if (!link) return null;
+  const otherId = link.a_user_id === me.id ? link.b_user_id : link.a_user_id;
+  const vx = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", otherId);
+  if (!vx || realmOf(vx) !== "vx" || !vx.bridge_subject) return null;
+  return {
+    kpUserId: me.id,
+    vxCommunicationId: vx.id,
+    websiteSubject: vx.bridge_subject,
+    actorCommunicationId: me.id,
+    actorRealm: "kp",
+  };
+}
+
+async function classroomAssertion(
+  env: Env,
+  identity: ClassroomIdentity,
+  method: string,
+  path: string,
+): Promise<string | null> {
+  const key = await classroomBridgeKey(env);
+  if (!key) return null;
+  const issued = Date.now();
+  const claims = {
+    iss: "vintoxbd-comm-core",
+    aud: "vintoxbd-classroom",
+    method: method.toUpperCase(),
+    path,
+    iat: issued,
+    exp: issued + 45_000,
+    nonce: base64UrlEncode(crypto.getRandomValues(new Uint8Array(24))),
+    websiteSubject: identity.websiteSubject,
+    vxCommunicationId: identity.vxCommunicationId,
+    actorCommunicationId: identity.actorCommunicationId,
+    actorRealm: identity.actorRealm,
+  };
+  const encoded = base64UrlEncode(new TextEncoder().encode(JSON.stringify(claims)));
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(encoded));
+  return `${encoded}.${base64UrlEncode(new Uint8Array(signature))}`;
+}
+
+async function classroomUpstream(
+  env: Env,
+  identity: ClassroomIdentity,
+  method: "GET" | "POST",
+  path: string,
+  body?: Json,
+): Promise<Json> {
+  const origin = classroomOrigin(env);
+  const assertion = await classroomAssertion(env, identity, method, path);
+  if (!origin || !assertion)
+    fail(503, "Classroom access is not configured.", "CLASSROOM_UNAVAILABLE");
+  let response: Response;
+  try {
+    response = await fetch(`${origin}${path}`, {
+      method,
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        "x-vintox-classroom-assertion": assertion!,
+      },
+      ...(method === "POST" ? { body: JSON.stringify(body ?? {}) } : {}),
+      signal: AbortSignal.timeout(8_000),
+    });
+  } catch {
+    fail(503, "The classroom service is temporarily unavailable.", "CLASSROOM_UNAVAILABLE");
+  }
+  const data = (await response!.json().catch(() => ({}))) as Json;
+  if (!response!.ok) {
+    const upstreamMessage =
+      typeof data.message === "string" ? data.message : "Classroom access was refused.";
+    fail(response!.status, upstreamMessage, `CLASSROOM_${response!.status}`);
+  }
+  return data;
+}
+
+async function classroomBinaryUpstream(
+  env: Env,
+  identity: ClassroomIdentity,
+  path: string,
+): Promise<Response> {
+  const origin = classroomOrigin(env);
+  const assertion = await classroomAssertion(env, identity, "GET", path);
+  if (!origin || !assertion)
+    fail(503, "Classroom access is not configured.", "CLASSROOM_UNAVAILABLE");
+  let response: Response;
+  try {
+    response = await fetch(`${origin}${path}`, {
+      headers: {
+        accept: "application/octet-stream",
+        "x-vintox-classroom-assertion": assertion!,
+      },
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch {
+    fail(503, "The classroom material is temporarily unavailable.", "CLASSROOM_UNAVAILABLE");
+  }
+  if (!response!.ok) {
+    const text = await response!.text();
+    let message = "The classroom material could not be downloaded.";
+    try {
+      const data = JSON.parse(text) as Json;
+      if (typeof data.message === "string") message = data.message;
+    } catch {}
+    fail(response!.status, message, `CLASSROOM_${response!.status}`);
+  }
+  const headers = new Headers({
+    "content-type": response!.headers.get("content-type") || "application/octet-stream",
+    "content-disposition":
+      response!.headers.get("content-disposition") || 'attachment; filename="class-material"',
+    "cache-control": "private, no-store",
+    "x-content-type-options": "nosniff",
+  });
+  const length = response!.headers.get("content-length");
+  if (length && /^\d+$/.test(length)) headers.set("content-length", length);
+  return new Response(response!.body, { status: 200, headers });
+}
+
+/** Cache is a managed navigation projection, never an entitlement oracle. */
+async function syncManagedClassrooms(
+  db: D1Database,
+  identity: ClassroomIdentity,
+  payload: Json,
+): Promise<void> {
+  const classes = Array.isArray(payload.classes) ? payload.classes : [];
+  const syncedAt = nowIso();
+  const ids: string[] = [];
+  const statements: D1PreparedStatement[] = [];
+  for (const value of classes) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const row = value as Json;
+    const classId = String(row.id ?? "");
+    if (!/^\d{1,20}$/.test(classId)) continue;
+    ids.push(classId);
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO managed_classrooms
+             (kp_user_id, class_id, vx_communication_id, website_subject, payload_json, synced_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(kp_user_id, class_id) DO UPDATE SET
+             vx_communication_id = excluded.vx_communication_id,
+             website_subject = excluded.website_subject,
+             payload_json = excluded.payload_json,
+             synced_at = excluded.synced_at`,
+        )
+        .bind(
+          identity.kpUserId,
+          classId,
+          identity.vxCommunicationId,
+          identity.websiteSubject,
+          JSON.stringify(row),
+          syncedAt,
+        ),
+    );
+  }
+  statements.push(
+    ids.length
+      ? db
+          .prepare(
+            `DELETE FROM managed_classrooms
+              WHERE kp_user_id = ? AND class_id NOT IN (${inSql(ids.length)})`,
+          )
+          .bind(identity.kpUserId, ...ids)
+      : db.prepare("DELETE FROM managed_classrooms WHERE kp_user_id = ?").bind(identity.kpUserId),
+  );
+  await db.batch(statements);
+}
+
+/* ---------------- app identity bridge (phase R2, plan §13.13) ---------------- */
+
+/**
+ * Ask the legacy API who a presented session token belongs to.
+ *
+ * Returns `{ id, username, displayName }` only when the legacy worker itself
+ * answers 200 to `GET /api/me` with that token — any other answer, a body of
+ * the wrong shape, or a timeout is `null`. The token is never stored, logged or
+ * echoed; the client's own claims about who it is are ignored entirely.
+ */
+async function legacyIdentity(
+  origin: string,
+  token: string,
+): Promise<{ id: string; username: string; displayName: string } | null> {
+  let res: Response;
+  try {
+    res = await fetch(`${origin}/api/me`, {
+      headers: { authorization: `Bearer ${token}`, accept: "application/json" },
+      signal: AbortSignal.timeout(LEGACY_ME_TIMEOUT_MS),
+    });
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  let body: Record<string, unknown>;
+  try {
+    body = (await res.json()) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const user = (body?.user ?? null) as Record<string, unknown> | null;
+  const id = String(user?.id ?? "").trim();
+  if (!id) return null;
+  return {
+    id,
+    username: String(user?.username ?? "").trim(),
+    displayName: String(user?.displayName ?? "").trim(),
+  };
+}
+
+/**
+ * The KP handle an app account gets: the legacy username when this realm can
+ * still take it, otherwise a deterministic, policy-valid fallback. The handle
+ * is what colleagues see, so it is never guessed from a phone number or a
+ * display name — and a legacy rename never renames the account here.
+ */
+async function appHandle(db: D1Database, legacyUsername: string, subject: string): Promise<string> {
+  const wanted = handleFrom(legacyUsername);
+  if (wanted && !(await handleRefusal(db, wanted, "kp", null))) return wanted;
+  const bare = subject.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const base = (wanted ?? `user_${bare.slice(0, 10)}`).slice(0, 17);
+  for (let n = 2; n <= 9; n += 1) {
+    const candidate = `${base}${n}`.slice(0, 20);
+    if (!(await handleRefusal(db, candidate, "kp", null))) return candidate;
+  }
+  return `kp_${(await sha256Hex(subject)).slice(0, 12)}`;
+}
+
+/**
+ * Resolve the approval a request refers to: by the 8-character code, or by
+ * (id + HMAC signature) when the other client arrived through the deep link.
+ * Returns null on any mismatch — never a partially-verified approval.
+ */
+async function resolveApproval(
+  db: D1Database,
+  env: Env,
+  input: { code?: unknown; id?: unknown; signature?: unknown },
+): Promise<LinkApprovalRow | null> {
+  const code = String(input.code ?? "")
+    .trim()
+    .toUpperCase();
+  if (code) {
+    return one<LinkApprovalRow>(
+      db,
+      "SELECT * FROM link_approvals WHERE code_hash = ? LIMIT 1",
+      await sha256Hex(code),
+    );
+  }
+  const approvalId = String(input.id ?? "");
+  const signature = String(input.signature ?? "");
+  if (!approvalId || !signature) return null;
+  const row = await one<LinkApprovalRow>(
+    db,
+    "SELECT * FROM link_approvals WHERE id = ? LIMIT 1",
+    approvalId,
+  );
+  if (!row) return null;
+  const key = await linkApprovalKey(env);
+  if (!key) return null;
+  const expected = await linkSignature(key, linkSignaturePayload(row));
+  return constantTimeTextEqual(expected, signature) ? row : null;
+}
+
+/** Website rows get a synthetic address: the account is owned by Laravel. */
+const VX_EMAIL_SUFFIX = "@vx.vintoxbd.invalid";
+/** App-bridge accounts are keyed by the LEGACY user id, so their synthetic
+ *  email is the hash of that id — deterministic, unique, and never a real
+ *  address (nothing may be delivered to it). */
+const APP_EMAIL_SUFFIX = "@app.kuchupuchu.invalid";
+/** The legacy identity read is on the request path of a sign-in: bounded, and
+ *  a timeout is a refusal, never a partial identity. */
+const LEGACY_ME_TIMEOUT_MS = 8000;
+
+/* -- Laravel bridge assertions (plan §13.15: signed, short-lived, no password) */
+
+const BRIDGE_AUDIENCE = "vintoxbd-core";
+const BRIDGE_MAX_SKEW_MS = 5 * 60_000;
+
+let bridgeKeyCache: { source: string; key: CryptoKey } | null = null;
+
+async function bridgeKey(env: Env): Promise<CryptoKey | null> {
+  if (!env.LARAVEL_BRIDGE_KEY) return null;
+  if (bridgeKeyCache && bridgeKeyCache.source === env.LARAVEL_BRIDGE_KEY) return bridgeKeyCache.key;
+  try {
+    const raw = base64UrlDecode(env.LARAVEL_BRIDGE_KEY);
+    if (!raw || raw.length < 32) return null;
+    const key = await crypto.subtle.importKey(
+      "raw",
+      raw,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign", "verify"],
+    );
+    bridgeKeyCache = { source: env.LARAVEL_BRIDGE_KEY, key };
+    return key;
+  } catch {
+    return null;
+  }
+}
+
+type BridgeClaims = {
+  sub?: string;
+  handle?: string;
+  displayName?: string;
+  aud?: string;
+  exp?: number;
+  iat?: number;
+  /** Plan §13.14: the Laravel class bridge names the communication identity it
+   *  is talking about — the opaque core id and the realm it belongs to. Both
+   *  are OPTIONAL so a site that has not stored the mapping yet still signs in;
+   *  when present they must agree with the account this assertion resolves to,
+   *  and a mismatch is refused (never silently ignored). */
+  communicationId?: string;
+  originRealm?: string;
+};
+
+/**
+ * Verify `base64url(payload).base64url(HMAC-SHA256(payload))` and its claims.
+ * Returns null on ANY doubt — bad shape, bad signature, wrong audience,
+ * expired, or minted implausibly far in the future.
+ */
+async function verifyBridgeAssertion(
+  key: CryptoKey,
+  assertion: string,
+): Promise<(Required<Pick<BridgeClaims, "sub">> & BridgeClaims) | null> {
+  const dot = assertion.lastIndexOf(".");
+  if (dot <= 0 || dot === assertion.length - 1) return null;
+  const payloadText = assertion.slice(0, dot);
+  const sigText = assertion.slice(dot + 1);
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payloadText));
+  if (!constantTimeTextEqual(base64UrlEncode(new Uint8Array(sig)), sigText)) return null;
+  const raw = base64UrlDecode(payloadText);
+  if (!raw) return null;
+  let claims: BridgeClaims;
+  try {
+    claims = JSON.parse(new TextDecoder().decode(raw)) as BridgeClaims;
+  } catch {
+    return null;
+  }
+  if (!claims || typeof claims.sub !== "string" || !claims.sub) return null;
+  if (claims.aud !== BRIDGE_AUDIENCE) return null;
+  const now = Date.now();
+  if (typeof claims.exp !== "number" || !Number.isFinite(claims.exp) || claims.exp < now)
+    return null;
+  if (typeof claims.iat === "number" && claims.iat > now + BRIDGE_MAX_SKEW_MS) return null;
+  // §13.14: the optional identity claims are shape-checked here; whether they
+  // MATCH an account is decided where the account is known (the exchange).
+  if (claims.originRealm !== undefined && !isRealm(claims.originRealm)) return null;
+  if (claims.communicationId !== undefined && typeof claims.communicationId !== "string")
+    return null;
+  return claims as Required<Pick<BridgeClaims, "sub">> & BridgeClaims;
+}
+
+/** schema_meta marker for the one-time per-realm uniqueness rebuild. */
+const REALM_UNIQ_META_KEY = "users_realm_uniqueness_v1";
+
 function slugFrom(value: string) {
   const cleaned = value
     .toLowerCase()
@@ -2826,12 +3621,27 @@ async function ensureSchema(db: D1Database) {
   const statements = [
     `CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
-      username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL, avatar_url TEXT,
+      -- Phase R2: handles are unique PER REALM, not globally (plan §13.3), so
+      -- the constraint lives in idx_users_realm_username. Databases created
+      -- before R2 still carry the legacy global UNIQUE and are rebuilt once by
+      -- migrateRealmUniqueness().
+      username TEXT NOT NULL, display_name TEXT NOT NULL, avatar_url TEXT,
       about TEXT, created_at TEXT NOT NULL, last_active_at TEXT NOT NULL,
       phone_e164 TEXT, phone_verified_at TEXT, phone_verification_method TEXT,
       google_subject TEXT, google_email TEXT, auth_status TEXT NOT NULL DEFAULT 'ACTIVE',
       verified INTEGER,
-      moderator INTEGER
+      moderator INTEGER,
+      origin_realm TEXT NOT NULL DEFAULT 'kp',
+      bridge_subject TEXT,
+      -- Plan §13.14: 1 while an ACTIVE cross-realm link exists for this
+      -- account. Kept on the row so the summary's linked flag is
+      -- authoritative and free (no join in any list).
+      linked INTEGER NOT NULL DEFAULT 0,
+      -- Plan §13.13: the legacy (app) account this KP-realm account IS, when
+      -- the Android app exchanged its legacy session here. Separate from
+      -- bridge_subject so the two bridges can never be confused for one
+      -- another.
+      kp_subject TEXT
     )`,
     `CREATE TABLE IF NOT EXISTS sessions (
       token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at TEXT NOT NULL,
@@ -2899,7 +3709,12 @@ async function ensureSchema(db: D1Database) {
       user_id TEXT NOT NULL,
       expires_at INTEGER NOT NULL
     )`,
-    `CREATE TABLE IF NOT EXISTS blocks (owner_id TEXT NOT NULL, target_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (owner_id, target_id))`,
+    `CREATE TABLE IF NOT EXISTS blocks (owner_id TEXT NOT NULL, target_id TEXT NOT NULL, created_at TEXT NOT NULL,
+       -- Plan §13.14: the moderation snapshot keeps BOTH realms as they were at
+       -- event time, so a later export or dispute reads the truth of that
+       -- moment instead of today's rows.
+       owner_realm TEXT, target_realm TEXT,
+       PRIMARY KEY (owner_id, target_id))`,
     // Owner round 34 (item 15): the blocked side's one "please unblock me"
     // per block. The row dies with the block (see the DELETE route), so a
     // later block starts clean; Ignore only flips the status, so no
@@ -2925,7 +3740,12 @@ async function ensureSchema(db: D1Database) {
     `CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY, conv_id TEXT NOT NULL, sender_id TEXT NOT NULL,
       kind TEXT NOT NULL DEFAULT 'TEXT', body TEXT, media TEXT, meta_json TEXT,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      -- Plan §13.14: the sender's realm AS OF the message. History is a
+      -- cache-safe identity snapshot: if the account is ever deleted, the
+      -- message keeps a neutral surface and the truth about where it came
+      -- from, instead of a badge that disappears with the row.
+      sender_realm TEXT
     )`,
     // Who owns an uploaded object, and which conversation (if any) references it.
     // This is what makes GET /api/files/:key authorizable instead of "anyone who
@@ -3018,6 +3838,15 @@ async function ensureSchema(db: D1Database) {
     // every request would fail until midnight. Here it is just one swallowed line,
     // retried by the next cold isolate (which is the point: the schema heals itself
     // the moment the quota resets, with nothing to run by hand).
+    // Plan §13.14: the cross-realm link flag, plus the one-time backfill so
+    // accounts linked before this column existed are not reported unlinked.
+    `ALTER TABLE users ADD COLUMN linked INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE messages ADD COLUMN sender_realm TEXT`,
+    `ALTER TABLE blocks ADD COLUMN owner_realm TEXT`,
+    `ALTER TABLE blocks ADD COLUMN target_realm TEXT`,
+    // Plan §13.13: the app bridge keys KP accounts by the legacy user id.
+    `ALTER TABLE users ADD COLUMN kp_subject TEXT`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_kp_subject ON users(kp_subject) WHERE kp_subject IS NOT NULL`,
     `CREATE INDEX IF NOT EXISTS idx_calls_status_created ON calls(status, created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_errorlog_created ON error_log(created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_devices_updated ON devices(updated_at)`,
@@ -3213,6 +4042,100 @@ async function ensureSchema(db: D1Database) {
     `ALTER TABLE members ADD COLUMN priv_allow_rec`,
     // NULL means this chat follows the account-wide read-receipt setting.
     `ALTER TABLE members ADD COLUMN priv_read_receipts INTEGER`,
+    // ------------------------------------------------------------------
+    // Phase R2 — realm-aware identity (plan §13.2/§13.3).
+    //
+    // Every account carries an IMMUTABLE origin realm: 'kp' = a KuchuPuchu-
+    // origin account, 'vx' = a VintoxBd website-origin account. Existing rows
+    // are KP by definition — this database IS the KuchuPuchu core — so the
+    // column default is 'kp' and no row ever changes realm afterwards.
+    `ALTER TABLE users ADD COLUMN origin_realm TEXT NOT NULL DEFAULT 'kp'`,
+    // The Laravel account a VX row belongs to (from the signed assertion).
+    // A lookup key for the next exchange; never a credential by itself.
+    `ALTER TABLE users ADD COLUMN bridge_subject TEXT`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_bridge
+       ON users(bridge_subject) WHERE bridge_subject IS NOT NULL`,
+    // Handles an account may not take, per realm ('*' = every realm). A table
+    // rather than a constant so moderation can extend it without a deploy.
+    `CREATE TABLE IF NOT EXISTS reserved_handles (
+      handle TEXT NOT NULL, realm TEXT NOT NULL DEFAULT '*', reason TEXT,
+      created_at TEXT NOT NULL, PRIMARY KEY (handle, realm)
+    )`,
+    `INSERT OR IGNORE INTO reserved_handles (handle, realm, reason, created_at) VALUES
+       ('admin', '*', 'owner policy 2026-10-14', datetime('now')),
+       ('system', '*', 'owner policy 2026-10-14', datetime('now')),
+       ('support', '*', 'owner policy 2026-10-14', datetime('now')),
+       ('help', '*', 'owner policy 2026-10-14', datetime('now')),
+       ('info', '*', 'owner policy 2026-10-14', datetime('now')),
+       ('root', '*', 'owner policy 2026-10-14', datetime('now')),
+       ('moderator', '*', 'owner policy 2026-10-14', datetime('now')),
+       ('vintoxbd', '*', 'owner policy 2026-10-14', datetime('now')),
+       ('kuchupuchu', '*', 'owner policy 2026-10-14', datetime('now'))`,
+    // Realm decisions are auditable data (plan §13.2): account provisioning,
+    // handle changes and later the link ceremony all append here.
+    `CREATE TABLE IF NOT EXISTS realm_audit (
+      id TEXT PRIMARY KEY, at TEXT NOT NULL, realm TEXT NOT NULL, actor_id TEXT,
+      subject_id TEXT, action TEXT NOT NULL, detail_json TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_realm_audit_subject ON realm_audit(subject_id, at)`,
+    // ---- R2: secure account linking (plan §13.2) ----
+    // An ACTIVE row states "these two accounts belong to one person". It is the
+    // ONLY artefact a ceremony may create: no profile field, handle or avatar is
+    // ever copied between the accounts (auto-merge is forbidden by the plan),
+    // and revoking flips `status` rather than deleting the evidence.
+    // `pair_key` is the canonical "smaller-id:larger-id" pair, UNIQUE, so the
+    // same two accounts can never hold two live links.
+    `CREATE TABLE IF NOT EXISTS identity_links (
+      id TEXT PRIMARY KEY, pair_key TEXT NOT NULL UNIQUE,
+      a_user_id TEXT NOT NULL, b_user_id TEXT NOT NULL,
+      a_realm TEXT NOT NULL, b_realm TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'ACTIVE',
+      created_at TEXT NOT NULL, revoked_at TEXT, revoked_by TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_identity_links_a ON identity_links(a_user_id, status)`,
+    `CREATE INDEX IF NOT EXISTS idx_identity_links_b ON identity_links(b_user_id, status)`,
+    // The short-lived, single-use approval. `code_hash` is the sha256 of the
+    // 8-character code shown on both screens; the HMAC signature in the deep
+    // link is derived from it. One row per ceremony, decided once.
+    `CREATE TABLE IF NOT EXISTS link_approvals (
+      id TEXT PRIMARY KEY, code_hash TEXT NOT NULL,
+      initiator_id TEXT NOT NULL, initiator_realm TEXT NOT NULL,
+      target_realm TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      created_at TEXT NOT NULL, expires_at TEXT NOT NULL,
+      decided_at TEXT, approved_by TEXT
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_link_approvals_code ON link_approvals(code_hash)`,
+    `CREATE INDEX IF NOT EXISTS idx_link_approvals_open ON link_approvals(status, expires_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_link_approvals_initiator ON link_approvals(initiator_id, status)`,
+    // ---- R7: Laravel-authoritative classroom navigation projection ----
+    // These rows make an enrolled class discoverable as a managed group in KP,
+    // but are NEVER consulted to authorize detail or room-token requests.
+    `CREATE TABLE IF NOT EXISTS managed_classrooms (
+      kp_user_id TEXT NOT NULL, class_id TEXT NOT NULL,
+      vx_communication_id TEXT NOT NULL, website_subject TEXT NOT NULL,
+      payload_json TEXT NOT NULL, synced_at TEXT NOT NULL,
+      PRIMARY KEY (kp_user_id, class_id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_managed_classrooms_sync ON managed_classrooms(kp_user_id, synced_at)`,
+    `CREATE TABLE IF NOT EXISTS classroom_notification_deliveries (
+      source_id TEXT PRIMARY KEY,
+      kp_user_id TEXT NOT NULL,
+      class_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'pending',
+      attempted_at TEXT NOT NULL,
+      delivered_at TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_classroom_notification_recipient ON classroom_notification_deliveries(kp_user_id, attempted_at)`,
+    // Plan §13.14: the one-time `linked` backfill for accounts linked before the
+    // column existed. It is the LAST statement on purpose: it reads
+    // identity_links, so it may only run once every table exists — placed any
+    // earlier it fails the walk and skips the schema fingerprint (the invariant
+    // test 27 pins), which would re-walk the whole list on every cold boot.
+    `UPDATE users SET linked = 1 WHERE linked = 0 AND id IN (
+       SELECT a_user_id FROM identity_links WHERE status = 'ACTIVE'
+       UNION SELECT b_user_id FROM identity_links WHERE status = 'ACTIVE')`,
   ];
   const fingerprint = await sha256Hex(
     [...statements, ...migrations, CLIENT_ID_BACKFILL].join("\n"),
@@ -3248,7 +4171,84 @@ async function ensureSchema(db: D1Database) {
       console.error(`schema fingerprint not recorded: ${err instanceof Error ? err.message : err}`);
     }
   }
+  // After the fingerprint decision: a walk that already failed records NOTHING
+  // (not even this marker), so the next cold isolate re-walks the whole list —
+  // exactly the invariant test 27 pins.
+  await migrateRealmUniqueness(db, allApplied);
   schemaReady = true;
+}
+
+/**
+ * R2 realm uniqueness — the one migration that cannot be a single statement.
+ *
+ * The legacy schema declared `username TEXT NOT NULL UNIQUE`: one global
+ * namespace, which cannot express the plan's "KP/@rahim and VX/@rahim coexist"
+ * (plan §13.3). SQLite cannot drop a column constraint, so this rebuilds the
+ * table ONCE from its own recorded DDL — every other column, default, NOT NULL
+ * and index is carried over verbatim and only that UNIQUE disappears — then
+ * installs the per-realm index in its place. Guarded by a schema_meta marker:
+ * every boot after the first pays one read.
+ */
+async function migrateRealmUniqueness(db: D1Database, walkSucceeded: boolean) {
+  const done = await one<{ value: string }>(
+    db,
+    "SELECT value FROM schema_meta WHERE key = ?",
+    REALM_UNIQ_META_KEY,
+  );
+  if (done) return;
+  if (
+    !(await runCatchingSql(
+      db,
+      "ALTER TABLE users ADD COLUMN origin_realm TEXT NOT NULL DEFAULT 'kp'",
+    ))
+  )
+    return;
+  const ddlRow = await one<{ sql: string | null }>(
+    db,
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'",
+  );
+  const legacy = ddlRow?.sql ?? "";
+  if (/username\s+TEXT\s+NOT NULL\s+UNIQUE/i.test(legacy)) {
+    const cols = await all<{ name: string }>(
+      db,
+      "SELECT name FROM pragma_table_info('users') ORDER BY cid",
+    );
+    const colList = cols.map((c) => `"${c.name}"`).join(", ");
+    const indexes = await all<{ name: string; sql: string | null }>(
+      db,
+      "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'users' AND sql IS NOT NULL",
+    );
+    const rebuilt = legacy
+      .replace(/^(\s*CREATE\s+TABLE\s+)users/i, "$1users_realm_rebuild")
+      .replace(/username\s+TEXT\s+NOT NULL\s+UNIQUE/i, "username TEXT NOT NULL");
+    // One batch = one transaction in D1: the database never sits between the
+    // old and the new table.
+    await db.batch(
+      [
+        rebuilt,
+        `INSERT INTO users_realm_rebuild (${colList}) SELECT ${colList} FROM users`,
+        "DROP TABLE users",
+        "ALTER TABLE users_realm_rebuild RENAME TO users",
+        ...indexes
+          .filter((i) => !i.name.startsWith("sqlite_autoindex"))
+          .map((i) => i.sql as string),
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_realm_username ON users(origin_realm, username COLLATE NOCASE)",
+      ].map((sql) => db.prepare(sql)),
+    );
+  } else {
+    await runCatchingSql(
+      db,
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_realm_username ON users(origin_realm, username COLLATE NOCASE)",
+    );
+  }
+  if (!walkSucceeded) return;
+  await run(
+    db,
+    "INSERT OR REPLACE INTO schema_meta (key, value, updated_at) VALUES (?, ?, ?)",
+    REALM_UNIQ_META_KEY,
+    "1",
+    nowIso(),
+  );
 }
 
 /**
@@ -3306,6 +4306,15 @@ type UserRow = {
   priv_status: string | null;
   private_profile: number | null;
   e2ee_public_key: string | null;
+  /** Phase R2: 'kp' | 'vx' — immutable origin realm (plan §13.3). */
+  origin_realm: string | null;
+  /** The Laravel account a VX row belongs to (bridge exchange). */
+  bridge_subject?: string | null;
+  /** The legacy (app) account this KP row IS, once the Android app exchanged
+   *  its legacy session here (plan §13.13). */
+  kp_subject?: string | null;
+  /** 1 while an ACTIVE cross-realm link exists (plan §13.14). */
+  linked?: number | null;
 };
 
 /* ---------------- privacy (owner round 30) ---------------- */
@@ -3460,6 +4469,12 @@ function userFrom(row: UserRow, online = false, light = false, viewer?: Viewer) 
     lastActiveAt: showSeen ? row.last_active_at : null,
     verified: !!row.verified,
     moderator: !!row.moderator,
+    // Phase R2: the immutable origin realm — the one field every KP/VX badge,
+    // directory filter, call screen, status row and moderation export reads.
+    // Sent twice on purpose: `origin_realm` is the contract name (plan §13.3),
+    // `originRealm` the camelCase alias the existing clients already speak.
+    origin_realm: realmOf(row),
+    originRealm: realmOf(row),
     // Owner round 32 (item 31): the badge the account CHOSE to show. Every
     // screen draws from this, so the choice holds on the chat list, the chat
     // header, calls, status, groups and the profile alike. Null = show all
@@ -3483,11 +4498,16 @@ function userFrom(row: UserRow, online = false, light = false, viewer?: Viewer) 
   // client can cache the avatar data-URI forever keyed by this ref and
   // only re-fetch when it actually changes.
   const avatarRef = showAvatar && row.avatar_url ? `${row.id}@v${row.avatar_version ?? 0}` : null;
+  // Plan §13.14: the normalized summary rides every shape that names an
+  // identity — directory, contacts, members, calls, status, blocklist — so a
+  // nested feature can never miss the origin badge or invent a role.
+  const summary = identitySummary(row, avatarRef);
   if (light) {
-    return { ...base, avatarUrl: null, avatarRef };
+    return { ...base, ...summary, avatarUrl: null, avatarRef };
   }
   return {
     ...base,
+    ...summary,
     avatarUrl: showAvatar ? row.avatar_url : null,
     // Also expose the stable per-version ref on the FULL shape, so clients can
     // render an avatar from its persistent cache even when a detail/profile
@@ -3515,7 +4535,12 @@ function badgeChoice(row: UserRow): string | null {
  *  instead. Legacy email accounts keep their real address until they sign
  *  in with a phone and migrate. */
 function userSelf(row: UserRow, online = false) {
-  const legacyEmail = row.email && !row.email.endsWith(PHONE_EMAIL_SUFFIX) ? row.email : null;
+  // Synthetic addresses (phone-era and the R2 website bridge) are storage
+  // details, never something a person may read back as "their email".
+  const legacyEmail =
+    row.email && !row.email.endsWith(PHONE_EMAIL_SUFFIX) && !row.email.endsWith(VX_EMAIL_SUFFIX)
+      ? row.email
+      : null;
   return {
     ...userFrom(row, online, false, SELF_VIEW),
     homeNavOrder: homeNavOrderOf(row.home_nav_order),
@@ -5508,6 +6533,7 @@ async function ringGroupMember(
     kind,
     fromId: starter.id,
     fromName: starter.display_name,
+    fromRealm: realmOf(starter),
     group: true,
     groupName,
     convId,
@@ -5523,6 +6549,7 @@ async function ringGroupMember(
       kind,
       fromName: starter.display_name,
       fromId: starter.id,
+      fromRealm: realmOf(starter),
       group: "1",
       groupName,
       convId,
@@ -5650,6 +6677,21 @@ function dataUrlResponse(dataUrl: string, filename = "media"): Response {
 const SHELL_CSP =
   "default-src 'self'; script-src 'self' https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws: wss: https://accounts.google.com; frame-src https://accounts.google.com; frame-ancestors 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'";
 
+/**
+ * Phase R3: the ONE directive that changes when the student panel embeds the
+ * shell — `frame-ancestors` gains the allowlisted origins and nothing else.
+ * The allowlist is a worker secret (PANEL_ORIGINS), so a deployment without it
+ * serves the byte-identical CSP above and the shell stays un-frameable.
+ */
+function shellCsp(env: Env): string {
+  const origins = panelOrigins(env);
+  if (origins.length === 0) return SHELL_CSP;
+  return SHELL_CSP.replace(
+    "frame-ancestors 'self';",
+    `frame-ancestors 'self' ${origins.join(" ")};`,
+  );
+}
+
 async function serveShellAsset(env: Env, request: Request): Promise<Response> {
   // Binding-free preview uploads never route asset paths through the worker
   // (their run_worker_first stays api/ws), so a missing binding here means a
@@ -5660,7 +6702,7 @@ async function serveShellAsset(env: Env, request: Request): Promise<Response> {
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("Referrer-Policy", "no-referrer");
   if ((headers.get("content-type") ?? "").includes("text/html")) {
-    headers.set("Content-Security-Policy", SHELL_CSP);
+    headers.set("Content-Security-Policy", shellCsp(env));
   }
   // The worker script must revalidate on every browser update check — a
   // cached sw.js is exactly how the legacy empty-list bug stayed alive for
@@ -5966,11 +7008,23 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       time: nowIso(),
       capabilities: {
         push: !!env.FCM_CONFIG && !!env.FCM_CREDENTIALS,
-        turn: (!!env.TURN_KEY_ID && !!env.TURN_API_TOKEN) || !!env.TURN_URLS,
+        turn: dedicatedTurnConfigured(env),
         realtime: !!env.CHAT_ROOM && !!env.CALL_SIGNAL,
         media: !!env.MEDIA,
+        // Phase R3: is the shell embeddable by the student panel at all?
+        panelEmbed: panelOrigins(env).length > 0,
       },
     });
+  }
+
+  /* Phase R3 (plan §13.3/§13.15): the student panel embeds this shell as an
+   * iframe and hands it the core session it minted for the signed-in student.
+   * The shell may not guess who is allowed to do that, so it asks here. Public
+   * and value-free by design: it names the allowed parent origins (which the
+   * browser can already see in the CSP header) and never a key or a token. */
+  if (path === "/api/panel/handoff" && method === "GET") {
+    const origins = panelOrigins(env);
+    return json({ enabled: origins.length > 0, origins });
   }
 
   if (path === "/api/config/firebase" && method === "GET") {
@@ -5984,68 +7038,77 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     });
   }
 
-  // Optional TURN relay config for the dialer. The app falls back to its
-  // built-in STUN/TURN list when this is null, so an empty config is fine.
+  // Dedicated TURN relay config for the dialer. Clients may use public STUN
+  // for direct candidates, but they refuse to place/answer calls when this
+  // endpoint cannot provide an authenticated first-party relay.
   //
   // Cloudflare Realtime TURN (the product once named "Calls"): set secrets
   // TURN_KEY_ID + TURN_API_TOKEN (a CF API token with Realtime Edit). Each
   // credential is minted by rtc.live.cloudflare.com and cached until near
   // expiry, so app polls cost at most one upstream call per TTL window.
   if (path === "/api/config/ice" && method === "GET") {
+    // Relay credentials are secrets even when a static provider is used. Never
+    // expose them to anonymous scanners; authenticated clients already send
+    // their ordinary bearer session through ApiClient.
+    await requireUser(db, request, env, ctx);
     const keyId = env.TURN_KEY_ID;
     const apiToken = env.TURN_API_TOKEN;
     if (keyId && apiToken) {
       let cached = turnCredCache;
       if (!cached || cached.expiresAt < Date.now() + 5 * 60_000) {
-        const mint = await fetch(
-          `https://rtc.live.cloudflare.com/v1/turn/keys/${keyId}/credentials/generate-ice-servers`,
-          {
-            method: "POST",
-            headers: {
-              authorization: `Bearer ${apiToken}`,
-              "content-type": "application/json",
-            },
-            body: JSON.stringify({ ttl: 86400 }),
-          },
-        );
-        if (mint.ok) {
-          const data = (await mint.json()) as {
-            iceServers?: { urls: string[]; username?: string; credential?: string }[];
-          };
-          // The mint returns TWO entries (STUN-only + TURN with creds).
-          // Merge into one: every url, plus the username/credential from
-          // the TURN entry — the app applies creds to all urls harmlessly.
-          const all = data.iceServers ?? [];
-          const turn = all.find((e) => e.username && e.credential);
-          if (turn) {
-            cached = {
-              server: {
-                urls: all.flatMap((e) => e.urls ?? []),
-                username: turn.username!,
-                credential: turn.credential!,
+        try {
+          const mint = await fetch(
+            `https://rtc.live.cloudflare.com/v1/turn/keys/${keyId}/credentials/generate-ice-servers`,
+            {
+              method: "POST",
+              headers: {
+                authorization: `Bearer ${apiToken}`,
+                "content-type": "application/json",
               },
-              expiresAt: Date.now() + 86_000_000,
+              body: JSON.stringify({ ttl: 86400 }),
+            },
+          );
+          if (mint.ok) {
+            const data = (await mint.json()) as {
+              iceServers?: { urls: string[]; username?: string; credential?: string }[];
             };
-            turnCredCache = cached;
+            const all = data.iceServers ?? [];
+            const turn = all.find((entry) => entry.username && entry.credential);
+            const turnUrls = all
+              .flatMap((entry) => entry.urls ?? [])
+              .filter((url) => /^turns?:/i.test(url));
+            if (turn && turnUrls.length) {
+              cached = {
+                server: {
+                  urls: turnUrls,
+                  username: turn.username!,
+                  credential: turn.credential!,
+                },
+                expiresAt: Date.now() + 86_000_000,
+              };
+              turnCredCache = cached;
+            }
+          } else {
+            console.log("turn_mint_error", JSON.stringify({ status: mint.status }));
           }
-        } else {
-          console.log("turn_mint_error", JSON.stringify({ status: mint.status }));
+        } catch (error) {
+          console.log(
+            "turn_mint_exception",
+            JSON.stringify({ error: error instanceof Error ? error.name : "unknown" }),
+          );
         }
       }
-      if (cached) return json({ ice: cached.server });
+      if (cached && cached.expiresAt > Date.now() + 5 * 60_000)
+        return json({ ice: { ...cached.server, expiresAt: cached.expiresAt } });
     }
     const urls = String(env.TURN_URLS || "")
       .split(",")
       .map((s) => s.trim())
-      .filter(Boolean);
-    if (!urls.length) return json({ ice: null });
-    return json({
-      ice: {
-        urls,
-        username: String(env.TURN_USERNAME || ""),
-        credential: String(env.TURN_CREDENTIAL || ""),
-      },
-    });
+      .filter((value) => /^turns?:/i.test(value));
+    const username = String(env.TURN_USERNAME || "").trim();
+    const credential = String(env.TURN_CREDENTIAL || "").trim();
+    if (!urls.length || !username || !credential) return json({ ice: null });
+    return json({ ice: { urls, username, credential, expiresAt: 0 } });
   }
 
   /* ---------- phone auth (OTP-less) ----------
@@ -6055,6 +7118,177 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
    * the decisions below are the server's. Every state-changing path runs as
    * ONE atomic D1 batch so a half-completed device transfer cannot exist.
    */
+
+  /* ---- VintoxBd website bridge (phase R2, plan §13.2 token exchange) ----
+   *
+   * Laravel owns website accounts; it never sends a password here. It signs a
+   * short-lived assertion (HMAC-SHA256, key = LARAVEL_BRIDGE_KEY) and this route
+   * turns it into a VX-origin account plus an ordinary bearer session. The
+   * account is created once (keyed by `sub`); every later exchange reuses it.
+   * Without the key the route is 503 — fail-closed.
+   */
+  if (path === "/api/auth/realm/exchange" && method === "POST") {
+    const key = await bridgeKey(env);
+    if (!key) fail(503, "The website bridge is not configured.", "BRIDGE_OFF");
+    const claims = await verifyBridgeAssertion(key!, String(body.assertion ?? ""));
+    if (!claims) fail(401, "That website assertion is invalid or expired.", "BAD_ASSERTION");
+    await rateLimitGlobal(db, `vxexchange:${claims.sub}`, 30);
+    const sub = claims.sub;
+    let row = await one<UserRow>(db, "SELECT * FROM users WHERE bridge_subject = ?", sub);
+    if (row && realmOf(row) !== "vx")
+      fail(409, "That website account is bound to a non-website identity.", "REALM_MISMATCH");
+    // §13.14: a bridge assertion may name the communication identity it means.
+    // It must agree with the account this `sub` resolves to — a site that
+    // stored the wrong id is told so instead of silently getting a different
+    // person's session.
+    if (claims.communicationId && row && claims.communicationId !== row.id)
+      fail(409, "That communication identity is not this website account.", "IDENTITY_MISMATCH");
+    if (claims.originRealm && claims.originRealm !== "vx")
+      fail(409, "That assertion names a realm this bridge cannot sign for.", "REALM_MISMATCH");
+    const requested = claims.handle === undefined ? null : handleFrom(claims.handle);
+    if (!row) {
+      if (!requested)
+        fail(400, "The website account requested an invalid username.", "INVALID_HANDLE");
+      const refusal = await handleRefusal(db, requested, "vx", null);
+      if (refusal) fail(409, HANDLE_REFUSAL_MESSAGES[refusal], `HANDLE_${refusal.toUpperCase()}`);
+      const userId = id();
+      const created = nowIso();
+      const displayName =
+        String(claims.displayName ?? "")
+          .trim()
+          .slice(0, 40) || requested;
+      await run(
+        db,
+        `INSERT INTO users
+           (id, email, password_hash, username, display_name, avatar_url, about,
+            created_at, last_active_at, auth_status, origin_realm, bridge_subject)
+         VALUES (?, ?, '!', ?, ?, NULL, NULL, ?, ?, 'ACTIVE', 'vx', ?)`,
+        userId,
+        `${sub}${VX_EMAIL_SUFFIX}`,
+        requested,
+        displayName,
+        created,
+        created,
+        sub,
+      );
+      row = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", userId);
+      await run(
+        db,
+        `INSERT INTO realm_audit (id, at, realm, actor_id, subject_id, action, detail_json)
+         VALUES (?, ?, 'vx', NULL, ?, 'vx.account.created', ?)`,
+        id(),
+        nowIso(),
+        userId,
+        JSON.stringify({ bridgeSubject: sub, handle: requested }),
+      );
+    } else if (claims.displayName) {
+      const displayName = String(claims.displayName).trim().slice(0, 40);
+      if (displayName && displayName !== row.display_name) {
+        await run(db, "UPDATE users SET display_name = ? WHERE id = ?", displayName, row.id);
+        row = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row.id);
+      }
+    }
+    if (!row) fail(500, "The website account could not be provisioned.", "BRIDGE_FAILED");
+    const deviceId =
+      String(body.deviceId ?? "")
+        .slice(0, 64)
+        .trim() || `web-${sub.slice(0, 24)}`;
+    const session = await sessionStmt(db, row!.id, deviceId);
+    await session.stmt.run();
+    await run(db, "UPDATE users SET last_active_at = ? WHERE id = ?", nowIso(), row!.id);
+    // §13.14: the website stores the mapping; hand it the normalized identity
+    // summary keys it needs (the opaque communication id + the realm) instead
+    // of making it read them out of the user shape.
+    return json({
+      token: session.token,
+      user: userSelf(row!, true),
+      realm: "vx",
+      communicationId: row!.id,
+      origin_realm: "vx",
+      originRealm: "vx",
+    });
+  }
+
+  /**
+   * The Android app's identity bridge (plan §13.13).
+   *
+   * The app IS KuchuPuchu: it signs in against the legacy API and holds a
+   * legacy session. Realm, links and classroom entitlements live HERE, so the
+   * app needs ordinary core credentials for the KP-realm account that
+   * corresponds to the legacy one. It presents its legacy session token; the
+   * core asks the legacy API who that is (read-only, `KP_LEGACY_ORIGIN`),
+   * provisions the account ONCE keyed by the legacy user id (`kp_subject`) and
+   * mints an ordinary bearer session. A second exchange reuses the same
+   * account — never a second one, never a merge with any other identity, and
+   * never a handle change.
+   */
+  if (path === "/api/auth/app/exchange" && method === "POST") {
+    const origin = String(env.KP_LEGACY_ORIGIN ?? "")
+      .trim()
+      .replace(/\/+$/, "");
+    if (!origin) fail(503, "The app identity bridge is not configured.", "APP_BRIDGE_OFF");
+    const presented = String(body.token ?? "").trim();
+    rateLimit(`apex:${clientIp(request)}`, 20, 10);
+    if (presented.length < 16 || presented.length > 200)
+      fail(401, "That app session is invalid or expired.", "BAD_APP_SESSION");
+    await rateLimitGlobal(db, `gapex:${clientIp(request)}`, 40);
+    const legacy = await legacyIdentity(origin, presented);
+    if (!legacy) fail(401, "That app session is invalid or expired.", "BAD_APP_SESSION");
+    await rateLimitGlobal(db, `gapexs:${await sha256Hex(legacy!.id)}`, 30);
+    const subject = legacy!.id;
+    let row = await one<UserRow>(db, "SELECT * FROM users WHERE kp_subject = ?", subject);
+    if (row && realmOf(row) !== "kp")
+      fail(409, "That app account is bound to a non-app identity.", "REALM_MISMATCH");
+    if (!row) {
+      const handle = await appHandle(db, legacy!.username, subject);
+      const userId = id();
+      const created = nowIso();
+      const displayName = legacy!.displayName.slice(0, 40) || handle;
+      await run(
+        db,
+        `INSERT INTO users
+           (id, email, password_hash, username, display_name, avatar_url, about,
+            created_at, last_active_at, auth_status, origin_realm, kp_subject)
+         VALUES (?, ?, '!', ?, ?, NULL, NULL, ?, ?, 'ACTIVE', 'kp', ?)`,
+        userId,
+        `${await sha256Hex(subject)}${APP_EMAIL_SUFFIX}`,
+        handle,
+        displayName,
+        created,
+        created,
+        subject,
+      );
+      row = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", userId);
+      await run(
+        db,
+        `INSERT INTO realm_audit (id, at, realm, actor_id, subject_id, action, detail_json)
+         VALUES (?, ?, 'kp', NULL, ?, 'kp.account.created', ?)`,
+        id(),
+        nowIso(),
+        userId,
+        JSON.stringify({ appSubject: subject, handle }),
+      );
+    }
+    if (!row) fail(500, "The app account could not be provisioned.", "APP_BRIDGE_FAILED");
+    const deviceId =
+      String(body.deviceId ?? "")
+        .slice(0, 64)
+        .trim() || `app-${(await sha256Hex(subject)).slice(0, 24)}`;
+    const session = await sessionStmt(db, row!.id, deviceId);
+    await session.stmt.run();
+    await run(db, "UPDATE users SET last_active_at = ? WHERE id = ?", nowIso(), row!.id);
+    await run(
+      db,
+      `INSERT INTO realm_audit (id, at, realm, actor_id, subject_id, action, detail_json)
+       VALUES (?, ?, 'kp', ?, ?, 'kp.session.minted', ?)`,
+      id(),
+      nowIso(),
+      row!.id,
+      row!.id,
+      JSON.stringify({ deviceId }),
+    );
+    return json({ token: session.token, user: userSelf(row!, true), realm: "kp" });
+  }
 
   if (path === "/api/auth/verify-phone" && method === "POST") {
     rateLimit(`pv:${clientIp(request)}`, 15, 10);
@@ -6102,11 +7336,22 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       const created = nowIso();
       const base = slugFrom(`user${userId.slice(0, 6)}`);
       let username = base;
+      // Handles are unique per realm (phase R2), so a signup only competes
+      // with KP-origin accounts — the namespace the new row is being born into.
       for (let attempt = 0; attempt < 8; attempt++) {
-        if (!(await one(db, "SELECT id FROM users WHERE username = ?", username))) break;
+        if (
+          !(await one(
+            db,
+            "SELECT id FROM users WHERE username = ? AND origin_realm = 'kp'",
+            username,
+          ))
+        )
+          break;
         username = `${base}_${Math.floor(Math.random() * 1_000_000)}`;
       }
-      if (await one(db, "SELECT id FROM users WHERE username = ?", username))
+      if (
+        await one(db, "SELECT id FROM users WHERE username = ? AND origin_realm = 'kp'", username)
+      )
         username = `${base}_${userId.slice(0, 8)}`;
       await run(
         db,
@@ -7022,6 +8267,35 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     );
   }
 
+  // VPS-free classroom signalling. Laravel remains the authority: opening the
+  // socket first exercises its room-token endpoint, which checks link,
+  // enrolment, role, revocation and the live class window. The Durable Object
+  // carries only offer/answer/ICE; audio and video remain device-to-device.
+  const wsClassroomMatch = path.match(/^\/ws\/classroom\/(\d{1,20})$/);
+  if (wsClassroomMatch && method === "GET" && env.CLASSROOM_SIGNAL) {
+    await rateLimitGlobal(db, `classroom-socket:${uid}`, 20);
+    const identity = await classroomIdentity(db, me);
+    if (!identity)
+      fail(
+        403,
+        "Link and approve the VintoxBd account that owns your enrolment.",
+        "CLASSROOM_LINK_REQUIRED",
+      );
+    await classroomUpstream(
+      env,
+      identity!,
+      "POST",
+      `/internal/classroom/v1/classes/${wsClassroomMatch[1]}/room-token`,
+    );
+    const roomId = `classroom:${wsClassroomMatch[1]}`;
+    const stub = env.CLASSROOM_SIGNAL.get(env.CLASSROOM_SIGNAL.idFromName(roomId));
+    return stub.fetch(
+      new Request("https://classroom-signal/connect", {
+        headers: { upgrade: "websocket", "x-kp-user": uid },
+      }),
+    );
+  }
+
   // Per-call signalling channel (Step 3): state changes, ICE, renegotiation.
   // Only the two call participants may hold a socket to it.
   const wsCallMatch = path.match(/^\/ws\/call\/([^/]+)$/);
@@ -7055,11 +8329,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   // Owner round 22: username availability for the edit screen — same rules
   // the PATCH itself enforces, so the tick mark never lies.
   if (path === "/api/users/username-available" && method === "GET") {
-    const u = (url.searchParams.get("u") || "").trim().toLowerCase();
-    if (!/^[a-z0-9_]{3,30}$/.test(u)) return json({ available: false, reason: "invalid" });
-    const taken =
-      (await one(db, "SELECT id FROM users WHERE username = ? AND id != ?", u, uid)) != null;
-    return json({ available: !taken, reason: taken ? "taken" : "free" });
+    // Phase R2: availability is PER REALM (plan §13.3) — the same handle may be
+    // free in VX while a KP account holds it. `realm` may be requested
+    // explicitly (the directory shows both networks); it decides only which
+    // namespace is checked, never which realm an account gets.
+    const realmParam = url.searchParams.get("realm");
+    const realm: OriginRealm = isRealm(realmParam) ? realmParam : realmOf(me);
+    const handle = handleFrom(url.searchParams.get("u"));
+    if (!handle) return json({ available: false, reason: "invalid", realm });
+    const refusal = await handleRefusal(db, handle, realm, uid);
+    return json({ available: !refusal, reason: refusal ?? "free", realm, handle });
   }
 
   if (path === "/api/me" && method === "PATCH") {
@@ -7076,16 +8355,14 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       values.push(String(body.about).slice(0, BIO_MAX_LENGTH));
     }
     if (body.username !== undefined) {
-      const username = slugFrom(String(body.username));
-      const taken = await one(
-        db,
-        "SELECT id FROM users WHERE username = ? AND id != ?",
-        username,
-        uid,
-      );
-      if (taken) fail(400, "That username is taken.");
+      // Phase R2: the caller's OWN realm decides the namespace (immutable —
+      // a body field can never move an account between realms), and the shared
+      // policy helper decides validity.
+      const handle = handleFrom(body.username);
+      const refusal = handle ? await handleRefusal(db, handle, realmOf(me), uid) : "invalid";
+      if (refusal) fail(400, HANDLE_REFUSAL_MESSAGES[refusal]);
       sets.push("username = ?");
-      values.push(username);
+      values.push(handle);
     }
     if (body.avatarUrl !== undefined) {
       const avatar = String(body.avatarUrl || "");
@@ -7330,21 +8607,736 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     });
   }
 
+  /* ---- classroom entitlement and managed groups (phase R7) ---- */
+
+  if (path === "/api/classroom/v1/classes" && method === "GET") {
+    await rateLimitGlobal(db, `classroom-list:${uid}`, 60);
+    const identity = await classroomIdentity(db, me);
+    if (!identity)
+      fail(
+        403,
+        "Link and approve the VintoxBd account that owns your enrolment.",
+        "CLASSROOM_LINK_REQUIRED",
+      );
+    const upstream = await classroomUpstream(
+      env,
+      identity!,
+      "GET",
+      "/internal/classroom/v1/classes",
+    );
+    await syncManagedClassrooms(db, identity!, upstream);
+    return json(upstream, 200, { "cache-control": "private, no-store" });
+  }
+
+  if (path === "/api/classroom/v1/notifications" && method === "POST") {
+    await rateLimitGlobal(db, `classroom-notification:${uid}`, 30);
+    if (realmOf(me) !== "vx" || !me.bridge_subject)
+      fail(
+        403,
+        "Only a bridged VintoxBd identity may relay class notifications.",
+        "CLASSROOM_VX_REQUIRED",
+      );
+
+    const notificationId = String(body.notificationId ?? "").trim();
+    const classId = String(body.classId ?? "").trim();
+    const eventType = String(body.eventType ?? "").trim();
+    const title = String(body.title ?? "").trim();
+    const message = String(body.body ?? "").trim();
+    if (!/^\d{1,20}$/.test(notificationId) || !/^\d{1,20}$/.test(classId))
+      fail(400, "Invalid class notification identity.", "BAD_CLASS_NOTIFICATION");
+    if (
+      ![
+        "class_reminder_2h",
+        "class_reminder_1h",
+        "class_reminder_15m",
+        "class_live",
+        "class_done",
+      ].includes(eventType)
+    )
+      fail(400, "Unknown class notification event.", "BAD_CLASS_NOTIFICATION");
+    if (!title || title.length > 120 || !message || message.length > 600)
+      fail(400, "Invalid class notification copy.", "BAD_CLASS_NOTIFICATION");
+
+    const key = await bridgeKey(env);
+    const signed = key
+      ? ((await verifyBridgeAssertion(key, String(body.assertion ?? ""))) as
+          (BridgeClaims & Record<string, unknown>) | null)
+      : null;
+    const now = Date.now();
+    if (
+      !signed ||
+      signed.sub !== me.bridge_subject ||
+      signed.communicationId !== uid ||
+      signed.originRealm !== "vx" ||
+      signed.purpose !== "class-notification" ||
+      signed.notificationId !== notificationId ||
+      signed.classId !== classId ||
+      signed.eventType !== eventType ||
+      signed.title !== title ||
+      signed.body !== message ||
+      typeof signed.iat !== "number" ||
+      typeof signed.exp !== "number" ||
+      signed.iat < now - 65_000 ||
+      signed.exp > signed.iat + 60_000 ||
+      typeof signed.nonce !== "string" ||
+      !/^[A-Za-z0-9_-]{20,80}$/.test(signed.nonce)
+    )
+      fail(401, "Invalid class notification authority.", "BAD_CLASS_NOTIFICATION_ASSERTION");
+
+    const link = await linkRowFor(db, uid);
+    if (!link)
+      return json({ accepted: false, reason: "not_linked" }, 200, { "cache-control": "no-store" });
+    const otherId = link.a_user_id === uid ? link.b_user_id : link.a_user_id;
+    const kp = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", otherId);
+    if (!kp || realmOf(kp) !== "kp")
+      return json({ accepted: false, reason: "no_kp_recipient" }, 200, {
+        "cache-control": "no-store",
+      });
+
+    const sourceId = `${uid}:${notificationId}`;
+    const existing = await one<{ state: string; attempted_at: string }>(
+      db,
+      "SELECT state, attempted_at FROM classroom_notification_deliveries WHERE source_id = ?",
+      sourceId,
+    );
+    if (existing?.state === "delivered")
+      return json({ accepted: true, deduplicated: true }, 200, { "cache-control": "no-store" });
+    if (existing && Date.parse(existing.attempted_at) > Date.now() - 120_000)
+      return json({ accepted: false, reason: "in_progress" }, 202, { "cache-control": "no-store" });
+
+    const attemptedAt = nowIso();
+    await run(
+      db,
+      `INSERT INTO classroom_notification_deliveries
+         (source_id, kp_user_id, class_id, event_type, state, attempted_at, delivered_at)
+       VALUES (?, ?, ?, ?, 'pending', ?, NULL)
+       ON CONFLICT(source_id) DO UPDATE SET
+         kp_user_id = excluded.kp_user_id,
+         class_id = excluded.class_id,
+         event_type = excluded.event_type,
+         state = 'pending',
+         attempted_at = excluded.attempted_at,
+         delivered_at = NULL`,
+      sourceId,
+      kp.id,
+      classId,
+      eventType,
+      attemptedAt,
+    );
+    const accepted = await pushToUser(
+      env,
+      db,
+      kp.id,
+      {
+        type: "classroom",
+        classId,
+        eventType,
+        title,
+        body: message,
+      },
+      {
+        title,
+        body: message,
+        channel: "kp_classes_v1",
+        tag: `class-${classId}`,
+      },
+    );
+    if (accepted) {
+      await run(
+        db,
+        "UPDATE classroom_notification_deliveries SET state = 'delivered', delivered_at = ? WHERE source_id = ?",
+        nowIso(),
+        sourceId,
+      );
+    } else {
+      await run(db, "DELETE FROM classroom_notification_deliveries WHERE source_id = ?", sourceId);
+    }
+    return json({ accepted }, accepted ? 200 : 202, { "cache-control": "no-store" });
+  }
+
+  const classroomDetail = path.match(/^\/api\/classroom\/v1\/classes\/(\d{1,20})$/);
+  if (classroomDetail && method === "GET") {
+    await rateLimitGlobal(db, `classroom-detail:${uid}`, 120);
+    const identity = await classroomIdentity(db, me);
+    if (!identity)
+      fail(
+        403,
+        "Link and approve the VintoxBd account that owns your enrolment.",
+        "CLASSROOM_LINK_REQUIRED",
+      );
+    const upstream = await classroomUpstream(
+      env,
+      identity!,
+      "GET",
+      `/internal/classroom/v1/classes/${classroomDetail[1]}`,
+    );
+    return json(upstream, 200, { "cache-control": "private, no-store" });
+  }
+
+  const classroomRoomToken = path.match(/^\/api\/classroom\/v1\/classes\/(\d{1,20})\/room-token$/);
+  if (classroomRoomToken && method === "POST") {
+    await rateLimitGlobal(db, `classroom-token:${uid}`, 20);
+    const identity = await classroomIdentity(db, me);
+    if (!identity)
+      fail(
+        403,
+        "Link and approve the VintoxBd account that owns your enrolment.",
+        "CLASSROOM_LINK_REQUIRED",
+      );
+    const upstream = await classroomUpstream(
+      env,
+      identity!,
+      "POST",
+      `/internal/classroom/v1/classes/${classroomRoomToken[1]}/room-token`,
+    );
+    const socketTicket = await issueWsTicket(env, uid);
+    if (!socketTicket)
+      fail(503, "Classroom socket authentication is not configured.", "NO_TICKET_KEY");
+    const requestUrl = new URL(request.url);
+    const socketProtocol = requestUrl.protocol === "https:" ? "wss:" : "ws:";
+    const authority = upstream as Record<string, unknown>;
+    const role = String(authority.role ?? authority.participantRole ?? "student").toLowerCase();
+    return json(
+      {
+        transport: "p2p-mesh",
+        url: `${socketProtocol}//${requestUrl.host}/ws/classroom/${classroomRoomToken[1]}`,
+        ticket: socketTicket,
+        participantId: uid,
+        instructor: role === "instructor" || role === "teacher" || authority.canPublish === true,
+        maxParticipants: 6,
+        turnFallback: false,
+      },
+      200,
+      { "cache-control": "private, no-store" },
+    );
+  }
+
+  const classroomAttendance = path.match(/^\/api\/classroom\/v1\/classes\/(\d{1,20})\/attendance$/);
+  if (classroomAttendance && method === "POST") {
+    await rateLimitGlobal(db, `classroom-attendance:${uid}`, 90);
+    const event =
+      body.event === "leave" ? "leave" : body.event === "heartbeat" ? "heartbeat" : null;
+    if (!event) fail(400, "Unknown attendance event.", "BAD_ATTENDANCE_EVENT");
+    const identity = await classroomIdentity(db, me);
+    if (!identity)
+      fail(
+        403,
+        "Link and approve the VintoxBd account that owns your enrolment.",
+        "CLASSROOM_LINK_REQUIRED",
+      );
+    const upstream = await classroomUpstream(
+      env,
+      identity!,
+      "POST",
+      `/internal/classroom/v1/classes/${classroomAttendance[1]}/attendance`,
+      { event },
+    );
+    return json(upstream, 200, { "cache-control": "private, no-store" });
+  }
+
+  const classroomState = path.match(/^\/api\/classroom\/v1\/classes\/(\d{1,20})\/state$/);
+  if (classroomState && method === "GET") {
+    await rateLimitGlobal(db, `classroom-state:${uid}`, 120);
+    const identity = await classroomIdentity(db, me);
+    if (!identity)
+      fail(
+        403,
+        "Link and approve the VintoxBd account that owns your enrolment.",
+        "CLASSROOM_LINK_REQUIRED",
+      );
+    const upstream = await classroomUpstream(
+      env,
+      identity!,
+      "GET",
+      `/internal/classroom/v1/classes/${classroomState[1]}/state`,
+    );
+    return json(upstream, 200, { "cache-control": "private, no-store" });
+  }
+
+  const classroomMaterial = path.match(
+    /^\/api\/classroom\/v1\/classes\/(\d{1,20})\/materials\/(\d{1,20})$/,
+  );
+  if (classroomMaterial && method === "GET") {
+    await rateLimitGlobal(db, `classroom-material:${uid}`, 30);
+    const identity = await classroomIdentity(db, me);
+    if (!identity)
+      fail(
+        403,
+        "Link and approve the VintoxBd account that owns your enrolment.",
+        "CLASSROOM_LINK_REQUIRED",
+      );
+    return classroomBinaryUpstream(
+      env,
+      identity!,
+      `/internal/classroom/v1/classes/${classroomMaterial[1]}/materials/${classroomMaterial[2]}`,
+    );
+  }
+
+  const classroomRecording = path.match(/^\/api\/classroom\/v1\/classes\/(\d{1,20})\/recording$/);
+  if (classroomRecording && method === "GET") {
+    await rateLimitGlobal(db, `classroom-recording:${uid}`, 20);
+    const identity = await classroomIdentity(db, me);
+    if (!identity)
+      fail(
+        403,
+        "Link and approve the VintoxBd account that owns your enrolment.",
+        "CLASSROOM_LINK_REQUIRED",
+      );
+    return classroomBinaryUpstream(
+      env,
+      identity!,
+      `/internal/classroom/v1/classes/${classroomRecording[1]}/recording`,
+    );
+  }
+
+  const classroomQuestion = path.match(/^\/api\/classroom\/v1\/classes\/(\d{1,20})\/questions$/);
+  if (classroomQuestion && method === "POST") {
+    await rateLimitGlobal(db, `classroom-question:${uid}`, 20);
+    const question = String(body.question ?? "").trim();
+    if (!question || question.length > 1000)
+      fail(400, "Write a question of at most 1000 characters.", "BAD_QUESTION");
+    const identity = await classroomIdentity(db, me);
+    if (!identity)
+      fail(
+        403,
+        "Link and approve the VintoxBd account that owns your enrolment.",
+        "CLASSROOM_LINK_REQUIRED",
+      );
+    const upstream = await classroomUpstream(
+      env,
+      identity!,
+      "POST",
+      `/internal/classroom/v1/classes/${classroomQuestion[1]}/questions`,
+      { question },
+    );
+    return json(upstream, 200, { "cache-control": "private, no-store" });
+  }
+
+  const classroomHand = path.match(/^\/api\/classroom\/v1\/classes\/(\d{1,20})\/raise-hand$/);
+  if (classroomHand && method === "POST") {
+    await rateLimitGlobal(db, `classroom-hand:${uid}`, 20);
+    const identity = await classroomIdentity(db, me);
+    if (!identity)
+      fail(
+        403,
+        "Link and approve the VintoxBd account that owns your enrolment.",
+        "CLASSROOM_LINK_REQUIRED",
+      );
+    const upstream = await classroomUpstream(
+      env,
+      identity!,
+      "POST",
+      `/internal/classroom/v1/classes/${classroomHand[1]}/raise-hand`,
+      {},
+    );
+    return json(upstream, 200, { "cache-control": "private, no-store" });
+  }
+
+  const classroomChat = path.match(/^\/api\/classroom\/v1\/classes\/(\d{1,20})\/chat$/);
+  if (classroomChat && method === "POST") {
+    await rateLimitGlobal(db, `classroom-chat:${uid}`, 60);
+    const message = String(body.body ?? "").trim();
+    if (!message || message.length > 1000)
+      fail(400, "Write a message of at most 1000 characters.", "BAD_CLASS_MESSAGE");
+    const identity = await classroomIdentity(db, me);
+    if (!identity)
+      fail(
+        403,
+        "Link and approve the VintoxBd account that owns your enrolment.",
+        "CLASSROOM_LINK_REQUIRED",
+      );
+    const upstream = await classroomUpstream(
+      env,
+      identity!,
+      "POST",
+      `/internal/classroom/v1/classes/${classroomChat[1]}/chat`,
+      { body: message },
+    );
+    return json(upstream, 200, { "cache-control": "private, no-store" });
+  }
+
+  const classroomPoll = path.match(
+    /^\/api\/classroom\/v1\/classes\/(\d{1,20})\/polls\/(\d{1,20})\/vote$/,
+  );
+  if (classroomPoll && method === "POST") {
+    await rateLimitGlobal(db, `classroom-poll:${uid}`, 20);
+    const option =
+      typeof body.option === "number" && Number.isInteger(body.option) ? body.option : -1;
+    if (option < 0 || option > 100) fail(400, "Choose a valid poll option.", "BAD_POLL_OPTION");
+    const identity = await classroomIdentity(db, me);
+    if (!identity)
+      fail(
+        403,
+        "Link and approve the VintoxBd account that owns your enrolment.",
+        "CLASSROOM_LINK_REQUIRED",
+      );
+    const upstream = await classroomUpstream(
+      env,
+      identity!,
+      "POST",
+      `/internal/classroom/v1/classes/${classroomPoll[1]}/polls/${classroomPoll[2]}/vote`,
+      { option },
+    );
+    return json(upstream, 200, { "cache-control": "private, no-store" });
+  }
+
+  const classroomQuiz = path.match(
+    /^\/api\/classroom\/v1\/classes\/(\d{1,20})\/quizzes\/(\d{1,20})\/submit$/,
+  );
+  if (classroomQuiz && method === "POST") {
+    await rateLimitGlobal(db, `classroom-quiz:${uid}`, 10);
+    const submitted = body.answers;
+    if (!submitted || typeof submitted !== "object" || Array.isArray(submitted))
+      fail(400, "Quiz answers are invalid.", "BAD_QUIZ_ANSWERS");
+    const entries = Object.entries(submitted as Json);
+    if (
+      entries.length > 100 ||
+      entries.some(
+        ([key, value]) =>
+          !/^\d{1,20}$/.test(key) ||
+          typeof value !== "number" ||
+          !Number.isInteger(value) ||
+          value < 0 ||
+          value > 100,
+      )
+    )
+      fail(400, "Quiz answers are invalid.", "BAD_QUIZ_ANSWERS");
+    const identity = await classroomIdentity(db, me);
+    if (!identity)
+      fail(
+        403,
+        "Link and approve the VintoxBd account that owns your enrolment.",
+        "CLASSROOM_LINK_REQUIRED",
+      );
+    const upstream = await classroomUpstream(
+      env,
+      identity!,
+      "POST",
+      `/internal/classroom/v1/classes/${classroomQuiz[1]}/quizzes/${classroomQuiz[2]}/submit`,
+      { answers: Object.fromEntries(entries) },
+    );
+    return json(upstream, 200, { "cache-control": "private, no-store" });
+  }
+
+  /* ---- account linking (phase R2, plan §13.2) ---- */
+
+  if (path === "/api/links" && method === "GET") {
+    return json({ links: await linkList(db, uid), realm: realmOf(me) });
+  }
+
+  if (path === "/api/links/approvals" && method === "POST") {
+    const key = await linkApprovalKey(env);
+    if (!key) fail(503, "Account linking is not configured.", "LINKING_OFF");
+    const mine = realmOf(me);
+    const wanted =
+      body.targetRealm === undefined ? (mine === "kp" ? "vx" : "kp") : body.targetRealm;
+    if (!isRealm(wanted)) fail(400, "Unknown target realm.", "BAD_REALM");
+    if (wanted === mine)
+      fail(
+        400,
+        "Both accounts are in the same realm — linking is for a website account and an app account.",
+        "SAME_REALM",
+      );
+    await rateLimitGlobal(db, `linkinit:${uid}`, 10);
+    if (await linkRowFor(db, uid)) fail(409, "This account is already linked.", "ALREADY_LINKED");
+    // One open ceremony per account: a second code would be a second truth.
+    const open = await one<{ id: string }>(
+      db,
+      "SELECT id FROM link_approvals WHERE initiator_id = ? AND status = 'PENDING' AND expires_at > ? LIMIT 1",
+      uid,
+      nowIso(),
+    );
+    if (open) fail(409, "An approval is already waiting.", "APPROVAL_OPEN");
+    const approvalId = id();
+    const code = randomLinkCode();
+    const codeHash = await sha256Hex(code);
+    const created = nowIso();
+    const expiresAt = new Date(Date.now() + LINK_APPROVAL_TTL_MS).toISOString();
+    const signature = await linkSignature(
+      key!,
+      linkSignaturePayload({
+        id: approvalId,
+        code_hash: codeHash,
+        initiator_id: uid,
+        initiator_realm: mine,
+        target_realm: wanted,
+        expires_at: expiresAt,
+      }),
+    );
+    await run(
+      db,
+      `INSERT INTO link_approvals
+         (id, code_hash, initiator_id, initiator_realm, target_realm, status, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?)`,
+      approvalId,
+      codeHash,
+      uid,
+      mine,
+      wanted,
+      created,
+      expiresAt,
+    );
+    await run(
+      db,
+      `INSERT INTO realm_audit (id, at, realm, actor_id, subject_id, action, detail_json)
+       VALUES (?, ?, ?, ?, ?, 'link.approval.initiated', ?)`,
+      id(),
+      created,
+      mine,
+      uid,
+      uid,
+      JSON.stringify({ approvalId, targetRealm: wanted }),
+    );
+    const origin = env.SELF_ORIGIN || new URL(request.url).origin;
+    return json({
+      approval: {
+        id: approvalId,
+        code,
+        signature,
+        realm: mine,
+        targetRealm: wanted,
+        expiresAt,
+        permissions: LINK_PERMISSIONS,
+        deepLink: `${origin}/link/${approvalId}?sig=${encodeURIComponent(signature)}`,
+      },
+    });
+  }
+
+  const linkApprovalRead = path.match(/^\/api\/links\/approvals\/([^/]+)$/);
+  if (linkApprovalRead && method === "GET") {
+    const row = await one<LinkApprovalRow>(
+      db,
+      "SELECT * FROM link_approvals WHERE id = ?",
+      linkApprovalRead[1]!,
+    );
+    if (!row || row.initiator_id !== uid) fail(404, "No such approval.", "NOT_FOUND");
+    const status = linkStatusOf(row!);
+    return json({
+      approval: {
+        id: row!.id,
+        status,
+        realm: row!.initiator_realm,
+        targetRealm: row!.target_realm,
+        expiresAt: row!.expires_at,
+      },
+      link: status === "APPROVED" ? ((await linkList(db, uid))[0] ?? null) : null,
+    });
+  }
+
+  if (path === "/api/links/approvals/lookup" && method === "POST") {
+    // Possession of the code (or the signed deep link) is the whole credential,
+    // so guessing is capped twice: per caller and per approval row.
+    await rateLimitGlobal(db, `linklookup:${uid}`, 20);
+    const row = await resolveApproval(db, env, body);
+    if (!row) fail(404, "That approval code is not valid.", "NOT_FOUND");
+    const status = linkStatusOf(row!);
+    if (status !== "PENDING")
+      fail(409, `That approval is ${status.toLowerCase()}.`, "APPROVAL_DECIDED");
+    const mine = realmOf(me);
+    if (row!.initiator_id === uid)
+      fail(403, "Approve from the other account, not the one that started it.", "WRONG_SIDE");
+    if (row!.target_realm !== mine)
+      fail(403, "Sign in on that realm to approve this request.", "WRONG_REALM");
+    const initiator = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row!.initiator_id);
+    if (!initiator) fail(404, "The requesting account no longer exists.", "NOT_FOUND");
+    return json({
+      approval: {
+        id: row!.id,
+        status,
+        expiresAt: row!.expires_at,
+        permissions: LINK_PERMISSIONS,
+        initiator: identityOf(initiator!),
+        approver: identityOf(me),
+      },
+    });
+  }
+
+  const linkDecision = path.match(/^\/api\/links\/approvals\/([^/]+)\/(approve|deny)$/);
+  if (linkDecision && method === "POST") {
+    const approvalId = linkDecision[1]!;
+    const decision = linkDecision[2]!;
+    const row = await one<LinkApprovalRow>(
+      db,
+      "SELECT * FROM link_approvals WHERE id = ?",
+      approvalId,
+    );
+    if (!row) fail(404, "No such approval.", "NOT_FOUND");
+    const status = linkStatusOf(row!);
+    if (status !== "PENDING")
+      fail(409, `That approval is ${status.toLowerCase()}.`, "APPROVAL_DECIDED");
+    const mine = realmOf(me);
+    if (row!.initiator_id === uid)
+      fail(403, "Only the other account can decide this request.", "WRONG_SIDE");
+    if (row!.target_realm !== mine)
+      fail(403, "Sign in on that realm to decide this request.", "WRONG_REALM");
+    const viaCode = await resolveApproval(db, env, body);
+    if (!viaCode || viaCode.id !== row!.id)
+      fail(403, "That code does not belong to this request.", "BAD_CODE");
+    const initiator = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row!.initiator_id);
+    if (!initiator) fail(404, "The requesting account no longer exists.", "NOT_FOUND");
+    const decidedAt = nowIso();
+    if (decision === "deny") {
+      await run(
+        db,
+        "UPDATE link_approvals SET status = 'DENIED', decided_at = ?, approved_by = ? WHERE id = ? AND status = 'PENDING'",
+        decidedAt,
+        uid,
+        row!.id,
+      );
+      await run(
+        db,
+        `INSERT INTO realm_audit (id, at, realm, actor_id, subject_id, action, detail_json)
+         VALUES (?, ?, ?, ?, ?, 'link.approval.denied', ?)`,
+        id(),
+        decidedAt,
+        mine,
+        uid,
+        row!.initiator_id,
+        JSON.stringify({ approvalId: row!.id }),
+      );
+      return json({ approval: { id: row!.id, status: "DENIED" } });
+    }
+    // Approve — the plan's "explicit approve": a plain POST without confirm
+    // must NOT link two accounts.
+    if (body.confirm !== true)
+      fail(400, "Confirm the two accounts before approving.", "CONFIRM_REQUIRED");
+    if (await linkRowFor(db, uid)) fail(409, "This account is already linked.", "ALREADY_LINKED");
+    if (await linkRowFor(db, row!.initiator_id))
+      fail(409, "The other account is already linked.", "ALREADY_LINKED");
+    const linkId = id();
+    const aFirst = uid < row!.initiator_id;
+    await db.batch([
+      db
+        .prepare(
+          `UPDATE link_approvals SET status = 'APPROVED', decided_at = ?, approved_by = ?
+            WHERE id = ? AND status = 'PENDING'`,
+        )
+        .bind(decidedAt, uid, row!.id),
+      db
+        .prepare(
+          // The guard re-reads the row the UPDATE just claimed (the repo's
+          // claimGuard pattern): a batch that lost the race inserts nothing.
+          `INSERT INTO identity_links
+             (id, pair_key, a_user_id, b_user_id, a_realm, b_realm, status, created_at)
+           SELECT ?, ?, ?, ?, ?, ?, 'ACTIVE', ?
+            WHERE EXISTS (SELECT 1 FROM link_approvals
+                           WHERE id = ? AND status = 'APPROVED'
+                             AND approved_by = ? AND decided_at = ?)`,
+        )
+        .bind(
+          linkId,
+          linkPairKey(uid, row!.initiator_id),
+          ...(aFirst
+            ? [uid, row!.initiator_id, mine, row!.initiator_realm]
+            : [row!.initiator_id, uid, row!.initiator_realm, mine]),
+          decidedAt,
+          row!.id,
+          uid,
+          decidedAt,
+        ),
+    ]);
+    const created = await one<IdentityLinkRow>(
+      db,
+      "SELECT * FROM identity_links WHERE pair_key = ?",
+      linkPairKey(uid, row!.initiator_id),
+    );
+    if (!created) fail(409, "That approval was already decided.", "APPROVAL_DECIDED");
+    // §13.14: both sides are linked from this instant — the flag is part of
+    // every identity summary they appear in.
+    await run(
+      db,
+      "UPDATE users SET linked = 1 WHERE id IN (?, ?)",
+      created.a_user_id,
+      created.b_user_id,
+    );
+    await run(
+      db,
+      `INSERT INTO realm_audit (id, at, realm, actor_id, subject_id, action, detail_json)
+       VALUES (?, ?, ?, ?, ?, 'link.approved', ?)`,
+      id(),
+      decidedAt,
+      mine,
+      uid,
+      row!.initiator_id,
+      JSON.stringify({
+        linkId,
+        initiator: { id: row!.initiator_id, realm: row!.initiator_realm },
+        approver: { id: uid, realm: mine },
+      }),
+    );
+    return json({
+      link: {
+        id: linkId,
+        createdAt: decidedAt,
+        counterpart: identityOf(initiator!),
+        permissions: LINK_PERMISSIONS.map((p) => p.key),
+      },
+      approval: { id: row!.id, status: "APPROVED" },
+    });
+  }
+
+  const linkRevoke = path.match(/^\/api\/links\/([^/]+)\/revoke$/);
+  if (linkRevoke && method === "POST") {
+    const link = await one<IdentityLinkRow>(
+      db,
+      "SELECT * FROM identity_links WHERE id = ?",
+      linkRevoke[1]!,
+    );
+    if (!link || (link.a_user_id !== uid && link.b_user_id !== uid))
+      fail(404, "No such link.", "NOT_FOUND");
+    if (link!.status !== "ACTIVE") fail(409, "That link is already revoked.", "ALREADY_REVOKED");
+    const revokedAt = nowIso();
+    await run(
+      db,
+      "UPDATE identity_links SET status = 'REVOKED', revoked_at = ?, revoked_by = ? WHERE id = ? AND status = 'ACTIVE'",
+      revokedAt,
+      uid,
+      link!.id,
+    );
+    // §13.14: with no ACTIVE link the summary must say so, on both sides —
+    // the other client learns it from this the moment it reads either account.
+    await run(db, "UPDATE users SET linked = 0 WHERE id IN (?, ?)", link.a_user_id, link.b_user_id);
+    await run(
+      db,
+      `INSERT INTO realm_audit (id, at, realm, actor_id, subject_id, action, detail_json)
+       VALUES (?, ?, ?, ?, ?, 'link.revoked', ?)`,
+      id(),
+      revokedAt,
+      realmOf(me),
+      uid,
+      link!.a_user_id === uid ? link!.b_user_id : link!.a_user_id,
+      JSON.stringify({ linkId: link!.id }),
+    );
+    return json({ link: { id: link!.id, status: "REVOKED", revokedAt } });
+  }
+
   if (path === "/api/users" && method === "GET") {
     const q = (url.searchParams.get("q") || "").trim().toLowerCase().replace(/^@/, "");
+    // Phase R2: one directory, two realms, with an All/KP/VX filter that never
+    // hides the badge (every row carries `origin_realm`). Default is All.
+    const realmParam = url.searchParams.get("realm");
+    const realmFilter: OriginRealm | "all" = isRealm(realmParam) ? realmParam : "all";
+    const realmSql = realmFilter === "all" ? "" : " AND origin_realm = ?";
+    const realmBinds: unknown[] = realmFilter === "all" ? [] : [realmFilter];
+    // Enumeration protection (plan §13.3): a per-account cap in front of the
+    // global limiter, because the directory is the one route a scraper can
+    // sweep cheaply.
+    await rateLimitGlobal(db, `dir:${uid}`, 60);
     // Owner round 30: a private profile is not discoverable by anyone.
     const rows = q
       ? await all<UserRow>(
           db,
-          `SELECT * FROM users WHERE (${instrLike("username")} OR ${instrLike("display_name")}) AND id != ? AND COALESCE(private_profile, 0) = 0 ORDER BY last_active_at DESC LIMIT 20`,
+          `SELECT * FROM users WHERE (${instrLike("username")} OR ${instrLike("display_name")}) AND id != ? AND COALESCE(private_profile, 0) = 0${realmSql} ORDER BY last_active_at DESC LIMIT 20`,
           instrTerm(q),
           instrTerm(q),
           uid,
+          ...realmBinds,
         )
       : await all<UserRow>(
           db,
-          "SELECT * FROM users WHERE id != ? AND COALESCE(private_profile, 0) = 0 ORDER BY last_active_at DESC LIMIT 20",
+          `SELECT * FROM users WHERE id != ? AND COALESCE(private_profile, 0) = 0${realmSql} ORDER BY last_active_at DESC LIMIT 20`,
           uid,
+          ...realmBinds,
         );
     // Block filtering in one two-sided query instead of a blockedBetween()
     // round trip per row — the new-chat screen was 2+N for a 20-user page.
@@ -7372,7 +9364,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       // Light: discovery pages render rows of 54dp avatars — the data-URI
       // for every result is fetched once per avatarRef by the client.
       .map((row) => userFrom(row, onlineNow(row), true, viewFor(contacts, row.id, uid)));
-    return json({ users: list });
+    return json({ users: list, realm: realmFilter });
   }
 
   // Avatar bytes keyed by the user id; the data-URI only (the list endpoints
@@ -7496,8 +9488,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (await blockedBetween(db, uid, row.id)) {
       return json({
         user: {
-          id: row.id,
-          username: row.username,
+          // §13.14: identity survives the wall (see buildConvDetail).
+          ...identitySummary(row, null),
           displayName: row.display_name,
           about: null,
           online: false,
@@ -7540,12 +9532,20 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       target,
     );
     if (ownerRow) fail(403, "This account can't be blocked.", "OWNER_ACCOUNT");
+    // §13.14: the snapshot is written from the two rows as they are NOW, so
+    // the moderation record carries the realms of the event, not of a later
+    // read. A target with no row keeps the route's old behaviour (the row is
+    // still written; there is simply no realm to record beyond the default).
+    const blockTargetRow = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", target);
     await run(
       db,
-      "INSERT OR IGNORE INTO blocks (owner_id, target_id, created_at) VALUES (?, ?, ?)",
+      `INSERT OR IGNORE INTO blocks (owner_id, target_id, created_at, owner_realm, target_realm)
+       VALUES (?, ?, ?, ?, ?)`,
       uid,
       target,
       nowIso(),
+      realmOf(me),
+      blockTargetRow ? realmOf(blockTargetRow) : null,
     );
     // Owner round 34 (item 15): the wall lands INSTANTLY on both sides —
     // the same conv poke the request-accept uses, so open chats re-read
@@ -7719,9 +9719,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   }
 
   if (path === "/api/blocks" && method === "GET") {
-    const rows = await all<{ target_id: string }>(
+    const rows = await all<{ target_id: string; target_realm: string | null }>(
       db,
-      "SELECT target_id FROM blocks WHERE owner_id = ? ORDER BY created_at DESC",
+      "SELECT target_id, target_realm FROM blocks WHERE owner_id = ? ORDER BY created_at DESC",
       uid,
     );
     // Owner round 32 (item 7): the Blocklist screen reads this — one IN()
@@ -7734,7 +9734,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const list = [];
     for (const row of rows) {
       const user = users.get(row.target_id);
-      if (user) list.push(userFrom(user, false, true));
+      if (!user) continue;
+      list.push({
+        ...userFrom(user, false, true),
+        // §13.14: the moderation snapshot — the realm this account had when
+        // the block was written. The live summary above already carries the
+        // realm (it is immutable); the snapshot is what an export or a dispute
+        // reads, so it ships with the row instead of being recomputed.
+        realm_at_event: row.target_realm ?? realmOf(user),
+      });
     }
     return json({ users: list });
   }
@@ -7765,6 +9773,25 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       crypto.randomUUID(),
       `REPORT[${uid.slice(0, 8)}] -> ${target.slice(0, 8)} :: ${reason || "no reason"}`,
       nowIso(),
+    );
+    // §13.14: a moderation event keeps the realm of both sides AT EVENT TIME.
+    // The target's realm is read from its own row (never from the request
+    // body), so a report can neither invent nor hide the other side's origin.
+    const targetRow = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", target);
+    await run(
+      db,
+      `INSERT INTO realm_audit (id, at, realm, actor_id, subject_id, action, detail_json)
+       VALUES (?, ?, ?, ?, ?, 'moderation.report', ?)`,
+      id(),
+      nowIso(),
+      realmOf(me),
+      uid,
+      target,
+      JSON.stringify({
+        reporterRealm: realmOf(me),
+        targetRealm: targetRow ? realmOf(targetRow) : null,
+        reason: reason || null,
+      }),
     );
     return json({ ok: true });
   }
@@ -9472,21 +11499,38 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // sender. A 50-message group page used to issue up to 50 extra D1 round
     // trips — every one of them edge→primary latency on the caller.
     const names = new Map<string, string>();
+    // §13.14: the same round trip also carries each sender's realm, so a page
+    // of history is badge-true even for a sender who has since left the chat —
+    // the name and the realm are one cache-safe snapshot, never a guess.
+    const realms = new Map<string, string>();
     for (const group of chunked([...new Set(rows.map((r) => r.sender_id).filter(Boolean))])) {
-      const sent = await all<{ id: string; display_name: string; nickname: string | null }>(
+      const sent = await all<{
+        id: string;
+        display_name: string;
+        origin_realm: string | null;
+        nickname: string | null;
+      }>(
         db,
-        `SELECT users.id, users.display_name,
+        `SELECT users.id, users.display_name, users.origin_realm,
                 (SELECT nickname FROM conversation_nicknames n
                   WHERE n.conv_id = ? AND n.user_id = users.id) AS nickname
            FROM users WHERE users.id IN (${inSql(group.length)})`,
         convId,
         ...group,
       );
-      for (const u of sent) names.set(u.id, u.nickname || u.display_name);
+      for (const u of sent) {
+        names.set(u.id, u.nickname || u.display_name);
+        // realmOf() reads exactly the column this query already selected.
+        realms.set(u.id, realmOf(u));
+      }
     }
-    const items = rows
-      .reverse()
-      .map((row) => ({ ...msgFrom(row), senderName: names.get(row.sender_id) }));
+    const items = rows.reverse().map((row) => ({
+      ...msgFrom(row),
+      senderName: names.get(row.sender_id),
+      // The per-message snapshot is the truth of that moment; the live map is
+      // only the fallback for messages older than the column (§13.14).
+      senderRealm: row.sender_realm ?? realms.get(row.sender_id),
+    }));
     // Delivery receipts: the fetching member has now received every message
     // in this page that someone else sent (only mark the ones still pending).
     const inboxIds = rows
@@ -9973,14 +12017,17 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const written = (await db.batch([
       db
         .prepare(
-          `INSERT INTO messages (id, conv_id, sender_id, kind, body, media, meta_json, created_at, client_id, reply_to, delivered_at)
-           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          `INSERT INTO messages (id, conv_id, sender_id, sender_realm, kind, body, media, meta_json, created_at, client_id, reply_to, delivered_at)
+           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             WHERE NOT EXISTS (SELECT 1 FROM messages WHERE conv_id = ? AND sender_id = ? AND client_id = ?)`,
         )
         .bind(
           mid,
           convId,
           uid,
+          // §13.14: the sender's realm travels WITH the message. Read here from
+          // the sender's own row — a client cannot stamp a realm on its message.
+          realmOf(me),
           storedKind,
           text,
           imageData ?? fileKey ?? null,
@@ -10073,12 +12120,24 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       created_at: created,
       delivered_at: isAiConversation ? created : null,
       reply_to: replyTo,
+      // §13.14: the frame and the response both hand the sender's realm to a
+      // client that has not loaded the member snapshot yet. Read from the
+      // sender's own row — the stored column is written from the same value.
+      sender_realm: realmOf(me),
     } as MsgRow);
     // Realtime: anyone with this chat open hears about the message the
     // instant it lands; everyone else's chat list gets a light poke. FCM
     // (below) still wakes fully backgrounded apps — WS is the foreground path.
     ctx.waitUntil(
-      broadcastRoomEvent(env, convId, { type: "message", conversationId: convId, message }),
+      broadcastRoomEvent(env, convId, {
+        type: "message",
+        conversationId: convId,
+        message,
+        // §13.14: the frame names the sender both by immutable id (in the
+        // message) and by realm, so a client that has not loaded the member
+        // snapshot yet still badges the right way.
+        senderRealm: realmOf(me),
+      }),
     );
     if (isAiConversation) {
       ctx.waitUntil(
@@ -10257,6 +12316,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           mid,
           kind: conv.kind,
           fromName: me.display_name,
+          // §13.14: the origin rides the push because the CARD is drawn from
+          // this payload — and it is read from the sender's own row here, so a
+          // client cannot put a realm of its choosing on another account.
+          kp_from_realm: realmOf(me),
+          kp_from_username: me.username,
           // Android resolves the sender's photo through the recipient-authenticated
           // avatar endpoint, which enforces private-avatar and block rules. Never put
           // a raw avatar blob in the FCM payload.
@@ -11199,6 +13263,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   /* ---------- calls ---------- */
 
   if (path === "/api/calls" && method === "POST") {
+    if (!dedicatedTurnConfigured(env))
+      fail(
+        503,
+        "Calling is temporarily unavailable because the dedicated relay is not configured.",
+        "CALL_RELAY_UNAVAILABLE",
+      );
     const other = String(body.userId || "");
     const kind = body.kind === "VIDEO" ? "VIDEO" : "AUDIO";
     if (!other || other === uid) fail(400, "Bad user.");
@@ -11318,6 +13388,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           kind,
           fromId: uid,
           fromName: me.display_name,
+          fromRealm: realmOf(me),
         });
         // Delivery rule (same as messages / missed calls):
         //   - NO live socket (swiped-away / killed / frozen) => system
@@ -11340,6 +13411,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             kind,
             fromName: me.display_name,
             fromId: uid,
+            fromRealm: realmOf(me),
             // r69: the pair conversation this ring belongs to — the callee's
             // app checks its CALL mute against it before making a sound (the
             // server already withholds this push for a call-muted member; this
@@ -11419,6 +13491,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   // Media is a mesh — the starter has no offer yet; each pair negotiates
   // through /peer when the second side joins.
   if (path === "/api/calls/group" && method === "POST") {
+    if (!dedicatedTurnConfigured(env))
+      fail(
+        503,
+        "Calling is temporarily unavailable because the dedicated relay is not configured.",
+        "CALL_RELAY_UNAVAILABLE",
+      );
     const convId = String(body.conversationId || "");
     const kind = body.kind === "VIDEO" ? "VIDEO" : "AUDIO";
     if (!convId) fail(400, "Bad conversation.");
@@ -11691,14 +13769,33 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       db,
       rows.map((row) => (row.caller_id === uid ? row.callee_id : row.caller_id)),
     );
-    const items: Array<{ createdAt: string }> = rows.map((row) =>
-      callHistoryFrom(
+    const callConversationIds = [...rows, ...groupRows]
+      .map((row) => row.conv_id)
+      .filter((value): value is string => !!value);
+    const hiddenConversationIds = new Set<string>();
+    for (const group of chunked([...new Set(callConversationIds)])) {
+      const hidden = await all<{ conv_id: string }>(
+        db,
+        `SELECT conv_id FROM members WHERE user_id = ? AND hidden = 1 AND conv_id IN (${inSql(group.length)})`,
+        uid,
+        ...group,
+      );
+      hidden.forEach((row) => hiddenConversationIds.add(row.conv_id));
+    }
+    const items: Array<{ createdAt: string; hidden?: boolean }> = rows.map((row) => ({
+      ...callHistoryFrom(
         row,
         uid,
         others.get(row.caller_id === uid ? row.callee_id : row.caller_id) ?? null,
       ),
-    );
-    for (const row of groupRows) items.push(await groupCallFrom(db, row, uid, true));
+      hidden: !!row.conv_id && hiddenConversationIds.has(row.conv_id),
+    }));
+    for (const row of groupRows) {
+      items.push({
+        ...(await groupCallFrom(db, row, uid, true)),
+        hidden: !!row.conv_id && hiddenConversationIds.has(row.conv_id),
+      });
+    }
     items.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
     return json({ items: items.slice(0, 100) });
   }
@@ -12143,6 +14240,8 @@ type MsgRow = {
   id: string;
   conv_id: string;
   sender_id: string;
+  /** Plan §13.14: the sender's realm at send time (null on legacy rows). */
+  sender_realm?: string | null;
   kind: string;
   body: string | null;
   media: string | null;
@@ -12474,6 +14573,9 @@ function msgFrom(row: MsgRow) {
   return {
     id: row.id,
     senderId: row.sender_id,
+    // §13.14: the sender's realm as of this message when we have it; clients
+    // fall back to the member snapshot for rows older than the column.
+    senderRealm: row.sender_realm ?? undefined,
     kind: row.kind,
     body: row.body,
     replyTo: row.reply_to || undefined,
@@ -13480,8 +15582,11 @@ function buildConvDetail(
     const memberUser = {
       ...(walled
         ? {
-            id: user.id,
-            username: user.username,
+            // §13.14: the wall hides private fields (last seen, bio, picture),
+            // never IDENTITY — origin realm, roles and the link flag are the
+            // facts a badge is drawn from, so they survive the block. The
+            // camelCase alias the shipped clients read rides along.
+            ...identitySummary(user, null),
             displayName: user.display_name,
             about: null,
             online: false,

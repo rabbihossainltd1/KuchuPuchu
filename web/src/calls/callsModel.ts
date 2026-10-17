@@ -163,15 +163,6 @@ export const CALL_COPY = {
   historyLoading: "Loading your call history…",
   historyError: "Call history could not be loaded.",
   historyRetry: "Try again",
-  /**
-   * The phone moves a hidden chat's calls off this tab and onto its Hidden
-   * screen (`ScreenStore.isHiddenCall`). This browser has no Hidden screen yet,
-   * so nothing is filtered — and that is said out loud instead of silently
-   * showing rows the phone would have moved.
-   */
-  historyHiddenNote:
-    "On the phone, calls from a chat you hid move to its Hidden list. This browser has no Hidden list yet, so every call is listed here.",
-
   /* ring + in-call status lines (CallScreens.kt) */
   statusBusy: "Line busy — on another call",
   statusOnHold: "On hold",
@@ -224,6 +215,7 @@ export const CALL_COPY = {
   codeForbidden: "That call isn't yours.",
   startFailed: "Couldn't start the call. Try again.",
   answerFailed: "Couldn't connect the call. Try again.",
+  relayUnavailable: "Calling is unavailable until the dedicated relay is configured.",
   noAnswer: "No answer",
 
   /* group calls: refused, with the reason */
@@ -276,6 +268,8 @@ export type CallPeer = {
   readonly id: string;
   readonly displayName: string;
   readonly username: string;
+  /** Immutable origin realm (§13.3) — the call screens' badge source. */
+  readonly originRealm: OriginRealm | null;
   readonly avatarUrl: string;
   readonly avatarRef: string;
   readonly online: boolean;
@@ -302,6 +296,7 @@ export type CallRow = {
   readonly status: CallStatus;
   readonly incoming: boolean;
   readonly conversationId: string;
+  readonly hidden: boolean;
   readonly callerId: string;
   readonly calleeId: string;
   readonly group: boolean;
@@ -378,6 +373,7 @@ export function parseCallPeer(value: unknown): CallPeer | null {
     id,
     displayName: text(value.displayName, 120),
     username: text(value.username, 64),
+    originRealm: originRealmOf(value),
     // A light row carries `avatarUrl: null` on purpose; the ref is what a client
     // resolves through its own cache.
     avatarUrl: text(value.avatarUrl, 4_000_000),
@@ -427,6 +423,7 @@ export function parseCallRow(value: unknown): CallRow | null {
     status: parseCallStatus(value.status),
     incoming: value.incoming === true,
     conversationId: text(value.conversationId, 64),
+    hidden: value.hidden === true,
     callerId: text(value.callerId, 64),
     calleeId: text(value.calleeId, 64),
     group,
@@ -809,52 +806,19 @@ export type IceServer = {
   readonly urls: readonly string[];
   readonly username?: string;
   readonly credential?: string;
+  /** Epoch milliseconds; zero means a static credential with external rotation. */
+  readonly expiresAt?: number;
 };
 
-/**
- * The phone's built-in list (CallEngine.builtInIceServers): three public STUN
- * servers, then Nextcloud's relay on 443 leading the TURN entries, then the
- * openrelay fallbacks. Order matters — a worker-minted relay goes FIRST when
- * `/api/config/ice` answers one, and these carry on when it does not.
- */
+/** Public STUN may discover direct candidates; relaying is always dedicated. */
 export const BUILT_IN_ICE_SERVERS: readonly IceServer[] = Object.freeze([
   { urls: ["stun:stun.l.google.com:19302"] },
   { urls: ["stun:stun1.l.google.com:19302"] },
   { urls: ["stun:stun.cloudflare.com:3478"] },
-  {
-    urls: ["turn:turn.nextcloud.com:443?transport=tcp", "turn:turn.nextcloud.com:443"],
-    username: "nextcloud",
-    credential: "nextcloud",
-  },
-  {
-    urls: [
-      "turn:standard.relay.metered.ca:80",
-      "turn:openrelay.metered.ca:80",
-      "turn:openrelay.metered.ca:443",
-      "turn:openrelay.metered.ca:80?transport=tcp",
-      "turns:openrelay.metered.ca:443?transport=tcp",
-    ],
-    username: "openrelayproject",
-    credential: "openrelayproject",
-  },
 ]);
 
-/**
- * The relay-first retry list: after ICE FAILED the phone drops the STUN-only
- * entries and keeps TCP/TLS relays, because direct and peer-reflexive pairing is
- * what dies behind a VPN or carrier-grade NAT (CallEngine.relayFirstIceServers).
- */
-export const RELAY_FIRST_ICE_SERVERS: readonly IceServer[] = Object.freeze([
-  {
-    urls: [
-      "turn:openrelay.metered.ca:80?transport=tcp",
-      "turn:openrelay.metered.ca:443?transport=tcp",
-      "turns:openrelay.metered.ca:443?transport=tcp",
-    ],
-    username: "openrelayproject",
-    credential: "openrelayproject",
-  },
-]);
+/** No public/shared TURN fallback is permitted. A retry uses the minted relay only. */
+export const RELAY_FIRST_ICE_SERVERS: readonly IceServer[] = Object.freeze([]);
 
 /**
  * `GET /api/config/ice` answers `{ ice: { urls, username, credential } }` or
@@ -866,12 +830,18 @@ export function parseIceConfig(payload: unknown): IceServer | null {
   const ice = payload.ice;
   if (!isRecord(ice)) return null;
   const urls = Array.isArray(ice.urls)
-    ? ice.urls.map((url) => text(url, 300)).filter((url) => url !== "")
+    ? ice.urls
+        .map((url) => text(url, 300))
+        .filter((url) => url.startsWith("turn:") || url.startsWith("turns:"))
     : [];
-  if (!urls.length) return null;
   const username = text(ice.username, 300);
   const credential = text(ice.credential, 300);
-  return username && credential ? { urls, username, credential } : { urls };
+  if (!urls.length || !username || !credential) return null;
+  const rawExpiry =
+    typeof ice.expiresAt === "number" && Number.isFinite(ice.expiresAt) ? ice.expiresAt : 0;
+  const expiresAt = Math.max(0, rawExpiry);
+  if (expiresAt > 0 && expiresAt <= Date.now() + 30_000) return null;
+  return { urls, username, credential, expiresAt };
 }
 
 /** The list a new peer connection is built with: the minted relay first. */
@@ -1158,6 +1128,9 @@ export function iceCandidateBody(candidate: {
  * messaging chunk imports — and is re-exported here so the calls chunk and the
  * contract case have a single import path for it.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- type-only import
+import type { OriginRealm } from "../messaging/realmBadge";
+import { originRealmOf } from "../messaging/realmBadge";
 export {
   CALL_GATE_REASONS,
   callPlacement,

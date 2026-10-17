@@ -52,6 +52,12 @@ const CallsLayer = lazy(() =>
   })),
 );
 
+const ClassroomWorkspace = lazy(() =>
+  import("./classroom/ClassroomWorkspace").then((module) => ({
+    default: module.ClassroomWorkspace,
+  })),
+);
+
 type View = {
   id: Exclude<SectionId, "account" | "contacts" | "newcontact">;
   label: string;
@@ -62,6 +68,7 @@ const views: View[] = [
   { id: "chats", label: "Chats", icon: "chats" },
   { id: "statuses", label: "Status", icon: "status" },
   { id: "calls", label: "Calls", icon: "calls" },
+  { id: "classroom", label: "Class", icon: "classroom" },
   { id: "search", label: "Search", icon: "search" },
 ];
 
@@ -72,6 +79,7 @@ const viewDescriptions: Record<
   chats: "Messaging is not enabled in this Web rollout. No chats or messages are loaded here.",
   statuses: "Status feed and viewer integration remain disabled in this Web rollout.",
   calls: "Call history and browser calling remain disabled in this Web rollout.",
+  classroom: "Linked VintoxBd classes appear here after enrollment approval.",
   search: "Search is not connected to KuchuPuchu accounts or conversations in this build.",
 };
 
@@ -228,6 +236,7 @@ export default function App() {
             route.section === "newcontact"))));
   const isStatusArea = route.kind === "section" && route.section === "statuses";
   const isCallsArea = route.kind === "section" && route.section === "calls";
+  const isClassroomArea = route.kind === "section" && route.section === "classroom";
   // With messaging on, the chat list itself carries private data, so it needs a
   // verified session too — not just the deep-link and account routes. A status
   // feed is other people's pictures and a reply is a sealed message, so it is
@@ -473,7 +482,11 @@ export default function App() {
           </Suspense>
         ) : null}
 
-        {statusesEnabled && isStatusArea ? (
+        {isClassroomArea ? (
+          <Suspense fallback={<p className="welcome-card__body">Loading classes…</p>}>
+            <ClassroomWorkspace />
+          </Suspense>
+        ) : statusesEnabled && isStatusArea ? (
           <Suspense fallback={<p className="welcome-card__body">Loading statuses…</p>}>
             <StatusWorkspace
               onOpenChat={

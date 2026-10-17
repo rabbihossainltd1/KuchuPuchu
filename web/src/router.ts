@@ -2,6 +2,7 @@ export const SECTIONS = [
   "chats",
   "statuses",
   "calls",
+  "classroom",
   "search",
   "contacts",
   "newcontact",
@@ -90,7 +91,10 @@ export function parseRoute(pathname: string): AppRoute {
 
 /** Account and conversation URLs never expose private data before a valid session. */
 export function routeRequiresAuthentication(route: AppRoute): boolean {
-  return route.kind === "conversation" || (route.kind === "section" && route.section === "account");
+  return (
+    route.kind === "conversation" ||
+    (route.kind === "section" && (route.section === "account" || route.section === "classroom"))
+  );
 }
 
 /** Build a canonical same-origin path. Route IDs are opaque path segments. */

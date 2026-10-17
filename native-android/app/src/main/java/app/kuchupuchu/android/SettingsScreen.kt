@@ -1,7 +1,9 @@
 package app.kuchupuchu.android
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import androidx.core.content.ContextCompat
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Lock
@@ -16,6 +18,9 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PermMedia
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -70,6 +75,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -80,12 +86,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -182,7 +190,7 @@ private fun HubRow(icon: ImageVector, label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun SubScreenHeader(title: String, onBack: () -> Unit, trailing: @Composable () -> Unit = {}) {
+fun SubScreenHeader(title: String, onBack: () -> Unit, trailing: @Composable () -> Unit = {}) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -216,6 +224,21 @@ fun SettingsScreen(nav: NavController) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var confirmLogout by remember { mutableStateOf(false) }
+    // §13.13: the hub shows the linked-account state — but only once this
+    // install has ever exchanged with the core, so merely opening Settings
+    // never provisions anything.
+    var vxState by remember { mutableStateOf(if (CoreApi.token == null) "Not linked" else "…") }
+    LaunchedEffect(Unit) {
+        if (CoreApi.token == null) return@LaunchedEffect
+        vxState = withContext(Dispatchers.IO) {
+            runCatching { CoreApi.get(ctx, "/api/links") }.fold(
+                onSuccess = { answer ->
+                    if (answer.optJSONArray("links")?.length() ?: 0 > 0) "Linked" else "Not linked"
+                },
+                onFailure = { "Not linked" },
+            )
+        }
+    }
 
     Column(
         Modifier
@@ -231,6 +254,7 @@ fun SettingsScreen(nav: NavController) {
             HubRow(Icons.Filled.Palette, "Appearance") { nav.navigate("settings/appearance") }
             HubRow(Icons.Filled.PhoneAndroid, "Devices") { nav.navigate("settings/devices") }
             HubRow(Icons.Filled.Shield, "Permissions") { nav.navigate("settings/permissions") }
+            SettingRow(Icons.Filled.School, "VintoxBd account", vxState) { nav.navigate("settings/vintoxbd") }
             HubRow(Icons.Filled.Info, "App") { nav.navigate("settings/app") }
         }
         Spacer(Modifier.height(18.dp))
@@ -284,6 +308,385 @@ fun SettingsScreen(nav: NavController) {
                 }
             },
         )
+    }
+}
+
+/* ---------------- Settings › VintoxBd account (plan §13.13) ---------------- */
+
+/**
+ * What the ceremony grants — the core's own two permissions, in the wording the
+ * website approval screen uses (LINK_PERMISSIONS in the worker), so the app
+ * never promises more than the website grants.
+ */
+private val VX_LINK_PERMISSIONS = listOf(
+    "See the courses and batches this website account bought",
+    "Join those live classes and record attendance",
+)
+
+/**
+ * The linked-account state and the secure “Link VintoxBd account” entry.
+ *
+ * The app is KuchuPuchu and chats/calls work with nobody linked (§13.2); linking
+ * exists so an app identity can inherit the private VintoxBd side — bought
+ * courses, batches and live-class access. The ceremony is the core's: this
+ * screen shows a short-lived one-time code, the student approves it on the
+ * website where both identities and the requested permissions are shown, and
+ * the app learns the outcome. Nothing here merges accounts, and the code is
+ * never stored — it lives in this screen's memory until it expires.
+ */
+@Composable
+fun VintoxBdAccountScreen(nav: NavController) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val haptics = rememberHaptics()
+
+    var loading by remember { mutableStateOf(true) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    var notice by remember { mutableStateOf("") }
+    var link by remember { mutableStateOf<JSONObject?>(null) }
+    var approval by remember { mutableStateOf<JSONObject?>(null) }
+    var secondsLeft by remember { mutableIntStateOf(0) }
+    var askUnlink by remember { mutableStateOf(false) }
+
+    fun readLinks(announceRevocation: Boolean) {
+        scope.launch {
+            try {
+                val answer = CoreApi.getAsync(ctx, "/api/links")
+                val first = answer.optJSONArray("links")?.optJSONObject(0)
+                if (first == null && announceRevocation && LinkMemory.seen(ctx)) {
+                    // Revoked elsewhere (or by an entitlement change): say so and
+                    // offer the re-auth path instead of pretending "never linked".
+                    notice =
+                        "This app is no longer linked to VintoxBd. Link it again to keep your " +
+                            "courses and class access."
+                    LinkMemory.markSeen(ctx, false)
+                }
+                if (first != null) LinkMemory.markSeen(ctx, true)
+                link = first
+                error = ""
+            } catch (e: Exception) {
+                error = (e as? CoreApi.CoreError)?.message ?: "Can't reach VintoxBd right now."
+            } finally {
+                loading = false
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) { readLinks(announceRevocation = true) }
+
+    // A code is only good for a few minutes: the countdown is the screen's, and
+    // the outcome is polled — a denial or an approval both end the wait.
+    LaunchedEffect(approval?.optString("id")) {
+        val id = approval?.optString("id").orEmpty()
+        if (id.isBlank()) return@LaunchedEffect
+        while (true) {
+            delay(4_000)
+            val answer = runCatching { CoreApi.getAsync(ctx, "/api/links/approvals/$id") }
+                .getOrNull() ?: continue
+            when (answer.optJSONObject("approval")?.optString("status")) {
+                "APPROVED" -> {
+                    val fresh = answer.optJSONObject("link")
+                        ?: runCatching { CoreApi.getAsync(ctx, "/api/links") }
+                            .getOrNull()?.optJSONArray("links")?.optJSONObject(0)
+                    link = fresh
+                    approval = null
+                    notice = "Linked. Your courses, batches and live classes now appear here."
+                    LinkMemory.markSeen(ctx, true)
+                    haptics.tap()
+                }
+                "DENIED" -> {
+                    approval = null
+                    notice = "The website declined this link. Ask for a new code when you're ready."
+                }
+                "EXPIRED" -> {
+                    approval = null
+                    notice = "That code expired. Ask for a new one."
+                }
+            }
+        }
+    }
+
+    if (approval != null) {
+        LaunchedEffect(approval?.optString("id"), approval?.optString("expiresAt")) {
+            val expires = approval?.optString("expiresAt").orEmpty()
+            while (true) {
+                secondsLeft = secondsFromDhaka(expires)
+                if (secondsLeft <= 0) break
+                delay(1_000)
+            }
+        }
+    }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Cream)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .verticalScroll(rememberScrollState()),
+    ) {
+        SubScreenHeader("VintoxBd account", onBack = { nav.popBackStack() })
+
+        if (loading) {
+            Row(
+                Modifier.fillMaxWidth().padding(24.dp),
+                horizontalArrangement = Arrangement.Center,
+            ) { CircularProgressIndicator(modifier = Modifier.size(22.dp), color = ActionBlueDeep) }
+            return@Column
+        }
+
+        if (error.isNotBlank()) {
+            SectionCard {
+                Column(Modifier.padding(16.dp)) {
+                    Text(error, fontSize = 13.5.sp, color = Red)
+                    Spacer(Modifier.height(12.dp))
+                    ActionBtn("Try again", Modifier.fillMaxWidth(), true) {
+                        loading = true
+                        readLinks(announceRevocation = false)
+                    }
+                }
+            }
+            Spacer(Modifier.height(32.dp))
+            return@Column
+        }
+
+        val current = link
+        val waiting = approval
+        when {
+            current != null -> {
+                // ---- linked -------------------------------------------------
+                SectionCard {
+                    Column(Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                current.optJSONObject("counterpart")?.optString("displayName")
+                                    ?.takeIf { it.isNotBlank() } ?: "VintoxBd account",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Ink,
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            // §13.12: the same origin badge every other surface draws.
+                            RealmBadge(realmOf(current.optJSONObject("counterpart")), 14.dp)
+                        }
+                        Text(
+                            "@" + current.optJSONObject("counterpart")?.optString("username").orEmpty(),
+                            fontSize = 13.sp,
+                            color = Muted,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                        Text(
+                            "Linked " + listStamp(current.optString("createdAt")),
+                            fontSize = 12.5.sp,
+                            color = Muted,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Text("This link lets the app:", fontSize = 13.sp, color = Ink)
+                        VX_LINK_PERMISSIONS.forEach { line ->
+                            Row(Modifier.padding(top = 4.dp)) {
+                                Icon(Icons.Filled.Check, null, tint = ActionBlueDeep, modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(line, fontSize = 12.5.sp, color = Muted)
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                SectionCard {
+                    SettingRow(Icons.Filled.School, "Class", "Enrolled VintoxBd classes") {
+                        nav.navigate("classroom")
+                    }
+                }
+                Spacer(Modifier.height(18.dp))
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Red.copy(alpha = 0.12f))
+                        .clickable { haptics.tap(); askUnlink = true }
+                        .padding(horizontal = 16.dp, vertical = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Block, contentDescription = "Unlink", tint = Red, modifier = Modifier.size(21.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text("Unlink VintoxBd account", color = Red, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                }
+            }
+
+            waiting != null -> {
+                // ---- waiting for the website --------------------------------
+                val code = waiting.optString("code")
+                SectionCard {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Enter this code on the VintoxBd website", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Sign in there, open the linked-accounts step and type the code. The website shows both accounts and what the link grants before you approve.",
+                            fontSize = 12.5.sp,
+                            color = Muted,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Cream)
+                                .padding(vertical = 14.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                code.chunked(4).joinToString(" "),
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 26.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Ink,
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            if (secondsLeft > 0) "Expires in ${secondsLeft / 60}:%02d".format(secondsLeft % 60)
+                            else "Checking the code…",
+                            fontSize = 12.5.sp,
+                            color = Muted,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.ContentCopy, null, tint = ActionBlueDeep, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "Keep it private — it works once, and whoever has it can approve.",
+                                fontSize = 12.sp,
+                                color = Muted,
+                            )
+                        }
+                        Spacer(Modifier.height(14.dp))
+                        Row {
+                            ActionBtn("Copy code", Modifier.weight(1f), true) {
+                                CoreApi.copyCode(ctx, "VintoxBd link code", code)
+                                notice = "Code copied."
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            GoldBtn("Open website", Modifier.weight(1f), true) {
+                                val url = waiting.optString("deepLink").ifBlank { CoreApi.base }
+                                runCatching {
+                                    ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        Text("Waiting for the website…", fontSize = 12.5.sp, color = Muted)
+                        Spacer(Modifier.height(8.dp))
+                        SettingRow(Icons.Filled.Close, "Discard this code", "", clickable = !busy) {
+                            approval = null
+                            notice = "Code discarded. It stops working on its own in a few minutes."
+                        }
+                    }
+                }
+            }
+
+            else -> {
+                // ---- not linked ---------------------------------------------
+                SectionCard {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Link this app to your VintoxBd account", fontSize = 15.5.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "Chat and calls work without linking. Link to inherit the VintoxBd side of your account.",
+                            fontSize = 12.5.sp,
+                            color = Muted,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        VX_LINK_PERMISSIONS.forEach { line ->
+                            Row(Modifier.padding(top = 4.dp)) {
+                                Icon(Icons.Filled.Check, null, tint = ActionBlueDeep, modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(line, fontSize = 12.5.sp, color = Muted)
+                            }
+                        }
+                        Spacer(Modifier.height(6.dp))
+                    }
+                }
+                Spacer(Modifier.height(18.dp))
+                ActionBtn("Link VintoxBd account", Modifier.fillMaxWidth().padding(horizontal = 14.dp), !busy) {
+                    if (busy) return@ActionBtn
+                    busy = true
+                    scope.launch {
+                        try {
+                            val answer = CoreApi.postAsync(
+                                ctx,
+                                "/api/links/approvals",
+                                JSONObject().put("targetRealm", "vx"),
+                            )
+                            approval = answer.optJSONObject("approval")
+                            secondsLeft = secondsFromDhaka(approval?.optString("expiresAt").orEmpty())
+                            notice = ""
+                        } catch (e: CoreApi.CoreError) {
+                            when (e.code) {
+                                "ALREADY_LINKED" -> readLinks(announceRevocation = false)
+                                "APPROVAL_OPEN" ->
+                                    notice =
+                                        "A code is already waiting for approval (it works for ten minutes). " +
+                                            "Approve it on the website, or ask again after it expires."
+                                else -> error = e.message ?: "Could not start linking."
+                            }
+                        } catch (e: Exception) {
+                            error = "Could not start linking."
+                        } finally {
+                            busy = false
+                        }
+                    }
+                }
+            }
+        }
+
+        if (notice.isNotBlank()) {
+            Spacer(Modifier.height(16.dp))
+            SectionCard {
+                Text(notice, fontSize = 13.sp, color = Ink, modifier = Modifier.padding(16.dp))
+            }
+        }
+        Spacer(Modifier.height(32.dp))
+    }
+
+    if (askUnlink) {
+        KpConfirmSheet(
+            title = "Unlink VintoxBd account?",
+            text = "The app keeps working. Courses, batches and live classes stop appearing here until you link again.",
+            confirmLabel = "Unlink",
+            danger = true,
+            onDismiss = { askUnlink = false },
+            onConfirm = {
+                askUnlink = false
+                busy = true
+                scope.launch {
+                    val id = link?.optString("id").orEmpty()
+                    try {
+                        if (id.isNotBlank()) CoreApi.postAsync(ctx, "/api/links/$id/revoke")
+                        link = null
+                        LinkMemory.markSeen(ctx, false)
+                        notice = "Unlinked. Link again whenever you need your courses here."
+                    } catch (e: Exception) {
+                        error = (e as? CoreApi.CoreError)?.message ?: "Could not unlink right now."
+                    } finally {
+                        busy = false
+                    }
+                }
+            },
+        )
+    }
+}
+
+/** Whole seconds until a Dhaka-zone ISO instant, floored at zero. */
+private fun secondsFromDhaka(iso: String): Int {
+    if (iso.isBlank()) return 0
+    return try {
+        val left = java.time.Duration.between(java.time.Instant.now(), java.time.Instant.parse(iso))
+        left.seconds.coerceAtLeast(0).toInt()
+    } catch (e: Exception) {
+        0
     }
 }
 

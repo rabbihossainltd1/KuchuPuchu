@@ -25,7 +25,14 @@ async function mk(withDo) {
   const callFrames = [];
   const chatFrames = [];
   const connects = [];
-  const env = { DB: db, MEDIA: makeR2(), GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
+  const env = {
+    DB: db,
+    MEDIA: makeR2(),
+    GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
+    TURN_URLS: "turns:relay.test:443",
+    TURN_USERNAME: "test",
+    TURN_CREDENTIAL: "test-secret",
+  };
   if (withDo) {
     // The worker may call fetch("url", init) OR fetch(new Request(...)) — the
     // real DO stub accepts both; normalise here so the fakes do too.
@@ -87,7 +94,64 @@ async function mk(withDo) {
     return { status: res.status, json: j };
   };
   const reg = makeReg(call);
-  return { db, call, reg, callFrames, chatFrames, connects };
+  return { db, env, call, reg, callFrames, chatFrames, connects };
+}
+
+// ---- 0. no public/shared relay fallback ----
+{
+  const k = await mk(false);
+  const a = await k.reg("relay-a@x.com", "relay_a");
+  const b = await k.reg("relay-b@x.com", "relay_b");
+  const anonymousIce = await k.call("GET", "/api/config/ice");
+  check("TURN credentials are never disclosed anonymously", anonymousIce.status === 401);
+  const configuredIce = await k.call("GET", "/api/config/ice", undefined, a.token);
+  check(
+    "authenticated static dedicated TURN is complete and explicitly non-expiring",
+    configuredIce.status === 200 &&
+      configuredIce.json.ice?.urls?.[0] === "turns:relay.test:443" &&
+      configuredIce.json.ice?.username === "test" &&
+      configuredIce.json.ice?.expiresAt === 0,
+    JSON.stringify(configuredIce),
+  );
+  const realFetch = globalThis.fetch;
+  k.env.TURN_KEY_ID = "turn-key";
+  k.env.TURN_API_TOKEN = "turn-secret";
+  globalThis.fetch = async (input, init) => {
+    const url = typeof input === "string" ? input : input.url;
+    if (url.startsWith("https://rtc.live.cloudflare.com/")) throw new TypeError("offline");
+    return realFetch(input, init);
+  };
+  const fallbackIce = await k.call("GET", "/api/config/ice", undefined, a.token);
+  globalThis.fetch = realFetch;
+  delete k.env.TURN_KEY_ID;
+  delete k.env.TURN_API_TOKEN;
+  check(
+    "a TURN mint network failure is contained and falls back only to configured private TURN",
+    fallbackIce.status === 200 &&
+      fallbackIce.json.ice?.urls?.[0] === "turns:relay.test:443" &&
+      fallbackIce.json.ice?.expiresAt === 0,
+    JSON.stringify(fallbackIce),
+  );
+  delete k.env.TURN_URLS;
+  delete k.env.TURN_USERNAME;
+  delete k.env.TURN_CREDENTIAL;
+  const missingIce = await k.call("GET", "/api/config/ice", undefined, a.token);
+  check("missing dedicated TURN answers ice:null", missingIce.json.ice === null);
+  const refused = await k.call(
+    "POST",
+    "/api/calls",
+    { userId: b.user.id, kind: "AUDIO", offerSdp: "v=0 offer" },
+    a.token,
+  );
+  check(
+    "call creation fails closed without dedicated TURN",
+    refused.status === 503 && refused.json.error?.code === "CALL_RELAY_UNAVAILABLE",
+    JSON.stringify(refused),
+  );
+  check(
+    "relay refusal creates no ringing row",
+    k.db._db.prepare("SELECT COUNT(*) n FROM calls").get().n === 0,
+  );
 }
 
 // ---- 1. create → answer → end frames + gated callee poke ----
@@ -147,6 +211,23 @@ async function mk(withDo) {
       !("reofferSdp" in historyRow) &&
       !("reanswerSdp" in historyRow),
     historyRow ? JSON.stringify(historyRow) : "none",
+  );
+
+  const conversationId = historyRow.conversationId;
+  k.db._db
+    .prepare("UPDATE members SET hidden = 1 WHERE conv_id = ? AND user_id = ?")
+    .run(conversationId, a.user.id);
+  const hiddenHistory = await k.call("GET", "/api/calls/history", undefined, a.token);
+  check(
+    "call history carries the viewer-specific hidden-chat fact",
+    hiddenHistory.json.items?.find((item) => item.id === callId)?.hidden === true,
+    JSON.stringify({
+      history: hiddenHistory.json,
+      conversationId,
+      members: k.db._db
+        .prepare("SELECT conv_id, user_id, hidden FROM members WHERE conv_id = ?")
+        .all(conversationId),
+    }),
   );
 }
 

@@ -30,7 +30,14 @@ const check = (name, cond, detail) =>
 
 async function mk() {
   const worker = await freshWorker();
-  const env = { DB: makeD1(), MEDIA: makeR2(), GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
+  const env = {
+    DB: makeD1(),
+    MEDIA: makeR2(),
+    GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
+    TURN_URLS: "turns:relay.test:443",
+    TURN_USERNAME: "test",
+    TURN_CREDENTIAL: "test-secret",
+  };
   const ctx = makeCtx();
   let ipSeq = 0;
   const call = async (method, path, body, token) => {
@@ -1022,6 +1029,9 @@ async function main() {
   // ── 12. "is push dead?" must be answerable without log access ───────────────
   {
     const h = await mk();
+    delete h.env.TURN_URLS;
+    delete h.env.TURN_USERNAME;
+    delete h.env.TURN_CREDENTIAL;
     const bare = await h.call("GET", "/api/health");
     const caps = bare.json.capabilities ?? {};
     check(
@@ -1052,6 +1062,8 @@ async function main() {
       ],
     });
     h.env.TURN_URLS = "turn:relay.example.com:3478";
+    h.env.TURN_USERNAME = "test";
+    h.env.TURN_CREDENTIAL = "test-secret";
     const on = await h.call("GET", "/api/health");
     check(
       "configuring firebase config alone is still push:false (the app side is not the credential)",

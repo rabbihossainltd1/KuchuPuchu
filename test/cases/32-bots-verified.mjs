@@ -20,7 +20,14 @@ const check = (name, cond, detail) =>
 async function mk() {
   const worker = await freshWorker();
   const db = makeD1();
-  const env = { DB: db, MEDIA: makeR2(), GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
+  const env = {
+    DB: db,
+    MEDIA: makeR2(),
+    GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
+    TURN_URLS: "turns:relay.test:443",
+    TURN_USERNAME: "test",
+    TURN_CREDENTIAL: "test-secret",
+  };
   const ctx = makeCtx();
   let ipSeq = 0;
   const call = async (method, path, body, token, fixedIp) => {
@@ -847,11 +854,13 @@ const convBetween = (db, a, b) =>
       engine.includes("delay(2200)"),
   );
   check(
-    "mobile-data calls: TURN over TCP 443 ahead of openrelay",
-    engine.includes("turn:turn.nextcloud.com:443?transport=tcp") &&
-      engine.includes("turn:standard.relay.metered.ca:80") &&
-      engine.indexOf("turn:turn.nextcloud.com:443?transport=tcp") <
-        engine.indexOf("turn:openrelay.metered.ca:80"),
+    "mobile-data calls require authenticated dedicated TURN without shared relay fallback",
+    engine.includes("private suspend fun ensureDedicatedTurn(): Boolean") &&
+      engine.includes(
+        'notify("Calling is unavailable until the dedicated relay is configured.")',
+      ) &&
+      !engine.includes("turn.nextcloud.com") &&
+      !engine.includes("openrelay.metered.ca"),
   );
   check(
     "v169: timestamp + ticks ride OUTSIDE the bubble - one row under it on every kind (end for mine, start for theirs); nothing is pinned inside the bubble any more",
@@ -2278,7 +2287,14 @@ const convBetween = (db, a, b) =>
   const worker = await freshWorker();
   const db = makeD1();
   const r2 = makeR2();
-  const env = { DB: db, MEDIA: r2, GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
+  const env = {
+    DB: db,
+    MEDIA: r2,
+    GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
+    TURN_URLS: "turns:relay.test:443",
+    TURN_USERNAME: "test",
+    TURN_CREDENTIAL: "test-secret",
+  };
   const ctx = makeCtx();
   let ipSeq = 0;
   const call = async (method, path, body, token, raw) => {
@@ -2624,14 +2640,21 @@ const convBetween = (db, a, b) =>
     "utf8",
   );
   check(
-    "r28-5/r31/r32-3: the settings cog is gone; the home ⋮ menu is exactly My Profile, New contact, All contacts, New group, Settings — in that order; My Profile stays in the home shell, the others are routes (r32-3: About Us removed; it stays under Settings › App) — bottom sheet (no DropdownMenu)",
+    "r28-5/r31/r32-3/R8: the settings cog is gone; the home ⋮ menu is exactly My Profile, New contact, All contacts, New group, Class, Settings — in that order; My Profile stays in the home shell, the others are routes (r32-3: About Us remains under Settings › App) — bottom sheet (no DropdownMenu)",
     !list.includes('Icon(Icons.Filled.Settings, "Settings"') &&
       (() => {
-        const order = ["My Profile", "New contact", "All contacts", "New group", "Settings"];
+        const order = [
+          "My Profile",
+          "New contact",
+          "All contacts",
+          "New group",
+          "Class",
+          "Settings",
+        ];
         const idx = order.map((l) => list.indexOf(`"${l}")`));
         return idx.every((i, n) => i > 0 && (n === 0 || i > idx[n - 1]));
       })() &&
-      (list.match(/HomeMenuItem\(Icons/g) || []).length === 5 &&
+      (list.match(/HomeMenuItem\(Icons/g) || []).length === 6 &&
       !list.includes('HomeMenuItem(Icons.Filled.Info, "About Us")') &&
       readFileSync(
         "native-android/app/src/main/java/app/kuchupuchu/android/SettingsScreen.kt",
@@ -3351,6 +3374,9 @@ const convBetween = (db, a, b) =>
         DB: db,
         MEDIA: makeR2(),
         GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
+        TURN_URLS: "turns:relay.test:443",
+        TURN_USERNAME: "test",
+        TURN_CREDENTIAL: "test-secret",
         FCM_CREDENTIALS: JSON.stringify({
           project_id: "kp-test-proj",
           client_email: "svc@kp-test-proj.iam.gserviceaccount.com",
@@ -3540,6 +3566,9 @@ const convBetween = (db, a, b) =>
         DB: db,
         MEDIA: makeR2(),
         GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
+        TURN_URLS: "turns:relay.test:443",
+        TURN_USERNAME: "test",
+        TURN_CREDENTIAL: "test-secret",
         FCM_CREDENTIALS: JSON.stringify({
           project_id: "kp-test-proj",
           client_email: "svc@kp-test-proj.iam.gserviceaccount.com",
@@ -3914,7 +3943,14 @@ const convBetween = (db, a, b) =>
     {
       const worker = await freshWorker();
       const db = makeD1();
-      const env = { DB: db, MEDIA: makeR2(), GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
+      const env = {
+        DB: db,
+        MEDIA: makeR2(),
+        GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
+        TURN_URLS: "turns:relay.test:443",
+        TURN_USERNAME: "test",
+        TURN_CREDENTIAL: "test-secret",
+      };
       const ctx = makeCtx();
       let ipSeq = 0;
       const call = async (method, path, body, token, raw) => {
@@ -4194,7 +4230,14 @@ const convBetween = (db, a, b) =>
     {
       const worker = await freshWorker();
       const db = makeD1();
-      const env = { DB: db, MEDIA: makeR2(), GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
+      const env = {
+        DB: db,
+        MEDIA: makeR2(),
+        GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
+        TURN_URLS: "turns:relay.test:443",
+        TURN_USERNAME: "test",
+        TURN_CREDENTIAL: "test-secret",
+      };
       const ctx = makeCtx();
       let ipSeq = 0;
       const call = async (method, path, body, token, raw) => {
@@ -5579,8 +5622,14 @@ const convBetween = (db, a, b) =>
       settings.includes('Api.delete("/api/blocks/$id")') &&
       settings.includes('Text("Unblock", color = Red, fontSize = 13.sp, maxLines = 1)') &&
       kt("KpApp.kt").includes('composable("settings/blocklist") { BlocklistScreen(nav) }') &&
-      src.includes('"SELECT target_id FROM blocks WHERE owner_id = ? ORDER BY created_at DESC"') &&
-      src.includes("if (user) list.push(userFrom(user, false, true));"),
+      // §13.14 moved the blocklist row onto the moderation snapshot: the row
+      // still comes from userFrom (identity + name), and it now carries the
+      // realm the blocked account had when the block was written.
+      src.includes(
+        '"SELECT target_id, target_realm FROM blocks WHERE owner_id = ? ORDER BY created_at DESC"',
+      ) &&
+      src.includes("...userFrom(user, false, true),") &&
+      src.includes("realm_at_event: row.target_realm ?? realmOf(user),"),
   );
   // Item 4: the device row shows IP · place · "Signed in <when>" under the
   // name line. The worker stores ip/city/country per auth_devices row at every
@@ -9455,6 +9504,9 @@ const convBetween = (db, a, b) =>
         DB: db,
         MEDIA: r2,
         GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
+        TURN_URLS: "turns:relay.test:443",
+        TURN_USERNAME: "test",
+        TURN_CREDENTIAL: "test-secret",
         GEMINI_API_KEY: "test-gemini-key",
       };
       const ctx = makeCtx();
@@ -10186,7 +10238,7 @@ const convBetween = (db, a, b) =>
         post.includes("const replyTo: string | null = replyTarget ? rawReplyTo : null;") &&
         post.includes("const written = (await db.batch([") &&
         post.includes(
-          "INSERT INTO messages (id, conv_id, sender_id, kind, body, media, meta_json, created_at, client_id, reply_to, delivered_at)\n           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?\n            WHERE NOT EXISTS (SELECT 1 FROM messages WHERE conv_id = ? AND sender_id = ? AND client_id = ?)`,",
+          "INSERT INTO messages (id, conv_id, sender_id, sender_realm, kind, body, media, meta_json, created_at, client_id, reply_to, delivered_at)\n           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?\n            WHERE NOT EXISTS (SELECT 1 FROM messages WHERE conv_id = ? AND sender_id = ? AND client_id = ?)`,",
         ) &&
         post.includes(
           '"UPDATE files SET conv_id = ? WHERE key = ? AND owner_id = ? AND conv_id IS NULL",',
@@ -10878,7 +10930,7 @@ const convBetween = (db, a, b) =>
       cl66.includes("ChatPreviewText.unread(") &&
         cl66.includes("ChatPreviewText.seen(") &&
         cl66.includes("withContext(Dispatchers.Default)") &&
-        cl66.includes("E2eeMsg.open(ctx, wireBody, peerKey)") &&
+        cl66.includes("E2eeMsg.openForPeer(ctx, wireBody, peerId, peerKey)") &&
         ss66.includes('append(c.optJSONObject("lastMessagePreview"))') &&
         ss66.includes('append(other?.optText("e2eePublicKey"))') &&
         ss66.includes('row.remove("lastMessagePreview")'),
@@ -10976,7 +11028,10 @@ const convBetween = (db, a, b) =>
         e2.includes("fun checkPeer(ctx: Context, peerId: String, pub: String): Boolean") &&
         e2.includes("fun trustPeer(ctx: Context, peerId: String, pub: String)") &&
         e2.includes("suspend fun ensureOnce(ctx: Context)") &&
-        e2.includes("fun unsealRow(ctx: Context, m: JSONObject, peerPub: String): JSONObject") &&
+        e2.includes(
+          "fun unsealRow(ctx: Context, m: JSONObject, peerId: String, peerPub: String): JSONObject",
+        ) &&
+        e2.includes("fun openForPeer(") &&
         e2.includes("fun sealGlobal(plain: String, peerPub: String): String?") &&
         e2.includes(
           "internal fun E2eeMsgCodeRow(ctx: Context, peerId: String, peerPub: String, peerName: String)",
@@ -11064,6 +11119,9 @@ const convBetween = (db, a, b) =>
       DB: db,
       MEDIA: makeR2(),
       GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
+      TURN_URLS: "turns:relay.test:443",
+      TURN_USERNAME: "test",
+      TURN_CREDENTIAL: "test-secret",
       GEMINI_API_KEY: "test-gemini-key",
       CHAT_ROOM: room,
     };

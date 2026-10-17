@@ -1119,6 +1119,11 @@ class CallEngine(private val app: Application) {
         fgTitle(if (kind == "VIDEO") "Video calling $title" else "Calling $title")
         scope.launch {
             try {
+                if (!ensureDedicatedTurn()) {
+                    notify("Calling is unavailable until the dedicated relay is configured.")
+                    hangupLocal()
+                    return@launch
+                }
                 val streamOk = withContext(Dispatchers.IO) { capture(kind == "VIDEO") }
                 if (!streamOk || left.get()) return@launch
                 publishChange()
@@ -1491,6 +1496,11 @@ class CallEngine(private val app: Application) {
         fgTitle(if (kind == "VIDEO") "Video calling $name" else "Calling $name")
         scope.launch {
             try {
+                if (!ensureDedicatedTurn()) {
+                    notify("Calling is unavailable until the dedicated relay is configured.")
+                    hangupLocal()
+                    return@launch
+                }
                 val streamOk = withContext(Dispatchers.IO) { capture(kind == "VIDEO") }
                 if (!streamOk || left.get()) return@launch
                 publishChange()
@@ -1595,6 +1605,13 @@ class CallEngine(private val app: Application) {
         // legs are negotiated by groupSync() on the ticks that follow.
         if (rec.group) {
             scope.launch {
+                if (!ensureDedicatedTurn()) {
+                    withContext(Dispatchers.IO) { runCatching { Api.post("/api/calls/${rec.id}/decline") } }
+                    notify("Calling is unavailable until the dedicated relay is configured.")
+                    answering.set(false)
+                    hangupLocal()
+                    return@launch
+                }
                 withContext(Dispatchers.IO) { runCatching { capture(rec.kind == "VIDEO") } }
                 iceCallId = rec.id
                 joinGroup(rec.id)
@@ -1603,6 +1620,13 @@ class CallEngine(private val app: Application) {
         }
         scope.launch {
             try {
+                if (!ensureDedicatedTurn()) {
+                    withContext(Dispatchers.IO) { runCatching { Api.post("/api/calls/${rec.id}/decline") } }
+                    notify("Calling is unavailable until the dedicated relay is configured.")
+                    answering.set(false)
+                    hangupLocal()
+                    return@launch
+                }
                 // `repeat(24) { ... return@repeat }` here NEVER left the loop —
                 // return@repeat only skips one iteration, so the callee kept
                 // re-fetching for the whole 6s while ITS OWN screen already
@@ -2174,87 +2198,19 @@ class CallEngine(private val app: Application) {
         publishChange()
     }
 
-    /**
-     * STUN for same-network calls + a public TURN relay so calls also
-     * connect across mobile networks (CGNAT), where STUN-only P2P fails.
-     */
-    /**
-     * ICE servers.
-     *
-     * The two TURN entries were bare `turn:host:port`, which in a WebRTC URL
-     * means UDP - so nothing in the list ever used the TCP or TLS listeners.
-     * Probing the host directly (kp-lab/turncheck.py) showed TCP/80 answering
-     * plain TURN as METERED-TURN-SERVER with realm metered.ca, and TCP/443
-     * terminating TLS with a CN=*.relay.metered.ca certificate. The UDP
-     * listeners could not be verified from that network, so they are kept and
-     * the measured TCP and TLS transports are added alongside them: more
-     * candidates, and relay now has a path that works where UDP is blocked or
-     * throttled, which is common on mobile networks.
-     */
+    /** Direct candidates use public STUN; every relay candidate is dedicated. */
     private fun iceServers(): List<PeerConnection.IceServer> =
         customTurnServers() + builtInIceServers()
 
-    /** Built-ins: public STUN + the free openrelay TURN as a last resort. */
     private fun builtInIceServers(): List<PeerConnection.IceServer> =
         listOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun.cloudflare.com:3478").createIceServer(),
-            // Owner round 12 (2026-09-05): carrier NATs (mobile data) need a
-            // TURN relay on TCP/443. The openrelay free service got flaky, so
-            // Nextcloud's public relay (tcp+udp on 443) leads the list now.
-            PeerConnection.IceServer.builder("turn:turn.nextcloud.com:443?transport=tcp")
-                .setUsername("nextcloud")
-                .setPassword("nextcloud")
-                .createIceServer(),
-            PeerConnection.IceServer.builder("turn:turn.nextcloud.com:443")
-                .setUsername("nextcloud")
-                .setPassword("nextcloud")
-                .createIceServer(),
-            PeerConnection.IceServer.builder("turn:standard.relay.metered.ca:80")
-                .setUsername("openrelayproject")
-                .setPassword("openrelayproject")
-                .createIceServer(),
-            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
-                .setUsername("openrelayproject")
-                .setPassword("openrelayproject")
-                .createIceServer(),
-            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443")
-                .setUsername("openrelayproject")
-                .setPassword("openrelayproject")
-                .createIceServer(),
-            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80?transport=tcp")
-                .setUsername("openrelayproject")
-                .setPassword("openrelayproject")
-                .createIceServer(),
-            PeerConnection.IceServer.builder("turns:openrelay.metered.ca:443?transport=tcp")
-                .setUsername("openrelayproject")
-                .setPassword("openrelayproject")
-                .createIceServer(),
         )
 
-    /**
-     * Same relays, minus the STUN-only entries and TCP/TLS-first: used for the
-     * single automatic retry after ICE FAILED. Direct + peer-reflexive pairing
-     * is what dies behind a VPN / carrier-grade NAT / restrictive networks,
-     * while a relay still works there — that is the difference between "call
-     * connected hoy na" and a call that connects one second later.
-     */
-    private fun relayFirstIceServers(): List<PeerConnection.IceServer> =
-        customTurnServers() + listOf(
-            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80?transport=tcp")
-                .setUsername("openrelayproject")
-                .setPassword("openrelayproject")
-                .createIceServer(),
-            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443?transport=tcp")
-                .setUsername("openrelayproject")
-                .setPassword("openrelayproject")
-                .createIceServer(),
-            PeerConnection.IceServer.builder("turns:openrelay.metered.ca:443?transport=tcp")
-                .setUsername("openrelayproject")
-                .setPassword("openrelayproject")
-                .createIceServer(),
-        )
+    /** The single relay-only retry cannot fall back to shared/public TURN. */
+    private fun relayFirstIceServers(): List<PeerConnection.IceServer> = customTurnServers()
 
     private fun relayConfig(): PeerConnection.RTCConfiguration =
         PeerConnection.RTCConfiguration(relayFirstIceServers()).apply {
@@ -2267,14 +2223,10 @@ class CallEngine(private val app: Application) {
     @Volatile private var turnUrls: List<String> = emptyList()
     @Volatile private var turnUser: String = ""
     @Volatile private var turnPass: String = ""
+    @Volatile private var turnExpiresAt: Long = 0L
     @Volatile private var turnLoaded: Boolean = false
 
-    /**
-     * TURN credentials served by the worker (/api/config/ice — set the
-     * TURN_URLS / TURN_USERNAME / TURN_CREDENTIAL worker secrets). Fetched
-     * once at startup and placed FIRST, so a real relay beats the flaky free
-     * fallbacks. Without a config the built-ins carry on as before.
-     */
+    /** Authenticated TURN credentials served by the Worker; never a shared relay. */
     private fun customTurnServers(): List<PeerConnection.IceServer> {
         if (!turnLoaded) return emptyList()
         return turnUrls.map { url ->
@@ -2285,21 +2237,38 @@ class CallEngine(private val app: Application) {
         }
     }
 
+    private suspend fun ensureDedicatedTurn(): Boolean {
+        val now = System.currentTimeMillis()
+        if (
+            turnLoaded && turnUrls.isNotEmpty() && turnUser.isNotBlank() && turnPass.isNotBlank() &&
+            (turnExpiresAt == 0L || turnExpiresAt > now + 5 * 60_000L)
+        ) return true
+        turnLoaded = false
+        return runCatching {
+            val data = withContext(Dispatchers.IO) { Api.get("/api/config/ice", false) }
+            val ice = data.optJSONObject("ice") ?: return@runCatching false
+            val arr = ice.optJSONArray("urls") ?: return@runCatching false
+            val urls = (0 until arr.length())
+                .map { arr.optString(it).trim() }
+                .filter { it.startsWith("turn:", true) || it.startsWith("turns:", true) }
+            val username = ice.optString("username").trim()
+            val credential = ice.optString("credential").trim()
+            val expiresAt = ice.optLong("expiresAt", 0L).coerceAtLeast(0L)
+            if (
+                urls.isEmpty() || username.isBlank() || credential.isBlank() ||
+                (expiresAt > 0L && expiresAt <= now + 5 * 60_000L)
+            ) return@runCatching false
+            turnUrls = urls
+            turnUser = username
+            turnPass = credential
+            turnExpiresAt = expiresAt
+            turnLoaded = true
+            true
+        }.getOrDefault(false)
+    }
+
     fun loadIceConfig() {
-        scope.launch {
-            runCatching {
-                val data = withContext(Dispatchers.IO) { Api.get("/api/config/ice", true) }
-                val ice = data.optJSONObject("ice") ?: return@runCatching
-                val arr = ice.optJSONArray("urls") ?: return@runCatching
-                val urls = (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() }
-                if (urls.isNotEmpty()) {
-                    turnUrls = urls
-                    turnUser = ice.optString("username")
-                    turnPass = ice.optString("credential")
-                    turnLoaded = true
-                }
-            }
-        }
+        scope.launch { ensureDedicatedTurn() }
     }
 
     private var iceWatchdog: Runnable? = null

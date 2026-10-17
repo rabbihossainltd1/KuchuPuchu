@@ -40,6 +40,9 @@ async function main() {
   const env = {
     DB: db,
     GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
+    TURN_URLS: "turns:relay.test:443",
+    TURN_USERNAME: "test",
+    TURN_CREDENTIAL: "test-secret",
     MEDIA: makeR2(),
     FCM_CREDENTIALS,
     // No live socket: the callee is swiped away -> guaranteed system payload.

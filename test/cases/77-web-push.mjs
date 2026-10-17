@@ -162,7 +162,14 @@ async function main() {
 
   const worker = await freshWorker();
   const db = makeD1();
-  const env = { DB: db, MEDIA: makeR2(), GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
+  const env = {
+    DB: db,
+    MEDIA: makeR2(),
+    GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
+    TURN_URLS: "turns:relay.test:443",
+    TURN_USERNAME: "test",
+    TURN_CREDENTIAL: "test-secret",
+  };
   const vapid = await makeVapid();
 
   // Every delivery this case observes lands here, keyed by endpoint number.

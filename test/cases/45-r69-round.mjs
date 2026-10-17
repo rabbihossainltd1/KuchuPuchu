@@ -50,6 +50,9 @@ async function mk(withChatRoom = false) {
     MEDIA: makeR2(),
     FCM_CREDENTIALS,
     GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
+    TURN_URLS: "turns:relay.test:443",
+    TURN_USERNAME: "test",
+    TURN_CREDENTIAL: "test-secret",
   };
   if (withChatRoom) {
     env.CHAT_ROOM = {

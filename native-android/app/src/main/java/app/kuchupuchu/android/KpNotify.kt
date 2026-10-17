@@ -96,6 +96,7 @@ object KpNotify {
     // as history, never as a second incoming call. The worker's FCM payload
     // names the same id.
     private const val MISSED_CHANNEL = "kp_missed_v2"
+    private const val CLASS_CHANNEL = "kp_classes_v1"
     private const val GROUP = "kp_chats"
 
     /**
@@ -280,6 +281,20 @@ object KpNotify {
                         attrs,
                     )
                     enableVibration(false)
+                    lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+                },
+        )
+        mgr.createNotificationChannel(
+            NotificationChannel(CLASS_CHANNEL, "Classes", NotificationManager.IMPORTANCE_HIGH)
+                .apply {
+                    description = "Class reminders, live-class alerts and finished-class updates"
+                    setSound(
+                        android.net.Uri.parse(
+                            "android.resource://" + ctx.packageName + "/" + SoundPrefs.notificationRingRes(ctx),
+                        ),
+                        attrs,
+                    )
+                    enableVibration(true)
                     lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
                 },
         )
@@ -711,6 +726,41 @@ object KpNotify {
             putExtra("kp_chat", convoId)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
+
+    /** First-party class reminder that opens the native class detail screen. */
+    @SuppressLint("MissingPermission")
+    fun classroom(ctx: Context, classId: String, title: String, body: String, eventType: String) {
+        if (classId.isBlank() || title.isBlank() || body.isBlank()) return
+        ensureChannels(ctx)
+        if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) return
+        val tap = PendingIntent.getActivity(
+            ctx,
+            "class:$classId".hashCode(),
+            Intent(ctx, MainActivity::class.java).apply {
+                putExtra("kp_class", classId)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = NotificationCompat.Builder(ctx, CLASS_CHANNEL)
+            .setSmallIcon(R.mipmap.ic_stat_kp)
+            .setLargeIcon(roundLogo(ctx))
+            .setContentTitle(title.take(120))
+            .setContentText(body.take(600))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body.take(600)))
+            .setContentIntent(tap)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(eventType == "class_done")
+            .setCategory(NotificationCompat.CATEGORY_EVENT)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setWhen(System.currentTimeMillis())
+            .setShowWhen(true)
+            .apply { if (Build.VERSION.SDK_INT < 26) setSound(defaultSound()) }
+            .build()
+        runCatching {
+            NotificationManagerCompat.from(ctx).notify("class:$classId".hashCode(), notification)
+        }.onFailure { KpCrash.mark("notify_classroom_failed:${it.javaClass.simpleName}") }
+    }
 
     /**
      * Silent confirmation shown after replying from the notification.

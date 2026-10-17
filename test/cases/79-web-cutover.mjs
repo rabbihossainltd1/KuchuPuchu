@@ -71,7 +71,7 @@ check(
 check(
   "the worker stamps frame-ancestors as a response header (meta cannot)",
   worker.includes("frame-ancestors 'self'") &&
-    worker.includes('headers.set("Content-Security-Policy", SHELL_CSP)'),
+    worker.includes('headers.set("Content-Security-Policy", shellCsp(env))'),
 );
 check("the header CSP only lands on HTML documents", worker.includes('includes("text/html")'));
 check(

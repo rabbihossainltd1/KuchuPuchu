@@ -220,6 +220,7 @@ object KpPush {
  *  - type=message : { convoId, kind, from, body }
  *  - type=call        : { callId, kind (AUDIO|VIDEO), from, fromId }
  *  - type=call_answer : { callId, kind }  (to the caller, on accept)
+ *  - type=classroom   : { classId, eventType, title, body }
  */
 class KpPushService : FirebaseMessagingService() {
 
@@ -287,6 +288,7 @@ class KpPushService : FirebaseMessagingService() {
                 "call" -> handleCall(data)
                 "call_answer" -> handleCallAnswer(data)
                 "message" -> handleMessage(data)
+                "classroom" -> handleClassroom(data)
                 "missed_call" -> handleMissedCall(data)
                 "reoffer", "reanswer" -> data["callId"]?.let { CallEngine.instance?.kickPoll(it) }
                 else -> {}
@@ -300,6 +302,21 @@ class KpPushService : FirebaseMessagingService() {
      * the ringing screen flips to connected within push latency (~1s) instead
      * of waiting for the next poll tick.
      */
+    /** Laravel-authorized reminder/live/ended class event routed through the linked VX identity. */
+    private fun handleClassroom(data: Map<String, String>) {
+        val classId = data["classId"].orEmpty().takeIf { it.matches(Regex("^[0-9]{1,20}$")) } ?: return
+        val title = data["title"].orEmpty().trim().take(120)
+        val body = data["body"].orEmpty().trim().take(600)
+        if (title.isBlank() || body.isBlank()) return
+        KpNotify.classroom(
+            this,
+            classId,
+            title,
+            body,
+            data["eventType"].orEmpty(),
+        )
+    }
+
     /** Missed-call alert with Call back / Message actions (app alive). */
     private fun handleMissedCall(data: Map<String, String>) {
         // Owner round 31 (item 24): the card is posted in the FOREGROUND too.

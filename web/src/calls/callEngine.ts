@@ -43,6 +43,7 @@
  */
 
 import type { ApiClient } from "../auth/authApi";
+import type { OriginRealm } from "../messaging/realmBadge";
 import type { SocketStatus } from "../messaging/sockets";
 import { callsApi, type StartCallResult } from "./callsApi";
 import {
@@ -132,6 +133,8 @@ export type CallPeerTarget = {
   readonly name: string;
   readonly avatar: string;
   readonly online: boolean;
+  /** §13.3: the peer's immutable origin realm — the call screens' badge. */
+  readonly realm: OriginRealm | null;
 };
 
 export type EngineOptions = {
@@ -198,7 +201,7 @@ export type CallEngineState = {
   readonly polling: boolean;
 };
 
-const EMPTY_PEER: CallPeerTarget = { id: "", name: "", avatar: "", online: false };
+const EMPTY_PEER: CallPeerTarget = { id: "", name: "", avatar: "", online: false, realm: null };
 
 export const INITIAL_CALL_STATE: CallEngineState = Object.freeze({
   phase: "idle",
@@ -812,6 +815,7 @@ export function createCallEngine(options: EngineOptions): CallEngine {
       id: peerId,
       name: next.other?.displayName || next.other?.username || state.peer.name || "KuchuPuchu",
       avatar: next.other?.avatarUrl || next.other?.avatarRef || state.peer.avatar,
+      realm: next.other ? next.other.originRealm : state.peer.realm,
       online: next.other?.online === true,
     };
 
@@ -946,10 +950,19 @@ export function createCallEngine(options: EngineOptions): CallEngine {
 
   /* ---------------------------------------------------------------------- start */
 
-  const ensureIceConfig = async () => {
-    if (iceLoaded) return;
+  const ensureIceConfig = async (): Promise<boolean> => {
+    const now = clock.now();
+    if (iceLoaded && iceMinted && (!iceMinted.expiresAt || iceMinted.expiresAt > now + 5 * 60_000))
+      return true;
+    const fresh = await transport.iceConfig(options.api);
+    if (!fresh || (fresh.expiresAt && fresh.expiresAt <= now + 5 * 60_000)) {
+      iceMinted = null;
+      iceLoaded = false;
+      return false;
+    }
+    iceMinted = fresh;
     iceLoaded = true;
-    iceMinted = await transport.iceConfig(options.api);
+    return true;
   };
 
   const buildPeer = (preAddVideo: boolean): PeerLike | null => {
@@ -1024,7 +1037,11 @@ export function createCallEngine(options: EngineOptions): CallEngine {
     });
     ended = false;
     try {
-      await ensureIceConfig();
+      if (!(await ensureIceConfig())) {
+        await teardown("");
+        publish({ phase: "idle", error: CALL_COPY.relayUnavailable });
+        return;
+      }
       localStream = await runtime.capture(mediaRequestFor(kind));
       audioTrack = localStream.getAudioTracks()[0] ?? null;
       cameraTrack = kind === "VIDEO" ? (localStream.getVideoTracks()[0] ?? null) : null;
@@ -1107,7 +1124,12 @@ export function createCallEngine(options: EngineOptions): CallEngine {
     const kind = row.kind;
     publish({ phase: "connecting", connecting: true, error: "" });
     try {
-      await ensureIceConfig();
+      if (!(await ensureIceConfig())) {
+        await transport.decline(options.api, row.id).catch(() => undefined);
+        await teardown("");
+        publish({ phase: "idle", error: CALL_COPY.relayUnavailable });
+        return;
+      }
       // Capture and the offer hunt run together: opening a camera costs
       // 300–900 ms and used to sit between the Accept tap and the answer, so the
       // caller kept hearing ringback the whole time.

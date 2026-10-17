@@ -125,6 +125,7 @@ const webApi = readFileSync(resolve("web/src/calls/callsApi.ts"), "utf8");
 const webStage = readFileSync(resolve("web/src/calls/CallStage.tsx"), "utf8");
 const webLayer = readFileSync(resolve("web/src/calls/CallsLayer.tsx"), "utf8");
 const webTab = readFileSync(resolve("web/src/calls/CallsWorkspace.tsx"), "utf8");
+const webCallsController = readFileSync(resolve("web/src/calls/useCalls.ts"), "utf8");
 const webApp = readFileSync(resolve("web/src/App.tsx"), "utf8");
 const webChatPane = readFileSync(resolve("web/src/messaging/ChatPane.tsx"), "utf8");
 const webFlags = readFileSync(resolve("web/src/featureFlagRegistry.ts"), "utf8");
@@ -513,33 +514,51 @@ check(
     RELAY_FIRST_ICE_SERVERS.every((server) => server.urls.every((url) => !url.startsWith("stun:"))),
 );
 check(
-  "the built-in list leads with public STUN and Nextcloud's 443 relay",
+  "public STUN remains for direct discovery but shared public TURN is removed",
   engineSource.includes('"stun:stun.l.google.com:19302"') &&
     engineSource.includes('"stun:stun1.l.google.com:19302"') &&
     engineSource.includes('"stun:stun.cloudflare.com:3478"') &&
-    engineSource.includes('"turn:turn.nextcloud.com:443?transport=tcp"') &&
-    BUILT_IN_ICE_SERVERS[0].urls[0] === "stun:stun.l.google.com:19302" &&
-    BUILT_IN_ICE_SERVERS[3].urls[0] === "turn:turn.nextcloud.com:443?transport=tcp",
+    !engineSource.includes("turn.nextcloud.com") &&
+    !engineSource.includes("openrelay.metered.ca") &&
+    BUILT_IN_ICE_SERVERS.length === 3 &&
+    BUILT_IN_ICE_SERVERS.every((server) => server.urls.every((url) => url.startsWith("stun:"))),
 );
 check(
-  "a minted relay goes FIRST, and no mint still leaves the built-ins",
+  "a dedicated relay goes first and relay-only retry has no shared fallback",
   iceServersFor({ urls: ["turn:relay.example:443"], username: "u", credential: "c" })[0].urls[0] ===
     "turn:relay.example:443" &&
     iceServersFor(null) === BUILT_IN_ICE_SERVERS &&
-    relayIceServersFor(null) === RELAY_FIRST_ICE_SERVERS,
+    relayIceServersFor(null).length === 0,
 );
 check(
-  "the Worker mints TURN credentials and answers null when it has none",
+  "the Worker mints authenticated TURN and refuses call creation when none is configured",
   workerSource.includes('if (path === "/api/config/ice" && method === "GET")') &&
-    workerSource.includes("if (!urls.length) return json({ ice: null });"),
+    workerSource.includes("function dedicatedTurnConfigured(env: Env): boolean") &&
+    workerSource.includes('"CALL_RELAY_UNAVAILABLE"') &&
+    workerSource.includes(
+      "if (!urls.length || !username || !credential) return json({ ice: null });",
+    ),
 );
 check(
-  "a missing or partial ice config degrades to the built-ins, never to nothing",
+  "minted TURN expiry is propagated and long-lived clients refresh before it",
+  workerSource.includes("await requireUser(db, request, env, ctx)") &&
+    workerSource.includes("cached.expiresAt > Date.now() + 5 * 60_000") &&
+    workerSource.includes("expiresAt: cached.expiresAt") &&
+    workerSource.includes('"turn_mint_exception"') &&
+    webEngine.includes("iceMinted.expiresAt > now + 5 * 60_000") &&
+    engineSource.includes("turnExpiresAt > now + 5 * 60_000L"),
+);
+check(
+  "missing, unauthenticated or non-TURN ICE config is rejected",
   parseIceConfig({ ice: null }) === null &&
     parseIceConfig({ ice: { urls: [] } }) === null &&
-    parseIceConfig({ ice: { urls: ["turn:a:443"] } })?.urls[0] === "turn:a:443" &&
+    parseIceConfig({ ice: { urls: ["turn:a:443"] } }) === null &&
+    parseIceConfig({ ice: { urls: ["stun:a:3478"], username: "u", credential: "c" } }) === null &&
     parseIceConfig({ ice: { urls: ["turn:a:443"], username: "u", credential: "c" } })?.username ===
       "u" &&
+    parseIceConfig({
+      ice: { urls: ["turn:a:443"], username: "u", credential: "c", expiresAt: Date.now() - 1 },
+    }) === null &&
     parseIceConfig(null) === null &&
     parseIceConfig({ ice: "nonsense" }) === null,
 );
@@ -1641,7 +1660,10 @@ function makeHarness(overrides = {}) {
   const clock = makeClock();
   // Mutable on purpose: a call moves through server states, and the harness has
   // to be able to hand the engine a different row on the next poll.
-  const script = { ...(overrides.script ?? {}) };
+  const script = {
+    iceConfig: { urls: ["turns:relay.test:443"], username: "u", credential: "c" },
+    ...(overrides.script ?? {}),
+  };
   const transport = makeTransport(script, log);
   const runtime = makeRuntime(log, overrides.runtime);
   const store = new Map(Object.entries(overrides.store ?? {}));
@@ -1677,6 +1699,42 @@ function makeHarness(overrides = {}) {
 }
 
 const flush = () => new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+
+{
+  const harness = makeHarness({ script: { iceConfig: null } });
+  await harness.engine.start({ id: PEER, name: "Rina", avatar: "", online: true }, "AUDIO");
+  check(
+    "Web refuses to capture media or signal a call without dedicated TURN",
+    harness.engine.state().phase === "idle" &&
+      harness.engine.state().error === CALL_COPY.relayUnavailable &&
+      !harness.log.some((entry) => entry.startsWith("capture:")) &&
+      !harness.transport.calls.some((entry) => entry.startsWith("start:")),
+  );
+}
+
+{
+  const incoming = parseCallRow(
+    row({
+      id: "3f2b7c1e-0000-4000-8000-000000000009",
+      incoming: true,
+      callerId: PEER,
+      calleeId: ME,
+      offerSdp: "v=0 offer",
+    }),
+  );
+  const harness = makeHarness({ script: { iceConfig: null, active: [incoming] } });
+  harness.engine.begin();
+  await harness.engine.tick();
+  harness.transport.calls.length = 0;
+  await harness.engine.answer();
+  check(
+    "Web declines an incoming ring when dedicated TURN cannot be loaded",
+    harness.engine.state().phase === "idle" &&
+      harness.engine.state().error === CALL_COPY.relayUnavailable &&
+      harness.transport.calls.some((entry) => entry.startsWith("decline:")) &&
+      !harness.log.some((entry) => entry.startsWith("capture:")),
+  );
+}
 
 {
   /* ---------------------------------------------------- an outgoing call */
@@ -1764,7 +1822,7 @@ const flush = () => new Promise((resolvePromise) => setTimeout(resolvePromise, 0
   await flush();
   check(
     "ICE failure reconfigures to the relay-first list exactly once",
-    log.includes(`setConfiguration:${RELAY_FIRST_ICE_SERVERS.length}`) &&
+    log.includes("setConfiguration:1") &&
       log.filter((entry) => entry.startsWith("setConfiguration")).length === 1,
   );
   check(
@@ -2400,9 +2458,11 @@ check(
     !webStage.includes("setVerifyOpen"),
 );
 check(
-  "the history tab states that hidden chats are not filtered here",
-  webTab.includes("CALL_COPY.historyHiddenNote") &&
-    CALL_COPY.historyHiddenNote.includes("no Hidden list yet"),
+  "viewer-hidden chats stay off the ordinary Web calls tab",
+  webCallsController.includes("setRows(items.filter((row) => !row.hidden))") &&
+    webModel.includes("hidden: value.hidden === true") &&
+    workerSource.includes("hiddenConversationIds.has(row.conv_id)") &&
+    !webTab.includes("historyHiddenNote"),
 );
 check(
   "every control on the call surface is labelled",

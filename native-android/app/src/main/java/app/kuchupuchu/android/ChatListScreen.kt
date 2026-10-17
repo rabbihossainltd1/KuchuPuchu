@@ -80,6 +80,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.PersonAdd
@@ -2078,11 +2079,14 @@ private fun ConvCard(
     val ctx = LocalContext.current
     val source = conv.optJSONObject("lastMessagePreview")
     val wireBody = source?.optText("body").orEmpty()
+    val peerId = other?.optText("id").orEmpty()
     val peerKey = other?.optText("e2eePublicKey").orEmpty()
-    var decoded by remember(id, wireBody, peerKey) { mutableStateOf<String?>(null) }
-    LaunchedEffect(id, wireBody, peerKey, unread) {
+    var decoded by remember(id, wireBody, peerId, peerKey) { mutableStateOf<String?>(null) }
+    LaunchedEffect(id, wireBody, peerId, peerKey, unread) {
         if (unread <= 0 && E2eeMsg.isEnvelope(wireBody)) {
-            decoded = withContext(Dispatchers.Default) { E2eeMsg.open(ctx, wireBody, peerKey) }
+            decoded = withContext(Dispatchers.Default) {
+                E2eeMsg.openForPeer(ctx, wireBody, peerId, peerKey)
+            }
         }
     }
     val plain = if (E2eeMsg.isEnvelope(wireBody)) decoded else wireBody.takeIf { source != null }
@@ -2576,6 +2580,7 @@ private fun HomeMenuSheet(onDismiss: () -> Unit, nav: NavController, onOpenProfi
         HomeMenuItem(Icons.Filled.PersonAdd, "New contact") { onDismiss(); nav.navigate("newcontact") }
         HomeMenuItem(Icons.Filled.Contacts, "All contacts") { onDismiss(); nav.navigate("contacts") }
         HomeMenuItem(Icons.Filled.GroupAdd, "New group") { onDismiss(); nav.navigate("newgroup") }
+        HomeMenuItem(Icons.Filled.School, "Class") { onDismiss(); nav.navigate("classroom") }
         HomeMenuItem(Icons.Filled.Settings, "Settings") { onDismiss(); nav.navigate("settings") }
     }
 }

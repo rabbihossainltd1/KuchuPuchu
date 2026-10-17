@@ -251,13 +251,14 @@ fun ChatScreen(nav: NavController, convId: String) {
             }.orEmpty()
         }
     }
+    val e2eeDecryptPeerId = conv.value?.optJSONObject("other")?.optText("id").orEmpty()
     fun sealOut(plain: String): String {
         if (plain.isBlank() || e2eePeerKey.isBlank()) return plain
         // Local fast path only; Api.request's guard seals/defer-retries any
         // plaintext payload before it can reach the network.
         return runCatching { E2eeMsg.seal(ctx, plain, e2eePeerKey) }.getOrNull() ?: plain
     }
-    fun unseal(m: JSONObject): JSONObject = E2eeMsg.unsealRow(ctx, m, e2eePeerKey)
+    fun unseal(m: JSONObject): JSONObject = E2eeMsg.unsealRow(ctx, m, e2eeDecryptPeerId, e2eePeerKey)
     val msgs = remember { mutableStateListOf<JSONObject>() }
     // r44 (owner: "age message giye pore animation hoi duplicate vabe"):
     // the queue is GONE - arrival bookkeeping is synchronous (FxArrivals).

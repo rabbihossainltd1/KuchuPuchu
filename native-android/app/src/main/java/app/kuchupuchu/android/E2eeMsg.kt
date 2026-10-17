@@ -225,6 +225,12 @@ internal object E2eeMsg {
         if (!isEnvelope(envelope) || peerPub.isBlank()) null else
             openWith(identity(ctx).first, peerPub, envelope)
 
+    fun openForPeer(ctx: Context, envelope: String, peerId: String, peerPub: String): String? {
+        if (peerId.isBlank()) return null
+        checkPeer(ctx, peerId, peerPub)
+        return open(ctx, envelope, peerPub)
+    }
+
     /**
      * Seal with the process-cached identity — the forward path runs off a
      * composable (no Context); null until app entry cached it. The transport
@@ -240,12 +246,12 @@ internal object E2eeMsg {
      * we cannot open (our key lost on a reinstall, the peer's new device)
      * becomes a neutral failure label, never a lock marker or ciphertext.
      */
-    fun unsealRow(ctx: Context, m: JSONObject, peerPub: String): JSONObject {
+    fun unsealRow(ctx: Context, m: JSONObject, peerId: String, peerPub: String): JSONObject {
         // Keep the wire envelope locally so a late peer-key refresh can retry.
         // Never expose ciphertext, and never destroy the only decryptable copy.
         val b = m.optText("kpEnvelope").ifBlank { m.optText("body") }
         if (!isEnvelope(b)) return m
-        val plain = open(ctx, b, peerPub) ?: UNREADABLE_MESSAGE
+        val plain = openForPeer(ctx, b, peerId, peerPub) ?: UNREADABLE_MESSAGE
         if (m.optText("body") == plain && m.optText("kpEnvelope") == b) return m
         return JSONObject(m.toString()).put("body", plain).put("kpEnvelope", b)
     }

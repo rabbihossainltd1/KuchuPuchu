@@ -34,7 +34,14 @@ const PNG_ALT =
 
 async function mk() {
   const worker = await freshWorker();
-  const env = { DB: makeD1(), MEDIA: makeR2(), GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
+  const env = {
+    DB: makeD1(),
+    MEDIA: makeR2(),
+    GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
+    TURN_URLS: "turns:relay.test:443",
+    TURN_USERNAME: "test",
+    TURN_CREDENTIAL: "test-secret",
+  };
   const ctx = makeCtx();
   let ipSeq = 0;
   const call = async (method, path, body, token, extraHeaders = {}) => {

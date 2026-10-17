@@ -246,6 +246,16 @@ fun KpApp() {
         }
     }
 
+    LaunchedEffect(authed) {
+        MainActivity.pendingClass.collect { classId ->
+            if (authed && !classId.isNullOrBlank()) {
+                runCatching {
+                    nav.navigate("classroom/$classId") { launchSingleTop = true }
+                }.onSuccess { MainActivity.pendingClass.value = null }
+            }
+        }
+    }
+
     // Long-press launcher shortcuts are retained across a cold start/login.
     LaunchedEffect(authed) {
         MainActivity.pendingLauncherShortcut.collect { shortcut ->
@@ -386,6 +396,17 @@ fun KpApp() {
                 composable("settings/devices") { DevicesSettingsScreen(nav) }
                 composable("settings/permissions") { PermissionsSettingsScreen(nav) }
                 composable("settings/app") { AppSettingsScreen(nav) }
+                // Plan §13.13: the linked VintoxBd account — state, the secure
+                // link entry, and unlink/re-auth.
+                composable("settings/vintoxbd") { VintoxBdAccountScreen(nav) }
+                // R8: first-party native classroom; never a WebView or external URL.
+                composable("classroom") { ClassroomListScreen(nav) }
+                composable("classroom/{id}") { entry ->
+                    ClassroomDetailScreen(nav, entry.arguments?.getString("id") ?: "")
+                }
+                composable("classroom/{id}/room") { entry ->
+                    ClassroomRoomScreen(nav, entry.arguments?.getString("id") ?: "")
+                }
                 // Owner round 32 (item 7): Privacy › Blocklist (unblock lives here).
                 composable("settings/blocklist") { BlocklistScreen(nav) }
                 // Owner round 31: the group profile (members / admin actions).

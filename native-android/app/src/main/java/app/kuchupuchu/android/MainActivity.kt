@@ -257,6 +257,9 @@ class MainActivity : ComponentActivity() {
         if (intent.getBooleanExtra("kp_return_call", false)) CallEngine.onRestoreIntent()
         if (intent.getBooleanExtra("kp_accept", false)) CallEngine.onAcceptIntent()
         intent.getStringExtra("kp_chat")?.let { pendingChat.value = it }
+        intent.getStringExtra("kp_class")
+            ?.takeIf { it.matches(Regex("^[0-9]{1,20}$")) }
+            ?.let { pendingClass.value = it }
         if (intent.action == LauncherShortcuts.ACTION) {
             intent.getStringExtra(LauncherShortcuts.EXTRA_ACTION)?.let { pendingLauncherShortcut.value = it }
         }
@@ -397,6 +400,9 @@ class MainActivity : ComponentActivity() {
          *  landed before login on a cold start.
          */
         val pendingChat = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
+        /** Native class detail to open from a linked-account class notification. */
+        val pendingClass = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
 
         /** Pending static launcher action, retained across cold start/login until KpApp handles it. */
         val pendingLauncherShortcut = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)

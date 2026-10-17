@@ -11,13 +11,13 @@
  *   (owner round 33, item 2). Here the engine's teardown is that bump.
  * - Rows are grouped into day sections — Today, Yesterday, weekday inside seven
  *   days, then "5 Oct" — cut in Asia/Dhaka, never in the browser's own zone.
- *
- * Unlike the phone, nothing is filtered out for a hidden chat: this browser has
- * no Hidden screen, and the copy says so instead of quietly dropping rows.
+ * - Calls belonging to a hidden chat stay off the ordinary Calls tab. The
+ *   server supplies this per-viewer fact; the browser never guesses from names.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApiClient } from "../auth/authApi";
+import type { OriginRealm } from "../messaging/realmBadge";
 import { apiErrorMessage } from "../api";
 import { callsApi } from "./callsApi";
 import {
@@ -85,7 +85,7 @@ export function useCalls(options: Options): CallsController {
       if (rows.length === 0) setState("loading");
       try {
         const items = await callsApi.history(api);
-        setRows(items);
+        setRows(items.filter((row) => !row.hidden));
         setError("");
         setState("ready");
         fetchedAt.current = Date.now();
@@ -138,6 +138,8 @@ export type CallRowView = {
   readonly row: CallRow;
   readonly name: string;
   readonly avatar: string;
+  /** §13.12: every call-history counterpart carries its origin badge. */
+  readonly realm: OriginRealm | null;
   readonly label: string;
   readonly stamp: string;
   readonly missed: boolean;
@@ -152,6 +154,7 @@ export function callRowView(row: CallRow, meId: string, nowMs: number = Date.now
     row,
     name: callPeerName(row),
     avatar: callPeerAvatar(row),
+    realm: row.other?.originRealm ?? null,
     label: callHistoryLabel(row),
     stamp: listStamp(row.createdAt, nowMs),
     missed: row.status === "MISSED" || row.status === "DECLINED",

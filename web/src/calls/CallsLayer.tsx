@@ -184,6 +184,7 @@ export function CallsLayer({ route, navigate }: Props) {
           name: target.name || "KuchuPuchu",
           avatar: target.avatar ?? "",
           online: target.online ?? false,
+          realm: null,
         },
         kind,
       );
@@ -214,6 +215,7 @@ export function CallsLayer({ route, navigate }: Props) {
             name: row.other?.displayName || row.other?.username || "KuchuPuchu",
             avatar,
             online: row.other?.online === true,
+            realm: row.other?.originRealm ?? null,
           },
           row.kind,
         );

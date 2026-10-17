@@ -179,6 +179,7 @@ object ScreenStore {
     /** Owner round 32 (item 23): a call row belongs to a hidden chat when the
      *  1:1 conversation with its other party is hidden. */
     fun isHiddenCall(call: JSONObject): Boolean {
+        if (call.optBoolean("hidden", false)) return true
         val cid = hiddenCallConv(call) ?: return false
         return isHidden(cid)
     }

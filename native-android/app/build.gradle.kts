@@ -14,6 +14,14 @@ plugins {
 val kpBuildSha = System.getenv("GITHUB_SHA")?.take(12)?.takeIf { it.matches(Regex("[0-9a-fA-F]{7,12}")) } ?: "local"
 val kpComposeBomVersion = "2026.06.00"
 
+// The VintoxBd communication core this build talks to for realm-aware features
+// (plan §13.13: the linked-account state). The app itself still signs in
+// against its own API — this is the ONE place the core origin is written down,
+// so a release build can pin production with -PkpCoreBase=… and nothing has to
+// be edited in Kotlin. Path/URL only, never a secret.
+val kpCoreBase = (project.findProperty("kpCoreBase") as? String)?.trim()?.takeIf { it.isNotBlank() }
+    ?: "https://vintoxbd-comm-core-preview.vintoxbdinstitute.workers.dev"
+
 // §51 / Play policy: `release` must not be signed with the repository's debug key —
 // that key is in git, so anyone with read access could publish an update that every
 // installed phone accepts as coming from this developer. The real signing key lives in
@@ -77,6 +85,7 @@ android {
         versionName = "3.9.205"
         buildConfigField("String", "BUILD_SHA", "\"$kpBuildSha\"")
         buildConfigField("String", "COMPOSE_BOM_VERSION", "\"$kpComposeBomVersion\"")
+        buildConfigField("String", "CORE_BASE", "\"$kpCoreBase\"")
     }
     signingConfigs {
         getByName("debug") {
@@ -187,6 +196,7 @@ dependencies {
     // decision, not an accident of what compose-bom happens to resolve.
     implementation("androidx.fragment:fragment-ktx:1.8.9")
     implementation("androidx.navigation:navigation-compose:2.9.8")
+    // Native subscriber classroom. Exact pin: upgrades require room/device QA.
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
