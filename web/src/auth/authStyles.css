@@ -83,6 +83,39 @@
   margin-top: 15px;
 }
 
+.qr-login {
+  justify-items: center;
+  text-align: center;
+}
+
+.qr-login__frame {
+  display: grid;
+  place-items: center;
+  width: 240px;
+  height: 240px;
+  margin: 4px auto 6px;
+  padding: 10px;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: var(--kp-skeuo-raised);
+}
+
+.qr-login__image {
+  width: 220px;
+  height: 220px;
+}
+
+.qr-login__placeholder {
+  max-width: 180px;
+  color: #1c2330;
+  font-size: 13px;
+  text-align: center;
+}
+
+.qr-login__phone-button {
+  margin-top: 6px;
+}
+
 .field-label {
   margin-top: 5px;
   color: #c8d3e6;

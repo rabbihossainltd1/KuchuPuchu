@@ -150,6 +150,18 @@ function fail(status: number, message: string, code?: string, retryAfter?: strin
 
 const nowIso = () => new Date().toISOString();
 const id = () => crypto.randomUUID();
+/**
+ * Phase R9: every real account's QR share/login code — 16 random bytes as
+ * lowercase hex, the same shape the one-time backfill migration used
+ * (`lower(hex(randomblob(16)))`), so the `by-qr` route's regex and the unique
+ * index both already agree with it. Called once at account creation and
+ * again on an explicit reset; a row must never sit at NULL in between, or its
+ * QR screen (every profile has one) has nothing to draw.
+ */
+const freshQrCode = () =>
+  [...crypto.getRandomValues(new Uint8Array(16))]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 const pairId = (a: string, b: string) => (a < b ? `c_${a}_${b}` : `c_${b}_${a}`);
 /** Anti-phantom grace: a RINGING call younger than this never reached the
  *  callee's screen (hidden from /active, the push waits it out), so a caller
@@ -638,6 +650,52 @@ async function claimLoginSession(
     platform: args.platform,
   });
   return token;
+}
+
+const QR_LOGIN_TTL_MS = 2 * 60_000;
+
+/**
+ * Atomically mint a Web session once a phone has confirmed a QR login.
+ * Shaped like claimLoginSession (login_requests): the WAITING client claims
+ * its own session on its own poll, so the session's recorded IP/city/country
+ * is the browser's, not the scanning phone's. Unlike login_requests this
+ * table starts with no known user — nobody can tell whose login this is
+ * until some authenticated phone confirms it — so the claim only needs a
+ * token, not a requestId+deviceId pair.
+ */
+async function claimQrLogin(
+  db: D1Database,
+  request: Request,
+  token: string,
+): Promise<{ sessionToken: string; user: UserRow } | null> {
+  const row = await one<{
+    status: string;
+    expires_at: string;
+    confirmed_user_id: string | null;
+  }>(
+    db,
+    "SELECT status, expires_at, confirmed_user_id FROM web_login_sessions WHERE token = ?",
+    token,
+  );
+  if (!row || row.status !== "CONFIRMED" || !row.confirmed_user_id) return null;
+  if (Date.parse(row.expires_at) < Date.now()) return null;
+  const user = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row.confirmed_user_id);
+  if (!user || user.auth_status !== "ACTIVE") return null;
+  const deviceId = `web-qr-${id()}`;
+  const { token: sessionToken, stmt } = await sessionStmt(db, user.id, deviceId);
+  const claimed = (await db.batch([
+    db
+      .prepare(
+        `UPDATE web_login_sessions SET status = 'CLAIMED', issued_token = NULL
+          WHERE token = ? AND status = 'CONFIRMED'`,
+      )
+      .bind(token),
+    ...deviceTransferStmts(db, user.id, deviceId, "Web browser", clientWhere(request), "WEB"),
+    stmt,
+  ])) as { meta: { changes: number } }[];
+  if (!claimed[0]?.meta.changes) return null;
+  await audit(db, "LOGIN_CLAIMED", user.id, deviceId, { method: "QR" });
+  return { sessionToken, user };
 }
 
 /** Best-effort audit trail (§11 audit_logs). Never blocks a login. */
@@ -4128,6 +4186,35 @@ async function ensureSchema(db: D1Database) {
       delivered_at TEXT
     )`,
     `CREATE INDEX IF NOT EXISTS idx_classroom_notification_recipient ON classroom_notification_deliveries(kp_user_id, attempted_at)`,
+    // ---- QR identity + QR web login (phase R9) ----
+    // A rotatable, opaque share code — never the raw user id — so a leaked
+    // screenshot can be invalidated with "Reset my QR code" without changing
+    // the account itself. ALTER cannot carry a non-constant DEFAULT, so this
+    // backfills every existing row (and every fresh row, since migrations
+    // always run once right after the CREATE batch) with its own random value.
+    `ALTER TABLE users ADD COLUMN qr_code TEXT`,
+    `UPDATE users SET qr_code = lower(hex(randomblob(16))) WHERE qr_code IS NULL`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_qr_code ON users(qr_code) WHERE qr_code IS NOT NULL`,
+    // One row per "scan this to sign the Web in" attempt. Deliberately NOT
+    // login_requests: that table requires a known user_id up front (phone
+    // lookup happens before a request exists); a QR session starts anonymous
+    // — nobody knows which account it is until some phone scans it — so it
+    // needs its own narrower shape. `issued_token` is read exactly once by
+    // the polling browser (claimQrLogin nulls it in the same UPDATE that
+    // flips CLAIMED), the same "spend on fetch" shape as view-once media.
+    `CREATE TABLE IF NOT EXISTS web_login_sessions (
+      token TEXT PRIMARY KEY,
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      confirmed_user_id TEXT,
+      confirmed_at TEXT,
+      issued_token TEXT
+    )`,
+    // Every lookup/update above is by the `token` primary key; this index
+    // exists solely for the daily sweep's "DELETE ... WHERE expires_at < ?"
+    // in pruneAgedRows, so it is cheap instead of a full table scan.
+    `CREATE INDEX IF NOT EXISTS idx_web_login_sessions_expiry ON web_login_sessions(expires_at)`,
     // Plan §13.14: the one-time `linked` backfill for accounts linked before the
     // column existed. It is the LAST statement on purpose: it reads
     // identity_links, so it may only run once every table exists — placed any
@@ -4315,6 +4402,8 @@ type UserRow = {
   kp_subject?: string | null;
   /** 1 while an ACTIVE cross-realm link exists (plan §13.14). */
   linked?: number | null;
+  /** Rotatable opaque QR share code (phase R9); never the raw id. */
+  qr_code?: string | null;
 };
 
 /* ---------------- privacy (owner round 30) ---------------- */
@@ -4493,6 +4582,10 @@ function userFrom(row: UserRow, online = false, light = false, viewer?: Viewer) 
           phone: privAllows(row.priv_phone, PRIVACY_DEFAULTS.phone, viewer) ? row.phone_e164 : null,
         }
       : {}),
+    // Phase R9: every profile carries its own share code, not only self — the
+    // "QR" button on a friend's profile shows THEIR code (e.g. to help a
+    // third person add them), not a scanner.
+    qrCode: row.qr_code ?? null,
   };
   // Stable per-avatar token; bumped on every profile-photo change, so a
   // client can cache the avatar data-URI forever keyed by this ref and
@@ -6042,7 +6135,7 @@ function counterUpsert(
 export async function pruneAgedRows(
   db: D1Database,
   now: Date,
-): Promise<{ errorLog: number; devices: number } | null> {
+): Promise<{ errorLog: number; devices: number; qrSessions: number } | null> {
   const day = now.toISOString().slice(0, 10);
   const done = await one<{ value: number }>(
     db,
@@ -6064,11 +6157,21 @@ export async function pruneAgedRows(
     "DELETE FROM devices WHERE updated_at < ?",
     new Date(now.getTime() - 60 * 864e5).toISOString(),
   );
+  // Abandoned QR logins (the browser tab closed, nobody scanned it, or it
+  // finished and nobody is ever coming back to poll it again) have no
+  // in-request path that cleans them up — unlike login_requests, which the
+  // waiting device's own poll lazily expires. One day of headroom past the
+  // 2-minute TTL is generous; the index makes this a cheap indexed delete.
+  const qrSessions = await run(
+    db,
+    "DELETE FROM web_login_sessions WHERE expires_at < ?",
+    new Date(now.getTime() - 864e5).toISOString(),
+  );
   // Gauges replace, and this has to be idempotent for the day: a marker written
   // through the counter path would read 2, 3, 4 and could not be told apart from a
   // day that pruned several times.
   await db.batch([gaugeUpsert(db, day, PRUNE_MARKER, 1)]);
-  return { errorLog, devices };
+  return { errorLog, devices, qrSessions };
 }
 
 /**
@@ -7161,8 +7264,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         db,
         `INSERT INTO users
            (id, email, password_hash, username, display_name, avatar_url, about,
-            created_at, last_active_at, auth_status, origin_realm, bridge_subject)
-         VALUES (?, ?, '!', ?, ?, NULL, NULL, ?, ?, 'ACTIVE', 'vx', ?)`,
+            created_at, last_active_at, auth_status, origin_realm, bridge_subject, qr_code)
+         VALUES (?, ?, '!', ?, ?, NULL, NULL, ?, ?, 'ACTIVE', 'vx', ?, ?)`,
         userId,
         `${sub}${VX_EMAIL_SUFFIX}`,
         requested,
@@ -7170,6 +7273,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         created,
         created,
         sub,
+        freshQrCode(),
       );
       row = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", userId);
       await run(
@@ -7248,8 +7352,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         db,
         `INSERT INTO users
            (id, email, password_hash, username, display_name, avatar_url, about,
-            created_at, last_active_at, auth_status, origin_realm, kp_subject)
-         VALUES (?, ?, '!', ?, ?, NULL, NULL, ?, ?, 'ACTIVE', 'kp', ?)`,
+            created_at, last_active_at, auth_status, origin_realm, kp_subject, qr_code)
+         VALUES (?, ?, '!', ?, ?, NULL, NULL, ?, ?, 'ACTIVE', 'kp', ?, ?)`,
         userId,
         `${await sha256Hex(subject)}${APP_EMAIL_SUFFIX}`,
         handle,
@@ -7257,6 +7361,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         created,
         created,
         subject,
+        freshQrCode(),
       );
       row = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", userId);
       await run(
@@ -7358,8 +7463,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         `INSERT INTO users
            (id, email, password_hash, username, display_name, avatar_url, about,
             created_at, last_active_at, phone_e164, phone_verified_at,
-            phone_verification_method, auth_status)
-         VALUES (?, ?, '', ?, ?, NULL, NULL, ?, ?, ?, ?, ?, 'PENDING')`,
+            phone_verification_method, auth_status, qr_code)
+         VALUES (?, ?, '', ?, ?, NULL, NULL, ?, ?, ?, ?, ?, 'PENDING', ?)`,
         userId,
         phoneEmail(phone),
         username,
@@ -7369,6 +7474,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         phone,
         verifiedAt,
         attestMethod,
+        freshQrCode(),
       );
       await audit(db, "PHONE_SIGNUP_STARTED", userId, deviceId, {
         phone: maskPhone(phone),
@@ -8018,10 +8124,96 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     return json({ ok: true });
   }
 
+  /* ---------- QR web login (phase R9) ----------
+   * The Web shows a QR code before any phone number is entered. A phone
+   * scans it (an ordinary authenticated request) and confirms; this browser
+   * — still unauthenticated — claims the resulting session on its own next
+   * poll, exactly like the new-device-login approval flow does for
+   * login_requests. No approval tap on the phone: the deliberate act of
+   * opening the scanner and pointing it at this one code IS the consent. */
+  if (path === "/api/auth/qr/start" && method === "POST") {
+    rateLimit(`qrs:${clientIp(request)}`, 30, 20);
+    await rateLimitGlobal(db, `gqrs:${clientIp(request)}`, 90);
+    const token = id();
+    const createdAt = nowIso();
+    const expiresAt = new Date(Date.now() + QR_LOGIN_TTL_MS).toISOString();
+    await run(
+      db,
+      `INSERT INTO web_login_sessions (token, status, created_at, expires_at)
+       VALUES (?, 'PENDING', ?, ?)`,
+      token,
+      createdAt,
+      expiresAt,
+    );
+    return json({ token, expiresAt }, 201);
+  }
+
+  const qrStatusMatch = path.match(/^\/api\/auth\/qr\/([A-Za-z0-9_-]{1,64})\/status$/);
+  if (qrStatusMatch && method === "GET") {
+    rateLimit(`qrp:${clientIp(request)}`, 180, 120);
+    await rateLimitGlobal(db, `gqrp:${clientIp(request)}`, 600);
+    const token = qrStatusMatch[1]!;
+    const row = await one<{ status: string; expires_at: string }>(
+      db,
+      "SELECT status, expires_at FROM web_login_sessions WHERE token = ?",
+      token,
+    );
+    if (!row) return json({ status: "UNKNOWN" });
+    if (row.status === "PENDING" || row.status === "SCANNED") {
+      if (Date.parse(row.expires_at) < Date.now()) {
+        await run(
+          db,
+          `UPDATE web_login_sessions SET status = 'EXPIRED' WHERE token = ? AND status = ?`,
+          token,
+          row.status,
+        );
+        return json({ status: "EXPIRED" });
+      }
+      return json({ status: row.status, expiresAt: row.expires_at });
+    }
+    if (row.status === "CONFIRMED") {
+      const claim = await claimQrLogin(db, request, token);
+      if (!claim) return json({ status: "EXPIRED" });
+      return json({
+        status: "SESSION",
+        token: claim.sessionToken,
+        user: userSelf(claim.user, true),
+      });
+    }
+    // CLAIMED (a racing poll already finished it) | EXPIRED | DENIED.
+    return json({ status: row.status === "CLAIMED" ? "UNKNOWN" : row.status });
+  }
+
   /* ---------- authenticated ---------- */
 
   const me = await requireUser(db, request, env, ctx);
   const uid = me.id;
+
+  const qrConfirmMatch = path.match(/^\/api\/auth\/qr\/([A-Za-z0-9_-]{1,64})\/confirm$/);
+  if (qrConfirmMatch && method === "POST") {
+    // The scanning phone is already signed in; opening the scanner and
+    // pointing it at the Web's one-shot code is the whole consent — no
+    // second "approve this login?" tap (owner decision). Confirming only
+    // records WHO is confirmed; claimQrLogin mints the actual session when
+    // the waiting browser polls, so the session's IP/city/country is the
+    // browser's own, not this phone's.
+    await rateLimitGlobal(db, `qrconfirm:${uid}`, 20);
+    const token = qrConfirmMatch[1]!;
+    const confirmedAt = nowIso();
+    const changes = await run(
+      db,
+      `UPDATE web_login_sessions SET status = 'CONFIRMED', confirmed_user_id = ?, confirmed_at = ?
+        WHERE token = ? AND status = 'PENDING' AND expires_at > ?`,
+      uid,
+      confirmedAt,
+      token,
+      confirmedAt,
+    );
+    if (!changes)
+      fail(410, "This QR code has expired. Scan the code shown on the screen again.", "QR_EXPIRED");
+    await audit(db, "QR_LOGIN_CONFIRMED", uid, null, {});
+    return json({ ok: true });
+  }
 
   // §37 token refresh, in the only shape that is safe with a single opaque bearer:
   // an **active** session slides its own expiry. Not "hand back an expired token and
@@ -9471,6 +9663,32 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const view =
       row.id === uid ? SELF_VIEW : (await isContact(db, uid, row.id)) ? CONTACT_VIEW : {};
     return json({ user: userFrom(row, onlineNow(row), false, view) });
+  }
+
+  // Phase R9: resolve a scanned QR share code to the profile it belongs to.
+  // Unlike the username route this does NOT gate on private_profile — a
+  // private profile still opts out of SEARCH, but sharing your own code (or
+  // scanning someone else's) is an explicit act each side chose, same spirit
+  // as a direct phone-number contact add.
+  const userQrMatch = path.match(/^\/api\/users\/by-qr\/([a-f0-9]{1,64})$/);
+  if (userQrMatch && method === "GET") {
+    await rateLimitGlobal(db, `userqr:${uid}`, 60);
+    const row = await one<UserRow>(db, "SELECT * FROM users WHERE qr_code = ?", userQrMatch[1]!);
+    if (!row) fail(404, "This QR code doesn't match a KuchuPuchu account.", "NOT_FOUND");
+    if (await blockedBetween(db, uid, row.id)) fail(403, "You can't reach this user.", "BLOCKED");
+    const view =
+      row.id === uid ? SELF_VIEW : (await isContact(db, uid, row.id)) ? CONTACT_VIEW : {};
+    return json({ user: userFrom(row, onlineNow(row), false, view) });
+  }
+
+  if (path === "/api/users/me/qr-code/reset" && method === "POST") {
+    // A leaked screenshot of your own code should not be a standing risk:
+    // this invalidates it and mints a fresh one (the old code 404s from then
+    // on, same shape as "Reset QR code" in other messengers).
+    await rateLimitGlobal(db, `qrreset:${uid}`, 10);
+    const code = freshQrCode();
+    await run(db, "UPDATE users SET qr_code = ? WHERE id = ?", code, uid);
+    return json({ qrCode: code });
   }
 
   const userMatch = path.match(/^\/api\/users\/([^/]+)$/);

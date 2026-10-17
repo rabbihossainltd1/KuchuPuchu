@@ -219,6 +219,15 @@ dependencies {
     implementation("io.coil-kt:coil-gif:2.7.0")
     implementation("com.airbnb.android:lottie-compose:6.6.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Phase R9: QR scan (add a contact / web login) and QR generation (every
+    // profile's own share code). Chosen over CameraX + ML Kit: the app has
+    // no CameraX usage anywhere else, and ScanContract's full-screen scanner
+    // Activity is a much smaller surface to get right than wiring a live
+    // camera preview by hand. zxing:core is pinned explicitly because
+    // zxing-android-embedded:4.3.0's own transitive default (3.4.1) is older
+    // than the fix release; minSdk 24 here already meets its floor.
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    implementation("com.google.zxing:core:3.5.3")
     // §50's "unit tests" rung: plain JVM tests over the queue's retry clock and the
     // notification id math (app/src/test). JUnit4 because that is what AGP's
     // testDebugUnitTest runs without any further configuration, and pinned like every

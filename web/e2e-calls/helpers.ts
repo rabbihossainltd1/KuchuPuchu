@@ -143,6 +143,12 @@ export type MockCallsWorker = {
   install(page: Page, as?: "me" | "peer"): Promise<void>;
   /** Push a frame to one user's `/ws/user` socket, the way the Worker broadcasts. */
   pushUserFrame(userId: string, frame: Record<string, unknown>): void;
+  /**
+   * Mark a conversation hidden for the reading user — the server-supplied,
+   * per-viewer fact `GET /api/calls/history` rides on `hidden`, which the
+   * browser (not this mock) is the one that filters out of the Calls tab.
+   */
+  hideConversation(conversationId: string): void;
 };
 
 function json(route: Route, body: unknown, status = 200) {
@@ -160,11 +166,15 @@ export async function createMockCallsWorker(
   const userSockets = new Map<string, WebSocketRoute[]>();
   const meIdentity = await generateTestIdentity();
   const peerIdentity = await generateTestIdentity();
+  const hiddenConversationIds = new Set<string>();
 
   const worker: MockCallsWorker = {
     calls,
     options,
     requests: [],
+    hideConversation(conversationId) {
+      hiddenConversationIds.add(conversationId);
+    },
     starts: [],
     answers: [],
     declines: [],
@@ -258,9 +268,20 @@ export async function createMockCallsWorker(
 
       await page.route(/\/api\/config\/ice(\?.*)?$/, (route) => {
         worker.requests.push("GET /api/config/ice");
-        // No TURN credentials in a test: the client must fall back to its own
-        // built-in list rather than fail the call.
-        return json(route, { ice: null });
+        // Phase R8/classroom (owner): the Web engine now refuses to capture
+        // media or signal a call at all without a dedicated TURN relay
+        // (test/cases/62-web-calls.mjs pins CALL_COPY.relayUnavailable for a
+        // null ice config) — `{ ice: null }` used to mean "fall back to the
+        // built-ins" but now means "refuse the call", so every call test
+        // needs a real-shaped, long-lived mint here or none of them can ring.
+        return json(route, {
+          ice: {
+            urls: ["turns:relay.e2e.test:443"],
+            username: "e2e-turn-user",
+            credential: "e2e-turn-credential",
+            expiresAt: Date.now() + 60 * 60_000,
+          },
+        });
       });
 
       await page.route(/\/api\/calls\/active(\?.*)?$/, (route) => {
@@ -306,6 +327,9 @@ export async function createMockCallsWorker(
             delete row.reofferSdp;
             delete row.reanswerSdp;
             delete row.media;
+            // Mirrors the real Worker: a per-viewer fact computed from the
+            // reader's OWN `members.hidden` row, never guessed from the name.
+            row.hidden = hiddenConversationIds.has(call.conversationId);
             return row;
           });
         return json(route, { items });

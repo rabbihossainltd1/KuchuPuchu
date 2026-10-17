@@ -65,6 +65,15 @@ export type LoginOtpResponse = {
   attemptsRemaining?: number;
 };
 
+export type QrStartResponse = { token: string; expiresAt: string };
+
+export type QrStatusResponse = {
+  status: "PENDING" | "SCANNED" | "SESSION" | "EXPIRED" | "UNKNOWN" | string;
+  expiresAt?: string;
+  token?: string;
+  user?: AuthUser;
+};
+
 export type AuthDevice = {
   deviceId: string;
   platform: string;
@@ -110,6 +119,23 @@ export const authApi = {
   },
   cancelLogin(api: ApiClient, body: Record<string, unknown>, signal?: AbortSignal) {
     return requestJson<{ ok: boolean }>(api, "/api/auth/login/cancel", "POST", body, signal);
+  },
+  // Phase R9: the Web-login QR. Starting is unauthenticated (nobody is signed
+  // in yet); the status poll is also unauthenticated — the phone's /confirm
+  // call is what carries a bearer, this browser never does until it claims
+  // the session that confirm produced.
+  startQrLogin(api: ApiClient, signal?: AbortSignal) {
+    return api.request<QrStartResponse>("/api/auth/qr/start", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+      ...(signal ? { signal } : {}),
+    });
+  },
+  pollQrLogin(api: ApiClient, token: string, signal?: AbortSignal) {
+    return api.request<QrStatusResponse>(`/api/auth/qr/${encodeURIComponent(token)}/status`, {
+      ...(signal ? { signal } : {}),
+    });
   },
   lookupRecovery(api: ApiClient, body: Record<string, unknown>, signal?: AbortSignal) {
     return requestJson<{ exists: boolean }>(api, "/api/auth/recovery/lookup", "POST", body, signal);

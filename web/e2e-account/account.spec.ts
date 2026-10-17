@@ -169,6 +169,14 @@ async function mockWorker(
     } else if (url.pathname === "/api/ws/ticket") {
       // Plan §7.2: socket dials mint a one-time ticket first; give the dial one.
       result = jsonResponse({ ticket: "e2e.ticket", expiresIn: 60 });
+    } else if (url.pathname === "/api/auth/qr/start" && request.method() === "POST") {
+      // Phase R9: the auth screen's new default view starts a QR token on
+      // mount. None of these specs exercise the QR-scan path itself (that is
+      // covered by its own tests), so a stable pending token is enough to
+      // let the screen render without an unmocked-request failure.
+      result = jsonResponse({ token: "e2e-qr-token", expiresAt: "2026-12-31T00:00:00.000Z" }, 201);
+    } else if (/^\/api\/auth\/qr\/[^/]+\/status$/.test(url.pathname)) {
+      result = jsonResponse({ status: "PENDING", expiresAt: "2026-12-31T00:00:00.000Z" });
     } else {
       result = jsonResponse({ error: { code: "NOT_MOCKED" } }, 404);
     }
@@ -186,7 +194,16 @@ async function mockWorker(
   };
 }
 
+// Phase R9: the auth screen now opens on the QR-login view by default,
+// so every flow that exercises the phone/OTP/Google path has to step off
+// it first. Idempotent: a no-op once the phone form is already showing.
+async function switchToPhoneFlow(page: Page) {
+  const phoneLink = page.getByRole("button", { name: "Log in with phone number" });
+  if (await phoneLink.isVisible().catch(() => false)) await phoneLink.click();
+}
+
 async function enterPhone(page: Page, phone = "01712345678") {
+  await switchToPhoneFlow(page);
   await page.getByLabel("Phone number").fill(phone);
   await page.getByRole("button", { name: "Continue", exact: true }).click();
 }
@@ -215,7 +232,7 @@ test.describe("opt-in Worker-backed account flows", () => {
     await installGoogleMock(page);
     await page.goto("/account");
 
-    await expect(page.getByRole("heading", { name: "Sign in or create an account" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Scan to sign in" })).toBeVisible();
     await enterPhone(page);
     await expect(page.getByText(/This browser cannot verify a SIM/)).toBeVisible();
     await page.getByLabel("Display name (optional)").fill("Amina Test");
@@ -301,7 +318,7 @@ test.describe("opt-in Worker-backed account flows", () => {
       },
     });
     await page.goto("/chats/thread-private-42");
-    await expect(page.getByRole("heading", { name: "Sign in or create an account" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Scan to sign in" })).toBeVisible();
     await enterPhone(page);
     await expect(
       page.getByText(/Waiting for approval from a signed-in KuchuPuchu device/),
@@ -375,6 +392,7 @@ test.describe("opt-in Worker-backed account flows", () => {
     });
     await installGoogleMock(page);
     await page.goto("/account");
+    await switchToPhoneFlow(page);
     await page.getByRole("button", { name: "Recover account with Google" }).click();
     await page.getByLabel("Phone number").fill("01712345678");
     await page.getByRole("button", { name: "Continue to recovery" }).click();
@@ -426,7 +444,7 @@ test.describe("opt-in Worker-backed account flows", () => {
     expect(logoutCall?.headers.authorization).toBe("Bearer persistent-session");
 
     await page.goto("/account");
-    await expect(page.getByRole("heading", { name: "Sign in or create an account" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Scan to sign in" })).toBeVisible();
     await expect(page.getByText("Amina Test", { exact: true })).toHaveCount(0);
   });
 
@@ -494,7 +512,7 @@ test.describe("opt-in Worker-backed account flows", () => {
           : jsonResponse({ user: baseProfile }),
     });
     await page.goto("/account");
-    await expect(page.getByRole("heading", { name: "Sign in or create an account" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Scan to sign in" })).toBeVisible();
     expect(await page.evaluate(() => localStorage.getItem("kp.token"))).toBeNull();
     expect(
       calls.some(

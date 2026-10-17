@@ -2640,11 +2640,12 @@ const convBetween = (db, a, b) =>
     "utf8",
   );
   check(
-    "r28-5/r31/r32-3/R8: the settings cog is gone; the home ⋮ menu is exactly My Profile, New contact, All contacts, New group, Class, Settings — in that order; My Profile stays in the home shell, the others are routes (r32-3: About Us remains under Settings › App) — bottom sheet (no DropdownMenu)",
+    "r28-5/r31/r32-3/R8/R9: the settings cog is gone; the home ⋮ menu is exactly My Profile, QR code, New contact, All contacts, New group, Class, Settings — in that order; My Profile stays in the home shell, the others are routes (r32-3: About Us remains under Settings › App) — bottom sheet (no DropdownMenu)",
     !list.includes('Icon(Icons.Filled.Settings, "Settings"') &&
       (() => {
         const order = [
           "My Profile",
+          "QR code",
           "New contact",
           "All contacts",
           "New group",
@@ -2654,7 +2655,7 @@ const convBetween = (db, a, b) =>
         const idx = order.map((l) => list.indexOf(`"${l}")`));
         return idx.every((i, n) => i > 0 && (n === 0 || i > idx[n - 1]));
       })() &&
-      (list.match(/HomeMenuItem\(Icons/g) || []).length === 6 &&
+      (list.match(/HomeMenuItem\(Icons/g) || []).length === 7 &&
       !list.includes('HomeMenuItem(Icons.Filled.Info, "About Us")') &&
       readFileSync(
         "native-android/app/src/main/java/app/kuchupuchu/android/SettingsScreen.kt",

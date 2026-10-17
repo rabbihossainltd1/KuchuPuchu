@@ -90,6 +90,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.MoreVert
@@ -2577,6 +2578,10 @@ private fun HomeMenuItem(icon: ImageVector, label: String, onClick: () -> Unit) 
 private fun HomeMenuSheet(onDismiss: () -> Unit, nav: NavController, onOpenProfile: () -> Unit) {
     KpSheet(onDismiss = onDismiss) {
         HomeMenuItem(Icons.Filled.Person, "My Profile") { onDismiss(); onOpenProfile() }
+        // Phase R9: the scanner (and my own code) live behind this one row —
+        // "QR code" opens my profile's QR screen, which also carries the
+        // Scan tab.
+        HomeMenuItem(Icons.Filled.QrCode, "QR code") { onDismiss(); nav.navigate("qr/${Store.myId()}") }
         HomeMenuItem(Icons.Filled.PersonAdd, "New contact") { onDismiss(); nav.navigate("newcontact") }
         HomeMenuItem(Icons.Filled.Contacts, "All contacts") { onDismiss(); nav.navigate("contacts") }
         HomeMenuItem(Icons.Filled.GroupAdd, "New group") { onDismiss(); nav.navigate("newgroup") }
