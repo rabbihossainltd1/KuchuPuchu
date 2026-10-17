@@ -3,6 +3,7 @@ import { useAuth } from "../auth/AuthContext";
 import { Icon } from "../icons";
 import { classroomApi, type ClassroomSummary } from "./classroomApi";
 import { MAX_PARTICIPANTS, MeshClassroom } from "./meshClassroom";
+import { InstructorRecorder, uploadClassRecording } from "./classroomRecording";
 import "./classroom.css";
 
 export function ClassroomWorkspace() {
@@ -13,8 +14,12 @@ export function ClassroomWorkspace() {
   const [active, setActive] = useState<ClassroomSummary | null>(null);
   const [streams, setStreams] = useState<Map<string, MediaStream>>(new Map());
   const [participants, setParticipants] = useState(0);
+  const [instructor, setInstructor] = useState(false);
+  const [recording, setRecording] = useState<"idle" | "recording" | "uploading" | "saved">("idle");
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState("");
   const roomRef = useRef<MeshClassroom | null>(null);
+  const recorderRef = useRef<InstructorRecorder | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -40,6 +45,13 @@ export function ClassroomWorkspace() {
     return () => window.clearInterval(heartbeat);
   }, [active, api]);
 
+  useEffect(() => {
+    if (recording !== "recording" && recording !== "uploading") return;
+    const protect = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", protect);
+    return () => window.removeEventListener("beforeunload", protect);
+  }, [recording]);
+
   async function joinClass(item: ClassroomSummary) {
     setJoining(item.id);
     setError("");
@@ -60,6 +72,7 @@ export function ClassroomWorkspace() {
       roomRef.current = room;
       await room.connect(credentials.url, credentials.ticket);
       setActive(item);
+      setInstructor(credentials.instructor);
       setParticipants(1);
     } catch {
       roomRef.current?.close();
@@ -72,13 +85,55 @@ export function ClassroomWorkspace() {
     }
   }
 
-  function leave() {
+  async function startRecording() {
+    if (!instructor || !roomRef.current || recording === "uploading") return;
+    setError("");
+    try {
+      const recorder = new InstructorRecorder(roomRef.current.recordingStreams());
+      await recorder.start();
+      recorderRef.current = recorder;
+      setRecording("recording");
+      setUploadProgress(0);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The device recording could not start.");
+    }
+  }
+
+  async function stopRecording(): Promise<boolean> {
+    const recorder = recorderRef.current;
+    if (!recorder || !active) return true;
+    setRecording("uploading");
+    setUploadProgress(0);
+    try {
+      const blob = await recorder.stop();
+      recorderRef.current = null;
+      await uploadClassRecording(api, active.id, blob, setUploadProgress);
+      setRecording("saved");
+      return true;
+    } catch (reason) {
+      setRecording("idle");
+      setError(
+        reason instanceof Error
+          ? `${reason.message} The recording was not published.`
+          : "The recording could not be uploaded privately.",
+      );
+      return false;
+    }
+  }
+
+  async function leave() {
+    if (recording === "uploading") return;
+    if (recording === "recording" && !(await stopRecording())) return;
     if (active) void classroomApi.attendance(api, active.id, "leave").catch(() => undefined);
     roomRef.current?.close();
     roomRef.current = null;
+    recorderRef.current = null;
     setActive(null);
     setStreams(new Map());
     setParticipants(0);
+    setInstructor(false);
+    setRecording("idle");
+    setUploadProgress(0);
   }
 
   if (active) {
@@ -92,9 +147,40 @@ export function ClassroomWorkspace() {
               {participants} / {MAX_PARTICIPANTS} participants
             </p>
           </div>
-          <button type="button" className="classroom-leave" onClick={leave}>
-            Leave class
-          </button>
+          <div className="classroom-actions">
+            {instructor && recording === "idle" && (
+              <button
+                type="button"
+                className="classroom-record"
+                onClick={() => void startRecording()}
+              >
+                Record on this device
+              </button>
+            )}
+            {instructor && recording === "recording" && (
+              <button
+                type="button"
+                className="classroom-record is-recording"
+                onClick={() => void stopRecording()}
+              >
+                Stop &amp; upload
+              </button>
+            )}
+            {recording === "uploading" && (
+              <span className="classroom-upload" role="status">
+                Private upload {uploadProgress}%
+              </span>
+            )}
+            {recording === "saved" && <span className="classroom-saved">Recording saved</span>}
+            <button
+              type="button"
+              className="classroom-leave"
+              disabled={recording === "uploading"}
+              onClick={() => void leave()}
+            >
+              Leave class
+            </button>
+          </div>
         </header>
         {error && (
           <p className="classroom-error" role="alert">

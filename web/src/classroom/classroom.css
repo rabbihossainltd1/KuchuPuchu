@@ -79,8 +79,51 @@
   background: #aeb6c0;
   cursor: not-allowed;
 }
+.classroom-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.classroom-record {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid #164b86;
+  border-radius: 12px;
+  background: #edf3fb;
+  color: #123f73;
+  font-weight: 700;
+  cursor: pointer;
+}
+.classroom-record.is-recording {
+  border-color: #a52d36;
+  background: #fff0f0;
+  color: #8f222c;
+}
+.classroom-upload,
+.classroom-saved {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  border: 1px solid #cbd5df;
+  border-radius: 12px;
+  background: #fff;
+  color: #31445c;
+  font-weight: 700;
+}
+.classroom-saved {
+  border-color: #9bc6aa;
+  background: #edf8f0;
+  color: #23633a;
+}
 .classroom-leave {
   background: #a52d36;
+}
+.classroom-leave:disabled {
+  background: #9aa3ae;
+  cursor: wait;
 }
 .classroom-error,
 .classroom-empty {
@@ -137,5 +180,14 @@
   }
   .classroom-card button {
     width: 100%;
+  }
+  .classroom-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+  .classroom-actions > * {
+    flex: 1 1 100%;
+    justify-content: center;
+    text-align: center;
   }
 }

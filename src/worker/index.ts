@@ -3014,7 +3014,7 @@ async function classroomAssertion(
 async function classroomUpstream(
   env: Env,
   identity: ClassroomIdentity,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "DELETE",
   path: string,
   body?: Json,
 ): Promise<Json> {
@@ -9079,6 +9079,87 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       identity!,
       `/internal/classroom/v1/classes/${classroomRecording[1]}/recording`,
     );
+  }
+
+  const classroomRecordingStart = path.match(
+    /^\/api\/classroom\/v1\/classes\/(\d{1,20})\/recording\/uploads$/,
+  );
+  if (classroomRecordingStart && method === "POST") {
+    await rateLimitGlobal(db, `classroom-recording-start:${uid}`, 8);
+    const contentType = String(body.contentType ?? "");
+    const size = Number(body.size);
+    if (
+      !["video/webm", "video/mp4"].includes(contentType) ||
+      !Number.isSafeInteger(size) ||
+      size < 1
+    )
+      fail(400, "Invalid recording metadata.", "BAD_RECORDING");
+    const identity = await classroomIdentity(db, me);
+    if (!identity) fail(403, "An approved VintoxBd link is required.", "CLASSROOM_LINK_REQUIRED");
+    const upstream = await classroomUpstream(
+      env,
+      identity,
+      "POST",
+      `/internal/classroom/v1/classes/${classroomRecordingStart[1]}/recording/uploads`,
+      { contentType, size },
+    );
+    return json(upstream, 201, { "cache-control": "private, no-store" });
+  }
+
+  const classroomRecordingPart = path.match(
+    /^\/api\/classroom\/v1\/classes\/(\d{1,20})\/recording\/uploads\/([0-9a-f-]{36})\/part$/i,
+  );
+  if (classroomRecordingPart && method === "POST") {
+    await rateLimitGlobal(db, `classroom-recording-part:${uid}`, 120);
+    const partNumber = Number(body.partNumber);
+    if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > 1000)
+      fail(400, "Invalid recording part.", "BAD_RECORDING_PART");
+    const identity = await classroomIdentity(db, me);
+    if (!identity) fail(403, "An approved VintoxBd link is required.", "CLASSROOM_LINK_REQUIRED");
+    const upstream = await classroomUpstream(
+      env,
+      identity,
+      "POST",
+      `/internal/classroom/v1/classes/${classroomRecordingPart[1]}/recording/uploads/${classroomRecordingPart[2]}/part`,
+      { partNumber },
+    );
+    return json(upstream, 200, { "cache-control": "private, no-store" });
+  }
+
+  const classroomRecordingComplete = path.match(
+    /^\/api\/classroom\/v1\/classes\/(\d{1,20})\/recording\/uploads\/([0-9a-f-]{36})\/complete$/i,
+  );
+  if (classroomRecordingComplete && method === "POST") {
+    await rateLimitGlobal(db, `classroom-recording-complete:${uid}`, 8);
+    const parts = Array.isArray(body.parts) ? body.parts : [];
+    if (parts.length < 1 || parts.length > 1000)
+      fail(400, "Invalid recording completion.", "BAD_RECORDING_PARTS");
+    const identity = await classroomIdentity(db, me);
+    if (!identity) fail(403, "An approved VintoxBd link is required.", "CLASSROOM_LINK_REQUIRED");
+    const upstream = await classroomUpstream(
+      env,
+      identity,
+      "POST",
+      `/internal/classroom/v1/classes/${classroomRecordingComplete[1]}/recording/uploads/${classroomRecordingComplete[2]}/complete`,
+      { parts },
+    );
+    return json(upstream, 200, { "cache-control": "private, no-store" });
+  }
+
+  const classroomRecordingAbort = path.match(
+    /^\/api\/classroom\/v1\/classes\/(\d{1,20})\/recording\/uploads\/([0-9a-f-]{36})$/i,
+  );
+  if (classroomRecordingAbort && method === "DELETE") {
+    await rateLimitGlobal(db, `classroom-recording-abort:${uid}`, 8);
+    const identity = await classroomIdentity(db, me);
+    if (!identity) fail(403, "An approved VintoxBd link is required.", "CLASSROOM_LINK_REQUIRED");
+    const upstream = await classroomUpstream(
+      env,
+      identity,
+      "DELETE",
+      `/internal/classroom/v1/classes/${classroomRecordingAbort[1]}/recording/uploads/${classroomRecordingAbort[2]}`,
+    );
+    return json(upstream, 200, { "cache-control": "private, no-store" });
   }
 
   const classroomQuestion = path.match(/^\/api\/classroom\/v1\/classes\/(\d{1,20})\/questions$/);

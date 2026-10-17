@@ -18,6 +18,7 @@ type Peer = { pc: RTCPeerConnection; pending: RTCIceCandidateInit[] };
 export class MeshClassroom {
   private socket: WebSocket | null = null;
   private peers = new Map<string, Peer>();
+  private remoteStreams = new Map<string, MediaStream>();
   private local: MediaStream | null = null;
 
   constructor(
@@ -51,6 +52,7 @@ export class MeshClassroom {
     } else if (message.type === "peer-left") {
       this.peers.get(message.participant)?.pc.close();
       this.peers.delete(message.participant);
+      this.remoteStreams.delete(message.participant);
       this.onCount(this.peers.size + 1);
     } else if ("to" in message && message.to === this.self) {
       const peer = await this.ensure(message.from, false);
@@ -77,7 +79,11 @@ export class MeshClassroom {
     const peer = { pc, pending: [] as RTCIceCandidateInit[] };
     this.peers.set(id, peer);
     this.local?.getTracks().forEach((track) => pc.addTrack(track, this.local!));
-    pc.ontrack = ({ streams, track }) => this.onRemote(id, streams[0] ?? new MediaStream([track]));
+    pc.ontrack = ({ streams, track }) => {
+      const stream = streams[0] ?? new MediaStream([track]);
+      this.remoteStreams.set(id, stream);
+      this.onRemote(id, stream);
+    };
     pc.onicecandidate = ({ candidate }) =>
       candidate &&
       this.send({ type: "candidate", from: this.self, to: id, candidate: candidate.toJSON() });
@@ -97,10 +103,17 @@ export class MeshClassroom {
     if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify(value));
   }
 
+  recordingStreams(): readonly MediaStream[] {
+    return this.local
+      ? [this.local, ...this.remoteStreams.values()]
+      : [...this.remoteStreams.values()];
+  }
+
   close(): void {
     this.local?.getTracks().forEach((track) => track.stop());
     for (const peer of this.peers.values()) peer.pc.close();
     this.peers.clear();
+    this.remoteStreams.clear();
     this.socket?.close();
     this.socket = null;
     this.local = null;
