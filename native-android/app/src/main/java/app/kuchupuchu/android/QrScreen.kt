@@ -258,7 +258,7 @@ private fun MyQrPane(user: JSONObject?, isMe: Boolean) {
                 "The old code stops working the moment you reset it.",
                 fontSize = 11.5.sp,
                 color = Muted,
-                modifier = Modifier.padding(top = 2.dp, horizontal = 20.dp),
+                modifier = Modifier.padding(start = 20.dp, top = 2.dp, end = 20.dp),
             )
         }
     }
