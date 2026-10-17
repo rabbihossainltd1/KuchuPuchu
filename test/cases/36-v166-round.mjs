@@ -90,8 +90,8 @@ const pkg = readFileSync(
 
 /* the round's own bookkeeping */
 check(
-  "r110: versionCode 282 / versionName 3.9.205 (Gemini-only AI, dark-blue web, compact OTP + copy, avatar fix round; reuse of the v274 debug signer still needs explicit approval)",
-  /versionCode\s*=\s*282\b/.test(pkg) && /versionName\s*=\s*"3\.9\.205"/.test(pkg),
+  "r111: versionCode 283 / versionName 3.9.206 (QR scan-to-add + per-profile QR share code round; reuse of the v274 debug signer still needs explicit approval)",
+  /versionCode\s*=\s*283\b/.test(pkg) && /versionName\s*=\s*"3\.9\.206"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */
