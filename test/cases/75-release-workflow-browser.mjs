@@ -24,12 +24,12 @@ check(
     workflow.includes("inputs.confirm == 'RELEASE-DEBUG-KEY-V279'"),
 );
 check(
-  "signing continuity is checked against the published v274 APK before publishing v283",
+  "signing continuity is checked against the published v274 APK before publishing v284",
   workflow.includes("gh release download v274") &&
     workflow.includes("kuchupuchu-3.9.197-r104.apk") &&
     workflow.includes("Verify signing continuity with v274") &&
-    workflow.includes('test "$code" = "283"') &&
-    workflow.includes('test "$name" = "3.9.206"'),
+    workflow.includes('test "$code" = "284"') &&
+    workflow.includes('test "$name" = "3.9.207"'),
 );
 
 for (const line of lines) console.log(line);

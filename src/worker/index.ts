@@ -3591,6 +3591,40 @@ async function linkPreview(target: URL): Promise<LinkPreview> {
 
 let schemaReady = false;
 
+/**
+ * A quota refusal is a BUDGET problem, not a broken statement: D1's free tier
+ * refuses every query once the account crosses its daily row-read / row-write
+ * allowance, and the answer is "wait until 00:00 UTC" (or upgrade).
+ *
+ * The schema walk is the most read-expensive thing this worker does — it
+ * creates indexes over the big tables and backfills scan them end to end — so
+ * running it again on every cold isolate while the budget is gone is what
+ * keeps the account spent instead of letting it recover. The walk therefore
+ * stops at the first refusal and this isolate stops walking for a while.
+ */
+const D1_QUOTA_ERROR =
+  /free tier|row read limit|row write limit|read limit|write limit|daily limit|too much contention/i;
+
+/** How long this isolate refuses to re-walk after a quota refusal. */
+const SCHEMA_WALK_COOLDOWN_MS = 5 * 60_000;
+
+/** Set by runCatchingSql when a migration was refused for quota reasons. */
+let schemaQuotaBlocked = false;
+
+/** Wall clock until which this isolate will not start another walk. */
+let schemaWalkBlockedUntil = 0;
+
+function isQuotaError(err: unknown): boolean {
+  const msg = String(err instanceof Error ? err.message : err);
+  return D1_QUOTA_ERROR.test(msg);
+}
+
+function blockSchemaWalk(err: unknown): void {
+  schemaQuotaBlocked = true;
+  schemaWalkBlockedUntil = Date.now() + SCHEMA_WALK_COOLDOWN_MS;
+  console.error("schema walk deferred: " + (err instanceof Error ? err.message : String(err)));
+}
+
 /** Throttles the expired-status reaper so reads stay read-only. */
 let nextStatusSweep = 0;
 
@@ -3676,6 +3710,11 @@ async function schemaApplied(db: D1Database, fingerprint: string): Promise<boole
  */
 async function ensureSchema(db: D1Database) {
   if (schemaReady) return;
+  // A quota refusal stops the walk, and the cooldown stops this isolate from
+  // starting it again on the next request: the walk is the most read-
+  // expensive thing here, and a refusal means the account cannot afford it.
+  if (Date.now() < schemaWalkBlockedUntil) return;
+  schemaQuotaBlocked = false;
   const statements = [
     `CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
@@ -4231,10 +4270,27 @@ async function ensureSchema(db: D1Database) {
     schemaReady = true;
     return;
   }
-  await db.batch(statements.map((sql) => db.prepare(sql)));
+  try {
+    await db.batch(statements.map((sql) => db.prepare(sql)));
+  } catch (err) {
+    // A refused batch means the account is out of its daily budget, not that
+    // the DDL is wrong. Throwing here would turn every endpoint into a 500
+    // for the rest of the UTC day; returning leaves the reads working.
+    if (!isQuotaError(err)) throw err;
+    blockSchemaWalk(err);
+    return;
+  }
   let allApplied = true;
   for (const sql of migrations) {
     if (!(await runCatchingSql(db, sql))) allApplied = false;
+    if (schemaQuotaBlocked) break;
+  }
+  if (schemaQuotaBlocked) {
+    // The walk stopped at the refusal. Nothing below may run: the backfill
+    // UPDATE scans the whole messages table, and the fingerprint write would
+    // record a schema that is only half applied.
+    blockSchemaWalk(new Error("schema walk stopped at a quota refusal"));
+    return;
   }
   // One-time backfill: legacy rows carry clientId only inside meta_json.
   // After this, every row has the column (future INSERTs always set it), so
@@ -4357,6 +4413,13 @@ async function runCatchingSql(db: D1Database, sql: string): Promise<boolean> {
   } catch (err) {
     const msg = String(err instanceof Error ? err.message : err);
     if (/duplicate column|duplicate index|already exists/i.test(msg)) return true;
+    // A quota refusal is not a bad statement: the account is out of its daily
+    // row budget. The walk must stop there — every statement past this point
+    // is another statement the account cannot afford, and the expensive ones
+    // (the backfill UPDATEs, the CREATE INDEX over messages/users) scan whole
+    // tables. Running them while the budget is gone is what turns a one-hour
+    // quota day into an all-day one.
+    if (isQuotaError(msg)) schemaQuotaBlocked = true;
     console.error(`migration failed: ${sql} -> ${msg}`);
     return false;
   }
