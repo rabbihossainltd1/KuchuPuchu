@@ -205,3 +205,28 @@ from the latest run, or a local `./gradlew assembleDebug`.
   serves it) mints a QR token with `201` and polls `PENDING` — the migration path from the
   live database's older schema is correct.
 * `test/repro-qr-prod.mjs` in this workspace holds that reproduction.
+
+---
+
+## 7. What was deployed on 2026-10-17 (same day)
+
+| # | Change | Where | Result |
+|---|---|---|---|
+| 1 | `src/worker/index.ts` — the schema walk stops at a quota refusal; a 5-minute per-isolate cooldown; a refused batch no longer 500s every endpoint; a blocked walk answers 503 BUSY + `Retry-After` | `kuchupuchu-api` Worker, versions `ebe79bf3` then `2be44941` | **Cold-start 25–29 s → 3.8 s** (measured live) |
+| 2 | `native-android/app/build.gradle.kts` — `versionCode 284`, `versionName 3.9.207`; `release.yml` + three contract cases re-pinned to v284 | commit `b834a7d2` | the in-app updater has a newer release to find |
+| 3 | **Firebase production** — `npm run build:web:firebase` + `firebase deploy --only hosting --project kuchupuchuff2026` | `https://kuchupuchu.web.app` | **QR login is live on production**; CSP + `frame-ancestors 'self'` + `nosniff` + `Referrer-Policy` now served; `/download/apk` redirects (302) instead of serving the SPA |
+| 4 | GitHub APK Release `v284` (debug keystore, v274 certificate continuity verified in CI) | `github.com/rabbihossainltd1/KuchuPuchu/releases` | the phone-side QR scanner (`QrScreen.kt`, shipped in v283 but never released) reaches phones for the first time |
+
+### Still open
+
+* **D1 writes stay refused until 00:00 UTC** (the daily row budget). The fix stops the
+  incident from spreading and makes the app answer honestly (`503 BUSY` + `Retry-After`,
+  so the Android pollers back off), but it cannot refund a spent budget. A paid plan
+  removes the ceiling entirely.
+* **`https://kuchupuchu.web.app` must be added to the Google OAuth client's
+  *Authorized JavaScript origins*** in the Google Cloud console
+  (`458576897499-1khrecq3eli0obsr6vc3q2k0q1e86rpg.apps.googleusercontent.com`), or the
+  "Continue with Google" button answers `400 origin_mismatch`. That is a console step
+  only the owner can take.
+* **v283 was never published as a release** — the repo's version code said 283 while
+  GitHub's latest release was v282, so the QR scanner had never reached a phone.
