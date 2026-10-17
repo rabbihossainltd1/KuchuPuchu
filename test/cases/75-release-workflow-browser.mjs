@@ -32,5 +32,31 @@ check(
     workflow.includes('test "$name" = "3.9.207"'),
 );
 
+// The R2 upload used to be skipped on every release: its own `env:` is applied
+// AFTER the step's `if:` is evaluated, so `env.CLOUDFLARE_API_TOKEN` was always
+// empty in the condition and the step never ran — the APK in /download/apk
+// stayed at whatever the last manual upload was. The Cloudflare values now
+// live at JOB level, where the `env` context already carries them when the
+// step's condition is evaluated.
+const jobEnv = workflow.slice(
+  workflow.indexOf("jobs:"),
+  workflow.indexOf("steps:", workflow.indexOf("jobs:")),
+);
+const r2Step = workflow.slice(workflow.indexOf("Upload latest APK to R2"));
+check(
+  "the R2 upload can actually run: the Cloudflare values are at job level, not inside the step's own env",
+  jobEnv.includes("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}") &&
+    jobEnv.includes("CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}") &&
+    jobEnv.includes("CLOUDFLARE_EMAIL: ${{ secrets.CLOUDFLARE_EMAIL }}") &&
+    r2Step.includes("if: ${{ env.CLOUDFLARE_API_TOKEN != ''"),
+  jobEnv,
+);
+check(
+  "the R2 step still uploads the release asset to the kuchupuchu-latest.apk key",
+  r2Step.includes("wrangler r2 object put kp-media/apk/kuchupuchu-latest.apk") &&
+    r2Step.includes("--remote") &&
+    r2Step.includes("application/vnd.android.package-archive"),
+);
+
 for (const line of lines) console.log(line);
 if (lines.some((line) => line.includes("BROKEN"))) process.exitCode = 1;
