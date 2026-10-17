@@ -150,6 +150,18 @@ function fail(status: number, message: string, code?: string, retryAfter?: strin
 
 const nowIso = () => new Date().toISOString();
 const id = () => crypto.randomUUID();
+/**
+ * Phase R9: every real account's QR share/login code — 16 random bytes as
+ * lowercase hex, the same shape the one-time backfill migration used
+ * (`lower(hex(randomblob(16)))`), so the `by-qr` route's regex and the unique
+ * index both already agree with it. Called once at account creation and
+ * again on an explicit reset; a row must never sit at NULL in between, or its
+ * QR screen (every profile has one) has nothing to draw.
+ */
+const freshQrCode = () =>
+  [...crypto.getRandomValues(new Uint8Array(16))]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 const pairId = (a: string, b: string) => (a < b ? `c_${a}_${b}` : `c_${b}_${a}`);
 /** Anti-phantom grace: a RINGING call younger than this never reached the
  *  callee's screen (hidden from /active, the push waits it out), so a caller
@@ -7252,8 +7264,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         db,
         `INSERT INTO users
            (id, email, password_hash, username, display_name, avatar_url, about,
-            created_at, last_active_at, auth_status, origin_realm, bridge_subject)
-         VALUES (?, ?, '!', ?, ?, NULL, NULL, ?, ?, 'ACTIVE', 'vx', ?)`,
+            created_at, last_active_at, auth_status, origin_realm, bridge_subject, qr_code)
+         VALUES (?, ?, '!', ?, ?, NULL, NULL, ?, ?, 'ACTIVE', 'vx', ?, ?)`,
         userId,
         `${sub}${VX_EMAIL_SUFFIX}`,
         requested,
@@ -7261,6 +7273,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         created,
         created,
         sub,
+        freshQrCode(),
       );
       row = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", userId);
       await run(
@@ -7339,8 +7352,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         db,
         `INSERT INTO users
            (id, email, password_hash, username, display_name, avatar_url, about,
-            created_at, last_active_at, auth_status, origin_realm, kp_subject)
-         VALUES (?, ?, '!', ?, ?, NULL, NULL, ?, ?, 'ACTIVE', 'kp', ?)`,
+            created_at, last_active_at, auth_status, origin_realm, kp_subject, qr_code)
+         VALUES (?, ?, '!', ?, ?, NULL, NULL, ?, ?, 'ACTIVE', 'kp', ?, ?)`,
         userId,
         `${await sha256Hex(subject)}${APP_EMAIL_SUFFIX}`,
         handle,
@@ -7348,6 +7361,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         created,
         created,
         subject,
+        freshQrCode(),
       );
       row = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", userId);
       await run(
@@ -7449,8 +7463,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         `INSERT INTO users
            (id, email, password_hash, username, display_name, avatar_url, about,
             created_at, last_active_at, phone_e164, phone_verified_at,
-            phone_verification_method, auth_status)
-         VALUES (?, ?, '', ?, ?, NULL, NULL, ?, ?, ?, ?, ?, 'PENDING')`,
+            phone_verification_method, auth_status, qr_code)
+         VALUES (?, ?, '', ?, ?, NULL, NULL, ?, ?, ?, ?, ?, 'PENDING', ?)`,
         userId,
         phoneEmail(phone),
         username,
@@ -7460,6 +7474,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         phone,
         verifiedAt,
         attestMethod,
+        freshQrCode(),
       );
       await audit(db, "PHONE_SIGNUP_STARTED", userId, deviceId, {
         phone: maskPhone(phone),
@@ -9671,9 +9686,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // this invalidates it and mints a fresh one (the old code 404s from then
     // on, same shape as "Reset QR code" in other messengers).
     await rateLimitGlobal(db, `qrreset:${uid}`, 10);
-    const code = [...crypto.getRandomValues(new Uint8Array(16))]
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
+    const code = freshQrCode();
     await run(db, "UPDATE users SET qr_code = ? WHERE id = ?", code, uid);
     return json({ qrCode: code });
   }

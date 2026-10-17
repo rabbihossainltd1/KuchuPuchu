@@ -489,6 +489,11 @@ fun KpApp() {
                 composable("profile/{id}") { entry ->
                     ProfileScreen(nav, entry.arguments?.getString("id") ?: "")
                 }
+                // Phase R9: every profile's QR button, and the Home ⋮ menu's
+                // scanner entry, land here.
+                composable("qr/{id}") { entry ->
+                    QrScreen(nav, entry.arguments?.getString("id") ?: "")
+                }
                 composable("chatprofile/{conversationId}/{id}") { entry ->
                     ProfileScreen(
                         nav,

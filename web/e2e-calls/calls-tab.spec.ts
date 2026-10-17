@@ -231,12 +231,16 @@ test.describe("the history list", () => {
     expect(worker.historyReads).toBeGreaterThan(reads);
   });
 
-  test("the tab states what it cannot do, rather than implying parity", async ({ page }) => {
+  test("a hidden chat's calls stay off the ordinary Calls tab", async ({ page }) => {
+    // The server supplies this per-viewer fact on the history row itself
+    // (`hidden`); the browser never guesses it from a name or a count.
+    worker.hideConversation(CHAT_ID);
     await openTab(page);
 
-    // A hidden chat's calls move to a Hidden screen on the phone; this browser
-    // has no Hidden screen, and the tab says so instead of quietly listing them.
-    await expect(page.locator(".calls-tab__note")).toContainText("no Hidden list yet");
+    // The direct chat's three calls (voice, missed, cancelled) are gone; the
+    // group call — a different conversation — is untouched.
+    await expect(rows(page)).toHaveCount(1);
+    await expect(page.locator(".call-row__name").first()).toContainText("Class of 2026");
 
     await page.locator(".calls-tab__foot details summary").click();
     const limits = page.locator(".calls-tab__foot details");

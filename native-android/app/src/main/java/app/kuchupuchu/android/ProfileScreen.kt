@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Videocam
@@ -188,6 +189,15 @@ fun ProfileScreen(
                 color = Ink,
                 modifier = Modifier.weight(1f),
             )
+            // Phase R9: every profile — mine and everyone else's — carries a
+            // QR button for THAT profile's own code (never a scanner here;
+            // the scanner lives in the Home ⋮ menu's "QR code" row, which
+            // opens my own QrScreen with its Scan tab).
+            if (user != null) {
+                IconButton(onClick = { haptics.tap(); nav.navigate("qr/$userId") }) {
+                    Icon(Icons.Filled.QrCode, "QR code", tint = Ink)
+                }
+            }
             if (!isMe && !isKpBot(userId) && user != null) {
                 IconButton(onClick = { haptics.tap(); moreOpen = true }) {
                     Icon(Icons.Filled.MoreVert, "More", tint = Ink)
