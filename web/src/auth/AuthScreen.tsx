@@ -7,6 +7,7 @@ import { useAuth } from "./AuthContext";
 import { authApi, authErrorCopy, isSessionPayload, isTransientPollError } from "./authApi";
 import { GoogleIdentityButton } from "./GoogleIdentityButton";
 import { buildE164, validOtp, type PhoneCountry } from "./phone";
+import { QrLoginPanel } from "./QrLoginPanel";
 
 const countries = (countryData as PhoneCountry[])
   .slice()
@@ -18,6 +19,7 @@ const bangladesh = countries.find((country) => country.iso === "BD") ?? {
 };
 
 export type AuthFlow =
+  | { kind: "qr" }
   | { kind: "phone"; mode: "login" | "recovery" }
   | {
       kind: "approval";
@@ -56,7 +58,10 @@ function expiredAt(value: string): number {
 
 export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
   const { api, deviceId, signIn } = useAuth();
-  const [flow, setFlow] = useState<AuthFlow>({ kind: "phone", mode: "login" });
+  // Phase R9 (owner: WhatsApp-Web style): the QR code is the default surface,
+  // not the phone form — scanning it from an already-signed-in phone is the
+  // fast path, and "Log in with phone number" is the explicit opt-out below.
+  const [flow, setFlow] = useState<AuthFlow>({ kind: "qr" });
   const [countryIso, setCountryIso] = useState(bangladesh.iso);
   const [phoneInput, setPhoneInput] = useState("");
   const [otp, setOtp] = useState("");
@@ -542,6 +547,7 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
     setNotice(null);
   }
 
+  const isQr = flow.kind === "qr";
   const isApproval = flow.kind === "approval";
   const isGoogle = flow.kind === "google";
   const isRecoveryEntry = flow.kind === "phone" && flow.mode === "recovery";
@@ -556,20 +562,24 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
           <div>
             <p className="eyebrow">KUCHUPUCHU WEB</p>
             <h1 id="auth-heading">
-              {isApproval
-                ? "Confirm this sign-in"
-                : isGoogle
-                  ? flow.purpose === "bind"
-                    ? "Finish setting up"
-                    : flow.purpose === "proof"
-                      ? "Verify it's you"
-                      : "Recover your account"
-                  : isRecoveryEntry
-                    ? "Recover your account"
-                    : "Sign in or create an account"}
+              {isQr
+                ? "Scan to sign in"
+                : isApproval
+                  ? "Confirm this sign-in"
+                  : isGoogle
+                    ? flow.purpose === "bind"
+                      ? "Finish setting up"
+                      : flow.purpose === "proof"
+                        ? "Verify it's you"
+                        : "Recover your account"
+                    : isRecoveryEntry
+                      ? "Recover your account"
+                      : "Sign in or create an account"}
             </h1>
           </div>
         </header>
+
+        {isQr && <QrLoginPanel onUsePhone={() => switchToPhone("login")} />}
 
         {flow.kind === "phone" && (
           <form className="auth-form" onSubmit={submitPhone}>
