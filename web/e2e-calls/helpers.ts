@@ -258,9 +258,20 @@ export async function createMockCallsWorker(
 
       await page.route(/\/api\/config\/ice(\?.*)?$/, (route) => {
         worker.requests.push("GET /api/config/ice");
-        // No TURN credentials in a test: the client must fall back to its own
-        // built-in list rather than fail the call.
-        return json(route, { ice: null });
+        // Phase R8/classroom (owner): the Web engine now refuses to capture
+        // media or signal a call at all without a dedicated TURN relay
+        // (test/cases/62-web-calls.mjs pins CALL_COPY.relayUnavailable for a
+        // null ice config) — `{ ice: null }` used to mean "fall back to the
+        // built-ins" but now means "refuse the call", so every call test
+        // needs a real-shaped, long-lived mint here or none of them can ring.
+        return json(route, {
+          ice: {
+            urls: ["turns:relay.e2e.test:443"],
+            username: "e2e-turn-user",
+            credential: "e2e-turn-credential",
+            expiresAt: Date.now() + 60 * 60_000,
+          },
+        });
       });
 
       await page.route(/\/api\/calls\/active(\?.*)?$/, (route) => {
