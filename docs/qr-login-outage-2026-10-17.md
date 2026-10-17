@@ -230,3 +230,41 @@ from the latest run, or a local `./gradlew assembleDebug`.
   only the owner can take.
 * **v283 was never published as a release** — the repo's version code said 283 while
   GitHub's latest release was v282, so the QR scanner had never reached a phone.
+
+---
+
+## 8. What was deployed on 2026-10-18 (owner round 33)
+
+The owner named four UI problems; the round also proved that the **production
+D1 has no phase-R9 QR schema at all** (`users.qr_code`, `web_login_sessions`),
+which is why the phone's "My code" panel spun for ever. Full write-up:
+[`docs/ui-round-33-2026-10-18.md`](./ui-round-33-2026-10-18.md).
+
+| # | Change | Where | Result |
+|---|---|---|---|
+| 1 | `QrScreen.kt` — compact "My code / Scan" switch, a scrolling pane, a visible accent border around the code, no filler under the reset button | Android | the screen fits every phone; nothing is cut off |
+| 2 | `QrScreen.kt` + `KpScanActivity.kt` + `KpScanFrameView.kt` + `kp_scan_capture.xml` — portrait-locked scanner with a real viewfinder frame, and a code is minted automatically when the account has none | Android | the phone no longer has to be turned over; the scanner has a border; a missing code no longer spins for ever |
+| 3 | `WelcomePage.tsx` — the hero pointed at `/hero-illustration.jpg`, which has never existed (the SPA rewrite answered 200 `text/html`); it is `/banner.jpg` | Web | **the banner loads** |
+| 4 | `AuthScreen.tsx` — "Sign in with a QR code instead" (`switchToQr()`) under the phone form | Web | the QR login is reachable again |
+| 5 | `authStyles.css` — `.auth-select` (dark `color-scheme`, explicit `option` colours) | Web | the country list is readable instead of white-on-white |
+| 6 | `versionCode 285` / `versionName 3.9.208`; release workflow + three contract cases re-pinned | repo | the in-app updater has a newer release |
+| 7 | `src/worker/index.ts` + `test/cases/101-federated-edge-proxy.mjs` re-formatted (the previous upstream commit failed CI's *Formatting* step) | repo | CI is green again |
+
+| deployment | where | version |
+|---|---|---|
+| Web (main production) | `https://kuchupuchu.web.app` | bundle `index-JQrDE2oy.js` |
+| Web (preview) | `https://kuchupuchu-api.kuchupuchu.workers.dev` | bundle `index-CtksAXCY.js`, Worker `5798559e` |
+| Android | GitHub release `v285` | `kuchupuchu-3.9.208-r110.apk` (debug keystore, cert `39190b0f…41ecd2e`) |
+| App download | `GET /download/apk` → R2 `kp-media/apk/kuchupuchu-latest.apk` | same APK |
+
+### Still open (unchanged, and now measured)
+
+* **D1 writes stay refused until 00:00 UTC.** Measured again on 2026-10-18:
+  `ALTER TABLE users ADD COLUMN qr_code TEXT` → *"Your account has exceeded D1's
+  free tier daily row write limit… wait until tomorrow (midnight UTC)"*. Because
+  the whole DDL batch is refused, the phase-R9 QR schema has **never been applied
+  to production** — the QR login and the profile share code cannot work there
+  until the walk succeeds. A paid plan removes the ceiling; a write-budget diet
+  would too.
+* **`https://kuchupuchu.web.app` must be added to the Google OAuth client's
+  *Authorized JavaScript origins*** (console step, owner only).
