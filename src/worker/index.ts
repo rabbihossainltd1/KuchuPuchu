@@ -74,6 +74,14 @@ export type Env = {
    *  directly. Unset => POST /api/auth/app/exchange answers 503 and no app
    *  account can be provisioned — fail-closed, like the other gates. */
   KP_LEGACY_ORIGIN?: string;
+  /**
+   * Staged two-account cutover: when set on the legacy KP Worker, every HTTP
+   * and WebSocket request is forwarded to the Vintox-owned authoritative core.
+   * The KP Worker remains a distinct edge project/account and keeps its stable
+   * public origin, while both KP and VX clients read and write one realm-aware
+   * message history. Unset on the authoritative core and during rehearsal.
+   */
+  FEDERATED_CORE_ORIGIN?: string;
   /** Optional self-hosted/purchased TURN for reliable calls on strict NATs.
    *  Comma-separated URLs, e.g. "turn:turn.example.com:3478,turns:turn.example.com:5349". */
   TURN_URLS?: string;
@@ -6884,8 +6892,46 @@ async function serveShellAsset(env: Env, request: Request): Promise<Response> {
   });
 }
 
+async function federatedCoreProxy(request: Request, env: Env): Promise<Response | null> {
+  const configured = String(env.FEDERATED_CORE_ORIGIN ?? "").trim();
+  if (!configured) return null;
+  let origin: URL;
+  try {
+    origin = new URL(configured);
+  } catch {
+    return json({ error: { code: "FEDERATED_CORE_CONFIG", message: "Core routing is unavailable." } }, 503);
+  }
+  if (origin.protocol !== "https:" || origin.username || origin.password || origin.pathname !== "/") {
+    return json({ error: { code: "FEDERATED_CORE_CONFIG", message: "Core routing is unavailable." } }, 503);
+  }
+  const incoming = new URL(request.url);
+  // A deployment accidentally pointing at itself must fail closed rather than
+  // burning CPU in an edge-to-edge redirect/proxy loop.
+  if (incoming.origin === origin.origin) {
+    return json({ error: { code: "FEDERATED_CORE_LOOP", message: "Core routing is unavailable." } }, 508);
+  }
+  const target = new URL(incoming.pathname + incoming.search, origin);
+  const headers = new Headers(request.headers);
+  headers.set("x-kp-edge-origin", incoming.origin);
+  headers.set("x-kp-edge-proxy", "v1");
+  // Preserve Authorization, conditional/range headers, request bodies, and
+  // WebSocket upgrade semantics. The target URL changes the Host safely.
+  const init = {
+    method: request.method,
+    headers,
+    body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body,
+    redirect: "manual" as RequestRedirect,
+    // Required by standards-based runtimes for a streaming request body;
+    // Cloudflare also accepts it and keeps multi-gigabyte uploads streaming.
+    duplex: "half" as const,
+  } as RequestInit & { duplex: "half" };
+  return fetch(new Request(target.toString(), init));
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const federated = await federatedCoreProxy(request, env);
+    if (federated) return federated;
     if (request.method === "OPTIONS") return json({ ok: true });
     // Slice J cutover: run_worker_first = ["/*"], so every request lands here
     // first. /api/* and /ws/* keep their full REST/socket path through
@@ -6956,6 +7002,9 @@ export default {
     env: Env,
     ctx: ExecutionContext,
   ): Promise<void> {
+    // Once this deployment is the KP edge proxy, the Vintox authoritative
+    // Worker owns all cron mutation/reaping. Never mutate the frozen legacy D1.
+    if (String(env.FEDERATED_CORE_ORIGIN ?? "").trim()) return;
     try {
       // Ensure the additive OTP columns/indexes exist in a cold scheduled isolate,
       // then erase expired codes even when both login clients have closed.
