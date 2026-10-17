@@ -90,8 +90,8 @@ const pkg = readFileSync(
 
 /* the round's own bookkeeping */
 check(
-  "r112: versionCode 284 / versionName 3.9.207 (QR-login release: the Firebase production shell finally carries the QR screen and the D1 quota spiral is broken; the v274 debug signer is reused with explicit owner approval)",
-  /versionCode\s*=\s*284\b/.test(pkg) && /versionName\s*=\s*"3\.9\.207"/.test(pkg),
+  "r113: versionCode 285 / versionName 3.9.208 (UI round: the QR screen scrolls, its switch is compact, the code and the scanner have visible borders, the scanner is portrait-locked, the web hero banner loads, the phone form can go back to QR, and the country dropdown is readable; the v274 debug signer is reused with explicit owner approval)",
+  /versionCode\s*=\s*285\b/.test(pkg) && /versionName\s*=\s*"3\.9\.208"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */

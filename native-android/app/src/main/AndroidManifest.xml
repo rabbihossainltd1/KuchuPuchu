@@ -203,7 +203,18 @@
                 <action android:name="android.telecom.ConnectionService" />
             </intent-filter>
         </service>
-                <!-- Owner round 16: in-app update installer result. -->
+                <!-- Owner round 33: our own QR capture activity. The zxing default
+             paints no frame around the scan area and followed the device's
+             rotation (a portrait app then handed the camera a sideways
+             preview, so the phone had to be turned over to read a code).
+             Locked to portrait here; the frame lives in its layout. -->
+        <activity
+            android:name=".KpScanActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.KuchuPuchu.Scan" />
+
+        <!-- Owner round 16: in-app update installer result. -->
         <receiver
             android:name=".KpUpdateReceiver"
             android:exported="false" />

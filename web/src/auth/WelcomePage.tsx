@@ -90,12 +90,16 @@ export function WelcomePage({
         </div>
 
         <figure className="kp-welcome__visual">
+          {/* Owner round 33: this pointed at "/hero-illustration.jpg", a file
+              that has never existed in web/public — the hero banner 404'd
+              and the landing page showed an empty frame. The artwork is
+              public/banner.jpg. */}
           <img
             className="kp-welcome__hero-img"
-            src="/hero-illustration.jpg"
+            src="/banner.jpg"
             alt="Encrypted chat bubbles and lock shields around a smartphone"
-            width={1408}
-            height={768}
+            width={1600}
+            height={639}
           />
         </figure>
       </section>

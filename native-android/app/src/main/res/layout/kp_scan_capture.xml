@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Owner round 33: the QR capture screen.
+
+  The library's default capture layout (zxing_capture) paints no frame
+  around the scan area at all. This layout is the same camera view with
+  our own viewfinder on top of it, a title and a close button.
+
+  The framing rect is pinned to 250dp so the corner brackets and the
+  area the decoder actually reads are the same box.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black">
+
+    <com.journeyapps.barcodescanner.DecoratedBarcodeView
+        android:id="@+id/kp_scan_viewfinder"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:zxing_framing_rect_height="250dp"
+        app:zxing_framing_rect_width="250dp"
+        app:zxing_preview_scaling_strategy="centerCrop"
+        app:zxing_use_texture_view="false" />
+
+    <app.kuchupuchu.android.KpScanFrameView
+        android:id="@+id/kp_scan_frame"
+        android:layout_width="250dp"
+        android:layout_height="250dp"
+        android:layout_gravity="center" />
+
+    <TextView
+        android:id="@+id/kp_scan_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="32dp"
+        android:fontFamily="sans-serif-medium"
+        android:text="Scan a KuchuPuchu code"
+        android:textColor="#E9EDF6"
+        android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/kp_scan_close"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:layout_gravity="top|end"
+        android:layout_margin="10dp"
+        android:gravity="center"
+        android:text="✕"
+        android:textColor="#E9EDF6"
+        android:textSize="20sp" />
+</FrameLayout>

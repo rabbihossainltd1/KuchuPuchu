@@ -142,6 +142,25 @@
   color: #75839c;
 }
 
+/*
+  Owner round 33: the country <select> showed a white dropdown. A native
+  select paints its OPTION LIST with the system's list colours, not the
+  page's: on a light-themed phone the list is white while the option text
+  inherited the field's near-white colour — white text on a white list, so
+  every country was invisible. The options now carry the card's own
+  colours, and the field declares a dark colour-scheme so the browser
+  paints the popup dark as well.
+*/
+.auth-select {
+  color-scheme: dark;
+}
+
+.auth-select option,
+.auth-select optgroup {
+  background-color: #0f182a;
+  color: #edf3fc;
+}
+
 .auth-input:hover:not(:disabled) {
   border-color: rgba(129, 165, 224, 0.4);
 }

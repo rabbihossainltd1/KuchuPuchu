@@ -6899,16 +6899,30 @@ async function federatedCoreProxy(request: Request, env: Env): Promise<Response 
   try {
     origin = new URL(configured);
   } catch {
-    return json({ error: { code: "FEDERATED_CORE_CONFIG", message: "Core routing is unavailable." } }, 503);
+    return json(
+      { error: { code: "FEDERATED_CORE_CONFIG", message: "Core routing is unavailable." } },
+      503,
+    );
   }
-  if (origin.protocol !== "https:" || origin.username || origin.password || origin.pathname !== "/") {
-    return json({ error: { code: "FEDERATED_CORE_CONFIG", message: "Core routing is unavailable." } }, 503);
+  if (
+    origin.protocol !== "https:" ||
+    origin.username ||
+    origin.password ||
+    origin.pathname !== "/"
+  ) {
+    return json(
+      { error: { code: "FEDERATED_CORE_CONFIG", message: "Core routing is unavailable." } },
+      503,
+    );
   }
   const incoming = new URL(request.url);
   // A deployment accidentally pointing at itself must fail closed rather than
   // burning CPU in an edge-to-edge redirect/proxy loop.
   if (incoming.origin === origin.origin) {
-    return json({ error: { code: "FEDERATED_CORE_LOOP", message: "Core routing is unavailable." } }, 508);
+    return json(
+      { error: { code: "FEDERATED_CORE_LOOP", message: "Core routing is unavailable." } },
+      508,
+    );
   }
   const target = new URL(incoming.pathname + incoming.search, origin);
   const headers = new Headers(request.headers);

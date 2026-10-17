@@ -16,6 +16,19 @@
         <item name="android:windowNoTitle">true</item>
     </style>
 
+    <!-- Owner round 33: the QR scanner's window. Dark and full screen, and
+         the library's own mask/laser colours are matched to the app's accent
+         blue so its frame and ours read as one piece. -->
+    <style name="Theme.KuchuPuchu.Scan" parent="android:Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:statusBarColor">@android:color/black</item>
+        <item name="android:navigationBarColor">@android:color/black</item>
+        <item name="zxing_viewfinder_mask">#99060E1A</item>
+        <item name="zxing_viewfinder_laser">#FF5AA9FF</item>
+        <item name="zxing_result_view">#B35AA9FF</item>
+        <item name="zxing_possible_result_points">#FF9BC2FF</item>
+    </style>
+
     <!-- WindowManager moves the floating nav as a single surface, avoiding
          per-frame Compose -> WindowManager relayouts and keeping blur attached. -->
     <style name="KpNavWindowAnimations">

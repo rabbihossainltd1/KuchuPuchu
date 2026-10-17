@@ -547,6 +547,24 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
     setNotice(null);
   }
 
+  /**
+   * Owner round 33: the phone form used to be a one-way door. The QR panel
+   * offered "Log in with phone number", but once you were on the number form
+   * there was no way back to the QR code — and the QR code is the better
+   * path (no SIM, no OTP). Going back remounts the QR panel, which mints a
+   * fresh login token.
+   */
+  function switchToQr() {
+    actionController.current?.abort();
+    actionController.current = null;
+    setBusy(false);
+    otpAttempted.current = false;
+    setOtp("");
+    setOtpLocked(false);
+    setFlow({ kind: "qr" });
+    setNotice(null);
+  }
+
   const isQr = flow.kind === "qr";
   const isApproval = flow.kind === "approval";
   const isGoogle = flow.kind === "google";
@@ -593,7 +611,7 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
             </label>
             <select
               id="auth-country"
-              className="auth-input"
+              className="auth-input auth-select"
               value={countryIso}
               onChange={(event) => setCountryIso(event.target.value)}
               disabled={busy}
@@ -644,14 +662,20 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
                 Back to sign-in
               </button>
             ) : (
-              <button
-                className="text-button"
-                type="button"
-                onClick={switchToRecovery}
-                disabled={busy}
-              >
-                Recover account with Google
-              </button>
+              <>
+                <button
+                  className="text-button"
+                  type="button"
+                  onClick={switchToRecovery}
+                  disabled={busy}
+                >
+                  Recover account with Google
+                </button>
+                {/* Owner round 33: the way back to the QR code. */}
+                <button className="text-button" type="button" onClick={switchToQr} disabled={busy}>
+                  Sign in with a QR code instead
+                </button>
+              </>
             )}
           </form>
         )}

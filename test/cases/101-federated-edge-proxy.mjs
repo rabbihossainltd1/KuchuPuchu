@@ -58,21 +58,35 @@ try {
     { FEDERATED_CORE_ORIGIN: "http://not-secure.example" },
     ctx,
   );
-  check("an insecure or malformed authority fails closed before fetch", bad.status === 503 && calls.length === 1);
+  check(
+    "an insecure or malformed authority fails closed before fetch",
+    bad.status === 503 && calls.length === 1,
+  );
 
   const loop = await worker.fetch(
     new Request("https://vintoxbd-comm-core.vintoxbdinstitute.workers.dev/api/health"),
     env,
     ctx,
   );
-  check("a self-targeting authority is rejected as a loop", loop.status === 508 && calls.length === 1);
+  check(
+    "a self-targeting authority is rejected as a loop",
+    loop.status === 508 && calls.length === 1,
+  );
 
   let dbTouched = false;
   await worker.scheduled(
     {},
     {
       ...env,
-      DB: new Proxy({}, { get() { dbTouched = true; throw new Error("legacy DB touched"); } }),
+      DB: new Proxy(
+        {},
+        {
+          get() {
+            dbTouched = true;
+            throw new Error("legacy DB touched");
+          },
+        },
+      ),
     },
     ctx,
   );

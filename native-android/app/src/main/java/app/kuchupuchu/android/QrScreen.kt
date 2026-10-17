@@ -21,7 +21,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PersonAdd
@@ -45,6 +47,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -106,15 +109,21 @@ fun QrScreen(nav: NavController, userId: String) {
         }
 
         if (isMe) {
+            // Owner round 33: this switch used to be a FULL-WIDTH pill with
+            // two huge buttons. It ate a third of the screen and pushed the
+            // code itself off the bottom. It is now a compact segmented
+            // control that hugs its content in the top-left corner.
             Row(
                 Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Card),
+                    .padding(start = 16.dp, top = 2.dp, bottom = 6.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Card)
+                    .border(1.dp, Line, RoundedCornerShape(12.dp))
+                    .padding(3.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                QrTabButton("My code", tab == 0, Modifier.weight(1f)) { tab = 0 }
-                QrTabButton("Scan", tab == 1, Modifier.weight(1f)) { tab = 1 }
+                QrTabButton("My code", tab == 0) { tab = 0 }
+                QrTabButton("Scan", tab == 1) { tab = 1 }
             }
         }
 
@@ -131,17 +140,18 @@ private fun QrTabButton(label: String, selected: Boolean, modifier: Modifier = M
     val haptics = rememberHaptics()
     Box(
         modifier
-            .clip(RoundedCornerShape(12.dp))
+            .width(84.dp)
+            .clip(RoundedCornerShape(10.dp))
             .background(if (selected) ActionBlueDeep else Color.Transparent)
             .clickable { haptics.tap(); onClick() }
-            .padding(vertical = 10.dp),
+            .padding(vertical = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             label,
-            fontSize = 14.sp,
+            fontSize = 12.5.sp,
             fontWeight = FontWeight.SemiBold,
-            color = if (selected) Color.White else Ink,
+            color = if (selected) ActionBlueInk else Ink,
         )
     }
 }
@@ -153,16 +163,60 @@ private fun MyQrPane(user: JSONObject?, isMe: Boolean) {
     val ctx = LocalContext.current
     var qrCode by remember(user) { mutableStateOf(user?.optText("qrCode").orEmpty()) }
     var resetting by remember { mutableStateOf(false) }
+    // Owner round 33: an account can hold NO share code at all — accounts
+    // created before QR profiles existed were never backfilled, and the D1
+    // backfill that used to fill them in was itself blocked by the daily
+    // write quota. The old screen then spun for ever, so the owner never
+    // even saw a code to scan. Mint one the moment we know the account has
+    // none, and say so plainly when that fails.
+    var loadError by remember(user) { mutableStateOf<String?>(null) }
+    var minting by remember { mutableStateOf(false) }
+    var retry by remember { mutableStateOf(0) }
+
+    LaunchedEffect(user, qrCode, retry) {
+        if (qrCode.isNotBlank() || minting) return@LaunchedEffect
+        if (user == null) return@LaunchedEffect // the profile is still loading
+        if (!isMe) {
+            loadError = "This person has no QR code yet."
+            return@LaunchedEffect
+        }
+        minting = true
+        loadError = null
+        var failure: String? = null
+        val fresh =
+            runCatching {
+                withContext(Dispatchers.IO) { Api.post("/api/users/me/qr-code/reset") }.optString("qrCode")
+            }.onFailure { failure = it.message }.getOrNull().orEmpty()
+        minting = false
+        if (fresh.isNotBlank()) {
+            qrCode = fresh
+            // This pane only renders for my own profile, so Store.me is this
+            // same account — keep its cache in step.
+            Store.me?.let { mine ->
+                Store.saveMe(JSONObject(mine.toString()).put("qrCode", fresh))
+            }
+        } else {
+            loadError =
+                failure?.takeIf { it.isNotBlank() }
+                    ?: "Your code could not be created right now. Try again in a minute."
+        }
+    }
 
     Column(
-        Modifier.fillMaxSize().padding(24.dp),
+        // Owner round 33: the pane used to be a fixed-height column, so the
+        // reset row and its note ran off the bottom of the screen on a
+        // normal phone. It scrolls now — nothing is ever cut off.
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(8.dp))
         KpAvatar(
             name = user?.optText("displayName").orEmpty(),
             url = user?.optText("avatarUrl"),
-            size = 84.dp,
+            size = 76.dp,
             avatarRef = user?.optText("avatarRef"),
         )
         Spacer(Modifier.height(10.dp))
@@ -180,37 +234,81 @@ private fun MyQrPane(user: JSONObject?, isMe: Boolean) {
         if (username.isNotBlank()) {
             Text("@$username", fontSize = 13.sp, color = Muted)
         }
-        Spacer(Modifier.height(20.dp))
-        Box(
-            Modifier
-                .size(240.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(Color.White)
-                .border(1.dp, CircleButtonEdge, RoundedCornerShape(20.dp)),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (qrCode.isBlank()) {
-                CircularProgressIndicator(color = ActionBlueDeep)
-            } else {
-                val bmp =
-                    remember(qrCode) {
-                        runCatching {
-                            BarcodeEncoder().encodeBitmap(
-                                "kuchupuchu://user/$qrCode",
-                                BarcodeFormat.QR_CODE,
-                                720,
-                                720,
-                            )
-                        }.getOrNull()
-                    }
-                if (bmp != null) {
-                    Image(bmp.asImageBitmap(), contentDescription = "QR code", modifier = Modifier.size(210.dp))
+        Spacer(Modifier.height(16.dp))
+        if (loadError != null) {
+            // No code, and none could be minted: say it plainly and offer a
+            // retry instead of spinning for ever.
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Card)
+                    .border(1.dp, Line, RoundedCornerShape(18.dp))
+                    .padding(18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    loadError!!,
+                    fontSize = 13.sp,
+                    color = Muted,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(ActionBlueDeep)
+                        .clickable(enabled = !minting) { retry++ }
+                        .padding(horizontal = 18.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Refresh, null, tint = ActionBlueInk, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        if (minting) "Please wait…" else "Try again",
+                        color = ActionBlueInk,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        } else {
+            Box(
+                Modifier
+                    .size(216.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Color.White)
+                    // Owner round 33: the frame used to be a 20%-alpha
+                    // hairline, so on a white card it was invisible and the
+                    // code looked unframed. A solid accent border reads as a
+                    // real panel — and the white margin around the code is
+                    // its quiet zone, without which scanners struggle.
+                    .border(2.dp, ActionBlueDeep, RoundedCornerShape(18.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (qrCode.isBlank()) {
+                    CircularProgressIndicator(color = ActionBlueDeep)
                 } else {
-                    Text("Could not draw the code.", fontSize = 13.sp, color = Muted)
+                    val bmp =
+                        remember(qrCode) {
+                            runCatching {
+                                BarcodeEncoder().encodeBitmap(
+                                    "kuchupuchu://user/$qrCode",
+                                    BarcodeFormat.QR_CODE,
+                                    720,
+                                    720,
+                                )
+                            }.getOrNull()
+                        }
+                    if (bmp != null) {
+                        Image(bmp.asImageBitmap(), contentDescription = "QR code", modifier = Modifier.size(184.dp))
+                    } else {
+                        Text("Could not draw the code.", fontSize = 13.sp, color = Muted)
+                    }
                 }
             }
         }
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(14.dp))
         Text(
             if (isMe) "People who scan this add you instantly." else "Scan this to add ${user?.optText("displayName")?.ifBlank { "them" } ?: "them"}.",
             fontSize = 13.sp,
@@ -218,7 +316,7 @@ private fun MyQrPane(user: JSONObject?, isMe: Boolean) {
             modifier = Modifier.padding(horizontal = 20.dp),
         )
         if (isMe) {
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(10.dp))
             Row(
                 Modifier
                     .clip(RoundedCornerShape(20.dp))
@@ -254,13 +352,11 @@ private fun MyQrPane(user: JSONObject?, isMe: Boolean) {
                     color = ActionBlueDeep,
                 )
             }
-            Text(
-                "The old code stops working the moment you reset it.",
-                fontSize = 11.5.sp,
-                color = Muted,
-                modifier = Modifier.padding(start = 20.dp, top = 2.dp, end = 20.dp),
-            )
+            // Owner round 33: the standalone "the old code stops working…"
+            // note was filler under the button — it repeated the button's
+            // own label and pushed the rest of the screen down. It is gone.
         }
+        Spacer(Modifier.height(28.dp))
     }
 }
 
@@ -335,7 +431,16 @@ private fun QrScannerPane(nav: NavController) {
                     ScanOptions()
                         .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
                         .setBeepEnabled(false)
-                        .setOrientationLocked(false)
+                        // Owner round 33: the camera used to follow the
+                        // device's rotation, so a portrait app handed the
+                        // scanner a sideways preview and the phone had to be
+                        // turned over to read a code. Locked to the app's
+                        // orientation (portrait) it never does.
+                        .setOrientationLocked(true)
+                        // Our own capture activity: the zxing default paints
+                        // no frame around the scan area, so the viewfinder
+                        // had no border at all.
+                        .setCaptureActivity(KpScanActivity::class.java)
                         .setPrompt("Point the camera at a KuchuPuchu QR code"),
                 )
             }.onFailure { error = "No camera app is available." }
@@ -373,36 +478,53 @@ private fun QrScannerPane(nav: NavController) {
         return
     }
 
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        when {
-            loading -> CircularProgressIndicator(color = ActionBlueDeep)
-            permissionDenied ->
-                EmptyState(
-                    icon = Icons.Filled.QrCodeScanner,
-                    title = "Camera permission needed",
-                    note = "KuchuPuchu needs the camera to scan a QR code.",
-                    modifier = Modifier.clickable { launchScan() },
-                )
-            error.isNotBlank() ->
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    EmptyState(icon = Icons.Filled.QrCodeScanner, title = "Couldn't scan that", note = error)
-                    Row(
-                        Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(ActionBlueDeep)
-                            .clickable { error = ""; launchScan() }
-                            .padding(horizontal = 18.dp, vertical = 10.dp),
-                    ) {
-                        Text("Scan again", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+    Box(Modifier.fillMaxSize().padding(20.dp), contentAlignment = Alignment.Center) {
+        // Owner round 33: the scan pane was a bare icon on the page — no
+        // frame, so there was nothing that looked like a viewfinder. The
+        // panel now carries the same accent border the code panel does.
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .border(2.dp, ActionBlueDeep, RoundedCornerShape(20.dp))
+                .padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            when {
+                loading -> CircularProgressIndicator(color = ActionBlueDeep)
+                permissionDenied ->
+                    EmptyState(
+                        icon = Icons.Filled.QrCodeScanner,
+                        title = "Camera permission needed",
+                        note = "KuchuPuchu needs the camera to scan a QR code.",
+                        modifier = Modifier.clickable { launchScan() },
+                    )
+                error.isNotBlank() ->
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        EmptyState(icon = Icons.Filled.QrCodeScanner, title = "Couldn't scan that", note = error)
+                        Row(
+                            Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(ActionBlueDeep)
+                                .clickable { error = ""; launchScan() }
+                                .padding(horizontal = 18.dp, vertical = 10.dp),
+                        ) {
+                            Text(
+                                "Scan again",
+                                color = ActionBlueInk,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
                     }
-                }
-            else ->
-                EmptyState(
-                    icon = Icons.Filled.QrCodeScanner,
-                    title = "Scan a code",
-                    note = "Point your camera at a KuchuPuchu profile or login code.",
-                    modifier = Modifier.clickable { launchScan() },
-                )
+                else ->
+                    EmptyState(
+                        icon = Icons.Filled.QrCodeScanner,
+                        title = "Scan a code",
+                        note = "Point your camera at a KuchuPuchu profile or login code.",
+                        modifier = Modifier.clickable { launchScan() },
+                    )
+            }
         }
     }
 }
