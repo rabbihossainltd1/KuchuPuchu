@@ -32,3 +32,8 @@ ci-watch.log
 scripts/.gh-token
 
 .scratch/
+
+# Firebase CLI local state (project cache, never committed)
+.firebase/
+# Kotlin compiler local build state
+.kotlin/
