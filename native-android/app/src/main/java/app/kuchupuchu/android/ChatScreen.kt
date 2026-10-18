@@ -247,18 +247,17 @@ fun ChatScreen(nav: NavController, convId: String) {
     val e2eePeerKey by remember {
         androidx.compose.runtime.derivedStateOf {
             conv.value?.let { c ->
-                if (c.optBoolean("isGroup")) "" else c.optJSONObject("other")?.optText("e2eePublicKey").orEmpty()
+                val peer = c.optJSONObject("other")
+                val realm = peer?.optString("origin_realm").orEmpty()
+                    .ifBlank { peer?.optString("originRealm").orEmpty() }
+                if (c.optBoolean("isGroup") || realm.equals("vx", ignoreCase = true)) ""
+                else peer?.optText("e2eePublicKey").orEmpty()
             }.orEmpty()
         }
     }
     val e2eeDecryptPeerId = conv.value?.optJSONObject("other")?.optText("id").orEmpty()
-    val e2eePeerRealm = conv.value?.optJSONObject("other")?.let { peer ->
-        peer.optString("origin_realm").ifBlank { peer.optString("originRealm") }
-    }.orEmpty().lowercase()
     fun sealOut(plain: String): String {
-        // VX's native Laravel browser may not possess its private identity.
-        // KP peers retain KP1; immutable VX recipients receive readable text.
-        if (plain.isBlank() || e2eePeerKey.isBlank() || e2eePeerRealm == "vx") return plain
+        if (plain.isBlank() || e2eePeerKey.isBlank()) return plain
         // Local fast path only; Api.request's guard seals/defer-retries any
         // plaintext payload before it can reach the network.
         return runCatching { E2eeMsg.seal(ctx, plain, e2eePeerKey) }.getOrNull() ?: plain
