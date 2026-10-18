@@ -1426,3 +1426,79 @@ therefore a production deploy).
    var** (wrangler 4.86). To read another account's bucket, pass a
    different `--config` file — exporting the env var alone still hits the
    account from `wrangler.toml`.
+
+## Owner round 36 — 2026-10-18 — the call relay ("calling is unavailable until the dedicated relay is configured")
+
+### The report
+Pressing call answered **"Calling is unavailable until the dedicated relay is
+configured."** That string is what the dialer says when `GET /api/config/ice`
+returns no relay credential — not a UI problem, a missing TURN.
+
+### Two independent causes
+1. **No TURN keys anywhere.** Cloudflare Realtime TURN credentials are minted
+   server-side; a static key pair is refused (`aioice` → `400`), so the APK can
+   never hold the secret. A TURN key was created in the KuchuPuchu account and
+   wired into the worker as `TURN_KEY_ID` + `TURN_API_TOKEN` (worker secrets
+   only — never committed, never in the APK).
+2. **The live host is an edge, not the session owner.** After the slice-J
+   cutover `kuchupuchu-api.kuchupuchu.workers.dev` proxies every `/api` and
+   `/ws` request to the core that owns the sessions
+   (`https://vintoxbd-comm-core.vintoxbdinstitute.workers.dev`, account
+   `vintoxbdinstitute`). The core holds no TURN keys ⇒ a **proxied**
+   `/api/config/ice` came back empty ⇒ the refusal.
+
+### The fix — the relay route answers on the edge
+* `sessionAcceptedBy(origin, request)` asks one **deployment-time constant**
+  (`SESSION_AUTHORITY_URL`, then `FEDERATED_CORE_ORIGIN`) whether the caller is
+  signed in: `GET {origin}/api/me` with the caller's own bearer + cookie,
+  `200` = yes. No session data comes back, and a request can never choose the
+  host.
+* `requireUserOrAuthority()` keeps the local D1 first and falls back to the
+  authority **only after a 401** (a broken database still surfaces as itself).
+* The fetch handler serves `/api/config/ice` **before** the core proxy ⇒ the
+  edge mints the credential with its own TURN keys.
+* `GET /api/health` keeps the core's capabilities but reports **this**
+  deployment's `turn` flag, so the live host stopped saying `turn:false` while
+  minting a relay.
+* Android `CallEngine.ensureDedicatedTurn()` asks the primary host, then the
+  relay host `Api.RELAY_BASE` (`kuchupuchu.kuchupuchu.workers.dev`, same code
+  with the TURN keys); `Api.isOwnHost()` now covers both hosts so the relay
+  host receives the session bearer too.
+* The web (`web/src/calls/callsApi.ts`) asks the same route on its own origin;
+  the edge forwards the cookie to the core.
+
+### Live proof
+`/api/config/ice` → `200` + real `turn:`/`turns:` URLs for a signed-in
+session, `401` for a bogus bearer; **aioice `ALLOCATE` OK** (relayed
+`104.30.145.121:21822`); the relay host answers the same way. Deployments:
+edge `kuchupuchu-api` `9e9a33ad-186a-43d4-9996-4dbb2767e308`, relay host
+`kuchupuchu` `88c1bd3c-a0c4-4fb7-8a97-e413910e57d0`. Full write-up:
+`docs/call-relay-2026-10-18.md`.
+
+### Operational damage and recovery (own fault, logged so it never repeats)
+`npx wrangler delete --name kuchupuchu-api --config /tmp/stub/wrangler.toml`
+**deleted the LIVE script** — `--name` overrides the config, so the stub's
+delete hit the production worker (live host 404 for about a minute). The
+script was redeployed and the TURN secrets were re-put immediately.
+**Rules:** never pass `--name` to a delete; delete a stub with its own config
+and no `--name`; list `GET /accounts/{id}/workers/scripts` before and after.
+A bulk secret upload must be **one request per secret**
+(`{"name":…,"text":…,"type":"secret_text"}`) — a `{"body":{…}}` map answers
+`400 Binding must have a name`.
+
+**Nine owner secrets were lost with the script** and only the owner can put
+them back (the API writes secrets, it never reads them):
+`FCM_CREDENTIALS` (Firebase service account — re-download from the console),
+`FEDERATION_PUSH_KEY` (must match the core's copy), `WS_TICKET_KEY`,
+`LOGIN_OTP_HMAC_SECRET`, `VAPID_PRIVATE_KEY`, `GEMINI_API_KEY`, `HF_TOKEN`,
+`CF_AI_TOKEN`, `LARAVEL_BRIDGE_KEY`. `FCM_CONFIG` and `GOOGLE_WEB_CLIENT_ID`
+were **restored** from the core's own `/api/config/firebase`. Everything else
+is proxied to the core, so messaging, chat, the web shell and the relay keep
+working while the secrets are outstanding.
+
+### Repo hygiene
+The Durable Object namespaces are now **pinned in `wrangler.toml`**
+(`ChatRoom e5ffd3c5…`, `CallSignal 32ce69ee…`, `ClassroomSignal a100d537…`):
+a binding without an id makes wrangler create a NEW namespace on the next
+deploy, which would move the live sockets (call signalling included) — a
+silent realtime outage. The temporary `wrangler.edge.local.toml` is gone.

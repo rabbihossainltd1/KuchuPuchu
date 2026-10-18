@@ -17,14 +17,22 @@ crons = ["* * * * *"]
 [[durable_objects.bindings]]
 name = "CHAT_ROOM"
 class_name = "ChatRoom"
+# The namespace ids are pinned on purpose. A binding without an id makes
+# wrangler create a NEW namespace on the next deploy, and the live sockets
+# (and the call signalling they carry) would land in the new one while the
+# app keeps talking to the old one - a silent realtime outage. Same reason
+# the D1 database_id below is written down.
+id = "e5ffd3c56fb14a83a5b4082b5651f7f8"
 
 [[durable_objects.bindings]]
 name = "CALL_SIGNAL"
 class_name = "CallSignal"
+id = "32ce69ee2dcf41cdb97d540b05bce1b3"
 
 [[durable_objects.bindings]]
 name = "CLASSROOM_SIGNAL"
 class_name = "ClassroomSignal"
+id = "a100d537fdd54ea291b91b6c8c8f02c7"
 
 [[migrations]]
 tag = "v1-realtime-do"

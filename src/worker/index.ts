@@ -109,6 +109,17 @@ export type Env = {
    * preview/alternative origin probes its own health endpoint instead. */
   SELF_ORIGIN?: string;
   TURN_API_TOKEN?: string;
+  /**
+   * The deployment that OWNS the sessions this deployment serves.
+   *
+   * A mirror deployment runs the same code against its own database, so a
+   * client signed in to the authority has no session row here. When this is
+   * set, a relay-only route may verify the bearer against the authority
+   * instead of refusing it. It is a deployment-time constant: never taken
+   * from a request, so the worker can only ever talk to the host the
+   * operator named.
+   */
+  SESSION_AUTHORITY_URL?: string;
   /** Realtime fan-out Durable Objects (Steps 2-3). Optional on purpose: the
    *  test harness and any deploy without the bindings keep the plain REST
    *  path — every broadcast call guards on presence and no-ops without it. */
@@ -5043,6 +5054,67 @@ async function requireUser(db: D1Database, request: Request, env?: Env, ctx?: Ex
   return row;
 }
 
+/**
+ * Ask another origin whether this caller is signed in.
+ *
+ * The relay route has to answer for a session it cannot see: a mirror
+ * deployment (same code, different database) holds the relay keys but not
+ * the sessions the app signs in to, and after the slice-J cutover the live
+ * host is an edge that proxies /api to the core which owns the sessions
+ * while the dedicated-relay keys stay on the edge. A caller whose session
+ * only exists in that other database would be refused by this deployment's
+ * own (frozen) one - and the dialer would answer "the dedicated relay is
+ * not configured" for a signed-in user.
+ *
+ * The other origin's GET /api/me is the authority: 200 means signed in, any
+ * other answer means not. No session data travels back - only the yes/no.
+ * The origin is a deployment-time constant, never a request value, so this
+ * can only ever reach the host the operator configured.
+ */
+async function sessionAcceptedBy(origin: string, request: Request): Promise<boolean> {
+  const base = origin.trim().replace(/\/+$/, "");
+  if (!base) return false;
+  const headers: Record<string, string> = { Accept: "application/json" };
+  const token = bearerToken(request);
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const cookie = request.headers.get("cookie");
+  if (cookie) headers.Cookie = cookie;
+  try {
+    const res = await fetch(`${base}/api/me`, { headers });
+    return res.ok;
+  } catch {
+    // The authority is unreachable - the original refusal stands.
+    return false;
+  }
+}
+
+async function requireUserOrAuthority(
+  db: D1Database,
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+) {
+  try {
+    return await requireUser(db, request, env, ctx);
+  } catch (error) {
+    // Only a refused session may be re-checked elsewhere; a broken database
+    // must surface as itself, not as "signed out".
+    if (!(error instanceof ApiError) || error.status !== 401) throw error;
+    // Two places may know this caller: an explicitly named authority (a relay
+    // mirror) and the core this edge proxies to (the slice-J cutover
+    // deployment, where the sessions live in the core's database).
+    const candidates = [
+      String(env.SESSION_AUTHORITY_URL || ""),
+      String(env.FEDERATED_CORE_ORIGIN || ""),
+    ];
+    for (const candidate of candidates) {
+      if (!candidate.trim()) continue;
+      if (await sessionAcceptedBy(candidate, request)) return null;
+    }
+    throw error;
+  }
+}
+
 const onlineNow = (row: { last_active_at: string }) =>
   Date.now() - Date.parse(row.last_active_at) < ONLINE_WINDOW_MS;
 
@@ -7070,6 +7142,29 @@ async function federatedCoreProxy(request: Request, env: Env): Promise<Response 
   return fetch(new Request(target.toString(), init));
 }
 
+/**
+ * Report THIS deployment's relay capability on a proxied health answer.
+ *
+ * The capabilities block is presence booleans only. After the cutover the
+ * live host proxies /api/health to the core, which holds no TURN keys and
+ * answers turn:false - while this deployment mints the relay for every
+ * signed-in caller. The proxied answer would send the owner looking for a
+ * fault that is not there, so the relay flag is taken from here and the rest
+ * of the block stays the core's.
+ */
+async function withLocalTurnCapability(response: Response, env: Env): Promise<Response> {
+  try {
+    const body = (await response.json()) as { capabilities?: Record<string, unknown> } | null;
+    if (!body || typeof body !== "object" || !body.capabilities) return response;
+    body.capabilities.turn = dedicatedTurnConfigured(env);
+    return json(body, response.status);
+  } catch {
+    // A health answer that is not the expected JSON is passed through as it
+    // came - the merge is a convenience, never a reason to fail the probe.
+    return response;
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const requestUrl = new URL(request.url);
@@ -7143,8 +7238,19 @@ export default {
         { "retry-after": "60" },
       );
     }
-    const federated = await federatedCoreProxy(request, env);
-    if (federated) return federated;
+    // The dedicated relay answers on the edge itself. The core that owns the
+    // sessions does not hold the TURN keys, so a proxied /api/config/ice comes
+    // back empty - and an empty relay is exactly the "dedicated relay is not
+    // configured" refusal the dialer shows. The edge asks the core who the
+    // caller is (requireUserOrAuthority) and mints the relay credential with
+    // its own keys.
+    const edgeRelayRoute = new URL(request.url).pathname === "/api/config/ice";
+    const federated = edgeRelayRoute ? null : await federatedCoreProxy(request, env);
+    if (federated) {
+      if (requestUrl.pathname === "/api/health" && federated.ok)
+        return withLocalTurnCapability(federated, env);
+      return federated;
+    }
     if (request.method === "OPTIONS") return json({ ok: true });
     // Slice J cutover: run_worker_first = ["/*"], so every request lands here
     // first. /api/* and /ws/* keep their full REST/socket path through
@@ -7486,7 +7592,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // Relay credentials are secrets even when a static provider is used. Never
     // expose them to anonymous scanners; authenticated clients already send
     // their ordinary bearer session through ApiClient.
-    await requireUser(db, request, env, ctx);
+    //
+    // The gate falls back to SESSION_AUTHORITY_URL: a mirror deployment holds
+    // the relay keys but not the sessions the app signs in with, so it asks
+    // the authority who the caller is instead of refusing a signed-in client.
+    await requireUserOrAuthority(db, request, env, ctx);
     const keyId = env.TURN_KEY_ID;
     const apiToken = env.TURN_API_TOKEN;
     if (keyId && apiToken) {

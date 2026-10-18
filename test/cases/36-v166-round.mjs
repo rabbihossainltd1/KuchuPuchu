@@ -90,8 +90,8 @@ const pkg = readFileSync(
 
 /* the round's own bookkeeping */
 check(
-  "r114: versionCode 288 / versionName 3.9.211 (UI round: the QR screen scrolls, its switch is icon-only and animated, the scanner pane carries no border, the scanner is portrait-locked, the composer caret sits at the end of the typed text, a link reads against its own bubble, the web hero banner loads, the phone form can go back to QR, and the country dropdown is readable; the v274 debug signer is reused with explicit owner approval)",
-  /versionCode\s*=\s*288\b/.test(pkg) && /versionName\s*=\s*"3\.9.211"/.test(pkg),
+  "r115: versionCode 289 / versionName 3.9.212 (call round: the live deployment mints the Cloudflare TURN relay itself for a session the core owns, so the dialer receives ICE servers instead of the 'dedicated relay is not configured' refusal, and the Android dialer falls back to the relay host when the primary cannot mint; the v274 debug signer is reused with explicit owner approval)",
+  /versionCode\s*=\s*289\b/.test(pkg) && /versionName\s*=\s*"3\.9.212"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */

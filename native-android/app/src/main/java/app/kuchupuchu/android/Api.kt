@@ -33,6 +33,17 @@ import java.util.concurrent.TimeUnit
  */
 object Api {
     const val BASE = "https://kuchupuchu-api.kuchupuchu.workers.dev"
+
+    /**
+     * The relay host.
+     *
+     * The same worker code, deployed under a second name, with the Cloudflare
+     * Realtime TURN keys wired in. When the primary deployment cannot mint
+     * relay credentials, the dialer asks this host instead — the session is
+     * still verified by the primary, so a signed-in caller stays a signed-in
+     * caller.
+     */
+    const val RELAY_BASE = "https://kuchupuchu.kuchupuchu.workers.dev"
     private const val TOKEN_KEY = "kp_session_token"
     private val JSON = "application/json; charset=utf-8".toMediaType()
     private val OCTET = "application/octet-stream".toMediaType()
@@ -608,10 +619,19 @@ object Api {
         }
     }
 
-    /** True for the worker's own host (the only place the session bearer belongs). */
-    private val ownHost: String by lazy { BASE.toHttpUrlOrNull()?.host.orEmpty() }
+    /**
+     * True for the worker's own hosts — the only places the session bearer
+     * belongs. The relay host is the same code under a second name, so it
+     * gets the bearer too; nothing outside this list ever sees the token.
+     */
+    private val ownHosts: Set<String> by lazy {
+        setOf(BASE, RELAY_BASE)
+            .mapNotNull { it.toHttpUrlOrNull()?.host }
+            .filter { it.isNotBlank() }
+            .toSet()
+    }
 
-    fun isOwnHost(host: String): Boolean = host.equals(ownHost, ignoreCase = true)
+    fun isOwnHost(host: String): Boolean = ownHosts.any { it.equals(host, ignoreCase = true) }
 
 }
 

@@ -2244,27 +2244,46 @@ class CallEngine(private val app: Application) {
             (turnExpiresAt == 0L || turnExpiresAt > now + 5 * 60_000L)
         ) return true
         turnLoaded = false
-        return runCatching {
-            val data = withContext(Dispatchers.IO) { Api.get("/api/config/ice", false) }
-            val ice = data.optJSONObject("ice") ?: return@runCatching false
-            val arr = ice.optJSONArray("urls") ?: return@runCatching false
-            val urls = (0 until arr.length())
-                .map { arr.optString(it).trim() }
-                .filter { it.startsWith("turn:", true) || it.startsWith("turns:", true) }
-            val username = ice.optString("username").trim()
-            val credential = ice.optString("credential").trim()
-            val expiresAt = ice.optLong("expiresAt", 0L).coerceAtLeast(0L)
-            if (
-                urls.isEmpty() || username.isBlank() || credential.isBlank() ||
-                (expiresAt > 0L && expiresAt <= now + 5 * 60_000L)
-            ) return@runCatching false
-            turnUrls = urls
-            turnUser = username
-            turnPass = credential
-            turnExpiresAt = expiresAt
-            turnLoaded = true
-            true
-        }.getOrDefault(false)
+        // The primary deployment is asked first. When it cannot mint relay
+        // credentials, the relay host answers instead: the same worker code
+        // with the TURN keys configured, and it checks this session against
+        // the primary before handing one out. Without that second try the
+        // dialer had nowhere to reach a relay, and every call ended at
+        // "calling is unavailable until the dedicated relay is configured".
+        for (base in listOf(Api.BASE, Api.RELAY_BASE)) {
+            val loaded = runCatching { loadDedicatedTurn(base) }.getOrDefault(false)
+            if (loaded) return true
+        }
+        return false
+    }
+
+    /**
+     * Fetch one relay configuration from [base] and keep it.
+     *
+     * The credentials are minted by the API — Cloudflare TURN only accepts
+     * short-lived ones — so this never invents a relay of its own.
+     */
+    private suspend fun loadDedicatedTurn(base: String): Boolean {
+        val now = System.currentTimeMillis()
+        val data = withContext(Dispatchers.IO) { Api.get("$base/api/config/ice", true) }
+        val ice = data.optJSONObject("ice") ?: return false
+        val arr = ice.optJSONArray("urls") ?: return false
+        val urls = (0 until arr.length())
+            .map { arr.optString(it).trim() }
+            .filter { it.startsWith("turn:", true) || it.startsWith("turns:", true) }
+        val username = ice.optString("username").trim()
+        val credential = ice.optString("credential").trim()
+        val expiresAt = ice.optLong("expiresAt", 0L).coerceAtLeast(0L)
+        if (
+            urls.isEmpty() || username.isBlank() || credential.isBlank() ||
+            (expiresAt > 0L && expiresAt <= now + 5 * 60_000L)
+        ) return false
+        turnUrls = urls
+        turnUser = username
+        turnPass = credential
+        turnExpiresAt = expiresAt
+        turnLoaded = true
+        return true
     }
 
     fun loadIceConfig() {
