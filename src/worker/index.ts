@@ -5651,12 +5651,19 @@ async function relayPushToKpEdge(
   data: Record<string, string>,
   note?: { title: string; body: string; channel: string; tag?: string },
 ): Promise<boolean | null> {
-  const origin = String(env.KP_PUSH_ORIGIN ?? "").trim().replace(/\/+$/, "");
+  const origin = String(env.KP_PUSH_ORIGIN ?? "")
+    .trim()
+    .replace(/\/+$/, "");
   const key = String(env.FEDERATION_PUSH_KEY ?? "").trim();
   if (!origin || !key) return null;
   try {
     const parsed = new URL(origin);
-    if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.pathname !== "/")
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.username ||
+      parsed.password ||
+      parsed.pathname !== "/"
+    )
       return null;
     const response = await fetch(`${origin}/api/internal/federation/push`, {
       method: "POST",
@@ -7074,20 +7081,25 @@ export default {
       const presented = (request.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
       if (!configured || !presented || !constantTimeTextEqual(configured, presented))
         return json({ error: { code: "UNAUTHENTICATED", message: "Not authorized." } }, 401);
-      const payload = (await request.json().catch(() => null)) as
-        | {
-            userId?: unknown;
-            data?: unknown;
-            note?: unknown;
-          }
-        | null;
+      const payload = (await request.json().catch(() => null)) as {
+        userId?: unknown;
+        data?: unknown;
+        note?: unknown;
+      } | null;
       const userId = typeof payload?.userId === "string" ? payload.userId : "";
-      if (!/^[A-Za-z0-9_-]{1,128}$/.test(userId) || !payload?.data || typeof payload.data !== "object")
+      if (
+        !/^[A-Za-z0-9_-]{1,128}$/.test(userId) ||
+        !payload?.data ||
+        typeof payload.data !== "object"
+      )
         return json({ error: { code: "BAD_PUSH_RELAY", message: "Invalid relay payload." } }, 400);
       const data: Record<string, string> = {};
       for (const [key, value] of Object.entries(payload.data as Record<string, unknown>)) {
         if (!/^[A-Za-z0-9_.-]{1,64}$/.test(key) || typeof value !== "string" || value.length > 4000)
-          return json({ error: { code: "BAD_PUSH_RELAY", message: "Invalid relay payload." } }, 400);
+          return json(
+            { error: { code: "BAD_PUSH_RELAY", message: "Invalid relay payload." } },
+            400,
+          );
         data[key] = value;
       }
       let note: { title: string; body: string; channel: string; tag?: string } | undefined;
@@ -7103,7 +7115,10 @@ export default {
           (candidate.tag !== undefined &&
             (typeof candidate.tag !== "string" || candidate.tag.length > 200))
         )
-          return json({ error: { code: "BAD_PUSH_RELAY", message: "Invalid relay payload." } }, 400);
+          return json(
+            { error: { code: "BAD_PUSH_RELAY", message: "Invalid relay payload." } },
+            400,
+          );
         note = {
           title: candidate.title,
           body: candidate.body,
@@ -7120,7 +7135,8 @@ export default {
         {
           error: {
             code: "MIGRATION_READ_ONLY",
-            message: "Messaging is briefly read-only while history is synchronized. Try again shortly.",
+            message:
+              "Messaging is briefly read-only while history is synchronized. Try again shortly.",
           },
         },
         503,

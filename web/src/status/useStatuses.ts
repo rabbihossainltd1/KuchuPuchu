@@ -292,7 +292,11 @@ export function useStatuses(options: UseStatusesOptions): StatusesController {
         // refused. Posting it plaintext would leave it readable on the server.
         const sealed = await protectOutgoingBody(
           body,
-          { isGroup: conversation?.isGroup ?? false, otherId: authorId, otherRealm: conversation?.other?.originRealm },
+          {
+            isGroup: conversation?.isGroup ?? false,
+            otherId: authorId,
+            otherRealm: conversation?.other?.originRealm,
+          },
           peerKey,
           identity,
         );

@@ -95,7 +95,11 @@ try {
     ...env,
     MIGRATION_READ_ONLY: "1",
     FEDERATION_PUSH_KEY: "relay-secret",
-    DB: { prepare() { throw new Error("diagnostic write intentionally unavailable"); } },
+    DB: {
+      prepare() {
+        throw new Error("diagnostic write intentionally unavailable");
+      },
+    },
   };
   const unauthorizedRelay = await worker.fetch(
     new Request("https://kuchupuchu-api.kuchupuchu.workers.dev/api/internal/federation/push", {

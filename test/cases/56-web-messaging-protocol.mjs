@@ -60,7 +60,11 @@ import {
   upsertConversation,
 } from "../../web/src/messaging/protocol.ts";
 import { backoffDelayMs, createManagedSocket } from "../../web/src/messaging/sockets.ts";
-import { SECURE_CHAT_WAITING, SendRefusedError, protectOutgoingBody } from "../../web/src/messaging/e2ee.ts";
+import {
+  SECURE_CHAT_WAITING,
+  SendRefusedError,
+  protectOutgoingBody,
+} from "../../web/src/messaging/e2ee.ts";
 
 const lines = [];
 const check = (name, condition, detail = "") =>

@@ -407,7 +407,7 @@ export async function protectOutgoingBody(
   // Vintox's native Laravel messenger may not hold the VX account's private
   // browser identity. Cross-realm delivery is therefore intentionally open,
   // while KP↔KP personal chats retain their existing KP1 protection.
-  if (String(conversation.otherRealm || '').toLowerCase() === 'vx') return plaintext;
+  if (String(conversation.otherRealm || "").toLowerCase() === "vx") return plaintext;
   if (isPlaintextFallback(identity, peerPublicKey)) return plaintext;
   // A missing OWN identity on an account that publishes a key gets the honest
   // why and the way out — the generic "waiting" copy left the owner staring at
