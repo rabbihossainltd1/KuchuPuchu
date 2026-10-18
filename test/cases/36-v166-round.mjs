@@ -90,8 +90,8 @@ const pkg = readFileSync(
 
 /* the round's own bookkeeping */
 check(
-  "r113: versionCode 286 / versionName 3.9.209 (UI round: the QR screen scrolls, its switch is compact, the code and the scanner have visible borders, the scanner is portrait-locked, the web hero banner loads, the phone form can go back to QR, and the country dropdown is readable; the v274 debug signer is reused with explicit owner approval)",
-  /versionCode\s*=\s*286\b/.test(pkg) && /versionName\s*=\s*"3\.9.209"/.test(pkg),
+  "r113: versionCode 287 / versionName 3.9.210 (UI round: the QR screen scrolls, its switch is compact, the code and the scanner have visible borders, the scanner is portrait-locked, the web hero banner loads, the phone form can go back to QR, and the country dropdown is readable; the v274 debug signer is reused with explicit owner approval)",
+  /versionCode\s*=\s*287\b/.test(pkg) && /versionName\s*=\s*"3\.9.209"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */
