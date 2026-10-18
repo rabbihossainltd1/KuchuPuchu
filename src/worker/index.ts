@@ -82,6 +82,13 @@ export type Env = {
    * message history. Unset on the authoritative core and during rehearsal.
    */
   FEDERATED_CORE_ORIGIN?: string;
+  /**
+   * Final-cutover write fence. Set only for the short snapshot/import window;
+   * reads remain available while every mutating HTTP request and cron write is
+   * refused with 503. Stored as a Worker secret so it can be toggled without
+   * changing tracked deployment configuration.
+   */
+  MIGRATION_READ_ONLY?: string;
   /** Optional self-hosted/purchased TURN for reliable calls on strict NATs.
    *  Comma-separated URLs, e.g. "turn:turn.example.com:3478,turns:turn.example.com:5349". */
   TURN_URLS?: string;
@@ -7024,6 +7031,19 @@ async function federatedCoreProxy(request: Request, env: Env): Promise<Response 
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const migrationReadOnly = String(env.MIGRATION_READ_ONLY ?? "").trim() === "1";
+    if (migrationReadOnly && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+      return json(
+        {
+          error: {
+            code: "MIGRATION_READ_ONLY",
+            message: "Messaging is briefly read-only while history is synchronized. Try again shortly.",
+          },
+        },
+        503,
+        { "retry-after": "60" },
+      );
+    }
     const federated = await federatedCoreProxy(request, env);
     if (federated) return federated;
     if (request.method === "OPTIONS") return json({ ok: true });
@@ -7092,9 +7112,14 @@ export default {
     env: Env,
     ctx: ExecutionContext,
   ): Promise<void> {
-    // Once this deployment is the KP edge proxy, the Vintox authoritative
-    // Worker owns all cron mutation/reaping. Never mutate the frozen legacy D1.
-    if (String(env.FEDERATED_CORE_ORIGIN ?? "").trim()) return;
+    // During the final snapshot window no background expiry/reaper may race the
+    // export. Once this deployment is the KP edge proxy, the Vintox authority
+    // owns cron mutation permanently; the frozen legacy D1 is never touched.
+    if (
+      String(env.MIGRATION_READ_ONLY ?? "").trim() === "1" ||
+      String(env.FEDERATED_CORE_ORIGIN ?? "").trim()
+    )
+      return;
     try {
       // Ensure the additive OTP columns/indexes exist in a cold scheduled isolate,
       // then erase expired codes even when both login clients have closed.

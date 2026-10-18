@@ -73,24 +73,38 @@ try {
     loop.status === 508 && calls.length === 1,
   );
 
-  let dbTouched = false;
-  await worker.scheduled(
-    {},
-    {
-      ...env,
-      DB: new Proxy(
-        {},
-        {
-          get() {
-            dbTouched = true;
-            throw new Error("legacy DB touched");
-          },
-        },
-      ),
-    },
+  const fenced = await worker.fetch(
+    new Request("https://kuchupuchu-api.kuchupuchu.workers.dev/api/conversations/x/messages", {
+      method: "POST",
+      body: "{}",
+      headers: { "content-type": "application/json" },
+    }),
+    { ...env, MIGRATION_READ_ONLY: "1" },
     ctx,
   );
+  const fencedBody = await fenced.json();
+  check(
+    "the final-snapshot fence rejects mutations before proxying and advertises retry",
+    fenced.status === 503 &&
+      fenced.headers.get("retry-after") === "60" &&
+      fencedBody.error?.code === "MIGRATION_READ_ONLY" &&
+      calls.length === 1,
+  );
+
+  let dbTouched = false;
+  const guardedDb = new Proxy(
+    {},
+    {
+      get() {
+        dbTouched = true;
+        throw new Error("legacy DB touched");
+      },
+    },
+  );
+  await worker.scheduled({}, { ...env, DB: guardedDb }, ctx);
   check("the KP proxy cron never mutates its frozen legacy D1", dbTouched === false);
+  await worker.scheduled({}, { DB: guardedDb, MIGRATION_READ_ONLY: "1" }, ctx);
+  check("the snapshot read-only fence also pauses cron writes", dbTouched === false);
 } finally {
   globalThis.fetch = realFetch;
 }
