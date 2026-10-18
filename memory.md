@@ -1329,7 +1329,7 @@ what lets a scanner read the code).
 
 ### Release
 
-`versionCode 288` / `versionName 3.9.211` — asset `kuchupuchu-3.9.211-r112.apk`.
+`versionCode 288` / `versionName 3.9.211` — asset `kuchupuchu-3.9.211-r113.apk`.
 `native-android/app/build.gradle.kts`, `.github/workflows/release.yml` and the
 three version-pinning cases (`36-v166-round`, `67-compose-crash-observability`,
 `75-release-workflow-browser`) all moved to 288 / 3.9.211.

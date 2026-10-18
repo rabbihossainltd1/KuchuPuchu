@@ -78,7 +78,7 @@ jobs:
           name="$(sed -n 's/^[[:space:]]*versionName = \"\([^\"]*\)\".*/\1/p' app/build.gradle.kts | head -n1)"
           test "$code" = "288"
           test "$name" = "3.9.211"
-          asset="$RUNNER_TEMP/kuchupuchu-${name}-r112.apk"
+          asset="$RUNNER_TEMP/kuchupuchu-${name}-r113.apk"
           cp "$apk" "$asset"
           echo "RELEASE_TAG=v${code}" >> "$GITHUB_ENV"
           echo "RELEASE_TITLE=v${code} (${name})" >> "$GITHUB_ENV"
