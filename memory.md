@@ -1502,3 +1502,13 @@ The Durable Object namespaces are now **pinned in `wrangler.toml`**
 a binding without an id makes wrangler create a NEW namespace on the next
 deploy, which would move the live sockets (call signalling included) — a
 silent realtime outage. The temporary `wrangler.edge.local.toml` is gone.
+
+### Release v289 (3.9.212) — published 2026-10-18 17:58 UTC
+Asset `kuchupuchu-3.9.212-r114.apk` (28,425,120 B, sha256
+`3938653b35221a799118d54cca770951187e4d471a4ea90deab57e81599bd4d8`, md5
+`769ae6b517ecb6908d0d4bfd69b9b396`), release run `39150754112` (all steps
+green, including the v274 signing-continuity check), CI run `39150823956`
+green. The R2 object `kp-media/apk/kuchupuchu-latest.apk` now carries the same
+md5 ✓. Commits on `main`: `6a94ba27` (the relay fix) and `96c90176` (the
+secret-recovery note). The live edge runs version
+`24d75d9a-d9cb-48fc-a3b2-01066b417333`.
