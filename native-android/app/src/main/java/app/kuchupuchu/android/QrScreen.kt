@@ -4,8 +4,15 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,7 +36,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PersonAdd
-import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -124,30 +131,51 @@ fun QrScreen(nav: NavController, userId: String) {
             ) {
                 Row(
                     Modifier
-                        .clip(RoundedCornerShape(14.dp))
+                        .clip(RoundedCornerShape(16.dp))
                         .background(Card)
-                        .border(1.dp, Line, RoundedCornerShape(14.dp))
-                        .padding(3.dp),
+                        .border(1.dp, Line, RoundedCornerShape(16.dp))
+                        .padding(4.dp),
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    QrTabButton("My code", Icons.Filled.QrCode, tab == 0) { tab = 0 }
-                    QrTabButton("Scan", Icons.Filled.QrCodeScanner, tab == 1) { tab = 1 }
+                    QrTabButton(QrMyCodeIcon, "My code", tab == 0) { tab = 0 }
+                    QrTabButton(QrScanIcon, "Scan", tab == 1) { tab = 1 }
                 }
             }
         }
 
-        if (!isMe || tab == 0) {
-            MyQrPane(user = user, isMe = isMe)
-        } else {
-            QrScannerPane(nav = nav)
+        // Owner round 35: the two panes used to swap in a single frame — one
+        // was removed and the other appeared, so the switch looked like a
+        // jump cut (owner: "upore switching animation nai"). The panes now
+        // slide across each other and fade, and the size change between them
+        // is animated too.
+        AnimatedContent(
+            targetState = tab,
+            transitionSpec = {
+                val forward = targetState > initialState
+                val enter = if (forward) -1 else 1
+                (slideInHorizontally { width -> width / 4 * enter } + fadeIn()) togetherWith
+                    (slideOutHorizontally { width -> width / 4 * -enter } + fadeOut())
+            },
+            label = "qrPane",
+        ) { target ->
+            if (!isMe || target == 0) {
+                MyQrPane(user = user, isMe = isMe)
+            } else {
+                QrScannerPane(nav = nav)
+            }
         }
     }
 }
-
+/**
+ * Owner round 35: an icon-only tab. The glyph is the owner's own drawing
+ * (see [QrMyCodeIcon] / [QrScanIcon]); the label survives only as the
+ * accessibility name, so a screen reader still says what the tab does.
+ */
 @Composable
 private fun QrTabButton(
-    label: String,
     icon: ImageVector,
+    label: String,
     selected: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
@@ -155,25 +183,29 @@ private fun QrTabButton(
     val haptics = rememberHaptics()
     val tint by animateColorAsState(
         targetValue = if (selected) ActionBlueInk else Muted,
-        animationSpec = tween(180),
+        animationSpec = tween(200),
         label = "qrTabTint",
     )
-    Row(
+    val fill by animateColorAsState(
+        targetValue = if (selected) ActionBlueDeep else Color.Transparent,
+        animationSpec = tween(200),
+        label = "qrTabFill",
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (selected) 1f else 0.92f,
+        animationSpec = tween(200),
+        label = "qrTabScale",
+    )
+    Box(
         modifier
-            .clip(RoundedCornerShape(11.dp))
-            .background(if (selected) ActionBlueDeep else Color.Transparent)
+            .clip(RoundedCornerShape(13.dp))
+            .background(fill)
             .clickable { haptics.tap(); onClick() }
-            .padding(horizontal = 14.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+            .padding(horizontal = 16.dp, vertical = 9.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale },
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(15.dp))
-        Text(
-            label,
-            fontSize = 12.5.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            color = tint,
-        )
+        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(21.dp))
     }
 }
 
@@ -500,14 +532,14 @@ private fun QrScannerPane(nav: NavController) {
     }
 
     Box(Modifier.fillMaxSize().padding(20.dp), contentAlignment = Alignment.Center) {
-        // Owner round 33: the scan pane was a bare icon on the page — no
-        // frame, so there was nothing that looked like a viewfinder. The
-        // panel now carries the same accent border the code panel does.
+        // Owner round 33: the scan pane was a bare icon on the page, so it
+        // grew a frame to look like a viewfinder. Owner round 35: that
+        // frame is GONE again — the owner asked for the box border to be
+        // removed, and the empty state reads better open on the page (the
+        // scanner's own corner brackets are the frame now).
         Column(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .border(2.dp, ActionBlueDeep, RoundedCornerShape(20.dp))
                 .padding(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {

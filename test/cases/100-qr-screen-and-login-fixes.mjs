@@ -33,18 +33,23 @@ const AUTH_CSS = read("web/src/auth/authStyles.css");
 
 /* ------------------------------------------------------------- Android ---- */
 {
-  const tabRow = QR.slice(QR.indexOf('QrTabButton("My code"'), QR.indexOf('QrTabButton("Scan"'));
+  const tabRow = QR.slice(
+    QR.indexOf("QrTabButton(QrMyCodeIcon"),
+    QR.indexOf("QrTabButton(QrScanIcon"),
+  );
   check(
     "the My code / Scan switch is a compact control, not a full-width row",
-    QR.includes('QrTabButton("My code", Icons.Filled.QrCode, tab == 0) { tab = 0 }') &&
-      QR.includes('QrTabButton("Scan", Icons.Filled.QrCodeScanner, tab == 1) { tab = 1 }') &&
+    QR.includes('QrTabButton(QrMyCodeIcon, "My code", tab == 0) { tab = 0 }') &&
+      QR.includes('QrTabButton(QrScanIcon, "Scan", tab == 1) { tab = 1 }') &&
       !tabRow.includes("weight(1f)") &&
       !/Row\(\s*Modifier\s*\.fillMaxWidth\(\)[\s\S]{0,200}QrTabButton/.test(QR),
     tabRow,
   );
+  // Owner round 35: the tabs carry no label at all any more - the owner's
+  // own glyphs only - so the switch reads like the app's own nav bar.
   check(
     "the tab buttons are a fixed, small size",
-    QR.includes("fontSize = 12.5.sp") && QR.includes(".size(15.dp)"),
+    QR.includes(".size(21.dp)") && !QR.includes("fontSize = 12.5.sp"),
   );
   // Owner round 34: the switch is centred and reads like a nav bar.
   check(
@@ -54,10 +59,11 @@ const AUTH_CSS = read("web/src/auth/authStyles.css");
     ) && !QR.includes(".padding(start = 16.dp, top = 2.dp, bottom = 6.dp)"),
   );
   check(
-    "each tab carries an icon next to its label (nav-bar look)",
-    QR.includes("Icon(icon, contentDescription = null, tint = tint") &&
-      QR.includes("Icons.Filled.QrCode") &&
-      QR.includes("Icons.Filled.QrCodeScanner"),
+    "each tab is an ICON ONLY - the owner's own glyph, no label (nav-bar look)",
+    QR.includes("Icon(icon, contentDescription = label, tint = tint") &&
+      QR.includes("QrMyCodeIcon") &&
+      QR.includes("QrScanIcon") &&
+      !QR.includes("Icons.Filled.QrCode,"),
   );
   check(
     "the My code pane scrolls, so nothing is cut off at the bottom",
@@ -85,9 +91,11 @@ const AUTH_CSS = read("web/src/auth/authStyles.css");
     "the scanner runs in our own capture activity (the one with the frame)",
     QR.includes(".setCaptureActivity(KpScanActivity::class.java)"),
   );
+  // Owner round 35: the owner asked for the scan pane's box border to be
+  // removed - the scanner's own corner brackets are the frame now.
   check(
-    "the scan pane itself carries a border",
-    QR.includes(".border(2.dp, ActionBlueDeep, RoundedCornerShape(20.dp))"),
+    "the scan pane carries NO border (owner round 35)",
+    !QR.includes(".border(2.dp, ActionBlueDeep, RoundedCornerShape(20.dp))"),
   );
   check(
     "the capture activity replaces the layout with ours",

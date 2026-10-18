@@ -138,6 +138,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.boundsInWindow
@@ -6419,11 +6420,36 @@ private fun Composer(
                                     }
                                 }
                             }
+                            // Owner round 35 (the caret): the bar painted
+                            // the text TWICE — a visible Text() and a
+                            // BasicTextField with a transparent colour, so
+                            // only the field ever drew the caret. The two
+                            // layers measured DIFFERENTLY: Text() merges
+                            // LocalTextStyle (Material's body style, 0.5sp
+                            // letter-spacing) while the field's own
+                            // textStyle does not, so the visible line grew
+                            // ~0.5sp per character and the caret drifted
+                            // LEFT — the longer the message, the further
+                            // the caret sat on top of a word instead of
+                            // after it (owner: "message er seshe je dag ta
+                            // thake ota message er last a thakche na").
+                            // Both layers now share ONE style, so the two
+                            // can never measure differently again.
+                            val composerTextStyle =
+                                TextStyle(
+                                    fontSize = 14.sp,
+                                    lineHeight = 20.sp,
+                                    // No inherited letter-spacing: the
+                                    // field does not take LocalTextStyle,
+                                    // and any gap between the two is what
+                                    // moved the caret.
+                                    letterSpacing = 0.sp,
+                                    fontFamily = FontFamily.Default,
+                                )
                             Text(
                                 text = MessageMarkup.formatted(inputState.text.toString()),
                                 color = Ink,
-                                fontSize = 14.sp,
-                                lineHeight = 20.sp,
+                                style = composerTextStyle,
                                 maxLines = 4,
                                 overflow = TextOverflow.Clip,
                                 modifier = Modifier
@@ -6436,7 +6462,7 @@ private fun Composer(
                                 state = inputState,
                                 inputTransformation = InputTransformation.maxLength(MESSAGE_BODY_LIMIT),
                                 outputTransformation = boldOutputTransformation,
-                                textStyle = TextStyle(color = Color.Transparent, fontSize = 14.sp, lineHeight = 20.sp),
+                                textStyle = composerTextStyle.copy(color = Color.Transparent),
                                 // Owner round 19: the caret follows the chat theme too.
                                 cursorBrush = androidx.compose.ui.graphics.SolidColor(accent),
                                 lineLimits = TextFieldLineLimits.MultiLine(minHeightInLines = 1, maxHeightInLines = 4),
@@ -9277,14 +9303,14 @@ private fun MessageRow(
                             // text. In select mode taps stay with the bubble.
                             val selecting = selectedIds.isNotEmpty()
                             val linked =
-                                remember(full, bodyInk, selecting, theme, onOpenMention) {
+                                remember(full, bodyInk, selecting, theme, mine, onOpenMention) {
                                     if (selecting) {
                                         if (visibleFull == full) null
                                         else androidx.compose.ui.text.AnnotatedString(visibleFull)
                                     } else MessageMarkup.annotate(
                                         value = full,
-                                        linkInk = chatAccent(theme),
-                                        mentionInk = chatAccent(theme),
+                                        linkInk = linkInkFor(theme, mine),
+                                        mentionInk = linkInkFor(theme, mine),
                                         allowMentions = true,
                                         openUrl = { url ->
                                             revealStamp.value()
@@ -12411,6 +12437,39 @@ internal fun chatAccent(theme: String): Color =
         // Owner round 20: dark-blue default chat — blue accent everywhere.
         else -> Color(0xFF2F6FED)
     }
+
+/**
+ * Owner round 35: the colour of a link inside a bubble.
+ *
+ * The link used to wear the chat accent — but on MY OWN blue bubble that IS
+ * the bubble's own colour, so the link vanished into it and the underline was
+ * the only clue (owner: "text blue a ar bubble o blue tai link bojha jai na
+ * valo"). The colour is now picked against the bubble it sits on: whichever
+ * of white / deep blue reads better ON that bubble wins, so a link always
+ * reads as a link — on the blue bubble, on the gold one and on the night one
+ * alike.
+ */
+internal fun linkInkFor(theme: String, mine: Boolean): Color {
+    val bubble =
+        when (theme) {
+            "mint" -> if (mine) Color(0xFF34D399) else if (KpThemeMode.darkBlue) Color(0xFF14261F) else Color(0xFFE7F8F0)
+            "rose" -> if (mine) Color(0xFFFB7185) else if (KpThemeMode.darkBlue) Color(0xFF2A1A21) else Color(0xFFFFE9EC)
+            "night" -> if (mine) Color(0xFF818CF8) else Color(0xFF1E293B)
+            "default" -> if (mine) Color(0xFFF59E0B) else Card
+            // Owner round 20: dark-blue default chat — blue bubbles.
+            else -> if (mine) Color(0xFF2F6FED) else Color(0xFF16213A)
+        }
+    // WCAG contrast: white ON the bubble vs. the deep blue ON the bubble —
+    // whichever reads better wins. A dark bubble (the blue one, the night
+    // one, the dark-navy card) takes white; a light or mid one (gold, cream,
+    // mint, rose, the indigo night bubble) takes the deep blue, which is the
+    // same ink the bubble's own text uses there.
+    val deepBlue = Color(0xFF17409B)
+    val onBubble = bubble.luminance() + 0.05f
+    val asWhite = 1.05f / onBubble
+    val asDeepBlue = onBubble / (deepBlue.luminance() + 0.05f)
+    return if (asDeepBlue >= asWhite) deepBlue else Color(0xFFFFFFFF)
+}
 
 /** My bubble per chat theme (Owner round 14: theme restyles bubbles too). */
 private fun chatMineFill(theme: String): Brush =

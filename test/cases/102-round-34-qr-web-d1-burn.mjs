@@ -47,22 +47,25 @@ const WORKER = read("src/worker/index.ts");
   );
   check(
     "the switch sits at the TOP of the screen, above the code",
-    switchBlock.indexOf("if (isMe) {") < QR.indexOf("if (!isMe || tab == 0) {") &&
+    switchBlock.indexOf("if (isMe) {") < QR.indexOf("AnimatedContent(") &&
       switchBlock.includes(".padding(top = 2.dp"),
   );
+  // Owner round 35: the tabs are the owner's own glyphs and carry NO label
+  // any more - the switch reads like the app's own nav bar.
   check(
-    "each tab is an icon + a label (the nav-bar look)",
-    QR.includes('QrTabButton("My code", Icons.Filled.QrCode, tab == 0)') &&
-      QR.includes('QrTabButton("Scan", Icons.Filled.QrCodeScanner, tab == 1)') &&
-      QR.includes("Icon(icon, contentDescription = null, tint = tint"),
+    "each tab is the owner's own icon, with no label (the nav-bar look)",
+    QR.includes('QrTabButton(QrMyCodeIcon, "My code", tab == 0)') &&
+      QR.includes('QrTabButton(QrScanIcon, "Scan", tab == 1)') &&
+      QR.includes("Icon(icon, contentDescription = label, tint = tint"),
   );
   check(
-    "the tab buttons are small (icon 15dp, label 12.5sp)",
-    QR.includes(".size(15.dp)") && QR.includes("fontSize = 12.5.sp"),
+    "the tab buttons are small (one 21dp icon, no label)",
+    QR.includes(".size(21.dp)") && !QR.includes("fontSize = 12.5.sp"),
   );
   check(
     "the selected tab is filled with the accent",
-    QR.includes(".background(if (selected) ActionBlueDeep else Color.Transparent)"),
+    QR.includes("val fill by animateColorAsState(") &&
+      QR.includes("targetValue = if (selected) ActionBlueDeep else Color.Transparent,"),
   );
 }
 

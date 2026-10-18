@@ -1257,3 +1257,109 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - **Release:** `versionCode 286` / `versionName 3.9.209`, asset `kuchupuchu-3.9.209-r111.apk`, R2 `kp-media/apk/kuchupuchu-latest.apk`, cert continuity with v274 checked in CI. Web: Firebase production (MAIN) + Cloudflare preview, both rebuilt from this tree.
 - **Housekeeping:** `git fetch` against the sandbox's GitHub replica answered "Repository not found" for every attempt while `ls-remote` and the tarball endpoint worked; the tree was restored from `api.github.com/repositories/1346525178/tarball/main` and the commit was pushed through the Git data API (blob → tree → commit → ref update). The workspace also wiped `.git`/`node_modules`/`.secrets` mid-round once (a restore snapshot); `/home/user/.env` and `/home/user/uploads/` survive, so the Firebase SA was re-copied from there.
 - **Verification:** 95/96 cases, 3970 assertions (new `test/cases/102-round-34-qr-web-d1-burn.mjs`, 22 checks; `test/cases/100-…` updated for the icon switch); `npm run typecheck`, `npm run typecheck:web` and `npx prettier --check .` green. The single failing case is `41-debug-key-migration` (the sandbox's `git ls-files` check) — green on a real clone.
+
+---
+
+## Owner round 35 — 2026-10-18 — the composer caret, the link colour, the QR screen
+
+The owner sent two screenshots from the Android app and named four things.
+
+### 1. The message bar's caret did not sit at the end of the text
+
+> *"massage bar a massage type korle massage er seshe je dag ta thake ota massage er last a thakche na prothome thakleo boro massage type korle aste aste word er upore overlap korche thik thakche na."*
+
+**Cause.** The composer paints the text twice: a visible `Text()` and, on top of
+it, a `BasicTextField` with `color = Color.Transparent` whose only visible job
+is the **caret** and the keyboard. The two layers measured differently:
+`Text()` merges `LocalTextStyle.current` (Material 3 `bodyLarge` →
+**letterSpacing 0.5sp**) while `BasicTextField(textStyle = …)` takes the style
+it is given **as-is** (**letterSpacing 0sp**). Every glyph in the visible line
+was ~0.5sp wider than the same glyph in the field, so the caret sat further
+left with every character — exactly what the screenshot shows (the caret
+between `…hehg` and `ge` of a 26-character message).
+
+**Fix** (`ChatScreen.kt`): one shared style for both layers.
+
+```kotlin
+val composerTextStyle = TextStyle(
+    fontSize = 14.sp, lineHeight = 20.sp, letterSpacing = 0.sp,
+    fontFamily = FontFamily.Default,
+)
+```
+
+* the visible `Text()` takes `style = composerTextStyle` (no more inherited
+  `LocalTextStyle`), and
+* the field takes `textStyle = composerTextStyle.copy(color = Color.Transparent)`.
+
+Identical measurement → the caret is always exactly after the last character.
+
+### 2. A link inside a message was invisible
+
+> *"link massage dekho valo bojha nai na text blue a ar bubble o blue tai link bojha jai na valo."*
+
+**Cause.** `MessageMarkup.annotate()` was called with `linkInk = chatAccent(theme)`,
+and on the default blue chat the accent (`0xFF2F6FED`) is *exactly* my own
+bubble's colour (the `0xFF2F6FED → 0xFF1E40AF` gradient). Blue link, blue bubble.
+
+**Fix** (`ChatScreen.kt`): a new `internal fun linkInkFor(theme, mine): Color`
+picks the ink from **the bubble the link sits on** —
+`bubble.luminance() < 0.45f → 0xFFFFFFFF` (white on a dark bubble) else
+`0xFF17409B` (deep blue on a light bubble). Mentions take the same ink.
+`androidx.compose.ui.graphics.luminance` imported; `mine` added to the
+`remember` key so the colour re-picks when the side changes.
+
+### 3. The scan pane's box border — removed
+
+The `2.dp` `ActionBlueDeep` border around the scan empty-state card is gone.
+The **QR code** panel keeps its frame on purpose (the white quiet zone is
+what lets a scanner read the code).
+
+### 4. The My code / Scan switch: animation + the owner's own icons
+
+> *"upore switching animation nai"* … *"ar 2 ra icons e change hobe … text thakbe na just icon nav bar er moto same rounded shob switching animation o thakbe"*
+
+* New `QrIcons.kt` — `QrMyCodeIcon` and `QrScanIcon`, the owner's two SVGs
+  redrawn as 24×24 `ImageVector`s (stroke 1.5, round caps/joins). No PNG ships.
+* `QrTabButton` is **icon only** (no label): a rounded container, the active
+  tab filled with the accent and its glyph in white, the other in muted ink,
+  the icon scaling between `0.92f` and `1f`. The label survives as the
+  **accessibility name** (`contentDescription = label`).
+* The panes now swap through `AnimatedContent` — slide across each other and
+  fade (`togetherWith`), with the size change animated too.
+
+### Release
+
+`versionCode 288` / `versionName 3.9.211` — asset `kuchupuchu-3.9.211-r112.apk`.
+`native-android/app/build.gradle.kts`, `.github/workflows/release.yml` and the
+three version-pinning cases (`36-v166-round`, `67-compose-crash-observability`,
+`75-release-workflow-browser`) all moved to 288 / 3.9.211.
+
+### New + updated contract locks
+
+* **new** `test/cases/103-round-35-qr-tabs-composer-link.mjs` (14 checks) — the
+  shared composer style, `letterSpacing = 0.sp`, the bubble-aware link ink and
+  the `linkInkFor` body, the missing scan border, the kept code frame, the
+  `AnimatedContent` swap, the icon-only animated tabs and the two glyphs.
+* `test/cases/100-qr-screen-and-login-fixes.mjs` — the new tab calls, the
+  21dp icon, "no label", and the scan border inverted.
+* `test/cases/102-round-34-qr-web-d1-burn.mjs` — the round-34 tab pins moved
+  to the round-35 shape (the old ones pinned the label + the 15dp icon).
+
+### Build note (sandbox)
+
+This box has 1.94 GB of RAM and no swap, so a **full** `:app:compileDebugKotlin`
+cannot finish here: the Kotlin daemon plus the Gradle JVM thrash the box into
+a 45-minute freeze and the kernel kills the daemon (`EOFException` on the
+daemon RMI channel → Gradle falls back to the in-process compiler → the box
+dies again). The working recipe when it does fit is
+`--no-daemon -Dorg.gradle.jvmargs=-Xmx600m -Pkotlin.compiler.execution.strategy=daemon
+-Pkotlin.daemon.jvmargs=-Xmx820m -Pkotlin.incremental=false
+-Dorg.gradle.workers.max=1 -Dorg.gradle.parallel=false`, and **only one** JVM
+may be alive at a time — a stale Kotlin daemon from the previous run is what
+kills the next one. The sandbox also lost `.git` and `node_modules` to a
+workspace restore mid-round (as it did in round 34); both were restored
+(re-clone + `npm ci`).
+
+**Verification:** 97/97 cases, 4002 assertions; `scripts/ktlint-check.sh`
+clean; the Android compile is left to CI (the `apk` job) and the release
+workflow, which is the repo's own compiler.
