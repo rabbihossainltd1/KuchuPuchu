@@ -59,7 +59,7 @@ jobs:
           ./gradlew :app:testDebugUnitTest :app:lintDebug --no-daemon --continue \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
 
-      - name: Build v285 APK with the v274-compatible debug keystore
+      - name: Build v286 APK with the v274-compatible debug keystore
         working-directory: native-android
         env:
           KP_KEYSTORE_B64: ""
@@ -76,9 +76,9 @@ jobs:
           test -s "$apk"
           code="$(sed -n 's/^[[:space:]]*versionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle.kts | head -n1)"
           name="$(sed -n 's/^[[:space:]]*versionName = \"\([^\"]*\)\".*/\1/p' app/build.gradle.kts | head -n1)"
-          test "$code" = "285"
-          test "$name" = "3.9.208"
-          asset="$RUNNER_TEMP/kuchupuchu-${name}-r110.apk"
+          test "$code" = "286"
+          test "$name" = "3.9.209"
+          asset="$RUNNER_TEMP/kuchupuchu-${name}-r111.apk"
           cp "$apk" "$asset"
           echo "RELEASE_TAG=v${code}" >> "$GITHUB_ENV"
           echo "RELEASE_TITLE=v${code} (${name})" >> "$GITHUB_ENV"

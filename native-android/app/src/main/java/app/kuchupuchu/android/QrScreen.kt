@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -27,6 +29,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
@@ -45,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -109,21 +113,26 @@ fun QrScreen(nav: NavController, userId: String) {
         }
 
         if (isMe) {
-            // Owner round 33: this switch used to be a FULL-WIDTH pill with
-            // two huge buttons. It ate a third of the screen and pushed the
-            // code itself off the bottom. It is now a compact segmented
-            // control that hugs its content in the top-left corner.
-            Row(
-                Modifier
-                    .padding(start = 16.dp, top = 2.dp, bottom = 6.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Card)
-                    .border(1.dp, Line, RoundedCornerShape(12.dp))
-                    .padding(3.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            // Owner round 34 (QR screen): the switch used to hug the LEFT
+            // edge as a wide pill. It is now a small, CENTRED, nav-bar-style
+            // segmented control at the very top: an icon + a label per tab
+            // and the active one filled with the accent — the same language
+            // as the app's own navigation bar.
+            Box(
+                Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 4.dp),
+                contentAlignment = Alignment.Center,
             ) {
-                QrTabButton("My code", tab == 0) { tab = 0 }
-                QrTabButton("Scan", tab == 1) { tab = 1 }
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Card)
+                        .border(1.dp, Line, RoundedCornerShape(14.dp))
+                        .padding(3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    QrTabButton("My code", Icons.Filled.QrCode, tab == 0) { tab = 0 }
+                    QrTabButton("Scan", Icons.Filled.QrCodeScanner, tab == 1) { tab = 1 }
+                }
             }
         }
 
@@ -136,22 +145,34 @@ fun QrScreen(nav: NavController, userId: String) {
 }
 
 @Composable
-private fun QrTabButton(label: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun QrTabButton(
+    label: String,
+    icon: ImageVector,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
     val haptics = rememberHaptics()
-    Box(
+    val tint by animateColorAsState(
+        targetValue = if (selected) ActionBlueInk else Muted,
+        animationSpec = tween(180),
+        label = "qrTabTint",
+    )
+    Row(
         modifier
-            .width(84.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(11.dp))
             .background(if (selected) ActionBlueDeep else Color.Transparent)
             .clickable { haptics.tap(); onClick() }
-            .padding(vertical = 6.dp),
-        contentAlignment = Alignment.Center,
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(15.dp))
         Text(
             label,
             fontSize = 12.5.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = if (selected) ActionBlueInk else Ink,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            color = tint,
         )
     }
 }

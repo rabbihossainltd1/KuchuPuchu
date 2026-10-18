@@ -110,10 +110,11 @@ export function QrLoginPanel({ onUsePhone }: { onUsePhone: () => void }) {
 
   return (
     <div className="auth-form qr-login" aria-live="polite">
-      <p className="auth-copy">
-        Open KuchuPuchu on your phone, open the QR scanner from the Home menu or your profile, and
-        point it at this code. This browser signs in the moment your phone scans it.
-      </p>
+      {/*
+        Owner round 34 (web): the "open the app and point it at this code" paragraph
+        was removed — the heading ("Scan to sign in") and the code itself say
+        everything that paragraph said, only in fewer words.
+      */}
       <div className="qr-login__frame">
         {svg ? (
           <img

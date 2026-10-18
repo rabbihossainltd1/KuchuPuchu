@@ -107,6 +107,15 @@ input:disabled {
   height: 100vh;
   min-height: 520px;
   grid-template-columns: 72px minmax(310px, 354px) minmax(0, 1fr);
+  /* Owner round 34: the grid had ONE implicit row, sized `auto`. That row
+     grew to the height of its tallest item — the chat pane, whose transcript
+     is as tall as the whole message list — so the pane became taller than
+     the viewport and the composer (the last row of the chat) was pushed
+     BELOW the bottom edge and clipped away, unreachable. One explicit row
+     of `minmax(0, 1fr)` pins the row to the viewport height; the transcript
+     then scrolls INSIDE it (it already carries `flex: 1; min-height: 0`),
+     exactly like the mobile layout does. */
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .preview-banner + .workspace {

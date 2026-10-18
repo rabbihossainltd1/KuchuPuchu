@@ -36,15 +36,28 @@ const AUTH_CSS = read("web/src/auth/authStyles.css");
   const tabRow = QR.slice(QR.indexOf('QrTabButton("My code"'), QR.indexOf('QrTabButton("Scan"'));
   check(
     "the My code / Scan switch is a compact control, not a full-width row",
-    QR.includes('QrTabButton("My code", tab == 0) { tab = 0 }') &&
-      QR.includes('QrTabButton("Scan", tab == 1) { tab = 1 }') &&
+    QR.includes('QrTabButton("My code", Icons.Filled.QrCode, tab == 0) { tab = 0 }') &&
+      QR.includes('QrTabButton("Scan", Icons.Filled.QrCodeScanner, tab == 1) { tab = 1 }') &&
       !tabRow.includes("weight(1f)") &&
       !/Row\(\s*Modifier\s*\.fillMaxWidth\(\)[\s\S]{0,200}QrTabButton/.test(QR),
     tabRow,
   );
   check(
     "the tab buttons are a fixed, small size",
-    QR.includes(".width(84.dp)") && QR.includes("fontSize = 12.5.sp"),
+    QR.includes("fontSize = 12.5.sp") && QR.includes(".size(15.dp)"),
+  );
+  // Owner round 34: the switch is centred and reads like a nav bar.
+  check(
+    "the switch is CENTRED at the top of the screen (owner round 34)",
+    /Box\(\s*\n\s*Modifier\.fillMaxWidth\(\)[\s\S]{0,200}contentAlignment = Alignment\.Center/.test(
+      QR,
+    ) && !QR.includes(".padding(start = 16.dp, top = 2.dp, bottom = 6.dp)"),
+  );
+  check(
+    "each tab carries an icon next to its label (nav-bar look)",
+    QR.includes("Icon(icon, contentDescription = null, tint = tint") &&
+      QR.includes("Icons.Filled.QrCode") &&
+      QR.includes("Icons.Filled.QrCodeScanner"),
   );
   check(
     "the My code pane scrolls, so nothing is cut off at the bottom",

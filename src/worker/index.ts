@@ -2527,6 +2527,16 @@ function rateLimit(key: string, capacity: number, refillPerMinute: number) {
  * isolate bursts still feel the smooth bucket while floods die globally.
  * D1 is single-writer, so the read-modify-write below cannot interleave.
  */
+/**
+ * Owner round 34 (D1 write burn): the caps whose counter may be written
+ * every 10th hit instead of every hit. Only roomy, round-numbered caps are
+ * listed — a cap of 60/90/120/300/600 still trips on exactly the same
+ * request as before, because the counter is written on every multiple of 10
+ * and therefore lands on the cap itself. The tight caps (8, 10, 20, 30, 40)
+ * stay exact: they are the anti-brute-force and anti-enumeration limits.
+ */
+const SAMPLED_RATE_LIMIT_CAPS = new Set([60, 90, 120, 300, 600]);
+
 async function rateLimitGlobal(db: D1Database, key: string, cap: number) {
   const window = Math.floor(Date.now() / 60_000);
   const row = await one<{ count: number }>(
@@ -2539,6 +2549,22 @@ async function rateLimitGlobal(db: D1Database, key: string, cap: number) {
   if (count >= cap) {
     fail(429, "Too many attempts. Wait a minute and try again.", "RATE_LIMITED", "60");
   }
+  // Owner round 34 (D1 write burn): this counter used to be written on EVERY
+  // call, so a 600/min route wrote 600 rows a minute into D1 — one of the
+  // largest row-write consumers on the read paths.
+  //
+  // The write is now sampled, but ONLY for the roomy, round-numbered caps
+  // (60, 90, 120, 300, 600 …): the row is written on the first hit of a
+  // window and then on every 10th hit, so the stored counter still lands
+  // exactly on the cap and the limit trips on exactly the same request as
+  // before — the counter is never behind by more than 9, and because the
+  // write happens on every multiple of 10, a round cap is still reached on
+  // the very hit that reached it.
+  //
+  // The TIGHT caps (8, 10, 20, 30, 40 …) are the anti-brute-force and
+  // anti-enumeration ones (per phone number, per IP). They keep counting
+  // every single hit: a 20-hit phone cap must not become a 29-hit one.
+  if (SAMPLED_RATE_LIMIT_CAPS.has(cap) && count > 0 && (count + 1) % 10 !== 0) return;
   await run(
     db,
     "INSERT OR REPLACE INTO rate_limits (key, window, count) VALUES (?, ?, ?)",
@@ -3633,6 +3659,46 @@ function blockSchemaWalk(err: unknown): void {
   console.error("schema walk deferred: " + (err instanceof Error ? err.message : String(err)));
 }
 
+/**
+ * Owner round 34 (D1 write burn): the worker error log is throttled and
+ * quota-aware.
+ *
+ * Before, EVERY failed request wrote one `error_log` row. When D1's free
+ * tier row-write limit was spent, each refused write turned into an error
+ * which turned into another `error_log` row: 3 408 inserts (10 224 written
+ * rows) in a single day, and the error path was one of the biggest reasons
+ * the daily budget ran out. Two rules now:
+ *   1. a D1 quota refusal is NEVER written back into D1 — the insert spends
+ *      the very budget that is already gone and cannot succeed anyway;
+ *   2. one row per distinct failure per isolate per minute, so a broken
+ *      route can no longer flood the table.
+ */
+const workerErrorSeen = new Map<string, number>();
+const WORKER_ERROR_LOG_GAP_MS = 60_000;
+
+async function logWorkerError(env: Env, stack: string): Promise<void> {
+  if (D1_QUOTA_ERROR.test(stack)) return;
+  const key = stack.split("\n").slice(0, 2).join(" | ").slice(0, 200);
+  const now = Date.now();
+  const last = workerErrorSeen.get(key) ?? 0;
+  if (now - last < WORKER_ERROR_LOG_GAP_MS) return;
+  workerErrorSeen.set(key, now);
+  if (workerErrorSeen.size > 200) {
+    for (const [k, stamp] of workerErrorSeen) {
+      if (now - stamp > 10 * WORKER_ERROR_LOG_GAP_MS) workerErrorSeen.delete(k);
+    }
+    if (workerErrorSeen.size > 200) {
+      const oldest = workerErrorSeen.keys().next();
+      if (!oldest.done) workerErrorSeen.delete(oldest.value);
+    }
+  }
+  try {
+    await env.DB.prepare("INSERT INTO error_log (id, stack, created_at) VALUES (?, ?, ?)")
+      .bind(crypto.randomUUID(), stack.slice(0, 2000), nowIso())
+      .run();
+  } catch {}
+}
+
 /** Throttles the expired-status reaper so reads stay read-only. */
 let nextStatusSweep = 0;
 
@@ -3672,9 +3738,20 @@ async function sweepSessions(db: D1Database) {
 /** The one `schema_meta` row: the fingerprint of the migration list this build applied. */
 const SCHEMA_META_KEY = "fingerprint";
 
-/** Legacy rows carry clientId only inside meta_json; the column is authoritative since. */
+/**
+ * Legacy rows carry clientId only inside meta_json; the column is authoritative since.
+ *
+ * Owner round 34 (D1 write burn): the predicate used to re-match every
+ * message whose meta_json has no `clientId` at all — `json_extract` returns
+ * NULL there, so the row stayed NULL and was written again on EVERY schema
+ * walk. That one statement was 26 522 written rows (1 495 runs) in a single
+ * day, the largest single share of the D1 write budget. The extra predicate
+ * makes the backfill converge: a row is written at most once, and rows that
+ * never had a clientId are left alone instead of re-written forever.
+ */
 const CLIENT_ID_BACKFILL = `UPDATE messages SET client_id = json_extract(meta_json, '$.clientId')
-       WHERE client_id IS NULL AND meta_json IS NOT NULL`;
+       WHERE client_id IS NULL AND meta_json IS NOT NULL
+         AND json_extract(meta_json, '$.clientId') IS NOT NULL`;
 
 /**
  * One indexed read: has this exact build's schema already been applied here?
@@ -3971,7 +4048,8 @@ async function ensureSchema(db: D1Database) {
     `ALTER TABLE typing ADD COLUMN kind TEXT`,
     // Owner round 32 item 4: where each signed-in device last came from.
     `ALTER TABLE auth_devices ADD COLUMN platform TEXT NOT NULL DEFAULT 'ANDROID'`,
-    `UPDATE auth_devices SET platform = 'WEB' WHERE device_id LIKE 'web-%'`,
+    `UPDATE auth_devices SET platform = 'WEB' WHERE device_id LIKE 'web-%'
+       AND (platform IS NULL OR platform <> 'WEB')`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_authdevices_active_platform
        ON auth_devices(user_id, platform) WHERE status = 'ACTIVE'`,
     `ALTER TABLE auth_devices ADD COLUMN ip TEXT`,
@@ -4108,13 +4186,15 @@ async function ensureSchema(db: D1Database) {
     `ALTER TABLE login_requests ADD COLUMN claim_id TEXT`,
     `ALTER TABLE login_requests ADD COLUMN otp_hash TEXT`,
     `ALTER TABLE login_requests ADD COLUMN otp_attempts INTEGER NOT NULL DEFAULT 0`,
-    `UPDATE login_requests SET new_device_platform = 'WEB' WHERE new_device_id LIKE 'web-%'`,
+    `UPDATE login_requests SET new_device_platform = 'WEB' WHERE new_device_id LIKE 'web-%'
+       AND (new_device_platform IS NULL OR new_device_platform <> 'WEB')`,
     `CREATE INDEX IF NOT EXISTS idx_loginreq_status_expiry ON login_requests(status, expires_at)`,
     `CREATE INDEX IF NOT EXISTS idx_login_approval_request
        ON messages(json_extract(meta_json, '$.requestId')) WHERE kind = 'LOGIN_APPROVAL'`,
     `ALTER TABLE recovery_requests ADD COLUMN new_device_platform TEXT NOT NULL DEFAULT 'ANDROID'`,
     `ALTER TABLE recovery_requests ADD COLUMN claim_id TEXT`,
-    `UPDATE recovery_requests SET new_device_platform = 'WEB' WHERE new_device_id LIKE 'web-%'`,
+    `UPDATE recovery_requests SET new_device_platform = 'WEB' WHERE new_device_id LIKE 'web-%'
+       AND (new_device_platform IS NULL OR new_device_platform <> 'WEB')`,
     // Uniqueness the legacy schema cannot express: one phone → one account,
     // one Google subject → one account (§9/§22). Partial indexes so legacy
     // NULL rows never collide; fresh DBs got these constraints in the CREATE,
@@ -6977,11 +7057,7 @@ export default {
       console.error("worker error", stack);
       // Keep the stack so the exact failure can be pulled later via
       // /api/debug/errors — client banners alone never named the cause.
-      try {
-        await env.DB.prepare("INSERT INTO error_log (id, stack, created_at) VALUES (?, ?, ?)")
-          .bind(crypto.randomUUID(), stack.slice(0, 2000), nowIso())
-          .run();
-      } catch {}
+      await logWorkerError(env, stack);
       // "D1 has exceeded its row-read limit" is not something a client can retry
       // its way out of — the quota is per UTC day, and every immediate retry spent
       // more reads on the failing path (that is how yesterday's last hour went from
