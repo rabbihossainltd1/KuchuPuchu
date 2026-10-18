@@ -1378,22 +1378,51 @@ workflow, which is the repo's own compiler.
 * The in-app updater reads `releases/latest` → tag `v288` > the installed
   287 → the update popup appears on the next app open.
 
-**Two operational lessons from this release (both cost time, both are real):**
+**The website's "Download APK" button still hands out v286 — a REAL
+pre-existing bug, now pinned down (it is NOT the CDN cache).**
 
-1. **`/download/apk` is served from Cloudflare's edge cache.** The worker
-   answers with `cache-control: public, max-age=600`, and the edge keeps the
-   OLD body for up to ten minutes after the R2 object is replaced — so right
-   after a release the web download button can still hand out the PREVIOUS
-   APK (it served v286 while R2 already held v288). The proof: putting a
-   22-byte probe object at `apk/kuchupuchu-latest.apk` still returned the
-   old 28 MB APK from the route. The in-app updater is NOT affected — it
-   downloads the GitHub release asset, not this route. Nothing to fix in
-   code; just read the release asset when a version must be checked.
-2. **`wrangler r2 object get/put` needs the GLOBAL API KEY + EMAIL in the
+The route is `GET /download/apk` -> the worker reads the R2 object
+`apk/kuchupuchu-latest.apk` from its `MEDIA` binding. The live worker
+answers with the **v286** asset (md5 `5476885f1960f9bdb617057da6df8a08`),
+while the bucket the release workflow writes to
+(`92081fac…/kp-media`, the account in `wrangler.toml`) holds **v288**
+(md5 `a036d3f4d7d3bf54044010982a2cdf64`). The proofs:
+
+* a 22-byte probe object PUT at `apk/kuchupuchu-latest.apk` was **not**
+  seen by the route (GET returned the 28 MB APK, HEAD returned the old
+  size) — so the binding does not read the bucket the release writes to;
+* the `f/` media in `92081fac…/kp-media` stops at **2026-10-15** while the
+  app is used daily, so that bucket is an ORPHAN and the live media bucket
+  is a different one;
+* only ONE account of the three the global key can see has R2 at all
+  (`92081fac…`, "Kuchupuchu"); the other two answer "Please enable R2";
+  the other account's workers.dev subdomain is `rabbihossainltd`, not
+  `kuchupuchu`, so the live worker itself is in `92081fac…` — its `MEDIA`
+  binding is simply CROSS-ACCOUNT (a bucket in an account the credentials
+  in `env.txt` cannot see);
+* it is not the edge cache: `/api/health` answers with the live clock, the
+  responses carry no `age`/`cf-cache-status` header, and a request with
+  `Cache-Control: no-cache` still returned the old body.
+
+**Consequence:** the in-app updater is FINE (it downloads the GitHub
+release asset, and v288 is published, signed with the same certificate as
+v287, so the running app updates in place). Only the website's download
+button is stale. The fix is NOT in the app: either point the release
+workflow's R2 upload at the bucket the worker's `MEDIA` binding really
+reads, or make `/download/apk` answer with the latest GitHub release
+asset. The owner has to say which (the second one is a worker change and
+therefore a production deploy).
+
+**Two more operational lessons from this release:**
+
+1. **`wrangler r2 object get/put` needs the GLOBAL API KEY + EMAIL in the
    environment, not only the API token.** With `CLOUDFLARE_API_TOKEN` alone
-   the R2 calls fail with a permissions error and wrangler writes a
-   0-byte file (which looks exactly like "the object is empty"). With
-   `CLOUDFLARE_API_KEY` + `CLOUDFLARE_EMAIL` as well, the same call
-   succeeds. Always export all four (`CLOUDFLARE_ACCOUNT_ID`,
-   `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_EMAIL`, `CLOUDFLARE_API_KEY`) before
-   touching R2 by hand.
+   the R2 calls fail with a 403 and wrangler writes a **0-byte file** (which
+   looks exactly like "the object is empty"). With `CLOUDFLARE_API_KEY` +
+   `CLOUDFLARE_EMAIL` as well, the same call succeeds. Always export all
+   four (`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_EMAIL`,
+   `CLOUDFLARE_API_KEY`) before touching R2 by hand.
+2. **`wrangler.toml`'s `account_id` beats the `CLOUDFLARE_ACCOUNT_ID` env
+   var** (wrangler 4.86). To read another account's bucket, pass a
+   different `--config` file — exporting the env var alone still hits the
+   account from `wrangler.toml`.
