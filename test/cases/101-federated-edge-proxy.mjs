@@ -91,6 +91,35 @@ try {
       calls.length === 1,
   );
 
+  const relayEnv = {
+    ...env,
+    MIGRATION_READ_ONLY: "1",
+    FEDERATION_PUSH_KEY: "relay-secret",
+    DB: { prepare() { throw new Error("diagnostic write intentionally unavailable"); } },
+  };
+  const unauthorizedRelay = await worker.fetch(
+    new Request("https://kuchupuchu-api.kuchupuchu.workers.dev/api/internal/federation/push", {
+      method: "POST",
+      body: "{}",
+      headers: { "content-type": "application/json" },
+    }),
+    relayEnv,
+    ctx,
+  );
+  const authorizedRelay = await worker.fetch(
+    new Request("https://kuchupuchu-api.kuchupuchu.workers.dev/api/internal/federation/push", {
+      method: "POST",
+      body: JSON.stringify({ userId: "kp-user", data: { type: "message" }, note: null }),
+      headers: { authorization: "Bearer relay-secret", "content-type": "application/json" },
+    }),
+    relayEnv,
+    ctx,
+  );
+  check(
+    "the private FCM relay authenticates and bypasses both proxy and snapshot fence",
+    unauthorizedRelay.status === 401 && authorizedRelay.status === 200 && calls.length === 1,
+  );
+
   let dbTouched = false;
   const guardedDb = new Proxy(
     {},

@@ -89,6 +89,11 @@ export type Env = {
    * changing tracked deployment configuration.
    */
   MIGRATION_READ_ONLY?: string;
+  /** Signed, private FCM relay during/after the two-account cutover. The VX
+   * authority asks the frozen KP edge to use its existing non-exportable FCM
+   * secret for KP-origin device tokens; no message history is read or written. */
+  FEDERATION_PUSH_KEY?: string;
+  KP_PUSH_ORIGIN?: string;
   /** Optional self-hosted/purchased TURN for reliable calls on strict NATs.
    *  Comma-separated URLs, e.g. "turn:turn.example.com:3478,turns:turn.example.com:5349". */
   TURN_URLS?: string;
@@ -5640,6 +5645,33 @@ async function broadcastCallEvent(env: Env, callId: string, event: Record<string
   }
 }
 
+async function relayPushToKpEdge(
+  env: Env,
+  userId: string,
+  data: Record<string, string>,
+  note?: { title: string; body: string; channel: string; tag?: string },
+): Promise<boolean | null> {
+  const origin = String(env.KP_PUSH_ORIGIN ?? "").trim().replace(/\/+$/, "");
+  const key = String(env.FEDERATION_PUSH_KEY ?? "").trim();
+  if (!origin || !key) return null;
+  try {
+    const parsed = new URL(origin);
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.pathname !== "/")
+      return null;
+    const response = await fetch(`${origin}/api/internal/federation/push`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({ userId, data, note: note ?? null }),
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!response.ok) return false;
+    const body = (await response.json().catch(() => null)) as { accepted?: boolean } | null;
+    return body?.accepted === true;
+  } catch {
+    return false;
+  }
+}
+
 async function pushToUser(
   env: Env,
   db: D1Database,
@@ -5650,6 +5682,8 @@ async function pushToUser(
   try {
     const auth = await fcmAccessToken(env);
     if (!auth) {
+      const relayed = await relayPushToKpEdge(env, userId, data, note);
+      if (relayed !== null) return relayed;
       // Used to be a silent `return false`: if FCM_CREDENTIALS was ever bad
       // or the Google token exchange failed, EVERY push quietly died with zero
       // trace and no 5xx — the exact shape of a "notifications broke" report.
@@ -7031,6 +7065,55 @@ async function federatedCoreProxy(request: Request, env: Env): Promise<Response 
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const requestUrl = new URL(request.url);
+    // This private route deliberately runs before the read-only fence and edge
+    // proxy: after cutover the frozen KP project remains the FCM credential
+    // holder, while the VX authority owns all message/history writes.
+    if (requestUrl.pathname === "/api/internal/federation/push" && request.method === "POST") {
+      const configured = String(env.FEDERATION_PUSH_KEY ?? "").trim();
+      const presented = (request.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+      if (!configured || !presented || !constantTimeTextEqual(configured, presented))
+        return json({ error: { code: "UNAUTHENTICATED", message: "Not authorized." } }, 401);
+      const payload = (await request.json().catch(() => null)) as
+        | {
+            userId?: unknown;
+            data?: unknown;
+            note?: unknown;
+          }
+        | null;
+      const userId = typeof payload?.userId === "string" ? payload.userId : "";
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(userId) || !payload?.data || typeof payload.data !== "object")
+        return json({ error: { code: "BAD_PUSH_RELAY", message: "Invalid relay payload." } }, 400);
+      const data: Record<string, string> = {};
+      for (const [key, value] of Object.entries(payload.data as Record<string, unknown>)) {
+        if (!/^[A-Za-z0-9_.-]{1,64}$/.test(key) || typeof value !== "string" || value.length > 4000)
+          return json({ error: { code: "BAD_PUSH_RELAY", message: "Invalid relay payload." } }, 400);
+        data[key] = value;
+      }
+      let note: { title: string; body: string; channel: string; tag?: string } | undefined;
+      if (payload.note && typeof payload.note === "object") {
+        const candidate = payload.note as Record<string, unknown>;
+        if (
+          typeof candidate.title !== "string" ||
+          typeof candidate.body !== "string" ||
+          typeof candidate.channel !== "string" ||
+          candidate.title.length > 200 ||
+          candidate.body.length > 1000 ||
+          candidate.channel.length > 100 ||
+          (candidate.tag !== undefined &&
+            (typeof candidate.tag !== "string" || candidate.tag.length > 200))
+        )
+          return json({ error: { code: "BAD_PUSH_RELAY", message: "Invalid relay payload." } }, 400);
+        note = {
+          title: candidate.title,
+          body: candidate.body,
+          channel: candidate.channel,
+          ...(typeof candidate.tag === "string" ? { tag: candidate.tag } : {}),
+        };
+      }
+      const accepted = await pushToUser(env, env.DB, userId, data, note);
+      return json({ accepted });
+    }
     const migrationReadOnly = String(env.MIGRATION_READ_ONLY ?? "").trim() === "1";
     if (migrationReadOnly && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
       return json(
