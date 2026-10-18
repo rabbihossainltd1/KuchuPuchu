@@ -493,6 +493,13 @@ internal object E2eeMsg {
         }
         val target = conv?.takeIf { known(it) } ?: throw ApiException(503, "Waiting for secure chat.")
         val isPersonal = personal(target)
+        val peer = target.optJSONObject("other")
+        val peerRealm = peer?.optString("origin_realm").orEmpty()
+            .ifBlank { peer?.optString("originRealm").orEmpty() }
+            .lowercase()
+        // Cross-realm compatibility: a VX website recipient may not have the
+        // private browser identity needed to open a KP1 envelope.
+        if (isPersonal && peerRealm == "vx") return body
         val key = peerKey(target)
         val ready = !isPersonal || (ctx != null && parsePub(key) != null && ensurePublished(ctx))
         val sealed = try {

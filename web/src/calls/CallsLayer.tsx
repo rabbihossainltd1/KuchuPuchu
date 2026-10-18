@@ -76,7 +76,7 @@ export function CallsLayer({ route, navigate }: Props) {
         const peerKey = detail?.other?.e2eePublicKey ?? "";
         const sealed = await protectOutgoingBody(
           text,
-          { isGroup: detail?.isGroup ?? false, otherId: peerId },
+          { isGroup: detail?.isGroup ?? false, otherId: peerId, otherRealm: detail?.other?.originRealm },
           peerKey,
           identity.identity,
         );

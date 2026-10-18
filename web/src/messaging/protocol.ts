@@ -29,6 +29,8 @@ export type ConversationPeer = {
   /** Optional alias shared only within the conversation that supplied this peer. */
   readonly nickname?: string;
   readonly e2eePublicKey: string;
+  /** Immutable account origin, used for cross-realm plaintext compatibility. */
+  readonly originRealm?: string;
   /**
    * Stable per-avatar token (`id@vN`) from the worker's user shape. Null on
    * the wire when the peer has no photo or hid it from this viewer; the
@@ -432,6 +434,9 @@ export function parsePeer(value: unknown): ConversationPeer | null {
     username: text(value.username, 64),
     ...(text(value.nickname, 40) ? { nickname: text(value.nickname, 40) } : {}),
     e2eePublicKey: text(value.e2eePublicKey, 4096),
+    ...((text(value.origin_realm, 8) || text(value.originRealm, 8))
+      ? { originRealm: (text(value.origin_realm, 8) || text(value.originRealm, 8)).toLowerCase() }
+      : {}),
     avatarRef: text(value.avatarRef, 128) || text(value.avatarUrl, 2_000_000),
     online: booleanish(value.online),
     lastActiveAt: isoTimestamp(value.lastActiveAt),

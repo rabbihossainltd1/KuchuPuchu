@@ -60,7 +60,7 @@ import {
   upsertConversation,
 } from "../../web/src/messaging/protocol.ts";
 import { backoffDelayMs, createManagedSocket } from "../../web/src/messaging/sockets.ts";
-import { SECURE_CHAT_WAITING, SendRefusedError } from "../../web/src/messaging/e2ee.ts";
+import { SECURE_CHAT_WAITING, SendRefusedError, protectOutgoingBody } from "../../web/src/messaging/e2ee.ts";
 
 const lines = [];
 const check = (name, condition, detail = "") =>
@@ -739,6 +739,16 @@ await drafts.write("c_2", "x".repeat(9000));
 check(
   "a draft is capped at the message body limit",
   (await drafts.read("c_2")).length === MESSAGE_BODY_LIMIT,
+);
+
+check(
+  "a VX-origin personal recipient receives readable plaintext",
+  (await protectOutgoingBody(
+    "cross-realm hello",
+    { isGroup: false, otherId: "vx_1", otherRealm: "vx" },
+    "A".repeat(88),
+    null,
+  )) === "cross-realm hello",
 );
 
 /* -------------------------------------------------------------------- copy --- */

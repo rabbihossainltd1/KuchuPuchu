@@ -836,7 +836,7 @@ export function useMessaging(options: Options): MessagingController {
     try {
       wireBody = await protectOutgoingBody(
         plaintext,
-        { isGroup: conversation.isGroup, otherId: conversationPeerId(conversation) },
+        { isGroup: conversation.isGroup, otherId: conversationPeerId(conversation), otherRealm: conversation.other?.originRealm },
         conversationPeerKey(conversation),
         identity,
       );
@@ -894,7 +894,7 @@ export function useMessaging(options: Options): MessagingController {
       try {
         wireBody = await protectOutgoingBody(
           plaintext,
-          { isGroup: conversation.isGroup, otherId: conversationPeerId(conversation) },
+          { isGroup: conversation.isGroup, otherId: conversationPeerId(conversation), otherRealm: conversation.other?.originRealm },
           conversationPeerKey(conversation),
           identity,
         );
@@ -939,7 +939,7 @@ export function useMessaging(options: Options): MessagingController {
       try {
         wireBody = await protectOutgoingBody(
           glyph,
-          { isGroup: conversation.isGroup, otherId: conversationPeerId(conversation) },
+          { isGroup: conversation.isGroup, otherId: conversationPeerId(conversation), otherRealm: conversation.other?.originRealm },
           conversationPeerKey(conversation),
           identity,
         );
@@ -1018,7 +1018,7 @@ export function useMessaging(options: Options): MessagingController {
         try {
           sealedCaption = await protectOutgoingBody(
             trimmed,
-            { isGroup: conversation.isGroup, otherId: conversationPeerId(conversation) },
+            { isGroup: conversation.isGroup, otherId: conversationPeerId(conversation), otherRealm: conversation.other?.originRealm },
             conversationPeerKey(conversation),
             identity,
           );
@@ -1296,7 +1296,12 @@ export function useMessaging(options: Options): MessagingController {
           let body = item.plaintext;
           if (body) {
             try {
-              body = await protectOutgoingBody(body, { isGroup, otherId }, peerKey, identity);
+              body = await protectOutgoingBody(
+                body,
+                { isGroup, otherId, otherRealm: target?.other?.originRealm },
+                peerKey,
+                identity,
+              );
             } catch (error) {
               blocked = (error as Error).message || SECURE_CHAT_WAITING;
               break;
@@ -1477,7 +1482,7 @@ export function useMessaging(options: Options): MessagingController {
       try {
         wireBody = await protectOutgoingBody(
           trimmed,
-          { isGroup: conversation.isGroup, otherId: conversationPeerId(conversation) },
+          { isGroup: conversation.isGroup, otherId: conversationPeerId(conversation), otherRealm: conversation.other?.originRealm },
           conversationPeerKey(conversation),
           identity,
         );
