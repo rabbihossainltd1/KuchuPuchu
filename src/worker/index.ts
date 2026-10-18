@@ -7425,7 +7425,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       version: "3.0",
       time: nowIso(),
       capabilities: {
-        push: !!env.FCM_CONFIG && !!env.FCM_CREDENTIALS,
+        push:
+          (!!env.FCM_CONFIG && !!env.FCM_CREDENTIALS) ||
+          (!!env.KP_PUSH_ORIGIN && !!env.FEDERATION_PUSH_KEY),
         turn: dedicatedTurnConfigured(env),
         realtime: !!env.CHAT_ROOM && !!env.CALL_SIGNAL,
         media: !!env.MEDIA,
