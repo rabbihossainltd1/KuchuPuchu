@@ -1363,3 +1363,37 @@ workspace restore mid-round (as it did in round 34); both were restored
 **Verification:** 97/97 cases, 4002 assertions; `scripts/ktlint-check.sh`
 clean; the Android compile is left to CI (the `apk` job) and the release
 workflow, which is the repo's own compiler.
+
+### Release v288 (3.9.211) — published 2026-10-18 15:09 UTC
+
+* Tag **v288**, asset **`kuchupuchu-3.9.211-r113.apk`** (28,425,120 bytes),
+  sha256 `9ffe6c683f4eb53381a24bba7ea501e980993966788fc30d85afab55acec6b2b`.
+* Signing certificate SHA-256 `39190b0f38787493081c999b036e7c65fc7a4ab65d807e4dcdc25285541ecd2e`
+  — **byte-identical to the published v287 asset**, so the running app takes
+  the update IN PLACE (no uninstall) and the release workflow's own
+  "Verify signing continuity with v274" gate passed.
+* CI on `59d51442`: the `worker` job and the `apk` job both green; the
+  release run's own gates (full `npm run ci` + ktlint, Android unit tests +
+  lint, `assembleRelease`, cert continuity, publish, R2 upload) all green.
+* The in-app updater reads `releases/latest` → tag `v288` > the installed
+  287 → the update popup appears on the next app open.
+
+**Two operational lessons from this release (both cost time, both are real):**
+
+1. **`/download/apk` is served from Cloudflare's edge cache.** The worker
+   answers with `cache-control: public, max-age=600`, and the edge keeps the
+   OLD body for up to ten minutes after the R2 object is replaced — so right
+   after a release the web download button can still hand out the PREVIOUS
+   APK (it served v286 while R2 already held v288). The proof: putting a
+   22-byte probe object at `apk/kuchupuchu-latest.apk` still returned the
+   old 28 MB APK from the route. The in-app updater is NOT affected — it
+   downloads the GitHub release asset, not this route. Nothing to fix in
+   code; just read the release asset when a version must be checked.
+2. **`wrangler r2 object get/put` needs the GLOBAL API KEY + EMAIL in the
+   environment, not only the API token.** With `CLOUDFLARE_API_TOKEN` alone
+   the R2 calls fail with a permissions error and wrangler writes a
+   0-byte file (which looks exactly like "the object is empty"). With
+   `CLOUDFLARE_API_KEY` + `CLOUDFLARE_EMAIL` as well, the same call
+   succeeds. Always export all four (`CLOUDFLARE_ACCOUNT_ID`,
+   `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_EMAIL`, `CLOUDFLARE_API_KEY`) before
+   touching R2 by hand.
