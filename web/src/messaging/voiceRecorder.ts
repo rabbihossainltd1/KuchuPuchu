@@ -408,12 +408,15 @@ export class VoiceRecorder {
     this.amps = [];
     this.peaks = [];
 
-    if (blob.size <= 0) {
-      this.failure = this.failure || "Nothing was recorded.";
-      return null;
-    }
+    // Duration wins over byte presence: Chromium may deliver no data chunk for
+    // a sub-second take, but that is still the user's intentional short note,
+    // not a recorder fault. This also keeps the composer copy deterministic.
     if (seconds < 1 || elapsed < 1000) {
       this.failure = "That voice note is too short.";
+      return null;
+    }
+    if (blob.size <= 0) {
+      this.failure = this.failure || "Nothing was recorded.";
       return null;
     }
     if (blob.size > VOICE_MAX_BYTES) {
