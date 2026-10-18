@@ -184,3 +184,37 @@ The proof screen pulls `googleWebClientId` from `/api/config/firebase` at
 runtime — with the API origin configured it reaches the Worker cross-origin,
 so once step 4 propagates the "Continue with Google" button mints a token
 from `kuchupuchu.web.app` and the H2 phone-proof completes in the browser.
+
+## ⚠️ 2026-10-18 — the worker secret store was lost (owner action needed)
+
+Ekta operator mistake-e `kuchupuchu-api` script-er delete hoye gelo, tar sathe
+**secret store** o chole gelo (Cloudflare secret **likha** jay, **pore** jay
+na — tai purono value ghono kora jay ni). Script-ta 1 minute-eo porer bar
+redeploy kora hoye gelo, TURN key gulo o abar bosha hoye gelo (call relay
+thik ache, `docs/call-relay-2026-10-18.md`), kintu **nicher owner secrets
+gulo ekhon edge-e nai**:
+
+| Secret | Ki kaj kore | Kivabe fothobe |
+| --- | --- | --- |
+| `FCM_CREDENTIALS` | Firebase service account (private key) — FCM push | Firebase console → Project settings → **Service accounts** → *Generate new private key* → JSON ta download kore `npx wrangler secret put FCM_CREDENTIALS` |
+| `FEDERATION_PUSH_KEY` | core-er push relay (`/api/internal/federation/push`) er shared key | **same value** ta core-eo lagbe, tai core-er deployment-e o `npx wrangler secret put FEDERATION_PUSH_KEY` korte hobe |
+| `WS_TICKET_KEY` | `/api/ws/ticket` signing | `npx wrangler secret put WS_TICKET_KEY` (ekta random 32-byte base64) |
+| `LOGIN_OTP_HMAC_SECRET` | OTP login | `npx wrangler secret put LOGIN_OTP_HMAC_SECRET` |
+| `VAPID_PRIVATE_KEY` | web push | `npx wrangler secret put VAPID_PRIVATE_KEY` |
+| `GEMINI_API_KEY` | AI reply | `npx wrangler secret put GEMINI_API_KEY` |
+| `HF_TOKEN` | AI image | `npx wrangler secret put HF_TOKEN` |
+| `CF_AI_TOKEN` | Workers AI | `npx wrangler secret put CF_AI_TOKEN` |
+| `LARAVEL_BRIDGE_KEY` | classroom entitlement bridge | `npx wrangler secret put LARAVEL_BRIDGE_KEY` |
+
+Already restored (ebar): `FCM_CONFIG` (core-er `/api/config/firebase` theke
+rebuilt) ar `GOOGLE_WEB_CLIENT_ID` (same source theke) — eider jonno abar
+kono download lagbe na.
+
+**Bhalo khobor:** cutover-er por live host **core-e proxy kore**, tai ei
+secret-gulo na thakle o message/chat/web/call relay kaj kore — shudhu
+**edge-er nijer FCM push path** (core relay korle) break hobe. Tar jonno
+`FCM_CREDENTIALS` + `FEDERATION_PUSH_KEY` age bosano bhalo.
+
+**Secret upload ekta request-e ekta secret**:
+`{"name":"…","text":"…","type":"secret_text"}` — `{"body":{…}}` dile
+`400 Binding must have a name` ashbe.
