@@ -1,14 +1,25 @@
 // 79 — production cutover contract (slice J, integration of the two parallel
-// attempts; owner chose the worker-stamped-header mechanism, PR #94).
+// attempts; revised 2026-10-19 for the stale-cutover fix).
 //
 // The React PWA (web/dist) replaced the legacy public/ shell at the Worker's
 // assets root. These checks pin the deploy mechanics a browser cannot prove
 // for itself: the build hook, the served directory, the single header
-// mechanism (worker stamps; neither _headers nor [[assets.rules]]), the
-// production recipe's flags, the service-worker migration, and the install
-// metadata. Runtime migration behaviour lives in web/e2e-cutover; the worker's
-// own privacy rules stay in verify-web-sw; cases 04/55 keep pinning the
-// retired legacy files.
+// mechanism, the production recipe's flags, the service-worker migration, and
+// the install metadata.
+//
+// Header mechanism history: PR #93 used an assets `_headers` file; PR #94
+// replaced it with worker-stamped headers (run_worker_first ["/*"], a single
+// source of truth). Live 2026-10-19 the worker path turned into the fault: the
+// worker-intermediated edge cache served the PREVIOUS build (old logo/old
+// bundle) for days — redeploys, brownfield manifests, even a no-assets
+// teardown never refreshed it, because env.ASSETS was already serving the NEW
+// build from inside while the public kept hitting the stale worker-response
+// cache. Statics now serve-directly (fresh, ["/api/*","/ws/*","/download/apk"]
+// stay on the worker) and the security headers returned to the assets
+// `_headers` file — still one source of truth, now one that cannot go stale.
+// Runtime migration behaviour lives in web/e2e-cutover; the worker's own
+// privacy rules stay in verify-web-sw; cases 04/55 keep pinning the retired
+// legacy files.
 
 import { existsSync, readFileSync } from "node:fs";
 
@@ -43,54 +54,61 @@ check(
   wrangler.includes('binding = "ASSETS"'),
 );
 check(
-  "every path runs the worker first so headers can be stamped",
-  wrangler.includes('run_worker_first = ["/*"]'),
+  "statics are serve-directly, not worker-intermediated (the worker path caches stale builds behind the edge — 2026-10-19 fix); only api/ws/apk stay on the worker",
+  wrangler.includes('run_worker_first = ["/api/*", "/ws/*", "/download/apk"]') &&
+    !/\nrun_worker_first\s*=\s*\["\/\*"\]/.test("\n" + wrangler),
 );
 check(
   "unknown paths still fall back to the shell for deep links",
   wrangler.includes('not_found_handling = "single-page-application"'),
 );
 
-/* ------------------------- one header mechanism: the worker, nothing else --- */
+/* -------------------- one header mechanism: the assets _headers file ------- */
+
+const headersFile = existsSync(new URL("../../web/public/_headers", import.meta.url))
+  ? read("../../web/public/_headers")
+  : "";
 
 check(
-  "the retired _headers file is gone (single source of truth)",
-  !existsSync(new URL("../../web/public/_headers", import.meta.url)),
+  "the assets _headers file is the single source of truth (worker-stamped responses went stale behind the edge cache, so they are retired — see wrangler.toml note)",
+  headersFile.length > 0,
+);
+check(
+  "_headers stamps frame-ancestors as a response header (meta cannot), one line only",
+  headersFile.includes("frame-ancestors 'self'") && !headersFile.includes("<script"),
+);
+check(
+  "_headers carries the production panel origins in frame-ancestors and the clickjacking protection",
+  headersFile.includes("https://vintoxbd.online") &&
+    headersFile.includes("https://www.vintoxbd.online"),
+);
+check(
+  "every asset response carries nosniff and no-referrer",
+  headersFile.includes("X-Content-Type-Options: nosniff") &&
+    headersFile.includes("Referrer-Policy: no-referrer"),
+);
+check(
+  "sw.js is no-store so every update check revalidates",
+  headersFile.includes("/sw.js") && headersFile.includes("Cache-Control: no-store"),
 );
 check(
   "wrangler carries no unsupported assets rules (live deploys ignored them)",
   !wrangler.includes("[[assets.rules]]"),
 );
 check(
-  "non-API paths delegate to the ASSETS binding before the REST router (only /download/apk stays on the worker)",
+  "the worker still delegates non-API paths to the ASSETS binding as the binding-free preview fallback (only /download/apk stays on the worker)",
   worker.includes("serveShellAsset(env, request)") &&
     worker.includes('!pathname.startsWith("/api/")') &&
     worker.includes('!pathname.startsWith("/ws/")') &&
     worker.includes('pathname !== "/download/apk"'),
 );
 check(
-  "the worker stamps frame-ancestors as a response header (meta cannot)",
-  worker.includes("frame-ancestors 'self'") &&
-    worker.includes('headers.set("Content-Security-Policy", shellCsp(env))'),
-);
-check("the header CSP only lands on HTML documents", worker.includes('includes("text/html")'));
-check(
-  "every asset response carries nosniff and no-referrer",
-  worker.includes('headers.set("X-Content-Type-Options", "nosniff")') &&
-    worker.includes('headers.set("Referrer-Policy", "no-referrer")'),
-);
-check(
-  "sw.js is no-store so every update check revalidates",
-  worker.includes('pathname === "/sw.js"') &&
-    worker.includes('headers.set("Cache-Control", "no-store")'),
+  "the binding-free preview fallback still answers 404 when ASSETS is absent",
+  worker.includes("if (!env.ASSETS)"),
 );
 check(
   "the meta CSP stays as belt for worker-less previews",
   indexHtml.includes('http-equiv="Content-Security-Policy"'),
-);
-check(
-  "a binding-free worker answers 404 for asset paths instead of crashing",
-  worker.includes("if (!env.ASSETS)"),
 );
 
 /* ----------------------------------------------------- production recipe --- */

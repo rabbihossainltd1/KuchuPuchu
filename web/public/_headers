@@ -1,0 +1,20 @@
+# Single source of truth for shell security headers (2026-10-19 stale-cutover
+# fix). Cloudflare's asset layer serves these — so unlike the retired
+# worker-stamped responses they can never go stale behind a worker-intermediate
+# edge cache. Mirrors the exact policy the worker's shellCsp() stamped.
+#
+# frame-ancestors must live here, not the index.html meta: a meta element
+# cannot carry frame-ancestors, only a header can (docs/web-hardening.md).
+# panelOrigins' production entries (vintoxbd.online) are folded in.
+/*
+  Cache-Control: public, max-age=0, must-revalidate
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws: wss: https://accounts.google.com; frame-src https://accounts.google.com; frame-ancestors 'self' https://vintoxbd.online https://www.vintoxbd.online; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'
+
+# Every browser update check must revalidate sw.js: a cached service worker is
+# exactly how the legacy empty-list bug stayed alive for existing installs.
+/sw.js
+  Cache-Control: no-store
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer

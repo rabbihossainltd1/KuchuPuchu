@@ -81,17 +81,21 @@ bucket_name = "kp-media"
 [build]
 command = "npm run build:web:prod"
 
-# run_worker_first on EVERY path: the worker delegates non-API paths to the
-# ASSETS binding and stamps the security headers (CSP with frame-ancestors,
-# nosniff, referrer-policy, no-store sw.js) onto the responses — a meta tag
-# cannot carry frame-ancestors, only a header can (docs/web-hardening.md).
-# The first slice-J attempt used wrangler's assets rules toml table (live
-# deploys proved it is silently ignored for headers) and then a _headers file
-# (PR #93); the owner chose this worker-stamped single source of truth
-# instead — case 79 pins the absence of both alternatives.
+# 2026-10-19 stale-cutover fix: statics are served BY Cloudflare's asset layer
+# (serve-directly), NOT through the worker. Routing every path through the
+# worker (run_worker_first = ["/*"]) let Cloudflare's worker-response edge
+# cache serve the PREVIOUS build's worker-stamped HTML/PNG/JS for a week —
+# redeploys never refreshed it (verified live: env.ASSETS served the NEW build
+# from inside while the public got the OLD one; even a 17-asset brownfield
+# redeploy and a no-assets teardown left the stale layer in front). Only the
+# requests that MUST run worker code stay on the worker: /api/*, /ws/* and
+# /download/apk (the signed R2 stream). The security headers moved to the
+# assets `_headers` file (the single source of truth now — served by the asset
+# layer, so they can no longer go stale); the worker's serveShellAsset is kept
+# only as the binding-free preview fallback. See docs/web-cutover.md.
 [assets]
 directory = "./web/dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
-run_worker_first = ["/*"]
+run_worker_first = ["/api/*", "/ws/*", "/download/apk"]
 

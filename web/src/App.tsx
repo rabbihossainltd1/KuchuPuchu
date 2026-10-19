@@ -598,7 +598,7 @@ export default function App() {
                   {!isOnline ? "Browser offline" : user ? "Account connected" : "Preview only"}
                 </span>
                 <span className="list-footer__spacer" />
-                <span className="footer-version">Web P2 preview</span>
+                <span className="footer-version">Web 3.9.213</span>
               </footer>
             </section>
 
