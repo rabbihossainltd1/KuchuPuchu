@@ -33,7 +33,12 @@
 - e2e fallout: the new logo pushed the 390px chat-list screenshot over the 1%
   tolerance; `themeMatrix` 390x844 baseline regenerated (CI actual vs local
   baseline match 0.118%).
-- Release `v290` workflow re-triggered clean on `422513ca` after the fix.
+- Release `v290` (`3.9.213`) published green on `b6dcde70`: asset
+  `kuchupuchu-3.9.213-r115.apk` (28,583,672 B, sha256 e3538359…), v274 signing
+  continuity verified by the workflow; R2 `kp-media/apk/kuchupuchu-latest.apk`
+  refreshed, so `/download/apk` now serves v290. CI run also green. (One extra
+  snag: af0000bc's test 106 shipped unformatted — the release's ci chain runs
+  `format:check` first, so the first two trigger attempts died at the gate.)
 
 ## Round 58 User Directives & Status
 - Directive 1: See more expand, message body collapse with animation:
