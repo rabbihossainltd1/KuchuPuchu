@@ -175,7 +175,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
@@ -6412,7 +6411,7 @@ private fun Composer(
                                         addStyle(
                                             SpanStyle(fontWeight = FontWeight.Bold),
                                             match.range.first,
-                                            match.range.first + content.length,
+                                            match.range.first + content.value.length,
                                         )
                                     }
                                 }
