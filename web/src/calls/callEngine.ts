@@ -836,6 +836,16 @@ export function createCallEngine(options: EngineOptions): CallEngine {
         // hijacking the media that is already up.
         return;
       }
+      if (!incoming) {
+        // Owner 2026-10-19 (multi-device rule): an OUTGOING row was dialled on
+        // this account's OTHER device — the outgoing screen belongs to the
+        // device that called, never to a second machine of the same account
+        // popping a calling screen it cannot answer or hang up without
+        // confusing everyone ("app a call dile desktop a o calling screen open
+        // hoye jacche — sei device a theke call jacche sei device i dekhabe").
+        // The call row itself stays server-side; this device simply watches.
+        return;
+      }
       outgoingRingAt = 0;
       seenIce.clear();
       iceCursor = "";
@@ -855,6 +865,29 @@ export function createCallEngine(options: EngineOptions): CallEngine {
       openCallSocket(next.id);
     } else {
       publish({ row: next, peer: peerTarget, kind: next.kind === "VIDEO" ? "VIDEO" : state.kind });
+    }
+
+    // Owner 2026-10-19 (multi-device rule): this account ANSWERED the ring on
+    // another device ("jekono device accept korle onno device a ar call
+    // screen dekhabe na"). Two shapes reach here:
+    //
+    //  1. Straight-to-ACTIVE on the first read (this device never saw the
+    //     RINGING tick): adopt NOTHING — a ghost ring over a call already on
+    //     the other machine.
+    //  2. A ring we HAD adopted turns ACTIVE with an SDP this device never
+    //     wrote: retire the ring SILENTLY — from the user's seat nothing
+    //     ended, they are simply already on the call elsewhere.
+    //
+    // The device that ACCEPTED is never touched: it is already past the
+    // incoming phase (its answer() publishes "connecting" first) before the
+    // row flips ACTIVE, and a row we have media up on (connectedAt set) is
+    // ours, not a stale one.
+    if (incoming && next.status === "ACTIVE" && next.answerSdp && state.connectedAt === 0) {
+      if (!alreadyOurs || state.phase === "incoming") {
+        ignored.add(next.id);
+        await teardown("");
+        return;
+      }
     }
 
     if (!incoming && next.status === "RINGING") {

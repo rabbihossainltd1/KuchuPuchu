@@ -289,8 +289,8 @@ test.describe("the call screen fits the desktop window", () => {
   ];
 
   test.beforeEach(async ({ page }) => {
-    // A seeded ring: the screen with the most on it (the two circles, their
-    // labels, the quick reply and the limits).
+    // A seeded ring: the screen with the most on it (the two circles, the
+    // quick reply and the limits).
     worker = await createMockCallsWorker({ withIncomingRing: true });
     await worker.install(page);
     await signIn(page);
@@ -311,7 +311,9 @@ test.describe("the call screen fits the desktop window", () => {
           return { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
         };
         const body = document.querySelector(".call-stage__body") as HTMLElement | null;
+        const ring = document.querySelector(".call-stage__ring") as HTMLElement | null;
         return {
+          viewportWidth: window.innerWidth,
           viewportHeight: window.innerHeight,
           scrollHeight: body?.scrollHeight ?? 0,
           clientHeight: body?.clientHeight ?? 0,
@@ -321,6 +323,9 @@ test.describe("the call screen fits the desktop window", () => {
           declineLabel: read(".call-circle--decline span"),
           quick: read(".call-stage__quick"),
           foot: read(".call-stage__foot"),
+          declineAria:
+            ring?.querySelector(".call-circle--decline")?.getAttribute("aria-label") ?? "",
+          acceptAria: ring?.querySelector(".call-circle--accept")?.getAttribute("aria-label") ?? "",
         };
       });
 
@@ -337,14 +342,85 @@ test.describe("the call screen fits the desktop window", () => {
           boxes.viewportHeight,
         );
       }
-      // The glyph sits INSIDE the circle, and the label BELOW it.
+      // The phone's look: each glyph is CENTRED on its circle, and NOTHING is
+      // drawn under the circle — no caption can fall onto the window edge.
       const circle = boxes.decline!;
       const glyph = boxes.declineGlyph!;
-      const label = boxes.declineLabel!;
       expect(glyph.top, "the glyph starts above its circle").toBeGreaterThanOrEqual(circle.top);
-      expect(glyph.bottom, "the glyph runs past its circle").toBeLessThanOrEqual(circle.top + 68);
-      expect(label.top, "the label sits on the circle").toBeGreaterThanOrEqual(circle.top + 68);
-      expect(label.bottom, "the label runs past the circle").toBeLessThanOrEqual(circle.bottom);
+      expect(glyph.bottom, "the glyph runs past its circle").toBeLessThanOrEqual(circle.bottom);
+      expect(glyph.top + glyph.bottom, "the glyph's middle is not the circle's middle").toBeCloseTo(
+        circle.top + circle.bottom,
+        6,
+      );
+      expect(boxes.declineLabel, "a caption is drawn under the circle").toBeNull();
+      // The two circles sit at the ring's far edges, like the phone's SpaceBetween row.
+      const ring = boxes.ring!;
+      expect(
+        boxes.decline!.left - ring.left,
+        "decline is not at the ring's left edge",
+      ).toBeLessThanOrEqual(40);
+      // The action is still NAMEABLE for keyboards and screen readers.
+      expect(boxes.declineAria).toBe("Decline");
+      expect(boxes.acceptAria).toBe("Accept");
     }
+  });
+});
+
+/**
+ * Multi-device rules (owner 2026-10-19): one account, two machines.
+ *
+ * - A call DIALLED from the phone shows the outgoing screen only on the phone.
+ *   The web session of the same account polls the same row but only watches —
+ *   it never pops a calling screen of its own ("app a call dile desktop a o
+ *   calling screen open hoye jacche").
+ * - A ring ANSWERED on the phone retires the web's ring of its own — from the
+ *   user's seat nothing ended, they are just already on the call ("jekono device
+ *   accept korle onno device a ar call screen dekhabe na").
+ */
+test.describe("multi-device rings", () => {
+  test("an outgoing call made on another device draws no calling screen here", async ({ page }) => {
+    worker = await createMockCallsWorker();
+    // Seed an OUTGOING row the phone just created: callerId is ME, the web
+    // engine knows it did not dial here, so it must stay silent.
+    worker.calls.set(CALL_ID, {
+      id: CALL_ID,
+      kind: "AUDIO",
+      status: "RINGING",
+      callerId: "u_me",
+      calleeId: PEER.id,
+      conversationId: CHAT_ID,
+      offerSdp: "v=0\r\n",
+      answerSdp: "",
+      startedAt: null,
+      endedAt: null,
+      createdAt: new Date(Date.now() - 4_000).toISOString(),
+      media: {},
+      ice: [],
+    });
+    await worker.install(page);
+    await signIn(page);
+    await page.goto("/calls");
+    // Two poll windows: a bug would have popped the stage by now.
+    await page.waitForTimeout(3_200);
+    await expect(stage(page)).toHaveCount(0);
+  });
+
+  test("answering on another device retires the adopted ring quietly", async ({ page }) => {
+    worker = await createMockCallsWorker({ withIncomingRing: true });
+    await worker.install(page);
+    await signIn(page);
+    await page.goto("/calls");
+    await expect(stage(page)).toBeVisible();
+
+    // The phone answered: status flips to ACTIVE with an SDP the web never wrote.
+    const row = worker.calls.get(CALL_ID)!;
+    row.status = "ACTIVE";
+    row.answerSdp = "v=0\r\na=msid:peer peer-video\r\n";
+    row.startedAt = new Date().toISOString();
+
+    await expect(stage(page)).toHaveCount(0, { timeout: 6_500 });
+    // No second wave either: the retired row stays retired on later reads.
+    await page.waitForTimeout(2_000);
+    await expect(stage(page)).toHaveCount(0);
   });
 });

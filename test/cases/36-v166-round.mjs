@@ -90,8 +90,8 @@ const pkg = readFileSync(
 
 /* the round's own bookkeeping */
 check(
-  "r116: versionCode 290 / versionName 3.9.213 (brand round: the owner's own logo picture is the mark everywhere - the launcher icon, the in-app brand mark, the notification icon and the web logo - and the desktop call screen fits its window again, with every glyph inside its circle; the v274 debug signer is reused with explicit owner approval)",
-  /versionCode\s*=\s*290\b/.test(pkg) && /versionName\s*=\s*"3\.9.213"/.test(pkg),
+  "r117: versionCode 291 / versionName 3.9.214 (owner bug round 2026-10-19: the single-layer composer with a real caret and live bold, the QR caption traded for copy/share icons, the logo on the official accounts, and the web's call-screen rows, shared-screen aspect, multi-device ring, message ticks and per-profile QR cards; the v274 debug signer is reused with explicit owner approval)",
+  /versionCode\s*=\s*291\b/.test(pkg) && /versionName\s*=\s*"3\.9.214"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */

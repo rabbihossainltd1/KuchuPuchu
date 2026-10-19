@@ -130,3 +130,33 @@ test.describe("Web profile and group info", () => {
     expect(worker.createdConversations).toEqual(["u_dir"]);
   });
 });
+
+test("the phone's QR button on every profile: the card shows the code with link actions (owner 2026-10-19)", async ({
+  page,
+}) => {
+  await openChat(page, new RegExp(PEER_NAME));
+  await page.getByRole("button", { name: new RegExp(`Open ${PEER_NAME} profile`) }).click();
+
+  const drawer = page.getByRole("dialog", { name: new RegExp(`${PEER_NAME} profile`) });
+  await drawer.getByRole("button", { name: "More profile options" }).click();
+  await drawer.getByRole("menuitem", { name: "QR code" }).click();
+
+  const card = page.locator(".profile-qr");
+  await expect(card).toBeVisible();
+  await expect(card).toContainText(PEER_NAME);
+  await expect(card).toContainText("@rahi");
+  // A drawn QR means the peer's share code rendered — no dead box.
+  await expect(card.locator(".profile-qr__code svg")).toBeVisible();
+  await expect(card.getByRole("button", { name: "Copy link" })).toBeEnabled();
+  await expect(card.getByRole("button", { name: "Share" })).toBeEnabled();
+
+  // Copy writes the profile's real link. (System clipboard in the mocked run.)
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await card.getByRole("button", { name: "Copy link" }).click();
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  expect(copied).toBe("kuchupuchu://user/0f1e2d3c4b5a69788796a5b4c3d2e1f0");
+  await expect(card.getByRole("button", { name: "Copied" })).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(card).toHaveCount(0);
+});

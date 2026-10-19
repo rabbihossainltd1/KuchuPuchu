@@ -1,5 +1,43 @@
 # Project Memory
 
+## 2026-10-19 (evening) — owner bug round: 8 fixes, v291 (3.9.214)
+
+Eight owner-reported bugs, all fixed in one round:
+
+1. Web call-screen ring: the Accept/Decline circles were misaligned and the head
+   block was off-centre on desktop. Icon-only circles with aria-labels (no text
+   labels, per the standing rule), the head is re-centred, the quick-reply/limits
+   rows stay inside the viewport (`calls.css` + `CallStage.tsx`).
+2. Desktop screen share: the stage letterboxed a 9:16 share into a widescreen
+   card. New `useStreamAspect` hook (MediaStreamTrack.getSettings -> clamped
+   0.45-2.6) sizes the self-preview AND the fullscreen stage on the shared
+   track's real ratio.
+3. Multi-device: opening the app on a second device stole/froze the call UI.
+   `callEngine.tick` now never adopts a `ringing_out` row as an outgoing call
+   and never resurrects a ring after `active++` with a foreign answerSdp
+   (answer-on-own-second-device retires the ring silently); two e2e pins.
+4. Web message ticks: meta cluster tightened (WhatsApp parity), the action
+   overflow now hides until hover/focus (`messaging.css`).
+5. Android composer: the dual-layer edit field fought the caret on long text
+   and the bold markers ate keystrokes. ONE BasicTextField now (Ink words + the
+   real caret in one buffer); `markupOutputTransformation` deletes the `*`/`**`
+   markers and `addStyle(Bold)`s the ranges; `MessageMarkup.boldMarkers` is
+   public for the transform.
+6. Logo on the official in-app accounts: `kuchupuchu` + `kuchupuchu.ai` in the
+   D1 directory still used the old gold mascot JPEG. Replaced with the 256px
+   cut of the new round mark (7747 B), `avatar_version` bumped +1.
+7. Android QR screen: the caption text under the code became a Copy/Share icon
+   row (toast on copy, ACTION_SEND on share), the box border around the scan
+   earlier already gone.
+8. Web profile QR + app-parity options: new `ProfileQrDialog.tsx` (QRCode lib;
+   Copy link / Share / Reset), opened from the InfoPane ⋮ menu for a peer and
+   from Account Settings for SELF (mints on open via `/api/me` then qr-reset
+   when none). `ConversationPeer.qrCode?` flows via `parsePeer`.
+
+- Tests: 101/101 cases, 4035 assertions; calls e2e 52, messaging e2e 159,
+  account e2e 12, shell e2e 8, hardening e2e 16 — ALL green locally.
+- Version 291 (3.9.214), asset `kuchupuchu-3.9.214-r116.apk`, v274 signer.
+
 ## 2026-10-19 — brand cutover, desktop call-screen fit, and the stale-edge-cache bug
 
 - Owner asked for two web-deliverables: (a) the desktop ring/call screen must fit

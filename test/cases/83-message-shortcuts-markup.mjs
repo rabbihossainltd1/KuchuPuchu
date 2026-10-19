@@ -263,10 +263,12 @@ check(
     androidNicknameSheet.includes('Api.put(path, JSONObject().put("nickname", value))'),
 );
 check(
-  "composer bold formatting previews before send, with the same marker-free rendering on Android and Web",
-  androidChat.includes("MessageMarkup.formatted(inputState.text.toString())") &&
-    androidChat.includes("outputTransformation = boldOutputTransformation") &&
+  "composer bold formatting previews before send, with the same marker-free rendering on Android and Web (Android lives inside the field's single-layer transform — r-2026-10-19 composer caret fix)",
+  androidMarkup.includes("val boldMarkers = Regex(") &&
     androidMarkup.includes("fun boldDelimiterRanges(value: String): List<IntRange>") &&
+    androidChat.includes("MessageMarkup.boldMarkers.findAll(toString())") &&
+    androidChat.includes("outputTransformation = markupOutputTransformation") &&
+    androidChat.includes("addStyle(") &&
     webCommands.includes('className="composer__format-preview"') &&
     webCommands.includes("parseMessageText(controller.draft)") &&
     webCss.includes(".composer__input--format-overlay"),

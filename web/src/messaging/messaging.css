@@ -467,13 +467,39 @@
 .bubble__meta {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 0.7rem;
+  justify-content: flex-end;
+  gap: 4px;
+  font-size: 0.75rem;
+  line-height: 1;
   color: var(--chat-other-muted, var(--kp-muted));
 }
 
-.bubble__meta time {
-  margin-left: auto;
+.bubble__meta .bubble__tick {
+  margin-right: 2px;
+}
+
+/* The stamp cluster is exactly the phone's: just time (+ ticks on ours) at
+   the bubble's bottom-right. The compact three-dot trigger shares the row but
+   stays out of sight until the row is hovered or a keyboard reaches it —
+   ChatPane's note about "the three-dot trigger beside its bubble" stands;
+   a hidden menu is not a missing menu. */
+.bubble__meta .message-actions-menu__trigger {
+  opacity: 0;
+  transition: opacity 120ms ease;
+  margin-left: 2px;
+}
+
+.bubble-row:hover .bubble__meta .message-actions-menu__trigger,
+.bubble-row:focus-within .bubble__meta .message-actions-menu__trigger,
+.bubble__meta .message-actions-menu__trigger:focus-visible,
+.bubble__meta .message-actions-menu__trigger[aria-expanded="true"] {
+  opacity: 1;
+}
+
+.bubble__meta .message-actions-menu__trigger:focus-visible {
+  outline: 2px solid var(--kp-focus);
+  outline-offset: 2px;
+  border-radius: 8px;
 }
 
 .bubble__vanish-timer {

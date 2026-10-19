@@ -240,6 +240,9 @@ export type MockWorker = {
   install(page: Page): Promise<void>;
 };
 
+export const PEER_QR_CODE = "0f1e2d3c4b5a69788796a5b4c3d2e1f0";
+export const ME_QR_CODE = "a6b7c8d9e0f10293847566778899aabb";
+
 export const ME = {
   id: "u_me",
   username: "me",
@@ -411,6 +414,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         moderator: options.peerBadges?.moderator ?? false,
         badge: options.peerBadges?.badge ?? null,
         avatarRef: options.peerAvatarUrl ? `${PEER_ID}@v1` : "",
+        qrCode: PEER_QR_CODE,
       },
       // r76-18: the server answers with the EFFECTIVE value, so a switched-off
       // permission arrives as an explicit false rather than as a missing flag.
@@ -881,6 +885,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
             phone: "+8801700000000",
             googleEmail: null,
             googleLinked: false,
+            qrCode: ME_QR_CODE,
             e2eePublicKey: me.u,
           },
         });
@@ -1233,6 +1238,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         username: "dirperson",
         nickname: "",
         e2eePublicKey: "BDIRKEY",
+        qrCode: "1.dir-qr-token",
         avatarRef: "",
         online: true,
         lastActiveAt: new Date().toISOString(),

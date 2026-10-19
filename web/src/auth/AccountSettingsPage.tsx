@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent 
 import { ApiError } from "../api";
 import { isWebFeatureEnabled } from "../featureFlags";
 import { BrandMark, Icon } from "../icons";
+import { ProfileQrDialog } from "../messaging/ProfileQrDialog";
 import { CallSettingsSection } from "../calls/CallSettingsSection";
 import {
   generateIdentity,
@@ -114,6 +115,10 @@ export function AccountSettingsPage({
 }) {
   const { api, user, updateUser } = useAuth();
   const profileAvatar = useProfileAvatar(api, user);
+  // The phone's top-right QR on MY profile (owner 2026-10-19: "web a profile a
+  // qr option nai" — own card included). Own code mints on first open, same as
+  // the phone's pane.
+  const [qrOpen, setQrOpen] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
   const [username, setUsername] = useState(user?.username ?? "");
@@ -433,6 +438,13 @@ export function AccountSettingsPage({
               >
                 {avatarBusy ? "Updating photo…" : "Change photo"}
               </button>
+              <button
+                type="button"
+                className="secondary-button secondary-button--compact"
+                onClick={() => setQrOpen(true)}
+              >
+                <Icon name="link" size={15} /> QR code
+              </button>
               {(profileAvatar.src || user.avatarUrl || user.avatarRef) && (
                 <button
                   type="button"
@@ -740,6 +752,24 @@ export function AccountSettingsPage({
           <span>Account data is loaded from the KuchuPuchu Worker.</span>
         </footer>
       </div>
+
+      {qrOpen && api && user ? (
+        <ProfileQrDialog
+          api={api}
+          user={{
+            id: user.id,
+            displayName: user.displayName,
+            username: user.username,
+            qrCode: (user as { qrCode?: string | null }).qrCode ?? null,
+            avatarRef: user.avatarRef ?? "",
+            verified: user.verified,
+            moderator: user.moderator,
+            badge: user.badge ?? null,
+          }}
+          self={true}
+          onClose={() => setQrOpen(false)}
+        />
+      ) : null}
     </main>
   );
 }

@@ -1,0 +1,291 @@
+/**
+ * The profile QR card — the phone's `QrScreen.kt` "My code" pane, on the web
+ * (owner 2026-10-19, the missing piece next to Nicknames: "web a profile a qr
+ * option nai"). Every profile carries a share code in the Worker's user shape:
+ * mine and a friend's alike. This shows the code, the picture and the name,
+ * and — like the phone's Copy / Share row — the code's link as an action row,
+ * with Reset on your own account only (one tap rotates it, invalidating the
+ * old one).
+ *
+ * A code can MINT on open the way the phone's pane does: accounts that predate
+ * QR profiles were never backfilled, so the panes used to spin forever; the
+ * app mints `/api/users/me/qr-code/reset` when it finds its own account bare,
+ * and so does this card (own profile only).
+ */
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import QRCode from "qrcode";
+import { authApi, type ApiClient } from "../auth/authApi";
+import { apiErrorMessage } from "../api";
+import { Icon } from "../icons";
+import { useAvatar } from "./avatars";
+import { UserBadges } from "./Badges";
+
+export type QrProfileUser = {
+  readonly id: string;
+  readonly displayName: string;
+  readonly username: string;
+  readonly qrCode?: string | null;
+  readonly avatarRef: string;
+  readonly verified?: boolean;
+  readonly moderator?: boolean;
+  readonly badge?: string | null;
+};
+
+type Props = {
+  readonly api: ApiClient;
+  readonly user: QrProfileUser;
+  /** Own account: enable reset + mint-on-demand. A friend's card is read-only. */
+  readonly self: boolean;
+  readonly onClose: () => void;
+};
+
+function qrLink(code: string): string {
+  return `kuchupuchu://user/${code}`;
+}
+
+export function ProfileQrDialog({ api, user, self, onClose }: Props) {
+  const avatar = useAvatar(api, user.avatarRef || "");
+  const [code, setCode] = useState(user.qrCode ?? "");
+  const [svg, setSvg] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState<"" | "mint" | "reset">("");
+  const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
+  const [notice, setNotice] = useState("");
+
+  const resetCode = useCallback(async () => {
+    const result = await api.request<{ qrCode?: string }>("/api/users/me/qr-code/reset", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    return result?.qrCode ?? "";
+  }, [api]);
+
+  // Mint-on-demand for a bare self account, exactly like the phone's pane —
+  // but read the CURRENT code first so a working one is never rotated just
+  // for opening this card.
+  useEffect(() => {
+    if (code || !self) return;
+    let cancelled = false;
+    setBusy("mint");
+    setError("");
+    void (async () => {
+      try {
+        const me = await authApi.getMe(api);
+        const existing = (me?.user as { qrCode?: string | null } | undefined)?.qrCode ?? "";
+        if (cancelled) return;
+        if (existing) {
+          setCode(existing);
+          return;
+        }
+        const fresh = await resetCode();
+        if (cancelled) return;
+        if (fresh) setCode(fresh);
+        else setError("Your code could not be created right now. Try again in a minute.");
+      } catch (cause) {
+        if (!cancelled) {
+          setError(
+            apiErrorMessage(cause) ||
+              "Your code could not be created right now. Try again in a minute.",
+          );
+        }
+      }
+    })().finally(() => {
+      if (!cancelled) setBusy("");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, code, resetCode, self]);
+
+  useEffect(() => {
+    if (!code) {
+      setSvg(null);
+      return;
+    }
+    let cancelled = false;
+    void QRCode.toString(qrLink(code), {
+      type: "svg",
+      margin: 1,
+      width: 216,
+      color: { dark: "#0b1324", light: "#ffffff" },
+    })
+      .then((markup) => {
+        if (!cancelled) setSvg(markup);
+      })
+      .catch(() => {
+        if (!cancelled) setError("The code could not be drawn. Try again.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [code]);
+
+  const copyLink = useCallback(async () => {
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(qrLink(code));
+      setCopyState("copied");
+      window.setTimeout(() => setCopyState("idle"), 2_000);
+    } catch {
+      setError("The link could not be copied — select it by hand.");
+    }
+  }, [code]);
+
+  const shareLink = useCallback(async () => {
+    if (!code) return;
+    const text = `Add me on KuchuPuchu: ${qrLink(code)}`;
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({ text });
+        return;
+      } catch (cause) {
+        if ((cause as Error)?.name === "AbortError") return; // the user closed the sheet
+      }
+    }
+    await copyLink();
+    setNotice("This browser has no share sheet — the link is copied instead.");
+  }, [code, copyLink]);
+
+  const doReset = useCallback(async () => {
+    if (!self || busy) return;
+    setBusy("reset");
+    setError("");
+    try {
+      const fresh = await resetCode();
+      if (fresh) {
+        setCode(fresh);
+        setNotice("New code created. The old one stopped working.");
+      } else {
+        setError("Could not reset the code.");
+      }
+    } catch (cause) {
+      setError(apiErrorMessage(cause) || "Could not reset the code.");
+    } finally {
+      setBusy("");
+    }
+  }, [busy, resetCode, self]);
+
+  const closeOnBackdrop = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (event.target === event.currentTarget) onClose();
+    },
+    [onClose],
+  );
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const title = user.displayName || "KuchuPuchu";
+  const username = useMemo(() => (user.username ? `@${user.username}` : ""), [user.username]);
+
+  return (
+    <div
+      className="profile-qr"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${title}'s QR code`}
+      onClick={closeOnBackdrop}
+    >
+      <div className="profile-qr__card" role="document">
+        <button
+          type="button"
+          className="icon-button profile-qr__close"
+          aria-label="Close QR code"
+          onClick={onClose}
+        >
+          <Icon name="close" size={18} />
+        </button>
+
+        <span className="profile-qr__avatar" aria-hidden="true">
+          {avatar ? (
+            <img className="avatar-img" src={avatar} alt="" draggable={false} />
+          ) : (
+            title.charAt(0).toUpperCase() || "?"
+          )}
+        </span>
+        <p className="profile-qr__name">
+          {title}
+          <UserBadges
+            verified={user.verified ?? false}
+            moderator={user.moderator ?? false}
+            badge={user.badge ?? null}
+            size={16}
+          />
+        </p>
+        {username ? <p className="profile-qr__username">{username}</p> : null}
+
+        {code ? (
+          <span className="profile-qr__code" aria-label="QR code">
+            {svg ? (
+              <span className="profile-qr__svg" dangerouslySetInnerHTML={{ __html: svg }} />
+            ) : (
+              <span className="profile-qr__loading">Drawing the code…</span>
+            )}
+          </span>
+        ) : (
+          <span className="profile-qr__statebox">
+            {busy === "mint" ? (
+              <span className="profile-qr__loading">Creating your code…</span>
+            ) : null}
+            {error ? <span className="profile-qr__error">{error}</span> : null}
+            {!busy && !error && !self ? (
+              <span className="profile-qr__error">This person has no QR code yet.</span>
+            ) : null}
+            {!busy && error && self ? (
+              <button type="button" className="text-button" onClick={doReset}>
+                Try again
+              </button>
+            ) : null}
+          </span>
+        )}
+
+        {code ? (
+          <div className="profile-qr__actions" aria-label="QR actions">
+            <button type="button" className="profile-qr__action" onClick={() => void copyLink()}>
+              <span className="profile-qr__action-icon" aria-hidden="true">
+                <Icon name="copy" size={18} />
+              </span>
+              <span>{copyState === "copied" ? "Copied" : "Copy link"}</span>
+            </button>
+            <button type="button" className="profile-qr__action" onClick={() => void shareLink()}>
+              <span className="profile-qr__action-icon" aria-hidden="true">
+                <Icon name="share" size={18} />
+              </span>
+              <span>Share</span>
+            </button>
+            {self ? (
+              <button
+                type="button"
+                className="profile-qr__action"
+                disabled={busy === "reset"}
+                onClick={() => void doReset()}
+              >
+                <span className="profile-qr__action-icon" aria-hidden="true">
+                  <Icon name="refresh" size={18} />
+                </span>
+                <span>{busy === "reset" ? "Resetting…" : "Reset code"}</span>
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {notice ? (
+          <p className="profile-qr__notice" role="status">
+            {notice}
+          </p>
+        ) : null}
+        {error && code ? (
+          <p className="profile-qr__error" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}

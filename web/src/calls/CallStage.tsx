@@ -54,6 +54,9 @@ export function CallStage({ engine, state }: Props) {
   // has to raise it by itself mid-call, with no click anywhere on this screen.
   const verifyOpen = state.verifyOpen;
   const phase = state.phase;
+  // Above every early return below (hook count must stay constant): the share
+  // card's aspect listener. Inert while nobody shares (peerScreen false).
+  const shareAspect = useStreamAspect(state.peerScreen ? state.remoteStream : null);
 
   // Escape is the keyboard's way out of a sheet, not out of a call: hanging up
   // by accident is worse than one more keypress.
@@ -209,14 +212,28 @@ export function CallStage({ engine, state }: Props) {
 
         {/* Their screen share on a VOICE call: the phone shows a 16:9 preview
             card above the buttons and the call stays a voice call (round 31
-            item 19). Tap it for the phone's fullscreen view of the share. */}
+            item 19). Tap it for the phone's fullscreen view of the share.
+            Owner 2026-10-19: the card followed the FIXED 16:9 of the phrase,
+            so a shared phone screen (portrait, ~9:19) shrank to a thin letter
+            and a tall desktop window showed pillar bars. The card now adopts
+            the shared screen's own ratio, clamped so an extreme share can
+            never crowd the controls off the stage. */}
         {!video && connected && state.peerScreen ? (
-          <div className="call-stage__share-card">
-            <VideoSurface
-              stream={state.remoteStream}
-              className="call-stage__share-preview"
-              label={`${state.peer.name}'s shared screen`}
-            />
+          <div
+            className="call-stage__share-card"
+            style={
+              shareAspect.tall
+                ? { width: "auto", height: "min(46vh, 430px)", maxWidth: "76%" }
+                : undefined
+            }
+          >
+            <div className="call-stage__share-preview" style={{ aspectRatio: shareAspect.ratio }}>
+              <VideoSurface
+                stream={state.remoteStream}
+                className="call-stage__share-preview__video"
+                label={`${state.peer.name}'s shared screen`}
+              />
+            </div>
             <button
               type="button"
               className="call-stage__share-expand"
@@ -241,21 +258,25 @@ export function CallStage({ engine, state }: Props) {
 
         {ringing ? (
           <div className="call-stage__ring">
+            {/* The phone's ring circles carry no caption — the colour and the
+                glyph are the meaning (owner 2026-10-19: "accept decline icon
+                bubble er niche theke jacche, thik nai aligment nai thik moto").
+                Screen readers get the action from aria-label instead. */}
             <button
               type="button"
               className="call-circle call-circle--decline"
+              aria-label={CALL_COPY.decline}
               onClick={() => void engine.decline()}
             >
               <Icon name="phoneOff" size={26} />
-              <span>{CALL_COPY.decline}</span>
             </button>
             <button
               type="button"
               className="call-circle call-circle--accept"
+              aria-label={CALL_COPY.accept}
               onClick={() => void engine.answer()}
             >
               <Icon name={video ? "videoCall" : "phone"} size={26} />
-              <span>{CALL_COPY.accept}</span>
             </button>
           </div>
         ) : null}
@@ -403,6 +424,48 @@ function statusLine(state: CallEngineState): string {
     sharing: state.sharing,
     seconds: state.seconds,
   });
+}
+
+/* A shared screen keeps its own ratio: a phone shares portrait (~9:19), a
+   desktop shares its monitor (16:9, ultrawide, 4:3). The preview CARD therefore
+   measures the shared track's real dimensions instead of pinning 16:9
+   (owner 2026-10-19: "desktop a screen share dile full screen korle 16:9 hoye
+   jacche but screen size onujai hocche na"). Clamped between a portrait
+   phone and an ultrawide monitor so the card can never crowd the controls
+   off the stage; a browser without getSettings (the e2e mock's fake track)
+   keeps the phrase's 16:9. */
+const SHARE_RATIO_MIN = 0.45;
+const SHARE_RATIO_MAX = 2.6;
+const SHARE_RATIO_DEFAULT = 16 / 9;
+
+function useStreamAspect(stream: MediaStreamLike | null): {
+  readonly ratio: string;
+  readonly tall: boolean;
+} {
+  const [ratio, setRatio] = useState<number>(SHARE_RATIO_DEFAULT);
+  useEffect(() => {
+    const track = stream?.getVideoTracks()[0] as
+      { getSettings?: () => { width?: number; height?: number } } | undefined;
+    if (!track || typeof track.getSettings !== "function") {
+      setRatio(SHARE_RATIO_DEFAULT);
+      return;
+    }
+    const read = () => {
+      const settings = track.getSettings!();
+      const w = settings.width ?? 0;
+      const h = settings.height ?? 0;
+      if (w > 0 && h > 0) {
+        setRatio(Math.min(SHARE_RATIO_MAX, Math.max(SHARE_RATIO_MIN, w / h)));
+      }
+    };
+    read();
+    (
+      track as MediaStreamTrack & { addEventListener?: (t: string, c: () => void) => void }
+    ).addEventListener?.("resize", read);
+    return undefined;
+  }, [stream]);
+  const bounded = Math.min(SHARE_RATIO_MAX, Math.max(SHARE_RATIO_MIN, ratio));
+  return { ratio: String(Math.round(bounded * 1000) / 1000), tall: bounded < 1 };
 }
 
 /**

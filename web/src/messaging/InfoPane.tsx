@@ -16,6 +16,7 @@ import type { Navigate } from "../useBrowserRouter";
 import { useAvatar } from "./avatars";
 import { UserBadges } from "./Badges";
 import { messagingApi } from "./messagingApi";
+import { ProfileQrDialog } from "./ProfileQrDialog";
 import {
   conversationTitle,
   headerSubtitle,
@@ -119,6 +120,8 @@ export function InfoPane({
   const [nicknameTarget, setNicknameTarget] = useState<ConversationPeer | null>(null);
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [nicknameValues, setNicknameValues] = useState<Record<string, string>>({});
+  /** The phone's top-right QR button on every profile (owner 2026-10-19). */
+  const [qrOpen, setQrOpen] = useState(false);
 
   useEffect(() => {
     setNicknameValues({});
@@ -126,6 +129,7 @@ export function InfoPane({
     setNicknameDraft("");
     setNicknameView("closed");
     setProfileMenuOpen(false);
+    setQrOpen(false);
   }, [conversation?.id]);
 
   const person = conversation ? conversation.other : peer;
@@ -269,6 +273,21 @@ export function InfoPane({
                     <Icon name="pencil" size={18} />
                     <span>Nicknames</span>
                   </button>
+                  {person ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="info-pane__menu-item"
+                      disabled={busy !== ""}
+                      onClick={() => {
+                        setProfileMenuOpen(false);
+                        setQrOpen(true);
+                      }}
+                    >
+                      <Icon name="link" size={18} />
+                      <span>QR code</span>
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -580,6 +599,10 @@ export function InfoPane({
           ) : null}
         </section>
       )}
+
+      {qrOpen && api && person ? (
+        <ProfileQrDialog api={api} user={person} self={false} onClose={() => setQrOpen(false)} />
+      ) : null}
     </aside>
   );
 }

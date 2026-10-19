@@ -59,6 +59,12 @@ export type ConversationPeer = {
    * that carries it (`KpSecure.privatePeer` on the phone).
    */
   readonly privateProfile: boolean;
+  /**
+   * The profile's own share code (`Phase R9` on the Worker: every profile
+   * carries one, not only self) — the phone's QR button on a friend's profile
+   * shows THEIR code; the web card does the same (owner 2026-10-19).
+   */
+  readonly qrCode?: string | null;
 };
 
 export type ConversationPreview = {
@@ -445,6 +451,7 @@ export function parsePeer(value: unknown): ConversationPeer | null {
     moderator: booleanish(value.moderator),
     badge: badgeChoice(value.badge),
     privateProfile: booleanish(value.privateProfile),
+    qrCode: text(value.qrCode, 64) || null,
   };
 }
 

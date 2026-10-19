@@ -31,13 +31,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -214,6 +217,7 @@ private fun QrTabButton(
 private fun MyQrPane(user: JSONObject?, isMe: Boolean) {
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
+    val haptics = rememberHaptics()
     var qrCode by remember(user) { mutableStateOf(user?.optText("qrCode").orEmpty()) }
     var resetting by remember { mutableStateOf(false) }
     // Owner round 33: an account can hold NO share code at all — accounts
@@ -361,13 +365,72 @@ private fun MyQrPane(user: JSONObject?, isMe: Boolean) {
                 }
             }
         }
-        Spacer(Modifier.height(14.dp))
-        Text(
-            if (isMe) "People who scan this add you instantly." else "Scan this to add ${user?.optText("displayName")?.ifBlank { "them" } ?: "them"}.",
-            fontSize = 13.sp,
-            color = Muted,
-            modifier = Modifier.padding(horizontal = 20.dp),
-        )
+        if (!isMe) {
+            Spacer(Modifier.height(14.dp))
+            Text(
+                "Scan this to add ${user?.optText("displayName")?.ifBlank { "them" } ?: "them"}.",
+                fontSize = 13.sp,
+                color = Muted,
+                modifier = Modifier.padding(horizontal = 20.dp),
+            )
+        }
+        // Owner 2026-10-19: the "People who scan this add you instantly." copy
+        // is gone; in its place the code's link gets Copy / Share actions (the
+        // same row the web's own QR card shows), because captions never shared
+        // anything but a link does.
+        if (isMe && loadError == null && qrCode.isNotBlank()) {
+            Spacer(Modifier.height(14.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(Card)
+                            .border(1.dp, Line, CircleShape)
+                            .clickable {
+                                haptics.tap()
+                                val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                cm.setPrimaryClip(
+                                    android.content.ClipData.newPlainText(
+                                        "KuchuPuchu QR link",
+                                        "kuchupuchu://user/$qrCode",
+                                    ),
+                                )
+                                Toast.makeText(ctx, "QR link copied.", Toast.LENGTH_SHORT).show()
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.ContentCopy, "Copy QR link", tint = ActionBlueDeep, modifier = Modifier.size(19.dp))
+                    }
+                    Spacer(Modifier.height(5.dp))
+                    Text("Copy link", fontSize = 12.sp, color = Muted)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(Card)
+                            .border(1.dp, Line, CircleShape)
+                            .clickable {
+                                haptics.tap()
+                                val share =
+                                    android.content.Intent(android.content.Intent.ACTION_SEND)
+                                        .setType("text/plain")
+                                        .putExtra(android.content.Intent.EXTRA_TEXT, "Add me on KuchuPuchu: kuchupuchu://user/$qrCode")
+                                runCatching { ctx.startActivity(android.content.Intent.createChooser(share, "Share your code")) }
+                                    .onFailure { Toast.makeText(ctx, "No app can take the share.", Toast.LENGTH_SHORT).show() }
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.Share, "Share QR link", tint = ActionBlueDeep, modifier = Modifier.size(19.dp))
+                    }
+                    Spacer(Modifier.height(5.dp))
+                    Text("Share", fontSize = 12.sp, color = Muted)
+                }
+            }
+        }
         if (isMe) {
             Spacer(Modifier.height(10.dp))
             Row(

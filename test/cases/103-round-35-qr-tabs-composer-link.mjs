@@ -27,33 +27,37 @@ const ICONS = kt("QrIcons.kt");
 
 /* ------------------------------------------- 1. the composer's caret ---- */
 {
-  // The bar painted the text twice: a visible Text() and a BasicTextField
-  // with a transparent colour, so only the field drew the caret. The two
-  // layers measured differently because Text() merges LocalTextStyle (the
-  // Material body style, 0.5sp letter-spacing) and the field does not, so
-  // the visible line grew ~0.5sp per character and the caret walked left.
+  // The bar painted the text TWICE — a visible Text() above a transparent
+  // BasicTextField — so the caret (the field's) and the words (Text's) could
+  // never share one measurement, and past four lines the overlay clipped while
+  // the field scrolled on: the caret sat on top of words, and the lower text
+  // never drew (owner 2026-10-19: "dag ta text er upor overlap korche, beshi
+  // text type korle nicher text gulaw dekha jai na").
   check(
-    "the composer paints one shared text style for BOTH layers",
-    CHAT.includes("val composerTextStyle =") &&
+    "the composer is ONE field: the field paints the words in real ink (no overlay layer)",
+    CHAT.includes("composerTextStyle =") &&
+      CHAT.includes(
+        "fontFamily = FontFamily.Default,\n                                    color = Ink,",
+      ) &&
+      !CHAT.includes("textStyle = composerTextStyle.copy(color = Color.Transparent),") &&
+      !/Text\(\s*\n\s*text = MessageMarkup\.formatted\(inputState/.test(CHAT),
+  );
+  check(
+    "that field keeps the size, the line height and the cap (scrollable past four lines instead of clipped)",
+    CHAT.includes("fontSize = 14.sp,") &&
+      CHAT.includes("lineHeight = 20.sp,") &&
       CHAT.includes("letterSpacing = 0.sp,") &&
       CHAT.includes("fontFamily = FontFamily.Default,") &&
-      CHAT.includes("style = composerTextStyle,") &&
-      CHAT.includes("textStyle = composerTextStyle.copy(color = Color.Transparent),"),
-  );
-  check(
-    "the visible composer text no longer inherits LocalTextStyle on its own",
-    !/Text\(\s*\n\s*text = MessageMarkup\.formatted\([^)]*\),\s*\n\s*color = Ink,\s*\n\s*fontSize = 14\.sp/.test(
-      CHAT,
-    ),
-  );
-  // The field and the visible text must agree on the wrapping too, or the
-  // caret still lands in the wrong place once the message wraps.
-  check(
-    "the visible composer text and the field share the size, the line height and the cap",
-    CHAT.includes("maxLines = 4,") &&
       CHAT.includes(
         "lineLimits = TextFieldLineLimits.MultiLine(minHeightInLines = 1, maxHeightInLines = 4),",
       ),
+  );
+  check(
+    "the bold preview lives inside the field's output transform (markers deleted AND styled there — what you see is what the caret is drawn on)",
+    CHAT.includes("val markupOutputTransformation =") &&
+      CHAT.includes("MessageMarkup.boldMarkers.findAll(toString())") &&
+      CHAT.includes("addStyle(") &&
+      CHAT.includes("outputTransformation = markupOutputTransformation"),
   );
 }
 

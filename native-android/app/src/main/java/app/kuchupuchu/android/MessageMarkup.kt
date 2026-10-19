@@ -32,7 +32,9 @@ private data class MarkRange(
 
 /** Lightweight message formatting: `*bold*`, `**bold**`, links and optional @username mentions. */
 internal object MessageMarkup {
-    private val boldMarkers = Regex("\\*{1,2}([^*\\n]+?)\\*{1,2}")
+    // Also read by the composer's live rendering transform (ChatScreen
+    // Composer) — the one source of "what counts as a *bold* run".
+    val boldMarkers = Regex("\\*{1,2}([^*\\n]+?)\\*{1,2}")
     private val mentionPattern = Regex("(^|[^A-Za-z0-9_])@([A-Za-z0-9_]{3,30})(?![A-Za-z0-9_])")
     private val urlPattern = Regex("(?:https?://|www\\.)[^\\s<>\\\"']+", RegexOption.IGNORE_CASE)
 

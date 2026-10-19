@@ -6388,11 +6388,33 @@ private fun Composer(
                             val currentInput by rememberUpdatedState(input)
                             val currentOnInput by rememberUpdatedState(onInput)
                             val currentOnReceiveImage by rememberUpdatedState(onReceiveImage)
-                            val boldOutputTransformation = remember {
+                            // Owner r-2026-10-19 (composer single layer): the bar
+                            // used to paint the text TWICE — a visible Text()
+                            // above a transparent BasicTextField — so the caret
+                            // (field's) and the words (Text's) could never be
+                            // measured as one, and past 4 lines the overlay
+                            // clipped while the field scrolled on: "dag ta text
+                            // er upor overlap korche, beshi text lekhele nicher
+                            // text dekha jai na". ONE field now owns the words
+                            // AND the caret — same buffer, no duplicate painter.
+                            // The bold preview is a proper output transform:
+                            // the markers are deleted AND the content styled,
+                            // so what you see is what the caret is drawn upon.
+                            val markupOutputTransformation = remember {
                                 OutputTransformation {
-                                    MessageMarkup.boldDelimiterRanges(toString())
-                                        .sortedByDescending { it.first }
-                                        .forEach { range -> delete(range.first, range.last + 1) }
+                                    MessageMarkup.boldMarkers.findAll(toString()).toList().asReversed().forEach { match ->
+                                        val content = match.groups[1] ?: match.groups[2] ?: return@forEach
+                                        // Drop the closing marker first, then the
+                                        // opening one; the content then sits at
+                                        // the open's index, styled bold there.
+                                        delete(content.range.last + 1, match.range.last + 1)
+                                        delete(match.range.first, content.range.first)
+                                        addStyle(
+                                            SpanStyle(fontWeight = FontWeight.Bold),
+                                            match.range.first,
+                                            match.range.first + content.length,
+                                        )
+                                    }
                                 }
                             }
                             LaunchedEffect(inputState) {
@@ -6420,49 +6442,23 @@ private fun Composer(
                                     }
                                 }
                             }
-                            // Owner round 35 (the caret): the bar painted
-                            // the text TWICE — a visible Text() and a
-                            // BasicTextField with a transparent colour, so
-                            // only the field ever drew the caret. The two
-                            // layers measured DIFFERENTLY: Text() merges
-                            // LocalTextStyle (Material's body style, 0.5sp
-                            // letter-spacing) while the field's own
-                            // textStyle does not, so the visible line grew
-                            // ~0.5sp per character and the caret drifted
-                            // LEFT — the longer the message, the further
-                            // the caret sat on top of a word instead of
-                            // after it (owner: "message er seshe je dag ta
-                            // thake ota message er last a thakche na").
-                            // Both layers now share ONE style, so the two
-                            // can never measure differently again.
+                            // The composer's whole style — size, line height and
+                            // spacing in ONE place. The caret takes its colour
+                            // from the theme and sits wherever the text actually
+                            // is, because nothing else draws that text.
                             val composerTextStyle =
                                 TextStyle(
                                     fontSize = 14.sp,
                                     lineHeight = 20.sp,
-                                    // No inherited letter-spacing: the
-                                    // field does not take LocalTextStyle,
-                                    // and any gap between the two is what
-                                    // moved the caret.
                                     letterSpacing = 0.sp,
                                     fontFamily = FontFamily.Default,
+                                    color = Ink,
                                 )
-                            Text(
-                                text = MessageMarkup.formatted(inputState.text.toString()),
-                                color = Ink,
-                                style = composerTextStyle,
-                                maxLines = 4,
-                                overflow = TextOverflow.Clip,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(min = 20.dp)
-                                    .padding(vertical = 6.dp)
-                                    .clearAndSetSemantics {},
-                            )
                             BasicTextField(
                                 state = inputState,
                                 inputTransformation = InputTransformation.maxLength(MESSAGE_BODY_LIMIT),
-                                outputTransformation = boldOutputTransformation,
-                                textStyle = composerTextStyle.copy(color = Color.Transparent),
+                                outputTransformation = markupOutputTransformation,
+                                textStyle = composerTextStyle,
                                 // Owner round 19: the caret follows the chat theme too.
                                 cursorBrush = androidx.compose.ui.graphics.SolidColor(accent),
                                 lineLimits = TextFieldLineLimits.MultiLine(minHeightInLines = 1, maxHeightInLines = 4),
