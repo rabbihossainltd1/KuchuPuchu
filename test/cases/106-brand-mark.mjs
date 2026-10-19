@@ -163,7 +163,11 @@ for (const [density, sizes] of Object.entries(densities)) {
     }
   }
 }
-check("every launcher and notification icon has its density's size", androidOk, androidDetail.join("; "));
+check(
+  "every launcher and notification icon has its density's size",
+  androidOk,
+  androidDetail.join("; "),
+);
 
 // The in-app brand mark (the login header, the About screen, the
 // notification's large icon) is one 512x512 file.
@@ -176,16 +180,21 @@ check(
 
 // The adaptive icon's background is the plate's black, so the launcher icon
 // reads as the logo instead of an amber disc.
-const background = read("native-android/app/src/main/res/values/ic_launcher_background.xml").toString();
+const background = read(
+  "native-android/app/src/main/res/values/ic_launcher_background.xml",
+).toString();
 check(
   "the adaptive icon's background is the plate's black",
   background.includes("#111113"),
   background.replace(/\s+/g, " ").slice(0, 120),
 );
-const adaptive = read("native-android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml").toString();
+const adaptive = read(
+  "native-android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml",
+).toString();
 check(
   "the adaptive icon draws the foreground over that background",
-  adaptive.includes("@color/ic_launcher_background") && adaptive.includes("@mipmap/ic_launcher_foreground"),
+  adaptive.includes("@color/ic_launcher_background") &&
+    adaptive.includes("@mipmap/ic_launcher_foreground"),
 );
 
 // The generator that cut the assets is in the repo, so the next picture is a
@@ -207,8 +216,8 @@ if (existsSync(generator)) {
 }
 
 // No stray build output in the brand folders.
-const stray = readdirSync(join(root, "native-android/app/src/main/res/mipmap-xxxhdpi")).filter((f) =>
-  f.endsWith(".webp"),
+const stray = readdirSync(join(root, "native-android/app/src/main/res/mipmap-xxxhdpi")).filter(
+  (f) => f.endsWith(".webp"),
 );
 check("no stray .webp shadowing the PNG icons", stray.length === 0, stray.join(", "));
 
