@@ -5088,6 +5088,78 @@ async function sessionAcceptedBy(origin: string, request: Request): Promise<bool
   }
 }
 
+/**
+ * The authority's view of the caller, as a user row this deployment can use.
+ *
+ * After the slice-J cutover the live sessions live in the core's database, so
+ * the edge's own (frozen) one does not know the caller - but the core does.
+ * GET /api/me answers with the signed-in user; that identity is what the edge
+ * needs to write a call row for someone whose session it cannot see. Only the
+ * identity travels back: no token, no secret.
+ */
+async function authorityUser(
+  env: Env,
+  request: Request,
+): Promise<(UserRow & { session_expires_at: string; session_device_id: string | null }) | null> {
+  const base = String(env.FEDERATED_CORE_ORIGIN || "")
+    .trim()
+    .replace(/\/+$/, "");
+  if (!base) return null;
+  const headers: Record<string, string> = { Accept: "application/json" };
+  const token = bearerToken(request);
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const cookie = request.headers.get("cookie");
+  if (cookie) headers.Cookie = cookie;
+  try {
+    const res = await fetch(`${base}/api/me`, { headers });
+    if (!res.ok) return null;
+    const payload = (await res.json().catch(() => null)) as {
+      user?: Record<string, unknown> | null;
+    } | null;
+    const user = payload?.user;
+    if (!user || typeof user.id !== "string" || !user.id) return null;
+    const now = new Date().toISOString();
+    return {
+      id: user.id,
+      email: "",
+      password_hash: "",
+      username: String(user.username ?? ""),
+      display_name: String(user.displayName ?? ""),
+      avatar_url: (user.avatarUrl as string | null) ?? null,
+      about: (user.about as string | null) ?? null,
+      created_at: now,
+      last_active_at: String(user.lastActiveAt ?? now),
+      avatar_version: null,
+      phone_e164: (user.phone as string | null) ?? null,
+      phone_verified_at: null,
+      phone_verification_method: null,
+      google_subject: null,
+      google_email: null,
+      auth_status: "active",
+      verified: user.verified ? 1 : 0,
+      moderator: user.moderator ? 1 : 0,
+      badge: (user.badge as string | null) ?? null,
+      priv_phone: null,
+      priv_avatar: null,
+      priv_messages: null,
+      priv_last_seen: null,
+      priv_groups: null,
+      priv_status: null,
+      private_profile: user.privateProfile ? 1 : 0,
+      e2ee_public_key: (user.e2eePublicKey as string | null) ?? null,
+      origin_realm: (user.origin_realm as string | null) ?? "kp",
+      qr_code: (user.qrCode as string | null) ?? null,
+      // The session itself lives in the core's database; this deployment only
+      // borrows the identity, so the borrowed expiry is the longest sensible
+      // one.
+      session_expires_at: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
+      session_device_id: null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function requireUserOrAuthority(
   db: D1Database,
   request: Request,
@@ -7244,8 +7316,28 @@ export default {
     // configured" refusal the dialer shows. The edge asks the core who the
     // caller is (requireUserOrAuthority) and mints the relay credential with
     // its own keys.
-    const edgeRelayRoute = new URL(request.url).pathname === "/api/config/ice";
-    const federated = edgeRelayRoute ? null : await federatedCoreProxy(request, env);
+    const edgePath = new URL(request.url).pathname;
+    // Three things stay on the edge instead of being handed to the core:
+    //  1. /api/config/ice - the core holds no TURN keys, so only the edge can
+    //     mint a relay credential for the dialer.
+    //  2. /download/apk - the release pipeline drops the newest signed APK in
+    //     THIS deployment's own R2 bucket, while the core's bucket still held
+    //     an older build; the in-app update button kept serving that stale
+    //     APK because the request was proxied to the core.
+    //  3. /api/calls* - the core refuses to open a call while its relay is
+    //     unconfigured ("the dedicated relay is not configured"). A call must
+    //     live in ONE database for its whole life (create, answer, ice, peer,
+    //     end), so while the core cannot open one the edge keeps the whole
+    //     call protocol here, in the edge's own database. Dropping the
+    //     /api/calls clause from this list hands the call protocol back to
+    //     the core.
+    const edgeRelayRoute = edgePath === "/api/config/ice";
+    const edgeOwnsApk = edgePath === "/download/apk";
+    const edgeOwnsCalls = edgePath.startsWith("/api/calls");
+    const federated =
+      edgeRelayRoute || edgeOwnsApk || edgeOwnsCalls
+        ? null
+        : await federatedCoreProxy(request, env);
     if (federated) {
       if (requestUrl.pathname === "/api/health" && federated.ok)
         return withLocalTurnCapability(federated, env);
@@ -7320,11 +7412,12 @@ export default {
     // During the final snapshot window no background expiry/reaper may race the
     // export. Once this deployment is the KP edge proxy, the Vintox authority
     // owns cron mutation permanently; the frozen legacy D1 is never touched.
-    if (
-      String(env.MIGRATION_READ_ONLY ?? "").trim() === "1" ||
-      String(env.FEDERATED_CORE_ORIGIN ?? "").trim()
-    )
-      return;
+    if (String(env.MIGRATION_READ_ONLY ?? "").trim() === "1") return;
+    // The edge proxies to the core: the core owns the cron mutation and the
+    // frozen legacy D1 stays untouched here. The calls the edge owns are
+    // reaped by the same reaper inside GET /api/calls/active, which every
+    // client polls while a call is up.
+    if (String(env.FEDERATED_CORE_ORIGIN ?? "").trim()) return;
     try {
       // Ensure the additive OTP columns/indexes exist in a cold scheduled isolate,
       // then erase expired codes even when both login clients have closed.
@@ -8629,7 +8722,21 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   /* ---------- authenticated ---------- */
 
-  const me = await requireUser(db, request, env, ctx);
+  // The call routes answer for a session this deployment may not know: after
+  // the slice-J cutover the live sessions live in the core's database and the
+  // edge's own copy is frozen. The core is the authority - it says who the
+  // caller is, and the edge borrows that identity to write the call row.
+  // Every other route keeps its own strict lookup.
+  let me: UserRow & { session_expires_at: string; session_device_id: string | null };
+  try {
+    me = await requireUser(db, request, env, ctx);
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 401 || !path.startsWith("/api/calls"))
+      throw error;
+    const authority = await authorityUser(env, request);
+    if (!authority) throw error;
+    me = authority;
+  }
   const uid = me.id;
 
   const qrConfirmMatch = path.match(/^\/api\/auth\/qr\/([A-Za-z0-9_-]{1,64})\/confirm$/);
