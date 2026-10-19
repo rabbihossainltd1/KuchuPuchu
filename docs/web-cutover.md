@@ -18,6 +18,32 @@
 - worker-stamp contract case 79-এ সরাসরি পিন করা যায়; `_headers`-এর runtime
   আচরণ wrangler-এর খেয়ালখুশির ওপর থাকে।
 
+### সংশোধনী (2026-10-19): stale-edge-cache বাগ — মেকানিজম `serve-directly`-তে ফেরত
+
+লাইভে ব্র্যান্ড কাটওভার মনিটর করে পাওয়া গেল: `/`, `/logo.png`, `/assets/*`
+ক্লায়েন্টকে নতুন বিল্ডের বদলে **আগের বিল্ড** দেখাচ্ছিল। ডিবাগ রুট দিয়ে ভেতরে
+দেখা গেল `env.ASSETS` নতুন বিল্ডই সার্ভ করছে — শুধু পাবলিক পথে পুরোনোটা। অর্থাৎ
+`run_worker_first = ["/*"]` করলে প্রতিটা স্ট্যাটিক রিকোয়েস্ট worker-এর ওপর
+দিয়ে যায়, আর Cloudflare-এর ক্যাশে worker-stamped আগের উত্তরটা URL-চাবিতে বসে
+থাকে — তাতে version ভাগ নেই, তাই ডিপ্লয়েও আপডেট মেলে না। পরীক্ষা:
+
+- ৫+ `wrangler deploy` (একবার ১৭টা সত্যিকার নতুন অ্যাসেট ব্রাউনফিল্ডে);
+- `run_worker_first = true` (serve_directly বন্ধ);
+- `[assets]` পুরোপুরি সরিয়ে ডিপ্লয়;
+
+— প্রতিটার পরেও পাবলিক আগেরই সামগ্রীর `cf-cache-status: HIT` দেখাচ্ছিল; শুধু
+মিরর (`run_worker_first = ["/api/*","/ws/*"]`) নতুন বিল্ড পেয়েছিল। Cloudflare
+কমিউনিটিতেও এটা পুরনো অমীমাংসিত সমস্যা (serve-directly স্ট্যাটিক ম্যানিফেস্ট
+বাগ + পার-ডিসি ক্যাশ সপ্তাহজুড়ে), workers.dev এ zone না থাকায় purge করা যায় না।
+
+**স্থির ব্যবস্থা:** স্ট্যাটিকরা এখন Cloudflare-এর asset layer সরাসরি সার্ভ করে
+(single source of truth = assets `_headers` ফাইল — নিজের রেসপন্সেও cache-এ
+আঁটকে না), আর রিসার্ভ কোড চাওয়া রুটগুলো ( `/api/*`, `/ws/*`, `/download/apk`)
+worker-এই থাকে (R2-তেই). case 79 এখন এটাই পিন করে; worker-এর `serveShellAsset()`
+/`shellCsp()` মিরর-জাতীয় binding-free প্রিভিউয়ের fallback হিসেবে থাকে।
+আবার worker-stamped হেডারে ফিরতে চাইলে আগে നিশ্চিত করতে হবে worker-রেসপন্স
+ক্যাশ version-চাবিতে আঁটকছে কিনা (আজ যাচাইযোগ্য ছিল না)।
+
 বাকি সব ভালো অংশ দুই পক্ষ থেকে নেওয়া হয়েছে: `LEGACY_CACHE_PREFIXES` সুইপ,
 precache-এ icon/manifest, `/sw.js`-এ `no-store`, cutover E2E সুট (service
 worker সহ একমাত্র সুট), voice player-এর honest `ended` স্টেট, sourcemap বন্ধ,
@@ -28,10 +54,12 @@ worker সহ একমাত্র সুট), voice player-এর honest `ende
 - `wrangler.toml`: `[build] command = "npm run build:web:prod"` — প্রতি
   `wrangler deploy`/`versions upload`-এর আগে বিল্ড; ড্যাশবোর্ড ছোঁয়া লাগেনি।
 - `[assets] directory = "./web/dist"`, `binding = "ASSETS"`,
-  `run_worker_first = ["/*"]`, `not_found_handling = "single-page-application"`।
-- Worker-এর `fetch()`: `/api/*` ও `/ws/*` আগের মতো REST/সকেট পাথ; বাকিটা
-  `serveShellAsset()` — `env.ASSETS.fetch(request)` করে হেডার ছাপে। বাইন্ডিং
-  নেই এমন ভার্সনে অ্যাসেট-পাথ এলে 404, ক্র্যাশ নয়।
+  `run_worker_first = ["/api/*", "/ws/*", "/download/apk"]`,
+  `not_found_handling = "single-page-application"`। (2026-10-19-এর আগে এটা
+  `["/*"]` ছিল; উপরের সংশোধনীটা দেখো।)
+- Worker-এর `fetch()`: `/api/*` ও `/ws/*` আগের মতো REST/সকেট পাথ; বাকিটা স্ট্যাটিক
+  এখন Cloudflare asset layer সরাসরি দেয়। নিরাপত্তা হেডার assets `_headers`
+  ফাইল থেকে আসে (meta বহন করতে পারে না বলেই frame-ancestors লাগত।)
 - preview কনফিগ এখন একই React বিল্ড সার্ভ করে (একই `[build]` হুক), তবে
   production বাইন্ডিং ছাড়া — case 54 সেটা পিন করে।
 

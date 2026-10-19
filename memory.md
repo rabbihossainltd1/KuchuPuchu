@@ -1,5 +1,40 @@
 # Project Memory
 
+## 2026-10-19 — brand cutover, desktop call-screen fit, and the stale-edge-cache bug
+
+- Owner asked for two web-deliverables: (a) the desktop ring/call screen must fit
+  inside the viewport with no clipped/overflowing controls; (b) the app logo
+  everywhere becomes the owner's photo (black rounded square + white bubble +
+  blue arrow, `/home/user/uploads/photo.jpg`).
+- Call screen: vh-based clamps on body/head/avatar/h2 + a two-row
+  `.call-circle` grid (icon centred on the 68px disc, label below) in
+  `web/src/calls/calls.css`; 16 call e2e tests added/passed.
+- Brand: `scripts/make-brand-assets.py` regenerates every mark from the photo
+  (web logo.png 192 + icon.svg; Android launcher/round/foreground/status +
+  drawable/icon_gold.png; adaptive bg #111113). Version bumped to
+  `290 / 3.9.213` (release asset `kuchupuchu-3.9.213-r115.apk`, guard
+  `RELEASE-DEBUG-KEY-V279`).
+- DEPLOY FACT LEARNED (the hard way): `run_worker_first = ["/*"]` (worker stamps
+  headers on every path) is the STALE-bug trigger. Cloudflare caches those
+  worker-first responses keyed by URL, and a redeploy does not invalidate them —
+  bindings/other proven fresh (`env.ASSETS` served the NEW build from inside),
+  but the public kept getting the old logo/old bundle `index-rzacuvO-.js` for
+  days. None of these refreshed it: 5+ deploys, a 17-asset brownfield manifest,
+  `run_worker_first = true`, a full no-assets teardown, query cache-busting, or
+  conditional GETs (old etag → 304 — the *origin* itself stayed old). Zones list
+  is empty, so no workers.dev purge. Cloudflare community already has this exact
+  open issue (serve-directly static-manifest staleness + per-DC week-long TTL).
+- FIX SHIPPED (`75e271d3`, live on the edge): statics now serve-directly (only
+  `/api/*`, `/ws/*`, `/download/apk` stay on the worker); security headers moved
+  to the assets `web/public/_headers` file = the single source of truth (served
+  by the asset layer itself, so they cannot go stale). `serveShellAsset()` /
+  `shellCsp()` stay as the binding-free preview fallback. Case 79 rewritten to
+  pin this; `docs/web-cutover.md` amended (Bangla).
+- e2e fallout: the new logo pushed the 390px chat-list screenshot over the 1%
+  tolerance; `themeMatrix` 390x844 baseline regenerated (CI actual vs local
+  baseline match 0.118%).
+- Release `v290` workflow re-triggered clean on `422513ca` after the fix.
+
 ## Round 58 User Directives & Status
 - Directive 1: See more expand, message body collapse with animation:
   - User feedback: "not fixed+ tumi expand animation taw remove korcho but why? tumi ager motoi rakho see more a click korle expand hobe massage body te click korle collapse hobe animation er sathe hobe shob."
