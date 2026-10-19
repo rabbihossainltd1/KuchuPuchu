@@ -37,3 +37,7 @@ scripts/.gh-token
 .firebase/
 # Kotlin compiler local build state
 .kotlin/
+
+# Python bytecode from the brand-asset generator
+__pycache__/
+*.pyc

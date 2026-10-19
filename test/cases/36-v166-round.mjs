@@ -90,8 +90,8 @@ const pkg = readFileSync(
 
 /* the round's own bookkeeping */
 check(
-  "r115: versionCode 289 / versionName 3.9.212 (call round: the live deployment mints the Cloudflare TURN relay itself for a session the core owns, so the dialer receives ICE servers instead of the 'dedicated relay is not configured' refusal, and the Android dialer falls back to the relay host when the primary cannot mint; the v274 debug signer is reused with explicit owner approval)",
-  /versionCode\s*=\s*289\b/.test(pkg) && /versionName\s*=\s*"3\.9.212"/.test(pkg),
+  "r116: versionCode 290 / versionName 3.9.213 (brand round: the owner's own logo picture is the mark everywhere - the launcher icon, the in-app brand mark, the notification icon and the web logo - and the desktop call screen fits its window again, with every glyph inside its circle; the v274 debug signer is reused with explicit owner approval)",
+  /versionCode\s*=\s*290\b/.test(pkg) && /versionName\s*=\s*"3\.9.213"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */

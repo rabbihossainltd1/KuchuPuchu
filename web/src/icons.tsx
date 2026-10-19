@@ -490,7 +490,8 @@ export function BrandMark({ size = 34 }: { size?: number }) {
       style={{
         width: size,
         height: size,
-        borderRadius: Math.round(size * 0.28),
+        // The brand mark is a rounded plate: its own corners are the corners.
+        borderRadius: Math.round(size * 0.24),
         objectFit: "cover",
         display: "block",
       }}

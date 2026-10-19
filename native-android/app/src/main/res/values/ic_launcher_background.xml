@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#F59E0B</color>
+    <!-- The brand mark is a black plate with a white speech bubble and a blue
+         arrow, so the adaptive icon's background is the plate's own black:
+         the launcher icon reads as the logo, not as an amber disc. -->
+    <color name="ic_launcher_background">#111113</color>
 </resources>

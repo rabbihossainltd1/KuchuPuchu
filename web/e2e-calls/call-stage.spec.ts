@@ -270,3 +270,81 @@ test.describe("an incoming call", () => {
     await expect(status(page)).toHaveText("Connecting…");
   });
 });
+
+/**
+ * The desktop ring has to FIT the window it is drawn in.
+ *
+ * Owner round 36 (2026-10-19): on a 1280x1024 desktop the call screen pushed
+ * its last two rows (the quick reply and the limits) below the fold, so the
+ * "Message" button was half cut off, and the negative margin that centred
+ * each glyph on its circle dropped the glyph onto its own label. The phone
+ * stacks its call screens over whatever is open and nothing is ever cut off;
+ * the browser may not be smaller than that.
+ */
+test.describe("the call screen fits the desktop window", () => {
+  const windowSizes = [
+    { width: 1280, height: 1024 },
+    { width: 1366, height: 860 },
+    { width: 1440, height: 900 },
+  ];
+
+  test.beforeEach(async ({ page }) => {
+    // A seeded ring: the screen with the most on it (the two circles, their
+    // labels, the quick reply and the limits).
+    worker = await createMockCallsWorker({ withIncomingRing: true });
+    await worker.install(page);
+    await signIn(page);
+  });
+
+  test("the ring, its labels and the rows under it all stay on the screen", async ({ page }) => {
+    for (const size of windowSizes) {
+      await page.setViewportSize(size);
+      await page.goto("/calls");
+      await expect(stage(page)).toBeVisible();
+      await page.waitForTimeout(250);
+
+      const boxes = await page.evaluate(() => {
+        const read = (selector: string) => {
+          const el = document.querySelector(selector);
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
+        };
+        const body = document.querySelector(".call-stage__body") as HTMLElement | null;
+        return {
+          viewportHeight: window.innerHeight,
+          scrollHeight: body?.scrollHeight ?? 0,
+          clientHeight: body?.clientHeight ?? 0,
+          ring: read(".call-stage__ring"),
+          decline: read(".call-circle--decline"),
+          declineGlyph: read(".call-circle--decline svg"),
+          declineLabel: read(".call-circle--decline span"),
+          quick: read(".call-stage__quick"),
+          foot: read(".call-stage__foot"),
+        };
+      });
+
+      // The stage itself never scrolls: everything is on the screen at once.
+      expect(
+        boxes.scrollHeight,
+        `the stage scrolls at ${size.width}x${size.height}`,
+      ).toBeLessThanOrEqual(boxes.clientHeight);
+      // Nothing hangs below the window.
+      for (const key of ["ring", "quick", "foot"] as const) {
+        const box = boxes[key];
+        expect(box, `${key} is missing`).not.toBeNull();
+        expect(box!.bottom, `${key} runs past the window`).toBeLessThanOrEqual(
+          boxes.viewportHeight,
+        );
+      }
+      // The glyph sits INSIDE the circle, and the label BELOW it.
+      const circle = boxes.decline!;
+      const glyph = boxes.declineGlyph!;
+      const label = boxes.declineLabel!;
+      expect(glyph.top, "the glyph starts above its circle").toBeGreaterThanOrEqual(circle.top);
+      expect(glyph.bottom, "the glyph runs past its circle").toBeLessThanOrEqual(circle.top + 68);
+      expect(label.top, "the label sits on the circle").toBeGreaterThanOrEqual(circle.top + 68);
+      expect(label.bottom, "the label runs past the circle").toBeLessThanOrEqual(circle.bottom);
+    }
+  });
+});
