@@ -37,6 +37,14 @@ Eight owner-reported bugs, all fixed in one round:
 - Tests: 101/101 cases, 4035 assertions; calls e2e 52, messaging e2e 159,
   account e2e 12, shell e2e 8, hardening e2e 16 — ALL green locally.
 - Version 291 (3.9.214), asset `kuchupuchu-3.9.214-r116.apk`, v274 signer.
+- OUTCOME: commits `4d67cf8f` (8 fixes + v291) then `a99c09cf` (composer fix:
+  MatchGroup.value.length, unused import; CI caught both). CI `39287915017` +
+  release `39287924951` green. Published tag `v291` "v291 (3.9.214)", asset
+  `kuchupuchu-3.9.214-r116.apk` 28,583,668 B
+  (sha256 b87d1227bdbdddce5cbaba1cd7294bc00777da10c2eb7ecddf7d78c30578a585);
+  `/download/apk` already serves it. Web deployed c858df24 (dist md5 ==
+  live md5). LESSON: `npm test` MUST run on system node v20 (better-sqlite3
+  native = NODE_MODULE_VERSION 115); node22 only for wrangler.
 
 ## 2026-10-19 — brand cutover, desktop call-screen fit, and the stale-edge-cache bug
 
