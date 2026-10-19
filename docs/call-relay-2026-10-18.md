@@ -117,3 +117,89 @@ the web shell all live on the core.
   `400 Binding must have a name`.
 * Never put a TURN secret in the APK. The credential is minted server-side,
   short-lived, and signed by Cloudflare.
+
+---
+
+# The call that could not start (2026-10-19)
+
+Owner report: the relay credential was fixed (v289), but **the call still never
+started** — the dialer kept saying *"Calling is temporarily unavailable because
+the dedicated relay is not configured."*
+
+## What was actually wrong
+
+That string is `503 CALL_RELAY_UNAVAILABLE`, and it came from the **core**,
+not from the edge:
+
+* `POST /api/calls` and `POST /api/calls/group` were **proxied** to
+  `vintoxbd-comm-core` (the deployment that owns the live sessions).
+* The core holds **no TURN keys** — they live on the edge — and both of its
+  call-creation sites are gated by `dedicatedTurnConfigured(env)`.
+* So the edge minted a perfectly good relay credential, the app fetched it,
+  and the very next call to the core was refused. The relay was never the
+  problem; the **database the call had to live in** was.
+
+A call must live in ONE database for its whole life (create → answer → ice →
+peer → end). The core could not open one, so the whole protocol had to move
+to the deployment that can.
+
+## The fix (edge version `3a0c0e95-0942-42fa-927b-072624622147`)
+
+Three things now stay on the edge instead of being handed to the core:
+
+| Route | Why it stays |
+| --- | --- |
+| `/api/config/ice` | the edge holds the TURN keys; the core mints nothing |
+| `/download/apk` | the release pipeline drops the newest signed APK in the **edge's** R2 bucket; the proxied core bucket still held an old build, so the in-app Update kept serving a stale APK |
+| `/api/calls*` | the core cannot open a call; the call protocol runs in the edge's own database |
+
+Dropping the `/api/calls` clause from that list hands the call protocol back
+to the core (one line, documented in the source).
+
+**The caller's identity.** The edge's session table is frozen — the live
+sessions live in the core's database — so a call for a session the edge does
+not know borrows the caller's identity from the core's `GET /api/me`, exactly
+the way the relay route already does. Only the identity travels back (no
+token, no secret), and it is asked for **only** after a real `401` and
+**only** on the call routes; every other route keeps its strict lookup. A
+session nobody knows still gets `401`.
+
+**The cron stays core-owned.** The frozen legacy D1 is not written by the
+edge's timer. The calls the edge owns are reaped by the same reaper inside
+`GET /api/calls/active` (`reapStaleCallsIfDue`), which every client polls
+while a call is up and again when the app opens.
+
+## Live proof (2026-10-19, on the live edge)
+
+| Check | Result |
+| --- | --- |
+| `GET /download/apk` on the edge | `200`, 28,425,120 B, md5 `769ae6b5…` — **v289**, the build the Update button must deliver |
+| `POST /api/calls` (no session) | `401 UNAUTHENTICATED` — **not** `503 CALL_RELAY_UNAVAILABLE` any more |
+| `POST /api/calls` (signed-in) | `201` — call `RINGING`, caller and callee read back correctly |
+| `GET /api/calls/active` (callee) | the incoming ring card, `other = Rabbi Hossain` |
+| `POST /api/calls/{id}/answer` | `200` — the call goes `ACTIVE`, the answer SDP is stored |
+| `POST` + `GET /api/calls/{id}/ice` | `201` + the candidate delivered to the peer |
+| `POST /api/calls/{id}/end` | `200` |
+| `GET /api/health` | `ok`, `capabilities.turn = true` |
+| `GET /api/config/ice` with a bogus bearer | `401` (the relay stays gated) |
+
+The test call, the temporary sessions and the call-log row were deleted again
+after the check.
+
+## What still needs the owner (the durable fix)
+
+The edge can open a call, but the **core** still cannot — and the core is
+where the sessions, the chat, the Durable Objects and the push live. Give the
+core the same two secrets and the call protocol can go back where the rest of
+the app lives:
+
+```
+TURN_KEY_ID    = 896cd44929831f8724744db412851b7c
+TURN_API_TOKEN = 536e03775d38b7682c794e8b503330cb2e6c11b82e851394794c43144e314c16
+```
+
+Cloudflare dashboard → *vintoxbdinstitute* → *Workers & Pages* →
+`vintoxbd-comm-core` → *Settings* → *Variables and Secrets* → add both as
+**encrypted** secrets. After that, removing the `/api/calls` clause from the
+edge's list hands the whole call protocol back to the core, and the chat's
+"call ended" bubble comes back with it.

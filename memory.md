@@ -1512,3 +1512,47 @@ green. The R2 object `kp-media/apk/kuchupuchu-latest.apk` now carries the same
 md5 ✓. Commits on `main`: `6a94ba27` (the relay fix) and `96c90176` (the
 secret-recovery note). The live edge runs version
 `24d75d9a-d9cb-48fc-a3b2-01066b417333`.
+
+### Calls moved to the edge (2026-10-19) — the call that never started
+The relay credential was fine (v289); the **call still could not start**:
+`POST /api/calls` was proxied to `vintoxbd-comm-core`, whose env has no TURN
+keys, and both of its call-creation sites are gated by
+`dedicatedTurnConfigured(env)` → `503 CALL_RELAY_UNAVAILABLE`. A call must
+live in ONE database for its whole life, so the whole protocol moved to the
+edge that owns the relay keys.
+
+**Edge keeps three things** (one line in `export default.fetch`, drop the
+`/api/calls` clause to hand the protocol back): `/api/config/ice`,
+`/download/apk` (the edge's own R2 bucket — the proxied core bucket still
+held the old APK, md5 `5476885f…`), `/api/calls*`.
+
+**The borrowed identity.** The edge's session table is frozen (the live
+sessions live in the core), so a call for a session the edge does not know
+borrows the caller's identity from the core's `GET /api/me`
+(`authorityUser()`), like the relay route already does. Only the identity
+travels back; it is asked for only after a real `401` and only on the call
+routes. `requireUser` stays strict everywhere else.
+
+**The cron stays core-owned**: the edge's timer never writes the frozen
+legacy D1 (cases 101/27 pin that). The calls the edge owns are reaped by the
+reaper inside `GET /api/calls/active` (`reapStaleCallsIfDue`).
+
+**Live proof** (edge `3a0c0e95-0942-42fa-927b-072624622147`): `/download/apk`
+→ md5 `769ae6b5…` (v289 ✓); `POST /api/calls` → `401` (not `503`) unauth, `201`
+signed-in; `/api/calls/active` shows the callee's ring card; `answer` → `ACTIVE`;
+`ice` → the candidate is delivered; `end` → `200`. The test call, the temp
+sessions and the call-log row were deleted again.
+
+**Known gaps of the edge-owned call**: the "call ended" bubble cannot be
+written into the **core's** chat (the core's send route allows only
+TEXT|STICKER|IMAGE|FILE) — the call history tab (edge-local) shows it; the
+edge's DO/WS call events do not reach the app, so the ~1.5–2 s
+`/api/calls/active` poll is the ring path; a callee who signed up **after**
+the cutover is not in the edge's frozen `users` table yet.
+
+**Durable fix (owner)**: add `TURN_KEY_ID` + `TURN_API_TOKEN` to
+`vintoxbd-comm-core` (dashboard → Variables and Secrets, encrypted), then the
+call protocol can go back to the core with the chat bubble and the sockets.
+
+Commit `e5a209ff`; tests 99/99 (4011 assertions), new case
+`test/cases/105-edge-owned-calls.mjs` (12 assertions).
