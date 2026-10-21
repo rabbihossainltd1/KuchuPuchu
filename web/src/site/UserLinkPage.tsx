@@ -79,10 +79,6 @@ export function UserLinkPage({ handle }: { handle: string }) {
         <h1 id="user-link-title">{displayName || `@${handle}`}</h1>
         {displayName ? <p className="user-link-sub">@{handle}</p> : null}
         <p className="user-link-sub">KuchuPuchu contact</p>
-        <p className="user-link-body">
-          This is a KuchuPuchu share link. Open the app to add and chat with{" "}
-          {displayName || `@${handle}`} — sealed chats, calls and status in one place.
-        </p>
         <a className="user-link-cta" href={appUrl}>
           Open in the KuchuPuchu app
         </a>

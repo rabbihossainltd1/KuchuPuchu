@@ -54,7 +54,7 @@ check(
   qrDialog.includes("const PLATE = Math.round(QR_WIDTH * 0.26)") &&
     qrDialog.includes('glyph.src = "/qr-badge.png"') &&
     qrDialog.includes("ctx.roundRect(x, y, PLATE, PLATE, PLATE_CORNER)") &&
-    qrDialog.includes("const GLYPH_INSET = PLATE * 0.1") &&
+    qrDialog.includes("const GLYPH_INSET = PLATE * 0.08") &&
     qrDialog.includes("const x = (QR_WIDTH - PLATE) / 2") &&
     !qrDialog.includes('logo.src = "/logo.png"'),
 );
@@ -63,7 +63,7 @@ check(
   qrScreen.includes("c.drawRoundRect(plateRect, corner, corner, paint)") &&
     qrScreen.includes("R.drawable.qr_badge") &&
     qrScreen.includes("val plate = 720f * 0.26f") &&
-    qrScreen.includes("val inset = plate * 0.10f") &&
+    qrScreen.includes("val inset = plate * 0.08f") &&
     !qrScreen.includes("R.drawable.icon_gold") &&
     !qrScreen.includes("drawCircle(360f, 360f"),
 );
@@ -83,8 +83,15 @@ check(
 
 /* 2 — the giant-oval photo on the web QR card --------------------------- */
 check(
-  "the QR card's avatar tile establishes its own containing block so .avatar-img can never escape into the card again",
-  styles.includes(".profile-qr__avatar {\n  position: relative;"),
+  "the QR card avatar is a dedicated img class AND its tile establishes a containing block — a stale stylesheet can never blow it up again",
+  styles.includes(".profile-qr__avatar {\n  position: relative;") &&
+    styles.includes(".profile-qr__avatar-img {") &&
+    qrDialog.includes('className="profile-qr__avatar-img"') &&
+    !qrDialog.includes('className="avatar-img"'),
+);
+check(
+  "the share landing carries NO extra instruction paragraph (owner 2026-10-21)",
+  !userLink.includes("user-link-body") && !styles.includes(".user-link-body {"),
 );
 
 /* 3 — the pill must stay glass (top-level echo of the 62/65 chain) ------ */

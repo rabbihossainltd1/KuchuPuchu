@@ -1037,16 +1037,18 @@ internal fun HomeBottomNavigation(
     // Enlarge the complete capsule and its slots while keeping the glyphs at 27dp.
     val navScale = 1.2f
     val navContentYOffset = 3.dp
-    // The reference screenshot shows the glass card about 4 px above the
-    // icon row; offset only the card (and its native blur mask) another 1.5 dp.
-    val backgroundCardYOffset = navContentYOffset + 1.5.dp
+    // The glass card IS the whole pill: same size as the icon row's box and
+    // no extra dip — before this it was shrunk to 224x46 and pushed 1.5dp
+    // below the icons, which read as "card ta nicher dike beshi hoye ache"
+    // (owner 2026-10-21).
+    val backgroundCardYOffset = 0.dp
     val itemH = 44.dp * navScale
     val gap = 4.dp * navScale
     val capsulePadding = 6.dp * navScale
     val navWindowWidth = 248.dp * navScale
     val navWindowHeight = 56.dp * navScale
-    val backgroundCardWidth = 224.dp * navScale
-    val backgroundCardHeight = 46.dp * navScale
+    val backgroundCardWidth = navWindowWidth
+    val backgroundCardHeight = navWindowHeight
     val navIconSize = 27.dp
     val navWindowWidthPx = with(density) { navWindowWidth.roundToPx() }
     val navWindowHeightPx = with(density) { navWindowHeight.roundToPx() }

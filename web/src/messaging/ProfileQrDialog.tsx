@@ -65,7 +65,7 @@ function shareUrl(code: string, username: string): string {
 const QR_WIDTH = 512;
 const PLATE = Math.round(QR_WIDTH * 0.26);
 const PLATE_CORNER = PLATE * 0.3;
-const GLYPH_INSET = PLATE * 0.1;
+const GLYPH_INSET = PLATE * 0.08;
 
 function platePath(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   ctx.beginPath();
@@ -273,7 +273,7 @@ export function ProfileQrDialog({ api, user, self, onClose }: Props) {
 
         <span className="profile-qr__avatar" aria-hidden="true">
           {avatar ? (
-            <img className="avatar-img" src={avatar} alt="" draggable={false} />
+            <img className="profile-qr__avatar-img" src={avatar} alt="" draggable={false} />
           ) : (
             title.charAt(0).toUpperCase() || "?"
           )}

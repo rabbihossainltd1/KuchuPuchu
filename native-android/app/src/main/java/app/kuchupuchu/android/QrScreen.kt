@@ -400,7 +400,7 @@ private fun MyQrPane(user: JSONObject?, isMe: Boolean) {
                                 c.drawRoundRect(plateRect, corner, corner, paint)
                                 runCatching {
                                     BitmapFactory.decodeResource(ctx.resources, R.drawable.qr_badge)?.let { mark ->
-                                        val inset = plate * 0.10f
+                                        val inset = plate * 0.08f
                                         c.drawBitmap(
                                             mark,
                                             null,

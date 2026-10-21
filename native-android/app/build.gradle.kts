@@ -81,8 +81,8 @@ android {
         applicationId = "app.kuchupuchu.android"
         minSdk = 24
         targetSdk = 35
-        versionCode = 293
-        versionName = "3.9.216"
+        versionCode = 294
+        versionName = "3.9.217"
         buildConfigField("String", "BUILD_SHA", "\"$kpBuildSha\"")
         buildConfigField("String", "COMPOSE_BOM_VERSION", "\"$kpComposeBomVersion\"")
         buildConfigField("String", "CORE_BASE", "\"$kpCoreBase\"")

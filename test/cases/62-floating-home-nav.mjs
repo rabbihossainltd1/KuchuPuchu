@@ -72,8 +72,8 @@ check(
   nav.includes("val navScale = 1.2f") &&
     nav.includes("val navWindowWidth = 248.dp * navScale") &&
     nav.includes("val navWindowHeight = 56.dp * navScale") &&
-    nav.includes("val backgroundCardWidth = 224.dp * navScale") &&
-    nav.includes("val backgroundCardHeight = 46.dp * navScale") &&
+    nav.includes("val backgroundCardWidth = navWindowWidth") &&
+    nav.includes("val backgroundCardHeight = navWindowHeight") &&
     nav.includes("val itemH = 44.dp * navScale") &&
     nav.includes("val indicatorSize = 40.dp * navScale") &&
     nav.includes("val navIconSize = 27.dp") &&
@@ -86,7 +86,7 @@ check(
 );
 check(
   "the background card sits 1.5dp below the icon/indicator baseline and carries the frosted-glass treatment itself (owner 2026-10-20)",
-  nav.includes("val backgroundCardYOffset = navContentYOffset + 1.5.dp") &&
+  nav.includes("val backgroundCardYOffset = 0.dp") &&
     nav.includes(
       ".align(Alignment.Center)\n                            .offset(y = backgroundCardYOffset)\n                            .size(backgroundCardWidth, backgroundCardHeight)\n                            .clip(CircleShape)\n                            .hazeEffect(state = hazeState) {",
     ) &&

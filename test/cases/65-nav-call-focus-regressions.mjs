@@ -143,17 +143,17 @@ check(
     nav.includes("slideInVertically("),
 );
 check(
-  "the pill contents sit 3dp lower over a truly frosted card — thin Haze tints, never an opaque slab again (owner 2026-10-21) — with the separate 1.5dp downward correction",
+  "the glass card IS the whole pill again — full 248x56 * scale, zero dip, thin Haze tints over a 28dp blur (owner 2026-10-21: card ta nicher dike beshi chilo)",
   nav.includes("val pillBase =") &&
     nav.includes("HazeTint(pillBase.copy(alpha = 0.32f))") &&
     nav.includes("val navScale = 1.2f") &&
     nav.includes("val navIconSize = 27.dp") &&
     nav.includes("val navWindowWidth = 248.dp * navScale") &&
     nav.includes("val navWindowHeight = 56.dp * navScale") &&
-    nav.includes("val backgroundCardWidth = 224.dp * navScale") &&
-    nav.includes("val backgroundCardHeight = 46.dp * navScale") &&
+    nav.includes("val backgroundCardWidth = navWindowWidth") &&
+    nav.includes("val backgroundCardHeight = navWindowHeight") &&
     nav.includes("val navContentYOffset = 3.dp") &&
-    nav.includes("val backgroundCardYOffset = navContentYOffset + 1.5.dp") &&
+    nav.includes("val backgroundCardYOffset = 0.dp") &&
     nav.includes(".offset(y = navContentYOffset)") &&
     nav.includes(".offset(y = backgroundCardYOffset)") &&
     nav.includes("+ navContentYOffset") &&

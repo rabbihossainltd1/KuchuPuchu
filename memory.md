@@ -1379,6 +1379,39 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 ---
 
 
+## 2026-10-21 (r120) — glyph fills the chip, pill glass = full pill, no extra share copy (v294 / 3.9.217 / r119)
+
+Second feedback pass same evening:
+
+1. **QR glyph too small on its plate** ("background er gap ta fill koroni") —
+   asset regenerated with a ~3% margin (was 12%) and the draw inset dropped
+   from 10% to 8% on both platforms: visible glyph ≈ 80% of the chip.
+2. **Web QR card still exploded for the owner** — even with the tile fix, a
+   stale stylesheet could re-break it because the img reused the global
+   absolutely-positioned `.avatar-img`. The dialog now renders a DEDICATED
+   class `.profile-qr__avatar-img` (static, 100%x100%, rounded) that never
+   goes through the global rule at all.
+3. **Nav glass card hung LOWER than the icons and was smaller than the
+   pill** — back to the original geometry: `backgroundCardWidth/Height =
+   navWindowWidth/Height` (full 248x56 x 1.2 pill) and
+   `backgroundCardYOffset = 0.dp` (the +1.5dp dip is gone). Blur style
+   unchanged (28dp over scaffold content, thin tints).
+4. **Share landing text removed** — the "This is a KuchuPuchu share link…"
+   paragraph is gone from UserLinkPage (photo, name, handle, CTA only) per
+   "ami extra instructions pochondo kori nai".
+
+Pill/card geometry + badge inset + avatar-class + no-copy pins re-pinned in
+cases 36/62/65/108/109; the workflow file kept getting rolled back by
+workspace snapshots and was re-restored from origin before the bump (watch
+for `.git`/node_modules/`.github` drops — re-link, fetch, checkout missing
+files, chmod +x gradlew, npm ci).
+
+Gates: unit **103/103 (4061 assertions)**; pipeline runs + live verification
+logged with the release.
+
+---
+
+
 ## 2026-10-21 — QR badge cleanup, real frosted pill, share-card photo (v293 / 3.9.216 / r118)
 
 v292 (3.9.215/r117, asset `kuchupuchu-3.9.215-r117.apk`, sha256

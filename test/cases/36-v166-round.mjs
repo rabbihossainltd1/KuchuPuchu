@@ -90,8 +90,8 @@ const pkg = readFileSync(
 
 /* the round's own bookkeeping */
 check(
-  "r119: versionCode 293 / versionName 3.9.216 (owner round 2026-10-21: QR badges wear the glyph with its background removed on a centred white rounded-square chip like WhatsApp, the nav pill is translucent frosted glass again (no opaque slab), the /@handle landing card shows the user's photo, and the brand refresh busts stale SW caches; r118 shipped: the QR code wears the app icon on a white plate like WhatsApp on phone and web, the nav pill is real frosted glass via Haze, kuchupuchu.web.app on Firebase is the public web with auto-deploy CI, and the /@handle share link opens the app through verified App Links; the v274 debug signer is reused with explicit owner approval)",
-  /versionCode\s*=\s*293\b/.test(pkg) && /versionName\s*=\s*"3\.9.216"/.test(pkg),
+  "r120: versionCode 294 / versionName 3.9.217 (owner round 2026-10-21 follow-up: the QR chip glyph now FILLS the plate, the nav glass card is the full pill again with no 1.5dp dip, the web QR avatar is a dedicated img class, and the share landing drops the extra instructions text; r119 shipped: QR badges wear the glyph with its background removed on a centred white rounded-square chip like WhatsApp, the nav pill is translucent frosted glass again (no opaque slab), the /@handle landing card shows the user's photo, and the brand refresh busts stale SW caches; r118 shipped: the QR code wears the app icon on a white plate like WhatsApp on phone and web, the nav pill is real frosted glass via Haze, kuchupuchu.web.app on Firebase is the public web with auto-deploy CI, and the /@handle share link opens the app through verified App Links; the v274 debug signer is reused with explicit owner approval)",
+  /versionCode\s*=\s*294\b/.test(pkg) && /versionName\s*=\s*"3\.9.217"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */
