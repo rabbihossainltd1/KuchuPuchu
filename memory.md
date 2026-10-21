@@ -1,5 +1,37 @@
 # Project Memory
 
+## 2026-10-20 — Firebase public web, pretty share links + App Links, QR badge, frosted nav
+
+Four owner jobs:
+
+1. QR middle icon (Android + web): WhatsApp-style brand mark on a white plate
+   in the code's centre; both sides encode at error-correction H. Android
+   composes `R.drawable.icon_gold` onto the 720px QR in QrScreen.kt; the web
+   ProfileQrDialog switched to a 512px canvas + `/logo.png` badge. QR CONTENT
+   UNCHANGED (`kuchupuchu://user/<code>`) — reset still kills leaked codes.
+2. Frosted nav (Android): the dialog-window pill + OS cross-window blur flags
+   are GONE. `dev.chrisbanes.haze:haze:1.7.3` added; KpApp's content Box
+   `.haze(homeNavHazeState)`, the pill card `.hazeEffect(state)`. In-window
+   AnimatedVisibility capsule, same 220/175 timing. Cases 62/63/65 rewritten.
+3. Firebase Hosting is the public web: fresh build deployed live to
+   https://kuchupuchu.web.app today (all four capabilities verified: SPA, CSP
+   w/ vintoxbd frame-ancestors, /download/apk redirect, assetlinks). Added
+   `.firebaserc` + `firebase.json` (was already in repo) + GitHub workflow
+   `firebase-hosting.yml`; secret `FIREBASE_SERVICE_ACCOUNT` set (uploads JSON
+   stayed out of the repo — it is in /home/user/uploads only).
+4. Pretty links: copy/share emits `https://kuchupuchu.web.app/@<username>`
+   (QrScreen + ProfileQrDialog). `web/public/{.well-known/,}assetlinks.json`
+   (identical twins) holds app.kuchupuchu.android + v274 signer SHA-256
+   `4E:3C:89:25:...:86:C4` (parsed from the v291 APK's v2 sig block). Manifest:
+   autoVerify filter for web.app + firebaseapp.com /@; MainActivity
+   pendingUserHandle -> KpApp resolves `/api/users/username/<handle>` ->
+   POST /api/conversations -> nav chat. Web router route `user-link` +
+   UserLinkPage (intent:// fallback + APK + web entry).
+
+Version 292 (3.9.215), asset `kuchupuchu-3.9.215-r117.apk`, v274 signer.
+Tests: 102/102 cases (4048 assertions); e2e shell 9, messaging 159,
+hardening 16 — all green; prettier/typecheck/ktlint clean.
+
 ## 2026-10-19 (evening) — owner bug round: 8 fixes, v291 (3.9.214)
 
 Eight owner-reported bugs, all fixed in one round:

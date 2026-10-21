@@ -122,3 +122,34 @@ test("desktop and mobile previews have no axe WCAG 2.1/2.2 A/AA violations", asy
     `mobile accessibility violations:\n${mobileViolations.join("\n")}`,
   ).toEqual([]);
 });
+
+test("the /@handle share link renders the public open-the-app landing, not a 404 (owner 2026-10-20)", async ({
+  page,
+}) => {
+  await page.goto("/@rabbihossainltd");
+
+  const card = page.locator(".user-link-card");
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("@rabbihossainltd");
+  await expect(card).toContainText("KuchuPuchu contact");
+
+  // The deep-link hand-off targets exactly the app's package with this URL.
+  const openApp = card.getByRole("link", { name: "Open in the KuchuPuchu app" });
+  const href = await openApp.getAttribute("href");
+  expect(href).toContain("intent://kuchupuchu.web.app/@rabbihossainltd");
+  expect(href).toContain("package=app.kuchupuchu.android");
+
+  // No app installed: the APK and the web app are one tap away.
+  await expect(card.getByRole("link", { name: "Download the app (Android)" })).toHaveAttribute(
+    "href",
+    "/download/apk",
+  );
+  await expect(card.getByRole("link", { name: "Open KuchuPuchu Web" })).toHaveAttribute(
+    "href",
+    "/",
+  );
+
+  // A malformed handle still 404s quietly to the real not-found path.
+  await page.goto("/@NOT-A-HANDLE");
+  await expect(page.locator(".user-link-card")).toHaveCount(0);
+});

@@ -257,6 +257,17 @@ class MainActivity : ComponentActivity() {
         if (intent.getBooleanExtra("kp_return_call", false)) CallEngine.onRestoreIntent()
         if (intent.getBooleanExtra("kp_accept", false)) CallEngine.onAcceptIntent()
         intent.getStringExtra("kp_chat")?.let { pendingChat.value = it }
+        // https://kuchupuchu.web.app/@handle — the profile share link. Regex-gated
+        // so only a clean handle lands in the resolver.
+        if (intent.action == Intent.ACTION_VIEW) {
+            val data = intent.data
+            val host = data?.host?.lowercase().orEmpty()
+            if (host == "kuchupuchu.web.app" || host == "kuchupuchu.firebaseapp.com") {
+                val handle =
+                    data?.pathSegments?.firstOrNull().orEmpty().removePrefix("@")
+                if (handle.matches(Regex("^[a-z0-9_]{3,30}$"))) pendingUserHandle.value = handle
+            }
+        }
         intent.getStringExtra("kp_class")
             ?.takeIf { it.matches(Regex("^[0-9]{1,20}$")) }
             ?.let { pendingClass.value = it }
@@ -411,6 +422,11 @@ class MainActivity : ComponentActivity() {
          *  sheet (see ShareActivity) — KpApp shows the chat picker for it. Same
          *  StateFlow shape as pendingChat, for the same cold-start reasons. */
         internal val pendingShare = kotlinx.coroutines.flow.MutableStateFlow<SharePayload?>(null)
+
+        /** Owner (2026-10-20): an opened https://kuchupuchu.web.app/@handle link
+         *  (verified App Link, or the camera-scan intent) arrives here; KpApp
+         *  resolves the handle to a chat once the account is in. */
+        internal val pendingUserHandle = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     }
 }
 

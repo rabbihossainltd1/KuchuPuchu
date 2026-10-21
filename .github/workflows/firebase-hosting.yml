@@ -1,0 +1,53 @@
+# Firebase Hosting — https://kuchupuchu.web.app is the public web (owner
+# 2026-10-20: "firebase hosted web a shob update hobe otay main website").
+# Every main push that touches the web build publishes the new PWA there; the
+# API stays on the Cloudflare worker (the build points at it via
+# VITE_KP_API_ORIGIN, and src/worker already answers CORS for the site).
+#
+# Secrets live in GitHub Actions:
+#   FIREBASE_SERVICE_ACCOUNT — the kuchupuchuff2026 service-account JSON
+#   (GOOGLE_APPLICATION_CREDENTIALS file firebase-tools authenticates with).
+name: Firebase Hosting
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "firebase.json"
+      - ".firebaserc"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/firebase-hosting.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the web PWA against the worker API
+        run: npm run build:web:firebase
+
+      - name: Verify the built service worker
+        run: npm run verify:web-sw
+
+      - name: Deploy to Firebase Hosting (kuchupuchu.web.app)
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
+        run: |
+          set -euo pipefail
+          printf '%s' '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > "${GOOGLE_APPLICATION_CREDENTIALS}"
+          npm exec --yes firebase -- deploy --only hosting --non-interactive

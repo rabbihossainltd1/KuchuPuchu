@@ -90,6 +90,18 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Owner (2026-10-20): the QR/share link is https://kuchupuchu.web.app/@handle.
+                 Verified App Links (assetlinks.json is served from the site's
+                 /.well-known) open the app straight from a tap or a camera
+                 scan on an Android phone; MainActivity resolves the handle to
+                 a chat. autoVerify requires both hosts to publish assetlinks. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="kuchupuchu.web.app" android:pathPrefix="/@" />
+                <data android:scheme="https" android:host="kuchupuchu.firebaseapp.com" android:pathPrefix="/@" />
+            </intent-filter>
             <meta-data
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />

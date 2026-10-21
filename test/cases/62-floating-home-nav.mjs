@@ -82,24 +82,15 @@ check(
     nav.includes("iconSize = navIconSize") &&
     nav.includes("sizeScale = navScale") &&
     nav.includes(".size(backgroundCardWidth, backgroundCardHeight)") &&
-    nav.includes("InsetDrawable(") &&
     nav.includes("StatusGlyphIcon(tint, navIconSize)"),
 );
 check(
-  "the background card and native-blur mask sit 1.5dp below the icon/indicator baseline without moving the contents",
+  "the background card sits 1.5dp below the icon/indicator baseline and carries the frosted-glass treatment itself (owner 2026-10-20)",
   nav.includes("val backgroundCardYOffset = navContentYOffset + 1.5.dp") &&
     nav.includes(
-      "val backgroundCardYOffsetPx = with(density) { backgroundCardYOffset.roundToPx() }",
+      ".align(Alignment.Center)\n                        .offset(y = backgroundCardYOffset)\n                        .size(backgroundCardWidth, backgroundCardHeight)\n                        .clip(CircleShape)\n                        .hazeEffect(state = hazeState)\n                        .background(pillFill),",
     ) &&
-    nav.includes(
-      ".align(Alignment.Center)\n                        .offset(y = backgroundCardYOffset)\n                        .size(backgroundCardWidth, backgroundCardHeight)",
-    ) &&
-    nav.includes("+ backgroundCardYOffsetPx).coerceAtLeast(0)") &&
-    nav.includes(
-      "val insetBottom = (navWindowHeightPx - backgroundCardHeightPx - insetY).coerceAtLeast(0)",
-    ) &&
-    nav.includes("backgroundCardYOffsetPx,") &&
-    nav.includes("            insetBottom,"),
+    nav.includes(".offset(y = navContentYOffset)"),
 );
 check(
   "tab and badge state are read inside the floating-pill scope, not by KpApp's animated NavHost",
@@ -154,47 +145,31 @@ check(
       .includes("110.dp + WindowInsets.navigationBars.getBottom(this).toDp()"),
 );
 check(
-  "bottom-nav route changes use compositor window animations rather than per-frame WindowManager relayouts",
+  "bottom-nav route changes drive the pill through Compose's compositor (AnimatedVisibility), never a per-frame WindowManager relayout",
   nav.includes("if (modalOpen)") &&
     nav.includes("dialogAttached = visible") &&
-    nav.includes("dialogWindow.setWindowAnimations(R.style.KpNavWindowAnimations)") &&
-    nav.includes("params.y = bottomOffsetPx") &&
+    nav.includes("AnimatedVisibility(") &&
+    nav.includes("slideInVertically(") &&
+    nav.includes("slideOutVertically(") &&
+    nav.includes("with(density) { bottomOffsetPx.toDp() }") &&
     !nav.includes("slideProgress") &&
-    !nav.includes("params.y = windowYOffsetPx") &&
-    fs
-      .readFileSync(
-        path.join(root, "native-android/app/src/main/res/anim/kp_nav_enter.xml"),
-        "utf8",
-      )
-      .includes('android:fromYDelta="100%"') &&
-    navEnter.includes('android:duration="180"') &&
-    navEnter.includes("@android:interpolator/fast_out_slow_in") &&
-    navExit.includes('android:toYDelta="100%"') &&
-    navExit.includes('android:duration="160"') &&
-    navExit.includes("@android:interpolator/fast_out_linear_in"),
+    !nav.includes("params.y = windowYOffsetPx"),
 );
 check(
-  "the nav pill is translucent, scales the glyphs to 27dp, and requests native cross-window blur with a support fallback",
-  nav.includes("HomeNavPillDialog(navDialogContext)") &&
-    chatList.includes("CompositionLocalProvider(LocalContext provides themedContext)") &&
-    nav.includes("R.style.KpNavDialogTheme") &&
-    nav.includes("dialogWindow.setBackgroundDrawable(pillWindowBackground)") &&
-    nav.includes("params.format = PixelFormat.TRANSLUCENT") &&
-    nav.includes("val pillFill =") &&
+  "the nav pill is a translucent frosted card — Haze samples the scaffold's own content on every device, no OS blur begging (owner 2026-10-20)",
+  nav.includes("Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter)") &&
+    nav.includes("AnimatedVisibility(") &&
+    nav.includes("visible = dialogAttached") &&
     nav.includes("copy(alpha = 0.82f)") &&
     nav.includes("val navScale = 1.2f") &&
     nav.includes("val navIconSize = 27.dp") &&
-    nav.includes("GradientDrawable()") &&
-    nav.includes("InsetDrawable(") &&
-    nav.includes("cornerRadius = backgroundCardHeightPx / 2f") &&
-    chatList.includes("setBackgroundBlurRadius(") &&
-    nav.includes("isCrossWindowBlurEnabled") &&
-    nav.includes("addCrossWindowBlurEnabledListener") &&
-    theme.includes('name="KpNavDialogTheme"') &&
-    theme.includes('name="android:windowIsTranslucent">true') &&
-    nav.includes("WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE") &&
-    nav.includes("WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()") &&
-    app.includes("HomeBottomNavigation("),
+    nav.includes(".clip(CircleShape)") &&
+    nav.includes(".hazeEffect(state = hazeState)") &&
+    !chatList.includes("setBackgroundBlurRadius(") &&
+    !chatList.includes("addCrossWindowBlurEnabledListener") &&
+    !chatList.includes("HomeNavPillDialog") &&
+    chatList.includes("import dev.chrisbanes.haze.hazeEffect") &&
+    app.includes("hazeState = homeNavHazeState,"),
 );
 check(
   "home nav exposes stable tab semantics and follows the selected content tab after reordering",

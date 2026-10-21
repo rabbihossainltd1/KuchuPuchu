@@ -13,7 +13,7 @@
  * and so does this card (own profile only).
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { authApi, type ApiClient } from "../auth/authApi";
 import { apiErrorMessage } from "../api";
@@ -40,14 +40,61 @@ type Props = {
   readonly onClose: () => void;
 };
 
-function qrLink(code: string): string {
+/* The code INSIDE the QR keeps its token shape (kuchupuchu://user/<code>) so
+ * the in-app scanner resolves it through /api/users/by-qr and a Reset still
+ * kills a leaked code. The link you COPY OUT is the pretty handle URL the
+ * owner asked for (2026-10-20): https://kuchupuchu.web.app/@handle — Android
+ * opens the app straight away (App Links); everyone else sees the web card. */
+function qrPayload(code: string): string {
   return `kuchupuchu://user/${code}`;
+}
+
+function shareUrl(code: string, username: string): string {
+  const handle = username.replace(/^@/, "").trim();
+  if (!handle) return `kuchupuchu://user/${code}`;
+  return `https://kuchupuchu.web.app/@${handle}`;
+}
+
+/* WhatsApp-style: the brand mark floats on a white plate in the middle of the
+ * code. Error correction H tolerates the covered modules (~30%), so the plate
+ * may carry the logo without sacrificing scan-ability. */
+const QR_WIDTH = 512;
+
+async function drawQrWithBadge(canvas: HTMLCanvasElement, payload: string): Promise<void> {
+  await QRCode.toCanvas(canvas, payload, {
+    errorCorrectionLevel: "H",
+    margin: 1,
+    width: QR_WIDTH,
+    color: { dark: "#0b1324", light: "#ffffff" },
+  });
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const plate = QR_WIDTH * 0.15; // plate radius — 30% diam matches the WhatsApp look
+  const cx = QR_WIDTH / 2;
+  const cy = QR_WIDTH / 2;
+  const logo = new Image();
+  logo.src = "/logo.png";
+  try {
+    await logo.decode();
+  } catch {
+    return; // the QR alone still scans; the badge is decorative
+  }
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, plate, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+  ctx.clip();
+  const inner = plate * 1.7; // logo slightly overfills the plate — brand reads crisp
+  ctx.drawImage(logo, cx - inner / 2, cy - inner / 2, inner, inner);
+  ctx.restore();
 }
 
 export function ProfileQrDialog({ api, user, self, onClose }: Props) {
   const avatar = useAvatar(api, user.avatarRef || "");
   const [code, setCode] = useState(user.qrCode ?? "");
-  const [svg, setSvg] = useState<string | null>(null);
+  const [drawn, setDrawn] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<"" | "mint" | "reset">("");
   const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
@@ -100,22 +147,26 @@ export function ProfileQrDialog({ api, user, self, onClose }: Props) {
 
   useEffect(() => {
     if (!code) {
-      setSvg(null);
+      setDrawn(false);
       return;
     }
     let cancelled = false;
-    void QRCode.toString(qrLink(code), {
-      type: "svg",
-      margin: 1,
-      width: 216,
-      color: { dark: "#0b1324", light: "#ffffff" },
-    })
-      .then((markup) => {
-        if (!cancelled) setSvg(markup);
-      })
-      .catch(() => {
-        if (!cancelled) setError("The code could not be drawn. Try again.");
-      });
+    setDrawn(false);
+    const run = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        window.requestAnimationFrame(run);
+        return;
+      }
+      void drawQrWithBadge(canvas, qrPayload(code))
+        .then(() => {
+          if (!cancelled) setDrawn(true);
+        })
+        .catch(() => {
+          if (!cancelled) setError("The code could not be drawn. Try again.");
+        });
+    };
+    run();
     return () => {
       cancelled = true;
     };
@@ -124,7 +175,7 @@ export function ProfileQrDialog({ api, user, self, onClose }: Props) {
   const copyLink = useCallback(async () => {
     if (!code) return;
     try {
-      await navigator.clipboard.writeText(qrLink(code));
+      await navigator.clipboard.writeText(shareUrl(code, user.username));
       setCopyState("copied");
       window.setTimeout(() => setCopyState("idle"), 2_000);
     } catch {
@@ -134,7 +185,7 @@ export function ProfileQrDialog({ api, user, self, onClose }: Props) {
 
   const shareLink = useCallback(async () => {
     if (!code) return;
-    const text = `Add me on KuchuPuchu: ${qrLink(code)}`;
+    const text = `Add me on KuchuPuchu: ${shareUrl(code, user.username)}`;
     if (typeof navigator.share === "function") {
       try {
         await navigator.share({ text });
@@ -222,11 +273,14 @@ export function ProfileQrDialog({ api, user, self, onClose }: Props) {
 
         {code ? (
           <span className="profile-qr__code" aria-label="QR code">
-            {svg ? (
-              <span className="profile-qr__svg" dangerouslySetInnerHTML={{ __html: svg }} />
-            ) : (
-              <span className="profile-qr__loading">Drawing the code…</span>
-            )}
+            <canvas
+              ref={canvasRef}
+              className="profile-qr__canvas"
+              width={QR_WIDTH}
+              height={QR_WIDTH}
+              aria-hidden="true"
+            />
+            {!drawn ? <span className="profile-qr__loading">Drawing the code…</span> : null}
           </span>
         ) : (
           <span className="profile-qr__statebox">

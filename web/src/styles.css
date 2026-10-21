@@ -132,6 +132,89 @@ input:disabled {
   background: rgba(13, 21, 36, 0.92);
 }
 
+/* Public /@handle share-link landing (owner 2026-10-20): a single centred card
+ on the brand's night background — no app chrome, no auth gate. */
+.user-link-page {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(1200px 600px at 50% -10%, #16233f 0%, #0b1324 60%);
+  color: #e8edf7;
+  padding: 24px;
+}
+.user-link-card {
+  width: min(400px, 100%);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  padding: 36px 28px 28px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.user-link-logo {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+}
+.user-link-card h1 {
+  margin: 4px 0 0;
+  font-size: 24px;
+  letter-spacing: 0.01em;
+}
+.user-link-sub {
+  margin: 0;
+  color: #9aa7c2;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.user-link-body {
+  margin: 8px 0 10px;
+  color: #c3cddf;
+  font-size: 14.5px;
+  line-height: 1.55;
+}
+.user-link-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 13px 18px;
+  border-radius: 999px;
+  background: #2b5bd7;
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 15px;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+.user-link-cta:hover,
+.user-link-cta:focus-visible {
+  background: #3b6ae0;
+}
+.user-link-alt {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+  font-size: 13px;
+  color: #8d9ab6;
+}
+.user-link-alt a {
+  color: #8fb0ff;
+  text-decoration: none;
+}
+.user-link-alt a:hover,
+.user-link-alt a:focus-visible {
+  text-decoration: underline;
+}
+
 .brand-lockup {
   display: grid;
   width: 48px;
@@ -1181,6 +1264,11 @@ a:focus-visible {
   padding: 4px;
 }
 
+.profile-qr__canvas {
+  display: block;
+  width: 216px;
+  height: 216px;
+}
 .profile-qr__svg,
 .profile-qr__svg svg {
   display: block;

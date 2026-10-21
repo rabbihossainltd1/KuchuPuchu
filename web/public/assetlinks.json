@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.kuchupuchu.android",
+      "sha256_cert_fingerprints": [
+        "4E:3C:89:25:D2:1E:BA:B9:4D:E0:9F:94:AE:58:95:51:CB:CE:A6:14:8B:99:39:43:14:25:27:CC:6A:54:86:C4"
+      ]
+    }
+  }
+]

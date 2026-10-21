@@ -67,6 +67,12 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.navigation.NavController
 import com.google.zxing.BarcodeFormat
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Paint
+import android.graphics.Canvas as AndroidCanvas
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import com.journeyapps.barcodescanner.BarcodeEncoder
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -86,6 +92,17 @@ import org.json.JSONObject
  * this phone confirms it: opening the scanner and pointing it at the one code
  * on the screen already is the consent, so there is no second approval tap.
  */
+/** Owner (2026-10-20: "link ta emon hobe kuchupuchu.web.app/@rabbihossainltd"):
+ * the public share link is the pretty handle URL — Android hands it to the app
+ * via App Links, browsers show the site's /@handle card. The code INSIDE the
+ * QR keeps its token form (kuchupuchu://user/<code>) so Reset still kills a
+ * leaked code; the handle alone cannot add anyone. */
+private fun kpShareLink(username: String, qrCode: String): String {
+    val handle = username.trim().removePrefix("@")
+    if (handle.isBlank()) return "kuchupuchu://user/$qrCode"
+    return "https://kuchupuchu.web.app/@$handle"
+}
+
 @Composable
 fun QrScreen(nav: NavController, userId: String) {
     val isMe = userId.isNotBlank() && userId == Store.myId()
@@ -346,15 +363,49 @@ private fun MyQrPane(user: JSONObject?, isMe: Boolean) {
                 if (qrCode.isBlank()) {
                     CircularProgressIndicator(color = ActionBlueDeep)
                 } else {
+                    // Owner (2026-10-20, "qr er majhe whatsapp er icon ... amar
+                    // app er icon"): like WhatsApp's card the brand mark sits
+                    // on a white plate in the middle of the code. The code is
+                    // encoded at error-correction H (30% damage tolerated), so
+                    // the plate never costs a scan.
                     val bmp =
                         remember(qrCode) {
                             runCatching {
-                                BarcodeEncoder().encodeBitmap(
-                                    "kuchupuchu://user/$qrCode",
-                                    BarcodeFormat.QR_CODE,
-                                    720,
-                                    720,
-                                )
+                                val hints =
+                                    java.util.EnumMap<EncodeHintType, Any>(EncodeHintType::class.java).apply {
+                                        put(EncodeHintType.ERROR_CORRECTION, ErrorCorrectionLevel.H)
+                                    }
+                                val base =
+                                    BarcodeEncoder().encodeBitmap(
+                                        "kuchupuchu://user/$qrCode",
+                                        BarcodeFormat.QR_CODE,
+                                        720,
+                                        720,
+                                        hints,
+                                    )
+                                val merged = base.copy(Bitmap.Config.ARGB_8888, true)
+                                val plate = 720f * 0.15f // plate radius matches WhatsApp's proportions
+                                val c = AndroidCanvas(merged)
+                                val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+                                paint.color = android.graphics.Color.WHITE
+                                c.drawCircle(360f, 360f, plate, paint)
+                                runCatching {
+                                    BitmapFactory.decodeResource(ctx.resources, R.drawable.icon_gold)?.let { mark ->
+                                        val inner = (plate * 1.7f).toInt()
+                                        c.drawBitmap(
+                                            mark,
+                                            null,
+                                            android.graphics.Rect(
+                                                (360 - inner / 2),
+                                                (360 - inner / 2),
+                                                (360 + inner / 2),
+                                                (360 + inner / 2),
+                                            ),
+                                            paint,
+                                        )
+                                    }
+                                }
+                                merged
                             }.getOrNull()
                         }
                     if (bmp != null) {
@@ -394,7 +445,7 @@ private fun MyQrPane(user: JSONObject?, isMe: Boolean) {
                                 cm.setPrimaryClip(
                                     android.content.ClipData.newPlainText(
                                         "KuchuPuchu QR link",
-                                        "kuchupuchu://user/$qrCode",
+                                        kpShareLink(username, qrCode),
                                     ),
                                 )
                                 Toast.makeText(ctx, "QR link copied.", Toast.LENGTH_SHORT).show()
@@ -418,7 +469,7 @@ private fun MyQrPane(user: JSONObject?, isMe: Boolean) {
                                 val share =
                                     android.content.Intent(android.content.Intent.ACTION_SEND)
                                         .setType("text/plain")
-                                        .putExtra(android.content.Intent.EXTRA_TEXT, "Add me on KuchuPuchu: kuchupuchu://user/$qrCode")
+                                        .putExtra(android.content.Intent.EXTRA_TEXT, "Add me on KuchuPuchu: ${kpShareLink(username, qrCode)}")
                                 runCatching { ctx.startActivity(android.content.Intent.createChooser(share, "Share your code")) }
                                     .onFailure { Toast.makeText(ctx, "No app can take the share.", Toast.LENGTH_SHORT).show() }
                             },

@@ -146,7 +146,7 @@ test("the phone's QR button on every profile: the card shows the code with link 
   await expect(card).toContainText(PEER_NAME);
   await expect(card).toContainText("@rahi");
   // A drawn QR means the peer's share code rendered — no dead box.
-  await expect(card.locator(".profile-qr__code svg")).toBeVisible();
+  await expect(card.locator(".profile-qr__code canvas")).toBeVisible();
   await expect(card.getByRole("button", { name: "Copy link" })).toBeEnabled();
   await expect(card.getByRole("button", { name: "Share" })).toBeEnabled();
 
@@ -154,7 +154,7 @@ test("the phone's QR button on every profile: the card shows the code with link 
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await card.getByRole("button", { name: "Copy link" }).click();
   const copied = await page.evaluate(() => navigator.clipboard.readText());
-  expect(copied).toBe("kuchupuchu://user/0f1e2d3c4b5a69788796a5b4c3d2e1f0");
+  expect(copied).toBe("https://kuchupuchu.web.app/@rahi");
   await expect(card.getByRole("button", { name: "Copied" })).toBeVisible();
 
   await page.keyboard.press("Escape");

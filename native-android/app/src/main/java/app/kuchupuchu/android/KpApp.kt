@@ -31,6 +31,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.compose.foundation.layout.Box
+import dev.chrisbanes.haze.haze
+import dev.chrisbanes.haze.HazeState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -66,6 +68,10 @@ fun KpApp() {
         HomeNavOrderPolicy.normalize(ids)
     }
     val homeNavOrderPending = currentUser?.optBoolean("_homeNavOrderPending") == true
+    // Owner (2026-10-20): the home nav pill's frosted backdrop samples this
+    // state's content (Haze). One state for the whole scaffold: the content
+    // Box carries .haze(), the pill's background card carries .hazeEffect().
+    val homeNavHazeState = remember { dev.chrisbanes.haze.HazeState() }
 
     // A reorder is cached immediately on this install, then retried through the
     // authenticated account endpoint after reconnect/relaunch until the server
@@ -316,6 +322,7 @@ fun KpApp() {
               Box(
                   Modifier
                       .fillMaxSize()
+                      .haze(state = homeNavHazeState)
                       .then(if (bannerUp) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier),
               ) {
             // r70-4 (owner, on the r69 fix: "jodi [peer] chat screen a na
@@ -511,6 +518,35 @@ fun KpApp() {
             // the same multi-select picker as Forward, titled "Send to". The
             // sends run on ShareSend's own scope; one target opens that chat.
             val share by MainActivity.pendingShare.collectAsState()
+
+            // Owner (2026-10-20): the web.app/@handle share link opened the app
+            // (verified App Link). Resolve the handle exactly like the About
+            // screen's developer chip does: user lookup, then open (creating
+            // it on demand) the 1:1 conversation.
+            val userHandle by MainActivity.pendingUserHandle.collectAsState()
+            LaunchedEffect(userHandle, authed) {
+                val handle = userHandle
+                if (handle.isNullOrBlank() || !authed) return@LaunchedEffect
+                MainActivity.pendingUserHandle.value = null
+                runCatching {
+                    val data =
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            Api.get("/api/users/username/" + java.net.URLEncoder.encode(handle, "UTF-8"), true)
+                        }
+                    val id = data.optJSONObject("user")?.optString("id").orEmpty()
+                    if (id.isBlank()) return@runCatching
+                    val cached = ScreenStore.convIdForUser[id]
+                    val convId =
+                        cached ?: kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            Api.post("/api/conversations", org.json.JSONObject().put("userId", id))
+                        }.optJSONObject("conversation")?.optString("id").orEmpty()
+                    if (convId.isNotBlank()) {
+                        ScreenStore.convIdForUser[id] = convId
+                        nav.navigate("chat/$convId") { launchSingleTop = true }
+                    }
+                }
+            }
+ 
             share?.takeIf { authed }?.let { payload ->
                 ForwardDialog(
                     onClose = {
@@ -541,6 +577,7 @@ fun KpApp() {
         val rootHaptics = rememberHaptics()
         HomeBottomNavigation(
             selectedTab = homeTab,
+            hazeState = homeNavHazeState,
             visible = authed && actualRoute == "main" && HomeNavState.visible.value && !callFullscreen && !modalWindowVisible,
             modalOpen = modalWindowVisible,
             userId = accountId,

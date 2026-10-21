@@ -1,12 +1,5 @@
 package app.kuchupuchu.android
 
-import android.graphics.PixelFormat
-import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.InsetDrawable
-import android.os.Build
-import android.view.Gravity
-import android.view.Window
-import android.view.WindowManager
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -17,6 +10,9 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import dev.chrisbanes.haze.hazeEffect
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
@@ -99,7 +95,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
@@ -140,7 +135,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -148,9 +142,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import kotlinx.coroutines.Dispatchers
@@ -170,13 +161,6 @@ internal object HomeNavState {
     val visible = mutableStateOf(true)
 }
 
-private fun setNavPillWindowBlur(window: Window, enabled: Boolean, radiusPx: Int) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        // Background blur is clipped to the pill's rounded window drawable;
-        // unlike FLAG_BLUR_BEHIND it does not blur the rest of the screen.
-        window.setBackgroundBlurRadius(if (enabled) radiusPx else 0)
-    }
-}
 
 @Composable
 fun ChatListScreen(nav: NavController, selectedTab: MutableIntState) {
@@ -1005,6 +989,7 @@ private fun ListTicks(read: Boolean, delivered: Boolean = read) {
 @Composable
 internal fun HomeBottomNavigation(
     selectedTab: MutableIntState,
+    hazeState: dev.chrisbanes.haze.HazeState,
     visible: Boolean,
     modalOpen: Boolean,
     userId: String,
@@ -1064,45 +1049,11 @@ internal fun HomeBottomNavigation(
     val backgroundCardWidthPx = with(density) { backgroundCardWidth.roundToPx() }
     val backgroundCardHeightPx = with(density) { backgroundCardHeight.roundToPx() }
     val backgroundCardYOffsetPx = with(density) { backgroundCardYOffset.roundToPx() }
-    val navBlurRadiusPx = with(density) { 24.dp.roundToPx() }
     val bottomOffsetPx = WindowInsets.navigationBars.getBottom(density) + with(density) { 16.dp.roundToPx() }
     val indicatorSize = 40.dp * navScale
     val indicatorEasing = remember { CubicBezierEasing(0.34f, 1.45f, 0.5f, 1f) }
     val windowInteractive = visible && !modalOpen
-    val dialogWindowRef = remember { arrayOfNulls<android.view.Window>(1) }
     var dialogAttached by remember { mutableStateOf(visible && !modalOpen) }
-    val baseContext = LocalContext.current
-    val navDialogContext = remember(baseContext) {
-        android.view.ContextThemeWrapper(baseContext, R.style.KpNavDialogTheme)
-    }
-    // Use a transparent rounded inset drawable so Android clips its native
-    // background blur to the same capsule bounds as the painted card.
-    val pillWindowBackground = remember(
-        navWindowWidthPx,
-        navWindowHeightPx,
-        backgroundCardWidthPx,
-        backgroundCardHeightPx,
-        backgroundCardYOffsetPx,
-    ) {
-        val insetX = ((navWindowWidthPx - backgroundCardWidthPx) / 2).coerceAtLeast(0)
-        val insetY =
-            ((navWindowHeightPx - backgroundCardHeightPx) / 2 + backgroundCardYOffsetPx).coerceAtLeast(0)
-        val insetBottom = (navWindowHeightPx - backgroundCardHeightPx - insetY).coerceAtLeast(0)
-        val rounded =
-            GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                setColor(android.graphics.Color.TRANSPARENT)
-                cornerRadius = backgroundCardHeightPx / 2f
-            }
-        InsetDrawable(
-            rounded,
-            insetX,
-            insetY,
-            (navWindowWidthPx - backgroundCardWidthPx - insetX).coerceAtLeast(0),
-            insetBottom,
-        )
-    }
-
     LaunchedEffect(visible, modalOpen) {
         if (modalOpen) {
             // Preserve the old immediate hide while a sheet owns the screen.
@@ -1113,84 +1064,30 @@ internal fun HomeBottomNavigation(
         }
     }
 
-    if (dialogAttached) {
-        HomeNavPillDialog(navDialogContext) {
-            val dialogView = LocalView.current
-            val dialogWindow = (dialogView.parent as? DialogWindowProvider)?.window
-            DisposableEffect(
-                dialogWindow,
-                navWindowWidthPx,
-                navWindowHeightPx,
-                bottomOffsetPx,
-                navBlurRadiusPx,
-                pillWindowBackground,
-            ) {
-                var blurWindowManager: WindowManager? = null
-                var blurListener: java.util.function.Consumer<Boolean>? = null
-                if (dialogWindow != null) {
-                    dialogWindowRef[0] = dialogWindow
-                    // Let WindowManager animate the whole translucent surface.
-                    // Updating LayoutParams.y from Compose every frame forced a
-                    // relayout on each frame, causing the reported stutter.
-                    dialogWindow.setWindowAnimations(R.style.KpNavWindowAnimations)
-                    dialogWindow.setBackgroundDrawable(pillWindowBackground)
-                    dialogView.elevation = 0f
-                    dialogView.translationZ = 0f
-                    dialogWindow.decorView.elevation = 0f
-                    dialogWindow.decorView.translationZ = 0f
-                    dialogWindow.setDimAmount(0f)
-                    val params = dialogWindow.attributes
-                    params.format = PixelFormat.TRANSLUCENT
-                    params.width = navWindowWidthPx
-                    params.height = navWindowHeightPx
-                    params.windowAnimations = R.style.KpNavWindowAnimations
-                    params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                    params.x = 0
-                    params.y = bottomOffsetPx
-                    params.flags =
-                        (params.flags or
-                            WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or
-                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL) and
-                            WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv() and
-                            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        // The window y is the bottom inset; don't apply it twice.
-                        params.setFitInsetsSides(0)
-                        params.setFitInsetsTypes(0)
-                    }
-                    dialogWindow.attributes = params
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        blurWindowManager = dialogView.context.getSystemService(WindowManager::class.java)
-                        blurWindowManager?.let { manager ->
-                            val listener = java.util.function.Consumer<Boolean> { enabled ->
-                                setNavPillWindowBlur(dialogWindow, enabled, navBlurRadiusPx)
-                            }
-                            blurListener = listener
-                            setNavPillWindowBlur(dialogWindow, manager.isCrossWindowBlurEnabled, navBlurRadiusPx)
-                            val mainExecutor = java.util.concurrent.Executor { command ->
-                                dialogView.post { command.run() }
-                                Unit
-                            }
-                            manager.addCrossWindowBlurEnabledListener(mainExecutor, listener)
-                        }
-                    }
-                }
-                onDispose {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        blurListener?.let { listener ->
-                            blurWindowManager?.removeCrossWindowBlurEnabledListener(listener)
-                        }
-                    }
-                    if (dialogWindow != null) {
-                        setNavPillWindowBlur(dialogWindow, enabled = false, radiusPx = 0)
-                    }
-                    if (dialogWindowRef[0] === dialogWindow) dialogWindowRef[0] = null
-                }
-            }
+    // Owner (2026-10-20: "nav bar er background card ta blur same kore daw"):
+    // the pill used to ride its own dialog window and beg the OS for a
+    // cross-window background blur — which most OEMs disable and Android 15
+    // refuses for floating windows, so the card read as plain translucency.
+    // It now draws INSIDE the app's own window: the scaffold content Box in
+    // KpApp carries .haze(homeNavHazeState), and this card carries .hazeEffect —
+    // real frosted glass on every device, emoji-blur style, no OS permission.
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+        AnimatedVisibility(
+            visible = dialogAttached,
+            enter =
+                slideInVertically(
+                    animationSpec = tween(220, easing = FastOutSlowInEasing),
+                    initialOffsetY = { fullHeight -> fullHeight },
+                ) + fadeIn(tween(220)),
+            exit =
+                slideOutVertically(
+                    animationSpec = tween(175),
+                    targetOffsetY = { fullHeight -> fullHeight },
+                ) + fadeOut(tween(175)),
+        ) {
             BoxWithConstraints(
                 Modifier
+                    .padding(bottom = with(density) { bottomOffsetPx.toDp() })
                     .size(navWindowWidth, navWindowHeight)
                     .then(if (windowInteractive) Modifier else Modifier.clearAndSetSemantics {})
                     .clip(CircleShape),
@@ -1201,6 +1098,7 @@ internal fun HomeBottomNavigation(
                         .offset(y = backgroundCardYOffset)
                         .size(backgroundCardWidth, backgroundCardHeight)
                         .clip(CircleShape)
+                        .hazeEffect(state = hazeState)
                         .background(pillFill),
                 )
                 val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4
@@ -1375,25 +1273,6 @@ internal fun HomeBottomNavigation(
     }
 }
 
-
-@Composable
-private fun HomeNavPillDialog(
-    themedContext: android.content.Context,
-    content: @Composable () -> Unit,
-) {
-    CompositionLocalProvider(LocalContext provides themedContext) {
-        Dialog(
-            onDismissRequest = {},
-            properties = DialogProperties(
-                dismissOnBackPress = false,
-                dismissOnClickOutside = false,
-                usePlatformDefaultWidth = false,
-                decorFitsSystemWindows = true,
-            ),
-            content = content,
-        )
-    }
-}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable

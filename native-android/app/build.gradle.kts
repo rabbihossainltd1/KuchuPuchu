@@ -81,8 +81,8 @@ android {
         applicationId = "app.kuchupuchu.android"
         minSdk = 24
         targetSdk = 35
-        versionCode = 291
-        versionName = "3.9.214"
+        versionCode = 292
+        versionName = "3.9.215"
         buildConfigField("String", "BUILD_SHA", "\"$kpBuildSha\"")
         buildConfigField("String", "COMPOSE_BOM_VERSION", "\"$kpComposeBomVersion\"")
         buildConfigField("String", "CORE_BASE", "\"$kpCoreBase\"")
@@ -201,6 +201,12 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("io.getstream:stream-webrtc-android:1.1.3")
+    // Owner (2026-10-20, "nav bar er background card ta blur same kore daw"):
+    // the home pill's frosted-glass backdrop. The old path leaned on the OS
+    // cross-window blur flags, which most OEMs disable and Android 15 ignores
+    // for floating windows; Haze samples the scaffold's own content and blurs
+    // it inside the card on every API level. Exact pin, like every dep here.
+    implementation("dev.chrisbanes.haze:haze:1.7.3")
     // Push notifications (Messenger mode). Firebase is initialized at runtime
     // from the worker's /api/config/firebase — no google-services.json needed
     // in the build, so the app works fine before FCM is set up.

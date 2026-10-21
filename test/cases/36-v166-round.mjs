@@ -90,8 +90,8 @@ const pkg = readFileSync(
 
 /* the round's own bookkeeping */
 check(
-  "r117: versionCode 291 / versionName 3.9.214 (owner bug round 2026-10-19: the single-layer composer with a real caret and live bold, the QR caption traded for copy/share icons, the logo on the official accounts, and the web's call-screen rows, shared-screen aspect, multi-device ring, message ticks and per-profile QR cards; the v274 debug signer is reused with explicit owner approval)",
-  /versionCode\s*=\s*291\b/.test(pkg) && /versionName\s*=\s*"3\.9.214"/.test(pkg),
+  "r118: versionCode 292 / versionName 3.9.215 (owner round 2026-10-20: the QR code wears the app icon on a white plate like WhatsApp on phone and web, the nav pill is real frosted glass via Haze, kuchupuchu.web.app on Firebase is the public web with auto-deploy CI, and the /@handle share link opens the app through verified App Links; the v274 debug signer is reused with explicit owner approval)",
+  /versionCode\s*=\s*292\b/.test(pkg) && /versionName\s*=\s*"3\.9.215"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */

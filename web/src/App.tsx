@@ -8,6 +8,7 @@ import { AccountSettingsPage } from "./auth/AccountSettingsPage";
 import { AuthScreen } from "./auth/AuthScreen";
 import { WelcomePage, useIsMobileViewport } from "./auth/WelcomePage";
 import { SitePage } from "./site/SitePages";
+import { UserLinkPage } from "./site/UserLinkPage";
 import { useAuth } from "./auth/AuthContext";
 import { useProfileAvatar } from "./auth/useProfileAvatar";
 
@@ -267,6 +268,14 @@ export default function App() {
   // privacy / data / terms) are public content — they render for everyone,
   // signed in or not, and stay reachable even on phones, because a link to
   // /privacy must never dead-end on the app-download gate.
+  // Owner (2026-10-20): the shared profile link /@handle is public too — the
+  // same must-not-dead-end rule as the static pages, because Android App
+  // Links only intercept it when the app is installed; everyone else lands
+  // here and still needs a working page.
+  if (route.kind === "user-link") {
+    return <UserLinkPage handle={route.handle} />;
+  }
+
   if (route.kind === "site") {
     return (
       <SitePage
@@ -598,7 +607,7 @@ export default function App() {
                   {!isOnline ? "Browser offline" : user ? "Account connected" : "Preview only"}
                 </span>
                 <span className="list-footer__spacer" />
-                <span className="footer-version">Web 3.9.214</span>
+                <span className="footer-version">Web 3.9.215</span>
               </footer>
             </section>
 

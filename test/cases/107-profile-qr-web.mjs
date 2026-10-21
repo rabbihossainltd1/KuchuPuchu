@@ -39,9 +39,11 @@ check(
 
 check(
   "the QR card exists (avatar, name, @username, the code, copy/share/reset actions)",
-  dialog.includes(".profile-qr__code") === false && // it stamps dangerouslySetInnerHTML-markup, the selector
-    dialog.includes("QRCode.toString(") &&
-    dialog.includes("kuchupuchu://user/") &&
+  !dialog.includes('className=".profile-qr__code"') && // the dotted form is a CSS selector, never a JSX class
+    dialog.includes('className="profile-qr__code"') &&
+    dialog.includes('errorCorrectionLevel: "H"') &&
+    dialog.includes("kuchupuchu.web.app/@") &&
+    dialog.includes("kuchupuchu://user/${code}") && // the QR payload keeps its reset table token
     dialog.includes("Copy link") &&
     dialog.includes("Share") &&
     dialog.includes("Reset code"),

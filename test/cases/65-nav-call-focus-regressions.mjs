@@ -94,18 +94,17 @@ check(
     nav.includes(".offset(x = indicatorX, y = indicatorY)"),
 );
 check(
-  "WindowManager animates the pill as one surface; Compose no longer relayouts the window every frame",
-  nav.includes("if (dialogAttached)") &&
-    nav.includes("dialogWindow.setWindowAnimations(R.style.KpNavWindowAnimations)") &&
-    nav.includes("dialogWindowRef[0]?.setWindowAnimations(0)") &&
-    nav.includes("params.y = bottomOffsetPx") &&
+  "the pill rides the app window as one compositor surface and slides in/out with the same capsule timing (owner 2026-10-20)",
+  nav.includes("Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter)") &&
+    nav.includes("AnimatedVisibility(") &&
+    nav.includes("visible = dialogAttached") &&
+    nav.includes("slideInVertically(") &&
+    nav.includes("initialOffsetY = { fullHeight -> fullHeight }") &&
+    nav.includes("tween(220, easing = FastOutSlowInEasing)") &&
+    nav.includes("slideOutVertically(") &&
+    nav.includes("targetOffsetY = { fullHeight -> fullHeight }") &&
+    nav.includes("with(density) { bottomOffsetPx.toDp() }") &&
     nav.includes("copy(alpha = 0.82f)") &&
-    chatList.includes("setBackgroundBlurRadius(") &&
-    nav.includes("WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()") &&
-    theme.includes("@anim/kp_nav_enter") &&
-    theme.includes("@anim/kp_nav_exit") &&
-    navEnter.includes('android:fromYDelta="100%"') &&
-    navExit.includes('android:toYDelta="100%"') &&
     !nav.includes("slideProgress") &&
     !nav.includes("params.y = windowYOffsetPx"),
 );
@@ -139,10 +138,11 @@ check(
     ) &&
     !kpApp.includes("ChatRouteEntryMotion(") &&
     !nav.includes("windowYOffsetPx") &&
-    nav.includes("R.style.KpNavWindowAnimations"),
+    nav.includes("AnimatedVisibility(") &&
+    nav.includes("slideInVertically("),
 );
 check(
-  "the pill contents sit 3dp lower while its background card and matching native blur mask get a separate 1.5dp downward correction",
+  "the pill contents sit 3dp lower while its frosted background card gets a separate 1.5dp downward correction",
   nav.includes("val pillFill =") &&
     nav.includes("copy(alpha = 0.82f)") &&
     nav.includes("val navScale = 1.2f") &&
@@ -156,23 +156,12 @@ check(
     nav.includes(".offset(y = navContentYOffset)") &&
     nav.includes(".offset(y = backgroundCardYOffset)") &&
     nav.includes("+ navContentYOffset") &&
-    nav.includes("backgroundCardYOffsetPx") &&
-    nav.includes(
-      "val insetBottom = (navWindowHeightPx - backgroundCardHeightPx - insetY).coerceAtLeast(0)",
-    ) &&
     nav.includes(
       ".offset(y = backgroundCardYOffset)\n                        .size(backgroundCardWidth, backgroundCardHeight)",
     ) &&
-    nav.includes(".background(pillFill)") &&
-    nav.includes("InsetDrawable(") &&
-    nav.includes("dialogWindow.setBackgroundDrawable(pillWindowBackground)") &&
-    chatList.includes("setBackgroundBlurRadius(") &&
-    nav.includes("isCrossWindowBlurEnabled") &&
-    nav.includes(".clip(CircleShape)") &&
-    nav.includes(".background(indicatorColor)") &&
-    !nav.includes("glassEdge") &&
-    !nav.includes("selectedBorder") &&
-    !nav.includes(".border(1.25.dp"),
+    nav.includes(
+      ".clip(CircleShape)\n                        .hazeEffect(state = hazeState)",
+    ),
 );
 check(
   "default-network recovery evicts stale HTTP sockets, retries the outbox, and refreshes visible feeds",

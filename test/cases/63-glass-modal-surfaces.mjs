@@ -174,14 +174,15 @@ check(
     ui.includes(".border(1.dp, borderColor ?: if (focused) ActionBlue"),
 );
 check(
-  "home nav keeps modal suppression and a translucent floating fill with native background blur",
-  nav.includes("if (dialogAttached)") &&
-    nav.includes("dialogWindowRef[0]?.setWindowAnimations(0)") &&
+  "home nav keeps modal suppression and its translucent floating fill, now frosted through Haze instead of a native window blur (owner 2026-10-20)",
+  nav.includes("var dialogAttached by remember { mutableStateOf(visible && !modalOpen) }") &&
     !nav.includes("slideProgress") &&
-    nav.includes("Dialog(") &&
-    nav.includes("WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE") &&
+    nav.includes("AnimatedVisibility(") &&
+    nav.includes("visible = dialogAttached") &&
     nav.includes("copy(alpha = 0.82f)") &&
-    chatList.includes("setBackgroundBlurRadius(") &&
+    !nav.includes("Dialog(") &&
+    !nav.includes("WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE") &&
+    !chatList.includes("setBackgroundBlurRadius(") &&
     kpApp.includes("modalOpen = modalWindowVisible"),
 );
 

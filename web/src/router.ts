@@ -32,6 +32,7 @@ export type AppRoute =
   | { kind: "section"; section: SectionId }
   | { kind: "conversation"; conversationId: string }
   | { kind: "site"; page: SitePageId }
+  | { kind: "user-link"; handle: string }
   | { kind: "not-found" };
 
 export type NavigableRoute = Exclude<AppRoute, { kind: "not-found" }>;
@@ -69,6 +70,20 @@ export function parseRoute(pathname: string): AppRoute {
 
   const rawSection = decodeSegment(segments[0]!);
   if (!rawSection) return { kind: "not-found" };
+
+  /* Owner (2026-10-20): the shared profile code / link is
+   * https://kuchupuchu.web.app/@handle — one segment beginning with "@", same
+   * shape as the handle QrScreen and the QR dialog copy out. Android App Links
+   * hand this URL to the app straight away; here it renders the public
+   * open-the-app landing instead of a 404. */
+  if (segments.length === 1 && rawSection.startsWith("@")) {
+    const handle = rawSection.slice(1);
+    // KuchuPuchu handles are lowercase slugs (login gates them to ^[a-z0-9_]{3,20};
+    // a little slack kept for legacy rows).
+    if (/^[a-z0-9_]{3,30}$/.test(handle)) return { kind: "user-link", handle };
+    return { kind: "not-found" };
+  }
+
   const section = rawSection.toLowerCase();
 
   if (segments.length === 1 && sectionSet.has(section)) {
@@ -102,6 +117,7 @@ export function pathForRoute(route: NavigableRoute): string {
   if (route.kind === "home") return "/";
   if (route.kind === "section") return `/${route.section}`;
   if (route.kind === "site") return `/${route.page}`;
+  if (route.kind === "user-link") return `/@${route.handle}`;
   return `/chats/${encodeURIComponent(route.conversationId)}`;
 }
 
