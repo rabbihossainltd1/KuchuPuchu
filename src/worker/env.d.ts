@@ -36,6 +36,13 @@ declare global {
     writeHttpMetadata(headers: Headers): void;
   }
 
+  /** Workers AI binding — the small slice of the surface the worker uses.
+   *  Chat-completion models answer with an OpenAI-style payload
+   *  (choices[0].message.content); older models answer { response }. */
+  interface Ai {
+    run(model: string, inputs: Record<string, unknown>): Promise<unknown>;
+  }
+
   interface R2Bucket {
     get(key: string): Promise<R2Object | null>;
     put(

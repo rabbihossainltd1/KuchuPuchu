@@ -138,6 +138,14 @@ export type Env = {
   LOGIN_OTP_HMAC_SECRET?: string;
   /** Gemini API key — powers all KuchuPuchu AI chat, vision, voice, and image turns. */
   GEMINI_API_KEY?: string;
+  /** Workers AI binding ([ai] in wrangler.toml). Owner round 120 (2026-10-21,
+   *  "ai bot... tar reply ami pascchi, but... massage ja dibo... ekta hint
+   *  shob somoy"): the account's GEMINI_API_KEY secret had never been
+   *  provisioned, so EVERY text turn fell back to the canned greeting. When
+   *  no Gemini key exists, the text brain falls back to the account-owned
+   *  free-tier Workers AI models (chat/answers); vision, voice and image
+   *  turns stay Gemini-only. */
+  AI?: Ai;
   /** Slice J cutover: the Workers Assets binding for the built React PWA
    *  (web/dist). Present in the production config ([assets] binding =
    *  "ASSETS"); absent in binding-free preview uploads, where the worker is
@@ -1293,6 +1301,50 @@ async function geminiChat(
   }
 }
 
+/** Worker v: the account-owned fallback brain. Owner round 120 (2026-10-21):
+ *  the GEMINI_API_KEY secret was never provisioned on the account, so every
+ *  AI-chat text turn answered with the canned greeting. When the key is
+ *  absent we run the same single-shot prompt on the account's OWN Workers AI
+ *  chat models — free on the free tier, no external account or key to leak.
+ *  Verified live against this account on 2026-10-21 (llama-4-scout and
+ *  llama-3.3-70b both answer; llama-3.1-8b was deprecated 2026-05-30). */
+const WORKERS_AI_CHAT_MODELS = [
+  "@cf/meta/llama-4-scout-17b-16e-instruct",
+  "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  "@cf/meta/llama-3.2-3b-instruct",
+] as const;
+
+async function workersAiChat(env: Env, prompt: string, maxTokens: number): Promise<string | null> {
+  if (!env.AI) return null;
+  for (const model of WORKERS_AI_CHAT_MODELS) {
+    try {
+      const data = (await env.AI.run(model, {
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: maxTokens,
+        temperature: 0.7,
+      })) as {
+        choices?: { message?: { content?: string } }[];
+        response?: string;
+      } | null;
+      const text = completeAiText(
+        String(data?.choices?.[0]?.message?.content ?? data?.response ?? ""),
+      );
+      if (text) return text;
+    } catch (err) {
+      try {
+        await env.DB.prepare("INSERT INTO error_log (id, stack, created_at) VALUES (?, ?, ?)")
+          .bind(
+            crypto.randomUUID(),
+            `workers-ai ${model}: ${String((err as Error)?.message ?? err)}`.slice(0, 480),
+            nowIso(),
+          )
+          .run();
+      } catch {}
+    }
+  }
+  return null;
+}
+
 /** v167: the live reply frames are throttled — at most one per 140 ms — so a
  *  fast model cannot turn one answer into a broadcast storm on the room's
  *  Durable Object. 7 frames a second is faster than the eye reads. */
@@ -1401,14 +1453,20 @@ async function aiBrainStream(
   maxTokens: number,
   onChunk: (text: string) => void,
 ): Promise<string | null> {
-  if (!env.GEMINI_API_KEY) return null;
   const prompt = messages
     .map(
       (m) =>
         `${m.role === "assistant" ? "Assistant" : "User"}: ${typeof m.content === "string" ? m.content : ""}`,
     )
     .join("\n");
-  return geminiStream(env, prompt, [], maxTokens, onChunk, 12_000);
+  if (env.GEMINI_API_KEY) return geminiStream(env, prompt, [], maxTokens, onChunk, 12_000);
+  // Owner round 120 (2026-10-21): no Gemini key ≠ canned greeting forever —
+  // answer with the account's own Workers AI instead. The fallback model
+  // answers whole (its free tier has no stream), so the bubble paints in one
+  // chunk instead of word-by-word; typing stays on while it thinks.
+  const answer = await workersAiChat(env, prompt, maxTokens);
+  if (answer) onChunk(answer);
+  return answer;
 }
 
 /** The welcome line rides Gemini. */
@@ -1423,7 +1481,7 @@ async function aiWelcomeText(env: Env, displayName: string | null): Promise<stri
     name +
     " Write a short, warm welcome message to them: 1–2 sentences, at most 35 words, in English, at most one emoji. " +
     "Do not use hashtags, quotes, or a signature line. Reply with the message text only.";
-  return geminiParts(env, prompt, [], 120);
+  return (await geminiParts(env, prompt, [], 120)) ?? (await workersAiChat(env, prompt, 120));
 }
 
 /** Drops the AI welcome message into a fresh 1:1 chat, exactly once per
@@ -2222,7 +2280,8 @@ async function sendAiReply(
         push,
       );
     }
-    const answerBody = answer ?? (!env.GEMINI_API_KEY ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);
+    const answerBody =
+      answer ?? (!env.GEMINI_API_KEY && !env.AI ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);
     const body = firstReplyIntro ? `${firstReplyIntro} ${answerBody}` : answerBody;
     const botId = await ensureAiBot(db);
     const mid = id();

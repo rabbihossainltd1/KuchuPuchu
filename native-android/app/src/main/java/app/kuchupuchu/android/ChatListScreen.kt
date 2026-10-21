@@ -1035,7 +1035,13 @@ internal fun HomeBottomNavigation(
     // nothing paints an 82%-opaque fill on top of the blur any more.
     val pillBase = if (darkMode) Color(0xFF283C6E) else Card
     // Enlarge the complete capsule and its slots while keeping the glyphs at 27dp.
-    val navScale = 1.2f
+    // Owner round 120 (2026-10-21, verbatim): "nav bar ta prottekta update a
+    // aste aste boro hoye jacche, notun update a card ta onek boro kore
+    // felcho. opacity onek beshi, tai blur bujha jacche na. ektu transparent
+    // koro, blur lagbe." — the 1.2 upsize from v293 (my rounding on "card
+    // smaller than the icons") is OUT: the pill returns to its original
+    // 248x56 and stays there; shrink requests are rejected below.
+    val navScale = 1f
     val navContentYOffset = 3.dp
     // The glass card IS the whole pill: same size as the icon row's box and
     // no extra dip — before this it was shrunk to 224x46 and pushed 1.5dp
@@ -1107,15 +1113,20 @@ internal fun HomeBottomNavigation(
                             .size(backgroundCardWidth, backgroundCardHeight)
                             .clip(CircleShape)
                             .hazeEffect(state = hazeState) {
-                                // Thin tints over the blurred scaffold
-                                // content keep the glass readable without
-                                // hiding the blur; the fallback stays
-                                // translucent on devices with no RenderEffect.
-                                backgroundColor = pillBase.copy(alpha = 0.20f)
-                                tints = listOf(HazeTint(pillBase.copy(alpha = 0.32f)))
+                                // Owner round 120 ("opacity onek beshi, tai blur
+                                // bujha jacche na. ektu transparent koro, blur
+                                // lagbe"): the tints used to stack 0.20 + 0.32 of
+                                // the theme surface on top of the blur — at that
+                                // pile the glass reads as plain translucency.
+                                // Nearly halved both; the blur (28.dp) and the
+                                // noise stay, so the frost is visible but the
+                                // colours behind it bleed through. The fallback
+                                // (no RenderEffect devices) drops the same way.
+                                backgroundColor = pillBase.copy(alpha = 0.10f)
+                                tints = listOf(HazeTint(pillBase.copy(alpha = 0.16f)))
                                 blurRadius = 28.dp
                                 noiseFactor = 0.12f
-                                fallbackTint = HazeTint(pillBase.copy(alpha = 0.62f))
+                                fallbackTint = HazeTint(pillBase.copy(alpha = 0.40f))
                             },
                     )
                     val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4

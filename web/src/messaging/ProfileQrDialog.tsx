@@ -40,13 +40,19 @@ type Props = {
   readonly onClose: () => void;
 };
 
-/* The code INSIDE the QR keeps its token shape (kuchupuchu://user/<code>) so
- * the in-app scanner resolves it through /api/users/by-qr and a Reset still
- * kills a leaked code. The link you COPY OUT is the pretty handle URL the
- * owner asked for (2026-10-20): https://kuchupuchu.web.app/@handle — Android
- * opens the app straight away (App Links); everyone else sees the web card. */
-function qrPayload(code: string): string {
-  return `kuchupuchu://user/${code}`;
+/* Owner round 120 (2026-10-21: "QR code ta jodi ami kono scanner dia scan
+ * kori to tahole kichu text thake / QR code ta dekhlam ekta QR code sedaw
+ * asha uchit https://kuchupuchu.web.app/@rabbihossainltd"): the QR ITSELF
+ * now carries the pretty public link — any camera or scanner in the world
+ * opens the same share card as a copied link. The in-app scanner parses that
+ * URL back to the handle (QrScanPolicy), and the legacy token shape stays
+ * understood so a code printed before this change still resolves through
+ * /api/users/by-qr — a Reset still retires an old leak. The link you COPY
+ * OUT is the same URL (see shareUrl below). */
+function qrPayload(code: string, username: string): string {
+  const handle = username.replace(/^@/, "").trim();
+  if (!handle) return `kuchupuchu://user/${code}`;
+  return `https://kuchupuchu.web.app/@${handle}`;
 }
 
 function shareUrl(code: string, username: string): string {
@@ -176,7 +182,7 @@ export function ProfileQrDialog({ api, user, self, onClose }: Props) {
         window.requestAnimationFrame(run);
         return;
       }
-      void drawQrWithBadge(canvas, qrPayload(code))
+      void drawQrWithBadge(canvas, qrPayload(code, user.username))
         .then(() => {
           if (!cancelled) setDrawn(true);
         })
@@ -188,7 +194,7 @@ export function ProfileQrDialog({ api, user, self, onClose }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [code]);
+  }, [code, user.username]);
 
   const copyLink = useCallback(async () => {
     if (!code) return;

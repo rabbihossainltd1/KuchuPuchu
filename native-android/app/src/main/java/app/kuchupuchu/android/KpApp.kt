@@ -528,22 +528,35 @@ fun KpApp() {
                 val handle = userHandle
                 if (handle.isNullOrBlank() || !authed) return@LaunchedEffect
                 MainActivity.pendingUserHandle.value = null
-                runCatching {
-                    val data =
-                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            Api.get("/api/users/username/" + java.net.URLEncoder.encode(handle, "UTF-8"), true)
+                // Owner round 120 ("open click kortesi, kintu chat ta open
+                // hocche na"): a silent runCatching meant a PRIVATE profile
+                // (username hidden), an unknown handle or a dropped request all
+                // looked like "the button does nothing". Failed opens say so.
+                val opened =
+                    runCatching {
+                        val data =
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                Api.get("/api/users/username/" + java.net.URLEncoder.encode(handle, "UTF-8"), true)
+                            }
+                        val id = data.optJSONObject("user")?.optString("id").orEmpty()
+                        if (id.isBlank()) return@runCatching false
+                        val cached = ScreenStore.convIdForUser[id]
+                        val convId =
+                            cached ?: kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                Api.post("/api/conversations", org.json.JSONObject().put("userId", id))
+                            }.optJSONObject("conversation")?.optString("id").orEmpty()
+                        if (convId.isNotBlank()) {
+                            ScreenStore.convIdForUser[id] = convId
+                            nav.navigate("chat/$convId") { launchSingleTop = true }
+                            true
+                        } else {
+                            false
                         }
-                    val id = data.optJSONObject("user")?.optString("id").orEmpty()
-                    if (id.isBlank()) return@runCatching
-                    val cached = ScreenStore.convIdForUser[id]
-                    val convId =
-                        cached ?: kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            Api.post("/api/conversations", org.json.JSONObject().put("userId", id))
-                        }.optJSONObject("conversation")?.optString("id").orEmpty()
-                    if (convId.isNotBlank()) {
-                        ScreenStore.convIdForUser[id] = convId
-                        nav.navigate("chat/$convId") { launchSingleTop = true }
-                    }
+                    }.getOrDefault(false)
+                if (!opened) {
+                    android.widget.Toast
+                        .makeText(appCtx, "Couldn't open that profile. Try again when you're online.", android.widget.Toast.LENGTH_LONG)
+                        .show()
                 }
             }
  

@@ -49,4 +49,52 @@ class QrScanPolicyTest {
             assertEquals("input <$raw>", QrScanAction.Invalid, parseQrScan(raw))
         }
     }
+
+    // Owner round 120 (2026-10-21): the QR payload IS the public share link
+    // (https://kuchupuchu.web.app/@handle) — the in-app scanner must read its
+    // own new codes, and the variants a camera/user can realistically produce.
+    @Test
+    fun `a share link resolves to its handle`() {
+        assertEquals(
+            QrScanAction.UserHandle("rabbihossainltd"),
+            parseQrScan("https://kuchupuchu.web.app/@rabbihossainltd"),
+        )
+        assertEquals(
+            QrScanAction.UserHandle("rabbihossainltd"),
+            parseQrScan("https://kuchupuchu.web.app/@rabbihossainltd/"),
+        )
+        assertEquals(
+            QrScanAction.UserHandle("rabbihossainltd"),
+            parseQrScan("  https://kuchupuchu.firebaseapp.com/@rabbihossainltd  "),
+        )
+        assertEquals(
+            QrScanAction.UserHandle("team_final_9"),
+            parseQrScan("https://kuchupuchu.web.app/@TEAM_FINAL_9"),
+        )
+    }
+
+    @Test
+    fun `a malformed or off-host link is invalid, never a half-parsed handle`() {
+        for (
+            raw in listOf(
+                "https://kuchupuchu.web.app/",
+                "https://kuchupuchu.web.app/@",
+                "https://kuchupuchu.web.app/@ab",
+                "https://kuchupuchu.web.app/@a b",
+                "https://kuchupuchu.web.app/@alice/friends",
+                "https://notkuchupuchu.web.app/@alice",
+                "https://kuchupuchu.web.app.evil.tld/@alice",
+                "https://kuchupuchu.web.app/settings/@alice",
+            )
+        ) {
+            assertEquals("input <$raw>", QrScanAction.Invalid, parseQrScan(raw))
+        }
+        assertEquals(QrScanAction.UserHandle("rabbi"), parseQrScan("https://kuchupuchu.web.app/@rabbi"))
+        // A harmless-looking query on a good link: the handle still parses, the
+        // scam parameter never reaches the resolver.
+        assertEquals(
+            QrScanAction.UserHandle("rabbi"),
+            parseQrScan("https://kuchupuchu.web.app/@rabbi?utm=print"),
+        )
+    }
 }

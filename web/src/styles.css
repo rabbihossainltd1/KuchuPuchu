@@ -178,6 +178,23 @@ input:disabled {
   margin: 4px 0 0;
   font-size: 24px;
   letter-spacing: 0.01em;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+/* Owner round 120 (2026-10-21: "verified account hole verified tick
+   thakbeto"): the verified badge rides the name, same blue as in-app. */
+.user-link-tick {
+  flex: none;
+  vertical-align: -2px;
+}
+/* The invalid-share-link view keeps the body sentence case (the profile
+   card's handles are the UPPERCASE micro-labels; a sentence uppercased reads
+   as shouting). */
+.user-link-sub--sentence {
+  text-transform: none;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
 }
 .user-link-sub {
   margin: 0;

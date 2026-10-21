@@ -38,9 +38,18 @@ function versionedServiceWorker(): Plugin {
           bytes: readFileSync(resolve(process.cwd(), "web/public", name)),
         }));
         const digest = createHash("sha256").update(serviceWorkerTemplate);
+        /* Owner round 120 (2026-10-21): /logo.png leaves the precache. A
+         * waiting old worker served the OLD logo for days (the pill/badge
+         * refresh looked "not fixed" after a deploy) because a precached
+         * path matches before any network attempt. The asset itself is
+         * hugged by the ?v= version query in-app and no-store headers
+         * server-side; the versioned hash assets stay precached for
+         * offline. Its bytes still feed the digest below, so a logo change
+         * still rotates the worker and its caches. */
+        const PRECACHE_IDENTITY = new Set(["/icon.svg", "/manifest.webmanifest"]);
         const precacheUrls = [
           ...files.map((output) => `/${output.fileName}`),
-          ...publicExtras.map((extra) => extra.url),
+          ...publicExtras.map((extra) => extra.url).filter((url) => PRECACHE_IDENTITY.has(url)),
         ].sort();
 
         for (const output of files) {

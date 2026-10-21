@@ -105,7 +105,7 @@ check(
     nav.includes("targetOffsetY = { fullHeight -> fullHeight }") &&
     nav.includes("with(density) { bottomOffsetPx.toDp() }") &&
     nav.includes("blurRadius = 28.dp") &&
-    nav.includes("fallbackTint = HazeTint(pillBase.copy(alpha = 0.62f))") &&
+    nav.includes("fallbackTint = HazeTint(pillBase.copy(alpha = 0.40f))") &&
     !nav.includes("slideProgress") &&
     !nav.includes("params.y = windowYOffsetPx"),
 );
@@ -143,10 +143,10 @@ check(
     nav.includes("slideInVertically("),
 );
 check(
-  "the glass card IS the whole pill again — full 248x56 * scale, zero dip, thin Haze tints over a 28dp blur (owner 2026-10-21: card ta nicher dike beshi chilo)",
+  "the glass card IS the whole pill — full 248x56 at scale 1, zero dip, nearly-halved Haze tints over the same 28dp blur (owner round 120: choto koro + ektu transparent koro)",
   nav.includes("val pillBase =") &&
-    nav.includes("HazeTint(pillBase.copy(alpha = 0.32f))") &&
-    nav.includes("val navScale = 1.2f") &&
+    nav.includes("HazeTint(pillBase.copy(alpha = 0.16f))") &&
+    nav.includes("val navScale = 1f") &&
     nav.includes("val navIconSize = 27.dp") &&
     nav.includes("val navWindowWidth = 248.dp * navScale") &&
     nav.includes("val navWindowHeight = 56.dp * navScale") &&

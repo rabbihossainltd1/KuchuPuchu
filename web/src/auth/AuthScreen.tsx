@@ -339,13 +339,14 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
     }
   }
 
-  async function submitOtp(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  // Owner round 120 (2026-10-21: "web a OTP verify button ta sorai daw —
+  // code complete hole auto verify hobe"): typed-to-length submissions go
+  // through this directly; the code's onChange fires it when the sixth digit
+  // lands. The form's Enter-key submit below is the same path, and the busy
+  // flag (set synchronously by startAction) is the double-fire guard.
+  async function submitOtpValue(code: string) {
     if (busy || flow.kind !== "approval" || otpLocked) return;
-    if (!validOtp(otp)) {
-      setNotice({ kind: "error", text: "Enter the six-digit code from the approval card." });
-      return;
-    }
+    if (!validOtp(code)) return;
 
     otpAttempted.current = true;
     const controller = startAction();
@@ -355,7 +356,7 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
     try {
       const result = await authApi.submitOtp(
         api,
-        { requestId: flow.requestId, deviceId, otp: otp.trim() },
+        { requestId: flow.requestId, deviceId, otp: code.trim() },
         controller.signal,
       );
       if (result.status === "SESSION" && isSessionPayload(result)) {
@@ -401,6 +402,17 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
       if (actionController.current === controller) actionController.current = null;
       if (!controller.signal.aborted) setBusy(false);
     }
+  }
+
+  function submitOtp(event: FormEvent<HTMLFormElement>) {
+    // Enter key / iOS "go": the same auto-verify path — no button needed.
+    event.preventDefault();
+    if (busy || flow.kind !== "approval" || otpLocked) return;
+    if (!validOtp(otp)) {
+      setNotice({ kind: "error", text: "Enter the six-digit code from the approval card." });
+      return;
+    }
+    void submitOtpValue(otp);
   }
 
   function finishApprovalLocally(copy: string) {
@@ -736,26 +748,23 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
                     value={otp}
                     onChange={(event) => {
                       setOtpError(false);
-                      setOtp(event.target.value.replace(/\D/g, "").slice(0, 6));
+                      const next = event.target.value.replace(/\D/g, "").slice(0, 6);
+                      setOtp(next);
+                      // Round 120: auto-verify on the sixth digit — the Verify
+                      // button is gone (owner: "otp verify button ta sorai daw").
+                      // busy inside submitOtpValue guards the double-fire when
+                      // IME/autofill delivers the rest of the code in one tick.
+                      if (next.length === 6 && !otpLocked) void submitOtpValue(next);
                     }}
                     disabled={busy}
                     autoFocus
                   />
                 </div>
-                <button
-                  className="otp-full__verify"
-                  type="submit"
-                  disabled={busy || !validOtp(otp)}
-                >
-                  {busy ? (
-                    <>
-                      <span className="otp-spinner" aria-hidden="true" />
-                      Verifying…
-                    </>
-                  ) : (
-                    "Verify code"
-                  )}
-                </button>
+                {/* Round 120 (owner: "otp verify button ta sorai daw"): no
+                    button at all — the sixth digit auto-submits, and Enter on
+                    the single input still runs the same submit path. While a
+                    check runs, the notice line above narrates it and the boxes
+                    dim via otp-boxes--verifying. */}
               </form>
             )}
             {!flow.otpAvailable && (

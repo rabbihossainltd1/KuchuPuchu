@@ -9352,7 +9352,9 @@ const convBetween = (db, a, b) =>
         ai.includes("VALUES (?, ?, ?, 'IMAGE', ?, ?, ?)`") &&
         ai.includes("await sendBotImage(drawn.image, firstReplyIntro)") &&
         ai.includes("kp_media: `/api/messages/${imgMid}/media`,") &&
-        ai.includes("answer ?? (!env.GEMINI_API_KEY ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);") &&
+        ai.includes(
+          "answer ?? (!env.GEMINI_API_KEY && !env.AI ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);",
+        ) && // round 120: Workers-AI-down reads AI_REPLY_DOWN
         src.includes("async function geminiParts(") &&
         src.includes(
           'inline_data: { mime_type: m.mime || "application/octet-stream", data: m.b64 }',

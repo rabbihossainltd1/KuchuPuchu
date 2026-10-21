@@ -68,8 +68,8 @@ check(
     nav.includes(".offset(x = indicatorX, y = indicatorY)"),
 );
 check(
-  "the full floating pill, slots, and indicator enlarge together while glyphs stay 27dp and move down 3dp",
-  nav.includes("val navScale = 1.2f") &&
+  "the pill stays at its original 248x56 at scale 1 (owner round 120 2026-10-21: update-torbar boro koro na); glyphs 27dp, content rides 3dp down",
+  nav.includes("val navScale = 1f") &&
     nav.includes("val navWindowWidth = 248.dp * navScale") &&
     nav.includes("val navWindowHeight = 56.dp * navScale") &&
     nav.includes("val backgroundCardWidth = navWindowWidth") &&
@@ -161,12 +161,12 @@ check(
     nav.includes("AnimatedVisibility(") &&
     nav.includes("visible = dialogAttached") &&
     nav.includes("val pillBase =") &&
-    nav.includes("HazeTint(pillBase.copy(alpha = 0.32f))") &&
+    nav.includes("HazeTint(pillBase.copy(alpha = 0.16f))") && // round 120
     nav.includes("blurRadius = 28.dp") &&
     nav.includes("noiseFactor = 0.12f") &&
-    nav.includes("fallbackTint = HazeTint(pillBase.copy(alpha = 0.62f))") &&
+    nav.includes("fallbackTint = HazeTint(pillBase.copy(alpha = 0.40f))") &&
     !nav.includes(".background(pillFill)") &&
-    nav.includes("val navScale = 1.2f") &&
+    nav.includes("val navScale = 1f") &&
     nav.includes("val navIconSize = 27.dp") &&
     nav.includes(".clip(CircleShape)") &&
     nav.includes(".hazeEffect(state = hazeState)") &&

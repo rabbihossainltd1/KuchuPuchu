@@ -61,7 +61,7 @@ check(
 check(
   "the web's QR card draws the same badge: canvas, H-ECC, white rounded chip, /qr-badge.png",
   dialog.includes('errorCorrectionLevel: "H"') &&
-    dialog.includes("drawQrWithBadge(canvas, qrPayload(code))") &&
+    dialog.includes("drawQrWithBadge(canvas, qrPayload(code, user.username))") &&
     dialog.includes('glyph.src = "/qr-badge.png"') &&
     dialog.includes("ctx.roundRect(x, y, PLATE, PLATE, PLATE_CORNER)"),
 );
@@ -139,12 +139,13 @@ check(
 );
 
 check(
-  "the share/copy link is the pretty handle URL while the code inside the QR keeps its resettable token",
+  "the QR payload IS the pretty share link now (owner round 120 2026-10-21: scan korlei kuchupuchu.web.app/@handle a asha uchit); the resettable token remains only as the handle-less fallback inside kpShareLink/qrPayload",
   qrScreen.includes('return "https://kuchupuchu.web.app/@$handle"') &&
     qrScreen.includes("private fun kpShareLink(username: String, qrCode: String)") &&
-    qrScreen.includes('"kuchupuchu://user/$qrCode"') && // the QR payload, untouched
+    qrScreen.includes("kpShareLink(payloadUsername, qrCode)") &&
+    qrScreen.includes('"kuchupuchu://user/$qrCode"') && // handle-less fallback inside kpShareLink — still stands
     dialog.includes("return `https://kuchupuchu.web.app/@${handle}`;") &&
-    dialog.includes("function qrPayload(code: string)"),
+    dialog.includes("function qrPayload(code: string, username: string)"),
 );
 
 check(

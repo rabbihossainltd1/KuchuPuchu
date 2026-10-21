@@ -94,9 +94,12 @@ import org.json.JSONObject
  */
 /** Owner (2026-10-20: "link ta emon hobe kuchupuchu.web.app/@rabbihossainltd"):
  * the public share link is the pretty handle URL — Android hands it to the app
- * via App Links, browsers show the site's /@handle card. The code INSIDE the
- * QR keeps its token form (kuchupuchu://user/<code>) so Reset still kills a
- * leaked code; the handle alone cannot add anyone. */
+ * via App Links, browsers show the site's /@handle card.
+ * Owner round 120 (2026-10-21: the QR must scan to the SAME pretty link, not a
+ * bare token): the code's PAYLOAD is the link itself, so any camera in the
+ * world lands on the share card; the in-app scanner parses the URL back to
+ * the handle (QrScanPolicy) while the legacy token shape stays understood, so
+ * a code printed before this change — and its Reset — still work. */
 private fun kpShareLink(username: String, qrCode: String): String {
     val handle = username.trim().removePrefix("@")
     if (handle.isBlank()) return "kuchupuchu://user/$qrCode"
@@ -368,16 +371,22 @@ private fun MyQrPane(user: JSONObject?, isMe: Boolean) {
                     // on a white plate in the middle of the code. The code is
                     // encoded at error-correction H (30% damage tolerated), so
                     // the plate never costs a scan.
+                    // Round 120 owner note ("QR scan korle amon link a asha uchit
+                    // https://kuchupuchu.web.app/@rabbihossainltd"): the payload IS the
+                    // public share link — any camera/scanner yields the same URL as Copy
+                    // link. Handle-less accounts keep the token form.
+                    val payloadUsername = user?.optText("username").orEmpty()
                     val bmp =
-                        remember(qrCode) {
+                        remember(qrCode, payloadUsername) {
                             runCatching {
                                 val hints =
                                     java.util.EnumMap<EncodeHintType, Any>(EncodeHintType::class.java).apply {
                                         put(EncodeHintType.ERROR_CORRECTION, ErrorCorrectionLevel.H)
                                     }
+                                val payload = kpShareLink(payloadUsername, qrCode)
                                 val base =
                                     BarcodeEncoder().encodeBitmap(
-                                        "kuchupuchu://user/$qrCode",
+                                        payload,
                                         BarcodeFormat.QR_CODE,
                                         720,
                                         720,
@@ -557,6 +566,28 @@ private fun QrScannerPane(nav: NavController) {
                             val data =
                                 withContext(Dispatchers.IO) {
                                     Api.get("/api/users/by-qr/${action.code}", force = true)
+                                }
+                            data.optJSONObject("user")
+                        }.onSuccess { u ->
+                            loading = false
+                            if (u == null) error = "This QR code doesn't match a KuchuPuchu account."
+                            else if (u.optString("id") == Store.myId()) error = "That's your own code."
+                            else preview = u
+                        }.onFailure {
+                            loading = false
+                            error = it.message ?: "Could not look up that code."
+                        }
+                    }
+                }
+                // Round 120: a scanned SHARE LINK (the QR payload since this
+                // version) resolves by handle to the same preview.
+                is QrScanAction.UserHandle -> {
+                    loading = true
+                    scope.launch {
+                        runCatching {
+                            val data =
+                                withContext(Dispatchers.IO) {
+                                    Api.get("/api/users/username/${action.handle}", force = true)
                                 }
                             data.optJSONObject("user")
                         }.onSuccess { u ->

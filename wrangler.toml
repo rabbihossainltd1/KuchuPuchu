@@ -99,3 +99,12 @@ binding = "ASSETS"
 not_found_handling = "single-page-application"
 run_worker_first = ["/api/*", "/ws/*", "/download/apk"]
 
+
+# Owner round 120 (2026-10-21, "ai bot... shob somoy fallback message dey"):
+# the account never had a GEMINI_API_KEY secret, so every AI-chat text turn
+# answered the canned greeting. The text brain falls back to this account's
+# own free-tier Workers AI when no Gemini key is set (verified live against
+# the account that the models below run). Vision/voice/image turns still need
+# Gemini; set the GEMINI_API_KEY secret to upgrade the text brain back.
+[ai]
+binding = "AI"

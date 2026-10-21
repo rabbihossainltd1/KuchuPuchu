@@ -97,10 +97,10 @@ check(
 /* 3 — the pill must stay glass (top-level echo of the 62/65 chain) ------ */
 check(
   "nav pill: pill base lives inside the Haze style as thin tints over a 28dp blur — nothing repaints an opaque fill on top of the blur",
-  chatList.includes("backgroundColor = pillBase.copy(alpha = 0.20f)") &&
-    chatList.includes("tints = listOf(HazeTint(pillBase.copy(alpha = 0.32f)))") &&
+  chatList.includes("backgroundColor = pillBase.copy(alpha = 0.10f)") &&
+    chatList.includes("tints = listOf(HazeTint(pillBase.copy(alpha = 0.16f)))") &&
     chatList.includes("blurRadius = 28.dp") &&
-    chatList.includes("fallbackTint = HazeTint(pillBase.copy(alpha = 0.62f))") &&
+    chatList.includes("fallbackTint = HazeTint(pillBase.copy(alpha = 0.40f))") && // round 120: opacity komao, blur keep
     !chatList.includes(".background(pillFill)") &&
     chatList.includes("import dev.chrisbanes.haze.HazeTint"),
 );

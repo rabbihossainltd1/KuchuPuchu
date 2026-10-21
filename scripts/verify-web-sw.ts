@@ -37,7 +37,15 @@ assert.ok(
   "only the app shell, its identity files, JavaScript and CSS may be cached; media stays network-only",
 );
 assert.ok(precache.includes("/icon.svg"), "precache must include the PWA icon");
-assert.ok(precache.includes("/logo.png"), "precache must include the app logo");
+/* Owner round 120 (2026-10-21, verified live twice): the logo must NEVER be
+ * precached. A waiting old worker's precache answers /logo.png before any
+ * network attempt and kept the pre-rebrand mark visible for days — a
+ * deploy that LOOKS unfixed. The logo rides no-store headers + the ?v=
+ * version query instead (see vite.web.config.ts PRECACHE_IDENTITY). */
+assert.ok(
+  !precache.includes("/logo.png"),
+  "the app logo must stay network-served (no precache) — stale-branding regressions",
+);
 assert.ok(precache.includes("/manifest.webmanifest"), "precache must include the manifest");
 
 for (const url of precache) {
