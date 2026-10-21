@@ -50,4 +50,4 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s' '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > "${GOOGLE_APPLICATION_CREDENTIALS}"
-          npm exec --yes firebase -- deploy --only hosting --non-interactive
+          npm exec --yes firebase-tools -- deploy --only hosting --non-interactive
