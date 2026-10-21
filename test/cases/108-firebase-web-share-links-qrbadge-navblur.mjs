@@ -70,7 +70,7 @@ check(
 
 check(
   "the home pill's card is Haze-frosted scaffold content, not an OS flag ask",
-  gradle.includes('"dev.chrisbanes.haze:haze:1.7.3"') &&
+  gradle.includes('"dev.chrisbanes.haze:haze:1.6.6"') &&
     chatList.includes(".hazeEffect(state = hazeState)") &&
     kpApp.includes("val homeNavHazeState = remember { dev.chrisbanes.haze.HazeState() }") &&
     kpApp.includes(".haze(state = homeNavHazeState)") &&

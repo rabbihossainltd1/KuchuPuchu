@@ -206,7 +206,7 @@ dependencies {
     // cross-window blur flags, which most OEMs disable and Android 15 ignores
     // for floating windows; Haze samples the scaffold's own content and blurs
     // it inside the card on every API level. Exact pin, like every dep here.
-    implementation("dev.chrisbanes.haze:haze:1.7.3")
+    implementation("dev.chrisbanes.haze:haze:1.6.6")
     // Push notifications (Messenger mode). Firebase is initialized at runtime
     // from the worker's /api/config/firebase — no google-services.json needed
     // in the build, so the app works fine before FCM is set up.
