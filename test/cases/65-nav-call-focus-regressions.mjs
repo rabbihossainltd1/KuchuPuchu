@@ -159,9 +159,7 @@ check(
     nav.includes(
       ".offset(y = backgroundCardYOffset)\n                        .size(backgroundCardWidth, backgroundCardHeight)",
     ) &&
-    nav.includes(
-      ".clip(CircleShape)\n                        .hazeEffect(state = hazeState)",
-    ),
+    nav.includes(".clip(CircleShape)\n                        .hazeEffect(state = hazeState)"),
 );
 check(
   "default-network recovery evicts stale HTTP sockets, retries the outbox, and refreshes visible feeds",
