@@ -161,6 +161,19 @@ input:disabled {
   height: 72px;
   border-radius: 18px;
 }
+
+/* The shared handle page shows THE USER's photo where the app logo used to
+   sit (owner 2026-10-21: "app er logo er jaigai oi user er profile picture
+   dekhabe"); the logo stays only as the fallback when the account has no
+   public photo. */
+.user-link-avatar {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid var(--kp-card, #10141f);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
 .user-link-card h1 {
   margin: 4px 0 0;
   font-size: 24px;
@@ -1220,6 +1233,7 @@ a:focus-visible {
 }
 
 .profile-qr__avatar {
+  position: relative; /* the absolutely-positioned .avatar-img must insets against the 72px tile, not escape into the card */
   display: grid;
   width: 72px;
   height: 72px;

@@ -27,7 +27,7 @@ export function ConversationAvatar({
   const url = useAvatar(api, ref);
   const officialLogo =
     !url && (isBotConversation(conversation) || isOneWayConversation(conversation))
-      ? "/logo.png"
+      ? "/logo.png?v=3.9.216"
       : null;
   const resolvedUrl = url || officialLogo;
 

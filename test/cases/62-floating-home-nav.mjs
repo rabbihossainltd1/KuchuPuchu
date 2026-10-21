@@ -88,7 +88,7 @@ check(
   "the background card sits 1.5dp below the icon/indicator baseline and carries the frosted-glass treatment itself (owner 2026-10-20)",
   nav.includes("val backgroundCardYOffset = navContentYOffset + 1.5.dp") &&
     nav.includes(
-      ".align(Alignment.Center)\n                            .offset(y = backgroundCardYOffset)\n                            .size(backgroundCardWidth, backgroundCardHeight)\n                            .clip(CircleShape)\n                            .hazeEffect(state = hazeState)\n                            .background(pillFill),",
+      ".align(Alignment.Center)\n                            .offset(y = backgroundCardYOffset)\n                            .size(backgroundCardWidth, backgroundCardHeight)\n                            .clip(CircleShape)\n                            .hazeEffect(state = hazeState) {",
     ) &&
     nav.includes(".offset(y = navContentYOffset)"),
 );
@@ -160,7 +160,12 @@ check(
   nav.includes("Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter)") &&
     nav.includes("AnimatedVisibility(") &&
     nav.includes("visible = dialogAttached") &&
-    nav.includes("copy(alpha = 0.82f)") &&
+    nav.includes("val pillBase =") &&
+    nav.includes("HazeTint(pillBase.copy(alpha = 0.32f))") &&
+    nav.includes("blurRadius = 28.dp") &&
+    nav.includes("noiseFactor = 0.12f") &&
+    nav.includes("fallbackTint = HazeTint(pillBase.copy(alpha = 0.62f))") &&
+    !nav.includes(".background(pillFill)") &&
     nav.includes("val navScale = 1.2f") &&
     nav.includes("val navIconSize = 27.dp") &&
     nav.includes(".clip(CircleShape)") &&

@@ -384,22 +384,31 @@ private fun MyQrPane(user: JSONObject?, isMe: Boolean) {
                                         hints,
                                     )
                                 val merged = base.copy(Bitmap.Config.ARGB_8888, true)
-                                val plate = 720f * 0.15f // plate radius matches WhatsApp's proportions
+                                // WhatsApp's chip is a white ROUNDED SQUARE ≈ 26% of code
+                                // width (owner 2026-10-21: square corners of the old circle
+                                // poke-out read as "logo er background remove nai"); the mark
+                                // (qr-badge glyph — dark bubble on transparent, background
+                                // removed) sits inside at 80%, dead-centre.
+                                val plate = 720f * 0.26f
+                                val half = plate / 2f
+                                val corner = plate * 0.30f
                                 val c = AndroidCanvas(merged)
                                 val paint = Paint(Paint.ANTI_ALIAS_FLAG)
                                 paint.color = android.graphics.Color.WHITE
-                                c.drawCircle(360f, 360f, plate, paint)
+                                val plateRect =
+                                    android.graphics.RectF(360f - half, 360f - half, 360f + half, 360f + half)
+                                c.drawRoundRect(plateRect, corner, corner, paint)
                                 runCatching {
-                                    BitmapFactory.decodeResource(ctx.resources, R.drawable.icon_gold)?.let { mark ->
-                                        val inner = (plate * 1.7f).toInt()
+                                    BitmapFactory.decodeResource(ctx.resources, R.drawable.qr_badge)?.let { mark ->
+                                        val inset = plate * 0.10f
                                         c.drawBitmap(
                                             mark,
                                             null,
-                                            android.graphics.Rect(
-                                                (360 - inner / 2),
-                                                (360 - inner / 2),
-                                                (360 + inner / 2),
-                                                (360 + inner / 2),
+                                            android.graphics.RectF(
+                                                plateRect.left + inset,
+                                                plateRect.top + inset,
+                                                plateRect.right - inset,
+                                                plateRect.bottom - inset,
                                             ),
                                             paint,
                                         )

@@ -522,7 +522,12 @@ export default function App() {
             >
               <header className="list-header">
                 <div className="list-header__brand">
-                  <img className="list-header__logo" src="/logo.png" alt="" draggable={false} />
+                  <img
+                    className="list-header__logo"
+                    src="/logo.png?v=3.9.216"
+                    alt=""
+                    draggable={false}
+                  />
                   <div>
                     <p className="eyebrow">KUCHUPUCHU WEB</p>
                     <h1 id="list-heading">{sectionHeading}</h1>
@@ -607,7 +612,7 @@ export default function App() {
                   {!isOnline ? "Browser offline" : user ? "Account connected" : "Preview only"}
                 </span>
                 <span className="list-footer__spacer" />
-                <span className="footer-version">Web 3.9.215</span>
+                <span className="footer-version">Web 3.9.216</span>
               </footer>
             </section>
 

@@ -22,7 +22,7 @@ Four owner jobs:
 4. Pretty links: copy/share emits `https://kuchupuchu.web.app/@<username>`
    (QrScreen + ProfileQrDialog). `web/public/{.well-known/,}assetlinks.json`
    (identical twins) holds app.kuchupuchu.android + v274 signer SHA-256
-   `4E:3C:89:25:...:86:C4` (parsed from the v291 APK's v2 sig block). Manifest:
+   `39:19:0B:0F:...:CD:2E` (re-verified 2026-10-21 by parsing the v2 sig blocks of v274, v291 AND v292 — all three share the repo debug signer; the earlier 4E:3C note was wrong). Manifest:
    autoVerify filter for web.app + firebaseapp.com /@; MainActivity
    pendingUserHandle -> KpApp resolves `/api/users/username/<handle>` ->
    POST /api/conversations -> nav chat. Web router route `user-link` +
@@ -1375,6 +1375,61 @@ Owner feedback on the live web chat: Bangla+English mixed copy, extra instructio
 - **Release:** `versionCode 286` / `versionName 3.9.209`, asset `kuchupuchu-3.9.209-r111.apk`, R2 `kp-media/apk/kuchupuchu-latest.apk`, cert continuity with v274 checked in CI. Web: Firebase production (MAIN) + Cloudflare preview, both rebuilt from this tree.
 - **Housekeeping:** `git fetch` against the sandbox's GitHub replica answered "Repository not found" for every attempt while `ls-remote` and the tarball endpoint worked; the tree was restored from `api.github.com/repositories/1346525178/tarball/main` and the commit was pushed through the Git data API (blob → tree → commit → ref update). The workspace also wiped `.git`/`node_modules`/`.secrets` mid-round once (a restore snapshot); `/home/user/.env` and `/home/user/uploads/` survive, so the Firebase SA was re-copied from there.
 - **Verification:** 95/96 cases, 3970 assertions (new `test/cases/102-round-34-qr-web-d1-burn.mjs`, 22 checks; `test/cases/100-…` updated for the icon switch); `npm run typecheck`, `npm run typecheck:web` and `npx prettier --check .` green. The single failing case is `41-debug-key-migration` (the sandbox's `git ls-files` check) — green on a real clone.
+
+---
+
+
+## 2026-10-21 — QR badge cleanup, real frosted pill, share-card photo (v293 / 3.9.216 / r118)
+
+v292 (3.9.215/r117, asset `kuchupuchu-3.9.215-r117.apk`, sha256
+`31d4296706a44100088319c50f4d5e82fa26d4cd1cca523f8e1040c8d1da2055`) shipped
+first; the owner's 17:45 feedback round then fixed four things:
+
+1. **QR badge, both platforms** — WhatsApp-style white ROUNDED-SQUARE chip
+   (26% of code width), dead-centre; the art is the glyph with its background
+   REMOVED: dark navy bubble + blue tail on transparency, generated from the
+   adaptive-icon foreground with white recolored to `#0b1324`
+   (`scripts`-less ad hoc PIL, asset sha256-identical at
+   `web/public/qr-badge.png` and `res/drawable/qr_badge.png`, 256px RGBA).
+   The old circle plate let the square logo's corners poke out.
+2. **Web QR card giant-photo bug** — global `.avatar-img` is
+   `position: absolute; inset: 0` (the "egg" fix); the 72px
+   `.profile-qr__avatar` tile never established a containing block so the img
+   inset against the CARD. One line: `position: relative` on the tile.
+3. **Nav pill is frosted glass again, NOT an opaque slab** — Haze 1.6.6
+   `hazeEffect` block: `backgroundColor = pillBase.copy(alpha = 0.20f)`,
+   `tints = [HazeTint(pillBase.copy(alpha = 0.32f))]`, `blurRadius = 28.dp`,
+   `noiseFactor = 0.12f`, `fallbackTint = HazeTint(pillBase.copy(alpha =
+   0.62f))`; the `.background(pillFill)` (82%-opaque repaint on top of the
+   blur) is gone. Haze 1.6.6 source-verified API (`HazeStyle`,
+   `HazeTint(color, blendMode)`, scope `var`s on `HazeEffectScope`).
+4. **/@handle landing shows the USER's photo + name** (logo only as
+   fallback) via new PUBLIC route `GET /api/users/card/<handle>` — logged-out
+   answer only, private profiles → `{user:null}`, avatar only when the
+   owner's avatar privacy = everyone. **Architecture gotcha learned: the live
+   host is a FEDERATED EDGE** — every path except `/api/config/ice`,
+   `/download/apk`, `/api/calls*` is proxied to the vintoxbd core BEFORE local
+   route matching, so a new edge route 401'd "Sign in first." until added to
+   the keep-list: `edgeOwnsShareCard = /^\/api\/users\/card\/.../`. The
+   edge answers from its own (frozen-replica) D1.
+5. **"logo ekhono shob jaigay old ta keno?"** — repo + deployed `/logo.png`
+   are already the correct black mark (sha-verified); the browser's service
+   worker precache kept serving the OLD asset. Every `/logo.png` reference
+   (favicon, manifest, in-app headers, auth screen, landing fallback) now
+   carries `?v=3.9.216` so stale caches are bypassed.
+
+Extra fix folded in before tagging: the assetlinks fingerprint I had pinned
+earlier (`4E:3C:89...`) was WRONG — v274/v291/v292 sig-block parsing proves
+all three are signed by the repo debug keystore `native-android/app/
+debug.keystore`, cert SHA-256 `39:19:0B:0F:38:78:74:93:08:1C:99:9B:03:6E:7C:
+65:FC:7A:4A:B6:5D:80:7E:4D:CD:C2:52:85:54:1E:CD:2E`. Both assetlinks twins
+now carry that value (deployed live, verified by curl) → verified App Links
+work again. Signing continuity for in-app updates was never broken.
+
+Gates: unit **103/103 (4059 assertions)** incl. new case 109; typecheck
+(typecheck:web) ✓; prettier ✓; ktlint-hygiene ✓; e2e shell **9/9**,
+messaging **159/159**, hardening **16/16**; card route curl-verified live
+(anonymous 200 with avatar / `{user:null}` for unknown handles).
 
 ---
 

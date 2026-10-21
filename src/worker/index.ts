@@ -7331,11 +7331,18 @@ export default {
     //     call protocol here, in the edge's own database. Dropping the
     //     /api/calls clause from this list hands the call protocol back to
     //     the core.
+    //  4. /api/users/card/<handle> - the PUBLIC share-card identity behind
+    //     https://kuchupuchu.web.app/@handle (owner 2026-10-21). The core
+    //     only answers for sessions, and a share link lands with strangers
+    //     who have none; this route is session-free by design, so it answers
+    //     from the edge's own user rows - otherwise it would proxy into the
+    //     core's 401 wall and the landing could never show the photo/name.
     const edgeRelayRoute = edgePath === "/api/config/ice";
     const edgeOwnsApk = edgePath === "/download/apk";
     const edgeOwnsCalls = edgePath.startsWith("/api/calls");
+    const edgeOwnsShareCard = /^\/api\/users\/card\/[a-z0-9_]{3,30}$/.test(edgePath);
     const federated =
-      edgeRelayRoute || edgeOwnsApk || edgeOwnsCalls
+      edgeRelayRoute || edgeOwnsApk || edgeOwnsCalls || edgeOwnsShareCard
         ? null
         : await federatedCoreProxy(request, env);
     if (federated) {
@@ -8718,6 +8725,31 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
     // CLAIMED (a racing poll already finished it) | EXPIRED | DENIED.
     return json({ status: row.status === "CLAIMED" ? "UNKNOWN" : row.status });
+  }
+
+  // Public share-card lookup for the https://kuchupuchu.web.app/@handle
+  // landing page (owner 2026-10-21: "link open korle app er logo er jaigai
+  // oi user er profile picture dekhabe"). A logged-out visitor only gets the
+  // card identity — name, handle, badge bits — and the photo just when the
+  // owner left avatar privacy at the "everyone" default. Presence, ids and
+  // every private field stay behind the session wall. The live host is a
+  // federated edge: this route is explicitly excluded from the core proxy
+  // (edgeOwnsShareCard above) — it answers HERE, from the edge's own user
+  // rows, because a share-link stranger has no core session at all.
+  const userCardMatch = path.match(/^\/api\/users\/card\/([a-z0-9_]{3,30})$/);
+  if (userCardMatch && method === "GET") {
+    await rateLimitGlobal(db, `usercard:${clientIp(request)}`, 120);
+    const row = await one<UserRow>(db, "SELECT * FROM users WHERE username = ?", userCardMatch[1]!);
+    if (!row || Number(row.private_profile ?? 0) !== 0) return json({ user: null });
+    return json({
+      user: {
+        displayName: row.display_name,
+        username: row.username,
+        verified: !!row.verified,
+        moderator: !!row.moderator,
+        avatarUrl: privAllows(row.priv_avatar, PRIVACY_DEFAULTS.avatar, {}) ? row.avatar_url : null,
+      },
+    });
   }
 
   /* ---------- authenticated ---------- */

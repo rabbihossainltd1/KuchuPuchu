@@ -152,7 +152,9 @@ export function InfoPane({
   const personUrlRaw = useAvatar(api, person?.avatarRef ?? "");
   const personUrl =
     personUrlRaw ||
-    (bot || (conversation ? isOneWayConversation(conversation) : false) ? "/logo.png" : null);
+    (bot || (conversation ? isOneWayConversation(conversation) : false)
+      ? "/logo.png?v=3.9.216"
+      : null);
   const groupUrl = useAvatar(api, conversation?.avatarRef ?? "");
 
   useEffect(() => {

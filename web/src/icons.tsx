@@ -508,7 +508,7 @@ export function BrandMark({ size = 34 }: { size?: number }) {
   return (
     <img
       aria-hidden="true"
-      src="/logo.png"
+      src="/logo.png?v=3.9.216"
       alt=""
       width={size}
       height={size}

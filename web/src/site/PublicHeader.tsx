@@ -46,7 +46,7 @@ export function PublicHeader({ active, navigate, onSignIn, onHome }: PublicHeade
             className="kp-welcome__brand"
             aria-label="KuchuPuchu Home"
           >
-            <img src="/logo.png" alt="KuchuPuchu logo" />
+            <img src="/logo.png?v=3.9.216" alt="KuchuPuchu logo" />
             <span>KuchuPuchu</span>
           </RouteLink>
         ) : onHome ? (
@@ -55,12 +55,12 @@ export function PublicHeader({ active, navigate, onSignIn, onHome }: PublicHeade
             className="kp-welcome__brand kp-welcome__brand--button"
             onClick={onHome}
           >
-            <img src="/logo.png" alt="KuchuPuchu logo" />
+            <img src="/logo.png?v=3.9.216" alt="KuchuPuchu logo" />
             <span>KuchuPuchu</span>
           </button>
         ) : (
           <a className="kp-welcome__brand" href="/">
-            <img src="/logo.png" alt="KuchuPuchu logo" />
+            <img src="/logo.png?v=3.9.216" alt="KuchuPuchu logo" />
             <span>KuchuPuchu</span>
           </a>
         )}

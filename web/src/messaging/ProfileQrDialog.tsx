@@ -55,10 +55,26 @@ function shareUrl(code: string, username: string): string {
   return `https://kuchupuchu.web.app/@${handle}`;
 }
 
-/* WhatsApp-style: the brand mark floats on a white plate in the middle of the
- * code. Error correction H tolerates the covered modules (~30%), so the plate
- * may carry the logo without sacrificing scan-ability. */
+/* WhatsApp-style: a white ROUNDED-SQUARE chip (≈ 26% of the code width) in
+ * the middle of the QR, carrying the brand glyph with its background removed
+ * (dark bubble + blue tail on transparent — the white bubble variant was
+ * invisible on a white plate). Error correction H tolerates the ~7% covered
+ * modules, so the chip never costs a scan. Owner 2026-10-21: the old circle
+ * plate let the square logo's corners poke out — "alignment nai, background
+ * remove nai". */
 const QR_WIDTH = 512;
+const PLATE = Math.round(QR_WIDTH * 0.26);
+const PLATE_CORNER = PLATE * 0.3;
+const GLYPH_INSET = PLATE * 0.1;
+
+function platePath(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  ctx.beginPath();
+  if (typeof ctx.roundRect === "function") {
+    ctx.roundRect(x, y, PLATE, PLATE, PLATE_CORNER);
+  } else {
+    ctx.rect(x, y, PLATE, PLATE);
+  }
+}
 
 async function drawQrWithBadge(canvas: HTMLCanvasElement, payload: string): Promise<void> {
   await QRCode.toCanvas(canvas, payload, {
@@ -69,24 +85,26 @@ async function drawQrWithBadge(canvas: HTMLCanvasElement, payload: string): Prom
   });
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
-  const plate = QR_WIDTH * 0.15; // plate radius — 30% diam matches the WhatsApp look
-  const cx = QR_WIDTH / 2;
-  const cy = QR_WIDTH / 2;
-  const logo = new Image();
-  logo.src = "/logo.png";
+  const glyph = new Image();
+  glyph.src = "/qr-badge.png";
   try {
-    await logo.decode();
+    await glyph.decode();
   } catch {
     return; // the QR alone still scans; the badge is decorative
   }
+  const x = (QR_WIDTH - PLATE) / 2;
+  const y = (QR_WIDTH - PLATE) / 2;
   ctx.save();
-  ctx.beginPath();
-  ctx.arc(cx, cy, plate, 0, Math.PI * 2);
+  platePath(ctx, x, y);
   ctx.fillStyle = "#ffffff";
   ctx.fill();
-  ctx.clip();
-  const inner = plate * 1.7; // logo slightly overfills the plate — brand reads crisp
-  ctx.drawImage(logo, cx - inner / 2, cy - inner / 2, inner, inner);
+  ctx.drawImage(
+    glyph,
+    x + GLYPH_INSET,
+    y + GLYPH_INSET,
+    PLATE - GLYPH_INSET * 2,
+    PLATE - GLYPH_INSET * 2,
+  );
   ctx.restore();
 }
 

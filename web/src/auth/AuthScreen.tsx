@@ -576,7 +576,7 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
       <div className="auth-background-glow auth-background-glow--amber" />
       <section className="auth-card" aria-labelledby="auth-heading">
         <header className="auth-brand">
-          <img className="auth-logo" src="/logo.png" alt="KuchuPuchu logo" />
+          <img className="auth-logo" src="/logo.png?v=3.9.216" alt="KuchuPuchu logo" />
           <div>
             <p className="eyebrow">KUCHUPUCHU WEB</p>
             <h1 id="auth-heading">

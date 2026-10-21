@@ -12,6 +12,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import dev.chrisbanes.haze.HazeTint
 import dev.chrisbanes.haze.hazeEffect
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
@@ -1028,8 +1029,11 @@ internal fun HomeBottomNavigation(
     val idleTint = if (darkMode) Color(0xFFD3DEF5) else Muted
     val selectedTint = if (darkMode) Color.White else Ink
     val indicatorColor = if (darkMode) Color(0xB32B5BD7) else ActionBlue.copy(alpha = 0.16f)
-    // Keep the glass card translucent even when cross-window blur is unavailable.
-    val pillFill = if (darkMode) Color(0xFF283C6E).copy(alpha = 0.82f) else Card.copy(alpha = 0.82f)
+    // Frosted glass, not an opaque slab (owner 2026-10-21: "nav bar er
+    // background blur na kore full opacity bariye diyecho"): the pill base
+    // goes INTO the Haze style, layered thin over the blurred chat content —
+    // nothing paints an 82%-opaque fill on top of the blur any more.
+    val pillBase = if (darkMode) Color(0xFF283C6E) else Card
     // Enlarge the complete capsule and its slots while keeping the glyphs at 27dp.
     val navScale = 1.2f
     val navContentYOffset = 3.dp
@@ -1100,8 +1104,17 @@ internal fun HomeBottomNavigation(
                             .offset(y = backgroundCardYOffset)
                             .size(backgroundCardWidth, backgroundCardHeight)
                             .clip(CircleShape)
-                            .hazeEffect(state = hazeState)
-                            .background(pillFill),
+                            .hazeEffect(state = hazeState) {
+                                // Thin tints over the blurred scaffold
+                                // content keep the glass readable without
+                                // hiding the blur; the fallback stays
+                                // translucent on devices with no RenderEffect.
+                                backgroundColor = pillBase.copy(alpha = 0.20f)
+                                tints = listOf(HazeTint(pillBase.copy(alpha = 0.32f)))
+                                blurRadius = 28.dp
+                                noiseFactor = 0.12f
+                                fallbackTint = HazeTint(pillBase.copy(alpha = 0.62f))
+                            },
                     )
                     val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4
                     val reorderStepPx = with(density) { (slotWidth + gap).toPx() }

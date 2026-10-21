@@ -259,7 +259,12 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
         {!selecting && (
           <>
             <div className="list-header__brand">
-              <img className="list-header__logo" src="/logo.png" alt="" draggable={false} />
+              <img
+                className="list-header__logo"
+                src="/logo.png?v=3.9.216"
+                alt=""
+                draggable={false}
+              />
               <div>
                 <p className="eyebrow">KUCHUPUCHU WEB</p>
                 <h1 id="list-heading">Chats</h1>

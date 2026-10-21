@@ -104,7 +104,8 @@ check(
     nav.includes("slideOutVertically(") &&
     nav.includes("targetOffsetY = { fullHeight -> fullHeight }") &&
     nav.includes("with(density) { bottomOffsetPx.toDp() }") &&
-    nav.includes("copy(alpha = 0.82f)") &&
+    nav.includes("blurRadius = 28.dp") &&
+    nav.includes("fallbackTint = HazeTint(pillBase.copy(alpha = 0.62f))") &&
     !nav.includes("slideProgress") &&
     !nav.includes("params.y = windowYOffsetPx"),
 );
@@ -142,9 +143,9 @@ check(
     nav.includes("slideInVertically("),
 );
 check(
-  "the pill contents sit 3dp lower while its frosted background card gets a separate 1.5dp downward correction",
-  nav.includes("val pillFill =") &&
-    nav.includes("copy(alpha = 0.82f)") &&
+  "the pill contents sit 3dp lower over a truly frosted card — thin Haze tints, never an opaque slab again (owner 2026-10-21) — with the separate 1.5dp downward correction",
+  nav.includes("val pillBase =") &&
+    nav.includes("HazeTint(pillBase.copy(alpha = 0.32f))") &&
     nav.includes("val navScale = 1.2f") &&
     nav.includes("val navIconSize = 27.dp") &&
     nav.includes("val navWindowWidth = 248.dp * navScale") &&

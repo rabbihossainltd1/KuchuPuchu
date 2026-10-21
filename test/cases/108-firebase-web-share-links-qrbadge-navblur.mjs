@@ -51,19 +51,19 @@ const api = read("../../web/src/api.ts");
 /* --------------------------- 1 · QR with the brand badge ------------------ */
 
 check(
-  "the phone's QR is drawn H-ECC with the brand mark on a center plate (WhatsApp-style)",
+  "the phone's QR is drawn H-ECC with the glyph on a centred white rounded-square chip (WhatsApp-style; r119: background removed)",
   qrScreen.includes("EncodeHintType.ERROR_CORRECTION") &&
     qrScreen.includes("ErrorCorrectionLevel.H") &&
-    qrScreen.includes("R.drawable.icon_gold") &&
-    qrScreen.includes("drawCircle(360f, 360f, plate, paint)"),
+    qrScreen.includes("R.drawable.qr_badge") &&
+    qrScreen.includes("c.drawRoundRect(plateRect, corner, corner, paint)"),
 );
 
 check(
-  "the web's QR card draws the same badge: canvas, H-ECC, white plate, /logo.png",
+  "the web's QR card draws the same badge: canvas, H-ECC, white rounded chip, /qr-badge.png",
   dialog.includes('errorCorrectionLevel: "H"') &&
     dialog.includes("drawQrWithBadge(canvas, qrPayload(code))") &&
-    dialog.includes('logo.src = "/logo.png"') &&
-    dialog.includes("ctx.arc(cx, cy, plate, 0, Math.PI * 2)"),
+    dialog.includes('glyph.src = "/qr-badge.png"') &&
+    dialog.includes("ctx.roundRect(x, y, PLATE, PLATE, PLATE_CORNER)"),
 );
 
 /* ----------------------- 2 · the frosted-glass nav pill -------------------- */
@@ -132,7 +132,7 @@ check(
       ta.includes("app.kuchupuchu.android") &&
       ta.includes("delegate_permission/common.handle_all_urls") &&
       ta.includes(
-        "4E:3C:89:25:D2:1E:BA:B9:4D:E0:9F:94:AE:58:95:51:CB:CE:A6:14:8B:99:39:43:14:25:27:CC:6A:54:86:C4",
+        "39:19:0B:0F:38:78:74:93:08:1C:99:9B:03:6E:7C:65:FC:7A:4A:B6:5D:80:7E:4D:CD:C2:52:85:54:1E:CD:2E",
       )
     );
   })(),
