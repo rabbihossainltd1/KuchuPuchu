@@ -205,7 +205,9 @@ dependencies {
     // the home pill's frosted-glass backdrop. The old path leaned on the OS
     // cross-window blur flags, which most OEMs disable and Android 15 ignores
     // for floating windows; Haze samples the scaffold's own content and blurs
-    // it inside the card on every API level. Exact pin, like every dep here.
+    // it inside the card on every API level. Pinned 1.6.6 on purpose: 1.7.x
+    // hard-requires compileSdk 37 while this app is pinned at compileSdk 35
+    // (AGP 8.11.1 maxes at 36), so the aar-metadata gate said no.
     implementation("dev.chrisbanes.haze:haze:1.6.6")
     // Push notifications (Messenger mode). Firebase is initialized at runtime
     // from the worker's /api/config/firebase — no google-services.json needed

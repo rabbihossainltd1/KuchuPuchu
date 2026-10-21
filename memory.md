@@ -10,7 +10,7 @@ Four owner jobs:
    ProfileQrDialog switched to a 512px canvas + `/logo.png` badge. QR CONTENT
    UNCHANGED (`kuchupuchu://user/<code>`) — reset still kills leaked codes.
 2. Frosted nav (Android): the dialog-window pill + OS cross-window blur flags
-   are GONE. `dev.chrisbanes.haze:haze:1.7.3` added; KpApp's content Box
+   are GONE. `dev.chrisbanes.haze:haze:1.6.6` added (1.7.x demands compileSdk 37; we build at 35); KpApp's content Box
    `.haze(homeNavHazeState)`, the pill card `.hazeEffect(state)`. In-window
    AnimatedVisibility capsule, same 220/175 timing. Cases 62/63/65 rewritten.
 3. Firebase Hosting is the public web: fresh build deployed live to
