@@ -1055,9 +1055,10 @@ internal fun HomeBottomNavigation(
     val windowInteractive = visible && !modalOpen
     var dialogAttached by remember { mutableStateOf(visible && !modalOpen) }
     LaunchedEffect(visible, modalOpen) {
+        // Preserve the old immediate hide while a sheet owns the screen: the
+        // overlay root below is composed out when modalOpen is true, so no
+        // exit animation plays behind the sheet.
         if (modalOpen) {
-            // Preserve the old immediate hide while a sheet owns the screen.
-            dialogWindowRef[0]?.setWindowAnimations(0)
             dialogAttached = false
         } else {
             dialogAttached = visible
@@ -1071,199 +1072,201 @@ internal fun HomeBottomNavigation(
     // It now draws INSIDE the app's own window: the scaffold content Box in
     // KpApp carries .haze(homeNavHazeState), and this card carries .hazeEffect —
     // real frosted glass on every device, emoji-blur style, no OS permission.
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-        AnimatedVisibility(
-            visible = dialogAttached,
-            enter =
-                slideInVertically(
-                    animationSpec = tween(220, easing = FastOutSlowInEasing),
-                    initialOffsetY = { fullHeight -> fullHeight },
-                ) + fadeIn(tween(220)),
-            exit =
-                slideOutVertically(
-                    animationSpec = tween(175),
-                    targetOffsetY = { fullHeight -> fullHeight },
-                ) + fadeOut(tween(175)),
-        ) {
-            BoxWithConstraints(
-                Modifier
-                    .padding(bottom = with(density) { bottomOffsetPx.toDp() })
-                    .size(navWindowWidth, navWindowHeight)
-                    .then(if (windowInteractive) Modifier else Modifier.clearAndSetSemantics {})
-                    .clip(CircleShape),
+    if (!modalOpen) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+            AnimatedVisibility(
+                visible = dialogAttached,
+                enter =
+                    slideInVertically(
+                        animationSpec = tween(220, easing = FastOutSlowInEasing),
+                        initialOffsetY = { fullHeight -> fullHeight },
+                    ) + fadeIn(tween(220)),
+                exit =
+                    slideOutVertically(
+                        animationSpec = tween(175),
+                        targetOffsetY = { fullHeight -> fullHeight },
+                    ) + fadeOut(tween(175)),
             ) {
-                Box(
+                BoxWithConstraints(
                     Modifier
-                        .align(Alignment.Center)
-                        .offset(y = backgroundCardYOffset)
-                        .size(backgroundCardWidth, backgroundCardHeight)
-                        .clip(CircleShape)
-                        .hazeEffect(state = hazeState)
-                        .background(pillFill),
-                )
-                val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4
-                val reorderStepPx = with(density) { (slotWidth + gap).toPx() }
-                val selectedId = HomeNavOrderPolicy.defaultOrder.getOrElse(tab.coerceIn(0, 3)) { "chats" }
-                val selectedPosition = navOrder.indexOf(selectedId).coerceIn(0, 3)
-                val indicatorX by animateDpAsState(
-                    targetValue = capsulePadding + (slotWidth - indicatorSize) * 0.5f +
-                        (slotWidth + gap) * selectedPosition.toFloat(),
-                    animationSpec = tween(450, easing = indicatorEasing),
-                    label = "navIndicatorX",
-                )
-                val indicatorY = capsulePadding + (itemH - indicatorSize) * 0.5f + navContentYOffset
-                Box(
-                    Modifier
-                        .offset(x = indicatorX, y = indicatorY)
-                        .size(indicatorSize)
-                        .clip(CircleShape)
-                        .background(indicatorColor),
-                )
-                LazyRow(
-                    state = navRowState,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = capsulePadding, vertical = capsulePadding)
-                        .offset(y = navContentYOffset),
-                    horizontalArrangement = Arrangement.spacedBy(gap),
-                    verticalAlignment = Alignment.CenterVertically,
-                    userScrollEnabled = false,
+                        .padding(bottom = with(density) { bottomOffsetPx.toDp() })
+                        .size(navWindowWidth, navWindowHeight)
+                        .then(if (windowInteractive) Modifier else Modifier.clearAndSetSemantics {})
+                        .clip(CircleShape),
                 ) {
-                    // Lay out the actual ordered ids instead of translating a
-                    // fixed-order Row. Stable keys keep every icon, click target,
-                    // selection and badge attached to its tab while LazyRow's
-                    // placement animation moves the untouched siblings.
-                    items(items = navOrder, key = { it }) { itemId ->
-                        val pageIndex = HomeNavOrderPolicy.defaultOrder.indexOf(itemId).coerceAtLeast(0)
-                        val isMoving = draggingId == itemId || settlingId == itemId
-                        val itemModifier = Modifier
-                            .width(slotWidth)
-                            .then(
-                                if (isMoving) {
-                                    Modifier
-                                } else {
-                                    Modifier.animateItem(
-                                        fadeInSpec = null,
-                                        fadeOutSpec = null,
-                                        placementSpec = spring(dampingRatio = 0.84f, stiffness = 620f),
-                                    )
-                                },
-                            )
-                        val label = when (itemId) {
-                            "status" -> "Status"
-                            "calls" -> "Calls"
-                            "profile" -> "Profile"
-                            else -> "Chats"
-                        }
-                        val itemOffsetPx = when {
-                            draggingId == itemId -> dragOffsetPx
-                            settlingId == itemId ->
-                                if (settlingOffsetReady) settlingOffset.value else settlingStartOffsetPx
-                            else -> 0f
-                        }
-                        NavItem(
-                            label = label,
-                            selected = tab == pageIndex,
-                            modifier = itemModifier,
-                            height = itemH,
-                            iconSize = navIconSize,
-                            sizeScale = navScale,
-                            badge = if (itemId == "chats") unreadChats else 0,
-                            newStatus = itemId == "status" && unseenStatus,
-                            enabled = windowInteractive,
-                            idleTint = idleTint,
-                            selectedTint = selectedTint,
-                            reorderable = true,
-                            isDragging = draggingId == itemId,
-                            reorderOffsetPx = itemOffsetPx,
-                            onClick = { onSelect(pageIndex) },
-                            onReorderStart = {
-                                settleGeneration++
-                                settlingId = null
-                                settlingOffsetReady = false
-                                draggingId = itemId
-                                dragStartOrder = navOrder
-                                dragStartIndex = navOrder.indexOf(itemId).coerceAtLeast(0)
-                                dragDistancePx = 0f
-                                dragOffsetPx = 0f
-                                dragChanged = false
-                                reorderHaptics.tap()
-                            },
-                            onReorderDrag = { deltaX ->
-                                if (draggingId == itemId && reorderStepPx > 0f) {
-                                    dragDistancePx += deltaX
-                                    val target =
-                                        (dragStartIndex + (dragDistancePx / reorderStepPx).roundToInt())
-                                            .coerceIn(0, HomeNavOrderPolicy.defaultOrder.lastIndex)
-                                    val next = HomeNavOrderPolicy.move(navOrder, itemId, target)
-                                    if (next != navOrder) {
-                                        navOrder = next
-                                        dragChanged = true
-                                        reorderHaptics.tap()
-                                    }
-                                    // The dragged item is laid out at its new
-                                    // index immediately; this remainder keeps it
-                                    // exactly under the pointer while siblings animate.
-                                    dragOffsetPx =
-                                        dragDistancePx - (target - dragStartIndex) * reorderStepPx
-                                }
-                            },
-                            onReorderEnd = { cancelled ->
-                                if (draggingId == itemId) {
-                                    val oldPosition = navOrder.indexOf(itemId).coerceAtLeast(0)
-                                    val restoreOrder = cancelled && dragChanged
-                                    val targetOrder = if (restoreOrder) dragStartOrder else navOrder
-                                    val targetPosition = targetOrder.indexOf(itemId).coerceAtLeast(0)
-                                    val fromOffsetPx =
-                                        (oldPosition - targetPosition) * reorderStepPx + dragOffsetPx
-                                    if (restoreOrder) navOrder = dragStartOrder
-                                    val saveOrder = !cancelled && dragChanged
-                                    draggingId = null
+                    Box(
+                        Modifier
+                            .align(Alignment.Center)
+                            .offset(y = backgroundCardYOffset)
+                            .size(backgroundCardWidth, backgroundCardHeight)
+                            .clip(CircleShape)
+                            .hazeEffect(state = hazeState)
+                            .background(pillFill),
+                    )
+                    val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4
+                    val reorderStepPx = with(density) { (slotWidth + gap).toPx() }
+                    val selectedId = HomeNavOrderPolicy.defaultOrder.getOrElse(tab.coerceIn(0, 3)) { "chats" }
+                    val selectedPosition = navOrder.indexOf(selectedId).coerceIn(0, 3)
+                    val indicatorX by animateDpAsState(
+                        targetValue = capsulePadding + (slotWidth - indicatorSize) * 0.5f +
+                            (slotWidth + gap) * selectedPosition.toFloat(),
+                        animationSpec = tween(450, easing = indicatorEasing),
+                        label = "navIndicatorX",
+                    )
+                    val indicatorY = capsulePadding + (itemH - indicatorSize) * 0.5f + navContentYOffset
+                    Box(
+                        Modifier
+                            .offset(x = indicatorX, y = indicatorY)
+                            .size(indicatorSize)
+                            .clip(CircleShape)
+                            .background(indicatorColor),
+                    )
+                    LazyRow(
+                        state = navRowState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = capsulePadding, vertical = capsulePadding)
+                            .offset(y = navContentYOffset),
+                        horizontalArrangement = Arrangement.spacedBy(gap),
+                        verticalAlignment = Alignment.CenterVertically,
+                        userScrollEnabled = false,
+                    ) {
+                        // Lay out the actual ordered ids instead of translating a
+                        // fixed-order Row. Stable keys keep every icon, click target,
+                        // selection and badge attached to its tab while LazyRow's
+                        // placement animation moves the untouched siblings.
+                        items(items = navOrder, key = { it }) { itemId ->
+                            val pageIndex = HomeNavOrderPolicy.defaultOrder.indexOf(itemId).coerceAtLeast(0)
+                            val isMoving = draggingId == itemId || settlingId == itemId
+                            val itemModifier = Modifier
+                                .width(slotWidth)
+                                .then(
+                                    if (isMoving) {
+                                        Modifier
+                                    } else {
+                                        Modifier.animateItem(
+                                            fadeInSpec = null,
+                                            fadeOutSpec = null,
+                                            placementSpec = spring(dampingRatio = 0.84f, stiffness = 620f),
+                                        )
+                                    },
+                                )
+                            val label = when (itemId) {
+                                "status" -> "Status"
+                                "calls" -> "Calls"
+                                "profile" -> "Profile"
+                                else -> "Chats"
+                            }
+                            val itemOffsetPx = when {
+                                draggingId == itemId -> dragOffsetPx
+                                settlingId == itemId ->
+                                    if (settlingOffsetReady) settlingOffset.value else settlingStartOffsetPx
+                                else -> 0f
+                            }
+                            NavItem(
+                                label = label,
+                                selected = tab == pageIndex,
+                                modifier = itemModifier,
+                                height = itemH,
+                                iconSize = navIconSize,
+                                sizeScale = navScale,
+                                badge = if (itemId == "chats") unreadChats else 0,
+                                newStatus = itemId == "status" && unseenStatus,
+                                enabled = windowInteractive,
+                                idleTint = idleTint,
+                                selectedTint = selectedTint,
+                                reorderable = true,
+                                isDragging = draggingId == itemId,
+                                reorderOffsetPx = itemOffsetPx,
+                                onClick = { onSelect(pageIndex) },
+                                onReorderStart = {
+                                    settleGeneration++
+                                    settlingId = null
+                                    settlingOffsetReady = false
+                                    draggingId = itemId
+                                    dragStartOrder = navOrder
+                                    dragStartIndex = navOrder.indexOf(itemId).coerceAtLeast(0)
+                                    dragDistancePx = 0f
                                     dragOffsetPx = 0f
                                     dragChanged = false
-                                    settleGeneration++
-                                    val thisSettle = settleGeneration
-                                    settlingStartOffsetPx = fromOffsetPx
-                                    settlingOffsetReady = false
-                                    settlingId = itemId
-                                    reorderScope.launch {
-                                        settlingOffset.snapTo(fromOffsetPx)
-                                        if (settleGeneration == thisSettle && settlingId == itemId) {
-                                            settlingOffsetReady = true
-                                            settlingOffset.animateTo(
-                                                0f,
-                                                spring(dampingRatio = 0.82f, stiffness = 620f),
-                                            )
+                                    reorderHaptics.tap()
+                                },
+                                onReorderDrag = { deltaX ->
+                                    if (draggingId == itemId && reorderStepPx > 0f) {
+                                        dragDistancePx += deltaX
+                                        val target =
+                                            (dragStartIndex + (dragDistancePx / reorderStepPx).roundToInt())
+                                                .coerceIn(0, HomeNavOrderPolicy.defaultOrder.lastIndex)
+                                        val next = HomeNavOrderPolicy.move(navOrder, itemId, target)
+                                        if (next != navOrder) {
+                                            navOrder = next
+                                            dragChanged = true
+                                            reorderHaptics.tap()
+                                        }
+                                        // The dragged item is laid out at its new
+                                        // index immediately; this remainder keeps it
+                                        // exactly under the pointer while siblings animate.
+                                        dragOffsetPx =
+                                            dragDistancePx - (target - dragStartIndex) * reorderStepPx
+                                    }
+                                },
+                                onReorderEnd = { cancelled ->
+                                    if (draggingId == itemId) {
+                                        val oldPosition = navOrder.indexOf(itemId).coerceAtLeast(0)
+                                        val restoreOrder = cancelled && dragChanged
+                                        val targetOrder = if (restoreOrder) dragStartOrder else navOrder
+                                        val targetPosition = targetOrder.indexOf(itemId).coerceAtLeast(0)
+                                        val fromOffsetPx =
+                                            (oldPosition - targetPosition) * reorderStepPx + dragOffsetPx
+                                        if (restoreOrder) navOrder = dragStartOrder
+                                        val saveOrder = !cancelled && dragChanged
+                                        draggingId = null
+                                        dragOffsetPx = 0f
+                                        dragChanged = false
+                                        settleGeneration++
+                                        val thisSettle = settleGeneration
+                                        settlingStartOffsetPx = fromOffsetPx
+                                        settlingOffsetReady = false
+                                        settlingId = itemId
+                                        reorderScope.launch {
+                                            settlingOffset.snapTo(fromOffsetPx)
                                             if (settleGeneration == thisSettle && settlingId == itemId) {
-                                                settlingId = null
-                                                settlingOffsetReady = false
+                                                settlingOffsetReady = true
+                                                settlingOffset.animateTo(
+                                                    0f,
+                                                    spring(dampingRatio = 0.82f, stiffness = 620f),
+                                                )
+                                                if (settleGeneration == thisSettle && settlingId == itemId) {
+                                                    settlingId = null
+                                                    settlingOffsetReady = false
+                                                }
                                             }
                                         }
+                                        if (saveOrder) onOrderChanged(navOrder)
                                     }
-                                    if (saveOrder) onOrderChanged(navOrder)
+                                },
+                            ) { tint ->
+                                when (itemId) {
+                                    "status" -> StatusGlyphIcon(tint, navIconSize)
+                                    "calls" -> Icon(
+                                        Icons.Filled.Call,
+                                        contentDescription = null,
+                                        tint = tint,
+                                        modifier = Modifier.size(navIconSize),
+                                    )
+                                    "profile" -> Icon(
+                                        Icons.Filled.Person,
+                                        contentDescription = null,
+                                        tint = tint,
+                                        modifier = Modifier.size(navIconSize),
+                                    )
+                                    else -> Icon(
+                                        painter = painterResource(R.drawable.ic_nav_chat),
+                                        contentDescription = null,
+                                        tint = tint,
+                                        modifier = Modifier.size(navIconSize),
+                                    )
                                 }
-                            },
-                        ) { tint ->
-                            when (itemId) {
-                                "status" -> StatusGlyphIcon(tint, navIconSize)
-                                "calls" -> Icon(
-                                    Icons.Filled.Call,
-                                    contentDescription = null,
-                                    tint = tint,
-                                    modifier = Modifier.size(navIconSize),
-                                )
-                                "profile" -> Icon(
-                                    Icons.Filled.Person,
-                                    contentDescription = null,
-                                    tint = tint,
-                                    modifier = Modifier.size(navIconSize),
-                                )
-                                else -> Icon(
-                                    painter = painterResource(R.drawable.ic_nav_chat),
-                                    contentDescription = null,
-                                    tint = tint,
-                                    modifier = Modifier.size(navIconSize),
-                                )
                             }
                         }
                     }

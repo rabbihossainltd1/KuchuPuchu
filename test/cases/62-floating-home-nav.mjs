@@ -88,7 +88,7 @@ check(
   "the background card sits 1.5dp below the icon/indicator baseline and carries the frosted-glass treatment itself (owner 2026-10-20)",
   nav.includes("val backgroundCardYOffset = navContentYOffset + 1.5.dp") &&
     nav.includes(
-      ".align(Alignment.Center)\n                        .offset(y = backgroundCardYOffset)\n                        .size(backgroundCardWidth, backgroundCardHeight)\n                        .clip(CircleShape)\n                        .hazeEffect(state = hazeState)\n                        .background(pillFill),",
+      ".align(Alignment.Center)\n                            .offset(y = backgroundCardYOffset)\n                            .size(backgroundCardWidth, backgroundCardHeight)\n                            .clip(CircleShape)\n                            .hazeEffect(state = hazeState)\n                            .background(pillFill),",
     ) &&
     nav.includes(".offset(y = navContentYOffset)"),
 );
