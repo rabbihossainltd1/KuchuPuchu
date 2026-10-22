@@ -72,7 +72,11 @@ test("the precache manifest is the shell plus identity files, never api/ws", asy
 
   expect(precache).toContain("/index.html");
   expect(precache).toContain("/icon.svg");
-  expect(precache).toContain("/logo.png");
+  // Owner round 120 (2026-10-21): the logo is OUT of the precache — a waiting
+  // old worker used to answer it from last week's cache, which kept stale
+  // branding visible for days ("logo ekhono shob jaigay old ta keno"). It is
+  // network-served now, versioned by the ?v= query at every call site.
+  expect(precache).not.toContain("/logo.png");
   expect(precache).toContain("/manifest.webmanifest");
   expect(precache.some((url) => url.startsWith("/assets/") && url.endsWith(".js"))).toBe(true);
   expect(precache.some((url) => url.startsWith("/assets/") && url.endsWith(".css"))).toBe(true);

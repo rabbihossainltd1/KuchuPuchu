@@ -360,11 +360,14 @@ test.describe("opt-in Worker-backed account flows", () => {
     });
     await page.goto("/account");
     await enterPhone(page);
+    // Owner round 120 (2026-10-21: "otp verify button ta sorai daw"): no Verify
+    // button exists — filling the sixth digit submits the code itself.
+    await expect(page.getByRole("button", { name: "Verify code" })).toHaveCount(0);
     await page.getByLabel("Six-digit code").fill("111111");
-    await page.getByRole("button", { name: "Verify code" }).click();
     await expect(page.getByRole("alert").filter({ hasText: "4 attempts remaining" })).toBeVisible();
+    // A wrong code clears the boxes and refocuses them; the next six digits
+    // auto-submit again without any button tap.
     await page.getByLabel("Six-digit code").fill("222222");
-    await page.getByRole("button", { name: "Verify code" }).click();
     await expect(page.getByRole("heading", { name: "Account & settings" })).toBeVisible();
     expect(otpCount).toBe(2);
   });
