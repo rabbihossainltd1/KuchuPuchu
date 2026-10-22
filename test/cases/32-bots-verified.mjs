@@ -739,8 +739,8 @@ const convBetween = (db, a, b) =>
       ).includes("Call ringtone"),
   );
   check(
-    "BOTH sounds live: tap (send) + server-accept (sent) on every kind",
-    chat.includes("KpSounds.sent(ctx)") && chat.includes("KpSounds.send(ctx)"),
+    "ONE sound on send: the tap (send) tone lives, the server-accept (sent) whoosh is REMOVED on every kind (owner 2026-10-22 r124 supersedes the old both-sounds rule)",
+    !chat.includes("KpSounds.sent(ctx)") && chat.includes("KpSounds.send(ctx)"),
   );
   check(
     "in-app message sound only when off the chat screen",

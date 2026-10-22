@@ -161,10 +161,10 @@ check(
     nav.includes("AnimatedVisibility(") &&
     nav.includes("visible = dialogAttached") &&
     nav.includes("val pillBase =") &&
-    nav.includes("HazeTint(pillBase.copy(alpha = 0.30f))") && // round 122: real frost again
-    nav.includes("blurRadius = 40.dp") &&
+    /HazeTint\(pillBase\.copy\(alpha = 0\.\d+f\)\)/.test(nav) && // r122 frost → r124 MAXIMUM (0.34 tint / 96dp / 0.96 fallback, pinned in case124)
+    /blurRadius = \d+\.dp/.test(nav) &&
     nav.includes("noiseFactor = 0.12f") &&
-    nav.includes("fallbackTint = HazeTint(pillBase.copy(alpha = 0.92f))") && // no-RenderEffect devices get solid frost
+    /fallbackTint = HazeTint\(pillBase\.copy\(alpha = 0\.9\df\)\)/.test(nav) && // no-RenderEffect devices get solid frost
     !nav.includes(".background(pillFill)") &&
     nav.includes("val navScale = 0.9f") &&
     nav.includes("val navIconSize = 27.dp") &&

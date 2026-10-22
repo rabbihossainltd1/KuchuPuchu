@@ -179,7 +179,7 @@ check(
     !nav.includes("slideProgress") &&
     nav.includes("AnimatedVisibility(") &&
     nav.includes("visible = dialogAttached") &&
-    nav.includes("HazeTint(pillBase.copy(alpha = 0.30f))") && // round 122: frost back, geometry untouched
+    /HazeTint\(pillBase\.copy\(alpha = 0\.\d+f\)\)/.test(nav) && // r122 frost → r124 MAXIMUM (exact values in case124), geometry untouched
     !nav.includes("Dialog(") &&
     !nav.includes("WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE") &&
     !chatList.includes("setBackgroundBlurRadius(") &&

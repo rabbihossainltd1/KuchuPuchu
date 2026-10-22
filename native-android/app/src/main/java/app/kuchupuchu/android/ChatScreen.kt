@@ -1977,8 +1977,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         // up, and pendingFor() repaints the clock bubble on re-entry.
         Outbox.send(convId, clientId, payload) { outcome ->
             // …and the owner's "sent" sound when the server accepted it.
-            outcome.onSuccess { runCatching { KpSounds.sent(ctx) } }
-            if (!alive.get()) return@send false
+                        if (!alive.get()) return@send false
             outcome.onSuccess { row -> paintSent(row) }
             outcome.onFailure { e ->
                 // Refused for good: the bubble turns red now and the text
@@ -2045,7 +2044,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                     scheduledRows.add(row)
                     scheduledRows.sortBy { it.optString("sendAt") }
                 }
-                runCatching { KpSounds.sent(ctx) }
                 Drafts.clear(convId)
             } catch (e: Exception) {
                 error = (e as? ApiException)?.message?.takeIf { it.isNotBlank() } ?: "Could not schedule. Try again."
@@ -2126,7 +2124,6 @@ fun ChatScreen(nav: NavController, convId: String) {
         scope.launch {
             try {
                 withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
-                runCatching { KpSounds.sent(ctx) }
             } catch (e: Exception) {
                 pending.removeAll { it.optString("clientId") == clientId }
                 error = (e as? ApiException)?.message?.takeIf { it.isNotBlank() } ?: "Could not send the GIF."
@@ -2219,7 +2216,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                         scheduledRows.add(row)
                         scheduledRows.sortBy { it.optString("sendAt") }
                     }
-                    runCatching { KpSounds.sent(ctx) }
                 } catch (e: Exception) {
                     error = (e as? ApiException)?.message?.takeIf { it.isNotBlank() } ?: "Could not schedule. Try again."
                 }
@@ -2421,7 +2417,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                         scheduledRows.sortBy { it.optString("sendAt") }
                     }
                     file.delete()
-                    runCatching { KpSounds.sent(ctx) }
                 } catch (e: Exception) {
                     error = (e as? ApiException)?.message?.takeIf { it.isNotBlank() } ?: "Could not schedule. Try again."
                 }
@@ -2549,8 +2544,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     .also { if (clipMeta.length() > 0) it.put("meta", clipMeta) else docMeta?.let { d -> it.put("meta", d) } }
                     .also { if (replyId != null) it.put("replyTo", replyId) }
             Uploads.sendFile(convId, clientId, name, mime, file, if (clipMeta.length() > 0) clipMeta else docMeta, plainPayload()) { outcome ->
-                outcome.onSuccess { runCatching { KpSounds.sent(ctx) } }
-                if (!alive.get()) return@sendFile false
+                                if (!alive.get()) return@sendFile false
                 outcome.onSuccess { row -> paintSent(row) }
                 outcome.onFailure { failure ->
                     // Before this the optimistic bubble stayed on screen forever
@@ -2564,8 +2558,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
         } else {
             Uploads.sendFile(convId, clientId, name, mime, file, docMeta, captionPayload) { outcome ->
-                outcome.onSuccess { runCatching { KpSounds.sent(ctx) } }
-                if (!alive.get()) return@sendFile false
+                                if (!alive.get()) return@sendFile false
                 outcome.onSuccess { row -> paintSent(row) }
                 outcome.onFailure { failure ->
                     // Before this the optimistic bubble stayed on screen forever
@@ -2648,8 +2641,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     .also { if (once) it.put("viewOnce", true) }
                     .also { if (replyId != null) it.put("replyTo", replyId) }
             Uploads.sendFile(convId, clientId, name, "audio/mp4", file, null, payload) { outcome ->
-                outcome.onSuccess { runCatching { KpSounds.sent(ctx) } }
-                if (!alive.get()) return@sendFile false
+                                if (!alive.get()) return@sendFile false
                 outcome.onSuccess { row -> paintSent(row) }
                 outcome.onFailure { e ->
                     markPendingFailed(clientId)
@@ -2772,8 +2764,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         .put("mediaH", job.row.optInt("mediaH"))
                         .also { p -> job.row.optJSONObject("meta")?.let { p.put("meta", it) } }
                 val cb: (Result<JSONObject>) -> Boolean = cb@{ outcome ->
-                    outcome.onSuccess { runCatching { KpSounds.sent(ctx) } }
-                    if (!alive.get()) return@cb false
+                                        if (!alive.get()) return@cb false
                     outcome.onSuccess { row -> paintSent(row) }
                     outcome.onFailure { failure ->
                         markPendingFailed(cid)
@@ -5628,7 +5619,10 @@ fun ChatScreen(nav: NavController, convId: String) {
             onPasteImage = { composerPasteImage() },
             onReceiveImage = { uri -> keyboardImagePasted(uri) },
             onSend = { requestAttachExit {
-                haptics.confirm()
+                // Round 124 (owner item 6: "sent sound ta baad — ekta i sound
+                // just; massage send a haptic feedback taw remove"): the ack
+                // whoosh is gone everywhere above, one tap sound only — and
+                // the SEND is haptic-free. Adjacent surfaces untouched.
                 showAttach = false
                 showStickers = false
                 if (sendText(input)) input = ""

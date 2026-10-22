@@ -541,6 +541,7 @@ fun KpApp() {
                 // hocche na"): a silent runCatching meant a PRIVATE profile
                 // (username hidden), an unknown handle or a dropped request all
                 // looked like "the button does nothing". Failed opens say so.
+                var linkFailReason = "lookup"
                 val opened =
                     runCatching {
                         // Round 123 (owner: own link STILL toasted on v297): no
@@ -569,26 +570,61 @@ fun KpApp() {
                             return@runCatching true
                         }
                         val cached = ScreenStore.convIdForUser[id]
+                        var convReason = ""
+                        linkFailReason = "chat create"
                         val convId =
                             cached ?: run {
-                                val created =
+                                suspend fun tryCreate(): org.json.JSONObject? =
+                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        Api.post("/api/conversations", org.json.JSONObject().put("userId", id))
+                                    }
+                                var created =
                                     try {
-                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                            Api.post("/api/conversations", org.json.JSONObject().put("userId", id))
-                                        }
+                                        tryCreate()
                                     } catch (selfCursor: ApiException) {
                                         // Worker contract: this endpoint fails 400
                                         // "Bad user." for exactly two inputs — a blank
                                         // userId (never sent here) and ONE'S OWN id.
                                         // Whether Store.me raced us or not, this IS the
                                         // owner opening his own link: profile, no toast.
-                                        if (selfCursor.status == 400) null else throw selfCursor
+                                        if (selfCursor.status == 400) null else {
+                                            convReason = "http " + selfCursor.status
+                                            null.also { throw selfCursor }
+                                        }
+                                    } catch (net: Exception) {
+                                        convReason = "network"
+                                        null.also { throw net }
                                     }
                                 if (created == null) {
                                     nav.navigate("profile/$id") { launchSingleTop = true }
                                     return@runCatching true
                                 }
-                                created.optJSONObject("conversation")?.optString("id").orEmpty()
+                                val convId =
+                                    created.optJSONObject("conversation")?.optString("id").orEmpty()
+                                // Round 124 (owner item 4: friend-link tap opened
+                                // the app, showed the old offline toast, NO
+                                // chat): a single failed create (edge→core proxy
+                                // hop, cold core, flaky data) used to dead-end
+                                // at an untagged toast. Retry ONCE behind a
+                                // breath, then land on his PROFILE — tappable,
+                                // never a dead end — with the reason visible.
+                                if (convId.isBlank()) {
+                                    convReason = "empty id"
+                                    kotlinx.coroutines.delay(700)
+                                    created = runCatching { tryCreate() }.getOrNull().also {
+                                        if (it == null) convReason = "retry fail"
+                                    }
+                                    val again =
+                                        created?.optJSONObject("conversation")?.optString("id").orEmpty()
+                                    if (again.isBlank()) {
+                                        nav.navigate("profile/$id") { launchSingleTop = true }
+                                        android.widget.Toast
+                                            .makeText(appCtx, "Chat didn't open (" + convReason + ") — his profile is open instead.", android.widget.Toast.LENGTH_LONG)
+                                            .show()
+                                        return@runCatching true
+                                    }
+                                    again
+                                } else convId
                             }
                         if (convId.isNotBlank()) {
                             ScreenStore.convIdForUser[id] = convId
@@ -600,7 +636,7 @@ fun KpApp() {
                     }.getOrDefault(false)
                 if (!opened) {
                     android.widget.Toast
-                        .makeText(appCtx, "Couldn't open that profile. Try again when you're online.", android.widget.Toast.LENGTH_LONG)
+                        .makeText(appCtx, "Couldn't open that profile (" + linkFailReason + "). Try again when you're online.", android.widget.Toast.LENGTH_LONG)
                         .show()
                 }
             }

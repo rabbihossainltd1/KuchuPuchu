@@ -64,14 +64,12 @@ const viteConfig = read("../../vite.web.config.ts");
 
 /* 1 — the pill regression is closed -------------------------------------- */
 check(
-  "nav pill: back to navScale 1f (248x56), tints nearly halved (0.10/0.16, fallback 0.40), SAME 28dp blur — size reset + visible frost",
+  "nav pill geometry stays reset + the frost values moved with the rounds (r121: 0.16/0.30 + 40dp + 0.92 → r124 MAXIMUM: 0.20/0.34 + 96dp + 0.96, pinned in case124)",
   chatList.includes("val navScale = 0.9f") &&
     !chatList.includes("val navScale = 1.2f") &&
     chatList.includes("val navContentYOffset = 0.dp") && // round 121 follow-up: centred, smaller
-    chatList.includes("backgroundColor = pillBase.copy(alpha = 0.16f)") &&
-    chatList.includes("tints = listOf(HazeTint(pillBase.copy(alpha = 0.30f)))") &&
-    chatList.includes("blurRadius = 40.dp") &&
-    chatList.includes("fallbackTint = HazeTint(pillBase.copy(alpha = 0.92f))"),
+    /blurRadius = \d+\.dp/.test(chatList) &&
+    /fallbackTint = HazeTint\(pillBase\.copy\(alpha = 0\.\d+f\)\)/.test(chatList),
 );
 
 /* 2 — QR payload IS the share link, both platforms ------------------------ */
@@ -122,12 +120,12 @@ check(
     kpApp.includes("if (id == Store.myId()) {") &&
     kpApp.includes('nav.navigate("profile/$id") { launchSingleTop = true }') &&
     kpApp.includes("catch (selfCursor: ApiException) {") &&
-    kpApp.includes("if (selfCursor.status == 400) null else throw selfCursor") &&
+    /if \(selfCursor\.status == 400\) null else/.test(kpApp) && // round 124: retry + reason tag replaced the bare rethrow; 400 self-route unchanged
     worker.includes('if (!other || other === uid) fail(400, "Bad user.");'),
 );
 check(
-  "an honest toast remains for REAL failures only",
-  kpApp.includes("Couldn't open that profile. Try again when you're online."),
+  "an honest toast remains for REAL failures only (round 124: stage-tagged)",
+  kpApp.includes('\"Couldn\'t open that profile (\" + linkFailReason + \"). Try again when you\'re online.\"'),
 );
 
 /* 3 — landing card: invalid state, tick, CTA fallback --------------------- */
@@ -153,7 +151,7 @@ check(
 );
 check(
   "a failed app-side profile open says something (was: silent nothing)",
-  kpApp.includes("Couldn't open that profile. Try again when you're online.") &&
+  /Couldn\'t open that profile \(/.test(kpApp) &&
     kpApp.includes("}.getOrDefault(false)"),
 );
 
@@ -184,9 +182,8 @@ check(
     ) &&
     worker.includes("if (geminiAnswer && geminiAnswer.trim()) return geminiAnswer;") && // round 123: Gemini-empty is not a dead line — the free brain always gets a turn
     worker.includes("if (answer) onChunk(answer);") &&
-    worker.includes(
-      "answer ?? (!env.GEMINI_API_KEY && !env.AI ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);",
-    ),
+    worker.includes("AI_REPLY_FALLBACK + aiDiagTag(env)") && // round 124: dead lines carry the lane fingerprint
+    worker.includes("AI_REPLY_DOWN + aiDiagTag(env)"),
 );
 check(
   "the welcome line also falls back through workersAiChat before its static greeting",

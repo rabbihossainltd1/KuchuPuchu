@@ -2,6 +2,10 @@ name = "kuchupuchu-api"
 main = "src/worker/index.ts"
 compatibility_date = "2025-08-01"
 account_id = "92081fac7caf54a46a756c382081544b"
+
+# Round 124: the AI dead-line fingerprint + /api/ai/diag name their process.
+# (folded into the existing [vars] table below — TOML allows one per doc.)
+
 workers_dev = true
 
 # One-minute cron: reap stale RINGING calls so a call nobody polls (both phones
@@ -55,6 +59,7 @@ database_id = "28f6c033-4334-4fc0-ba1c-441ab42cf9a0"
 # §52: the hourly cron probes this origin's /api/health to record backend latency
 # (worker + D1 round trip). Unset means the probe reports `lat.err` instead of guessing.
 [vars]
+KP_SELF = "edge"
 SELF_ORIGIN = "https://kuchupuchu-api.kuchupuchu.workers.dev"
 # Owner round 48: the Workers-AI rescue brain needs the account id at
 # runtime (the token stays a secret; this is config, not a secret).

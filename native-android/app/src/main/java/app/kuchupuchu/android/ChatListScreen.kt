@@ -1137,11 +1137,18 @@ internal fun HomeBottomNavigation(
                                 // vary the glass density. 0.16/0.30 + 40dp blur +
                                 // 0.92 fallback = one UNIFORM frost top to bottom,
                                 // size still untouched.
-                                backgroundColor = pillBase.copy(alpha = 0.16f)
-                                tints = listOf(HazeTint(pillBase.copy(alpha = 0.30f)))
-                                blurRadius = 40.dp
+                                // Round 124 (owner 2026-10-22 item 3: "kono blur i
+                                // nai — full maximum blur add kore daw"): strongest
+                                // frost — 96.dp blur, heavier uniform 0.20+0.34 navy,
+                                // near-solid 0.96 fallback for non-RenderEffect
+                                // devices. If the GPU blur fails on his phone the
+                                // pill still reads dense frosted navy. Geometry
+                                // untouched (owner r42: no size changes).
+                                backgroundColor = pillBase.copy(alpha = 0.20f)
+                                tints = listOf(HazeTint(pillBase.copy(alpha = 0.34f)))
+                                blurRadius = 96.dp
                                 noiseFactor = 0.12f
-                                fallbackTint = HazeTint(pillBase.copy(alpha = 0.92f))
+                                fallbackTint = HazeTint(pillBase.copy(alpha = 0.96f))
                             },
                     )
                     val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4

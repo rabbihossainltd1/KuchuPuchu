@@ -7,6 +7,15 @@ account_id = "92081fac7caf54a46a756c382081544b"
 workers_dev = false
 preview_urls = false
 
+# Round 124: tag the auto-built core for the AI diag probe. A [vars] table
+# REPLACES sticky plain-vars for this script, so it lists EVERY plain var the
+# core runtime reads (SELF_ORIGIN/LARAVEL/CF_ACCOUNT) plus its KP_SELF tag.
+# Secrets + bindings are uploaded separately and stay untouched by vars.
+[vars]
+KP_SELF = "core"
+SELF_ORIGIN = "https://kuchupuchu.kuchupuchu.workers.dev"
+CF_ACCOUNT = "92081fac7caf54a46a756c382081544b"
+LARAVEL_CLASSROOM_ORIGIN = "https://vintoxbd.online"
 # Intentionally no production bindings, routes, cron triggers, or DO migrations.
 # This config only validates/bundles the Worker; it is not a runtime preview.
 # Slice J: previews serve the built React PWA; wrangler runs the web build via

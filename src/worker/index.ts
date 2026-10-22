@@ -138,6 +138,9 @@ export type Env = {
   LOGIN_OTP_HMAC_SECRET?: string;
   /** Gemini API key — powers all KuchuPuchu AI chat, vision, voice, and image turns. */
   GEMINI_API_KEY?: string;
+  /** Which live script answers right now ("edge" / "core" via each deploy's
+   *  toml [vars]) — the AI dead-line fingerprint names its process (round 124). */
+  KP_SELF?: string;
   /** Workers AI binding ([ai] in wrangler.toml). Owner round 120 (2026-10-21,
    *  "ai bot... tar reply ami pascchi, but... massage ja dibo... ekta hint
    *  shob somoy"): the account's GEMINI_API_KEY secret had never been
@@ -1630,6 +1633,17 @@ const AI_REPLY_FALLBACK =
 const AI_REPLY_DOWN =
   "KuchuPuchu AI can't reach its brain right now — the AI service is having trouble. Please try again in a bit.";
 
+/** Round 124 (owner r7 item 2: "bar bar same massage dei — question er answer
+ *  kore na"): his screenshots show the FALLBACK line, which requires BOTH
+ *  env.GEMINI_API_KEY and env.AI falsy — yet both live scripts report their
+ *  bindings present. Instead of guessing, the dead lines now CARRY a tiny
+ *  diag suffix naming the answering script and what IT sees (g/a truthiness),
+ *  so the next screenshot settles WHO is blind in one photo. */
+function aiDiagTag(env: Env): string {
+  const self = (env.KP_SELF || "?").slice(0, 8);
+  return ` [diag:${self} g${env.GEMINI_API_KEY ? 1 : 0} a${env.AI ? 1 : 0}]`;
+}
+
 // Owner-identity questions in the AI chat: after the text answer, the app
 // also renders a tappable profile card (kind "OWNER_CARD") with the owner's
 // real social/email/website links — see OwnerCardBubble on the Android side.
@@ -2368,7 +2382,10 @@ async function sendAiReply(
       );
     }
     const answerBody =
-      answer ?? (!env.GEMINI_API_KEY && !env.AI ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);
+      answer ??
+      (!env.GEMINI_API_KEY && !env.AI
+        ? AI_REPLY_FALLBACK + aiDiagTag(env)
+        : AI_REPLY_DOWN + aiDiagTag(env));
     const body = firstReplyIntro ? `${firstReplyIntro} ${answerBody}` : answerBody;
     const botId = await ensureAiBot(db);
     const mid = id();
@@ -7780,6 +7797,20 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         "access-control-allow-origin": "*",
         ...(typeof size === "number" ? { "content-length": String(size) } : {}),
       },
+    });
+  }
+
+  // Round 124: read-only probe of WHICH script serves the AI lanes and the
+  // truthiness of its two brains (booleans only, no values). The edge proxies
+  // this like any /api route → the CORE answers (where the AI bot replies
+  // actually run); the worker.dev hostnames answer directly per script.
+  if (path === "/api/ai/diag" && method === "GET") {
+    return json({
+      ok: true,
+      self: env.KP_SELF || "?",
+      gemini: !!env.GEMINI_API_KEY,
+      workersAi: !!env.AI,
+      time: nowIso(),
     });
   }
 

@@ -199,9 +199,8 @@ check(
     ) && // v121-style fallthrough (round 120): no Gemini key ≠ silent bot — Workers AI answers
     src.includes("async function geminiImage(") &&
     src.includes("const drawn = await geminiImage(env, parts);") &&
-    src.includes(
-      "answer ?? (!env.GEMINI_API_KEY && !env.AI ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);",
-    ) && // round 120: Workers-AI-down reads as AI_REPLY_DOWN, not the canned greeting
+    src.includes("AI_REPLY_FALLBACK + aiDiagTag(env)") && // round 124: dead lines name their script+lanes
+    src.includes("AI_REPLY_DOWN + aiDiagTag(env)") && // round 120: Workers-AI-down reads as AI_REPLY_DOWN, not the canned greeting
     !src.includes("HF_TOKEN") &&
     !src.includes("hfChat") &&
     !src.includes("hfImage") &&
