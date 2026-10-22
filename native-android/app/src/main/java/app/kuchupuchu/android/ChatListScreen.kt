@@ -1041,8 +1041,14 @@ internal fun HomeBottomNavigation(
     // koro, blur lagbe." — the 1.2 upsize from v293 (my rounding on "card
     // smaller than the icons") is OUT: the pill returns to its original
     // 248x56 and stays there; shrink requests are rejected below.
-    val navScale = 1f
-    val navContentYOffset = 3.dp
+    // Owner round 121 (2026-10-22: "ekhono background card onekta boro +
+    // nicher dike extra ache background card ta"): 248x56 was already the
+    // original, so the pill goes a notch SMALLER (0.9 — 223x50) and the old
+    // 3dp icon-row dip is REMOVED: it left the row 3dp low inside the card,
+    // which is exactly the "nicher dike extra" emptiness he saw. Contents now
+    // sit dead-centred.
+    val navScale = 0.9f
+    val navContentYOffset = 0.dp
     // The glass card IS the whole pill: same size as the icon row's box and
     // no extra dip — before this it was shrunk to 224x46 and pushed 1.5dp
     // below the icons, which read as "card ta nicher dike beshi hoye ache"

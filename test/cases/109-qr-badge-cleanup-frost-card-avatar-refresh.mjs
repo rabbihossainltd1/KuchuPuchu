@@ -54,7 +54,7 @@ check(
   qrDialog.includes("const PLATE = Math.round(QR_WIDTH * 0.26)") &&
     qrDialog.includes('glyph.src = "/qr-badge.png"') &&
     qrDialog.includes("ctx.roundRect(x, y, PLATE, PLATE, PLATE_CORNER)") &&
-    qrDialog.includes("const GLYPH_INSET = PLATE * 0.08") &&
+    qrDialog.includes("const GLYPH_INSET = 0") && // round 121: glyph FILLS the chip ("gap fill hoini")
     qrDialog.includes("const x = (QR_WIDTH - PLATE) / 2") &&
     !qrDialog.includes('logo.src = "/logo.png"'),
 );
@@ -63,7 +63,7 @@ check(
   qrScreen.includes("c.drawRoundRect(plateRect, corner, corner, paint)") &&
     qrScreen.includes("R.drawable.qr_badge") &&
     qrScreen.includes("val plate = 720f * 0.26f") &&
-    qrScreen.includes("val inset = plate * 0.08f") &&
+    qrScreen.includes("val inset = 0f") && // round 121: no gap either on Android
     !qrScreen.includes("R.drawable.icon_gold") &&
     !qrScreen.includes("drawCircle(360f, 360f"),
 );

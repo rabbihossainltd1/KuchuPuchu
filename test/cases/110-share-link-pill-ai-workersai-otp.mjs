@@ -65,8 +65,9 @@ const viteConfig = read("../../vite.web.config.ts");
 /* 1 — the pill regression is closed -------------------------------------- */
 check(
   "nav pill: back to navScale 1f (248x56), tints nearly halved (0.10/0.16, fallback 0.40), SAME 28dp blur — size reset + visible frost",
-  chatList.includes("val navScale = 1f") &&
+  chatList.includes("val navScale = 0.9f") &&
     !chatList.includes("val navScale = 1.2f") &&
+    chatList.includes("val navContentYOffset = 0.dp") && // round 121 follow-up: centred, smaller
     chatList.includes("backgroundColor = pillBase.copy(alpha = 0.10f)") &&
     chatList.includes("tints = listOf(HazeTint(pillBase.copy(alpha = 0.16f)))") &&
     chatList.includes("blurRadius = 28.dp") &&
@@ -157,7 +158,7 @@ check(
   worker.includes(
     "if (env.GEMINI_API_KEY) return geminiStream(env, prompt, [], maxTokens, onChunk, 12_000);",
   ) &&
-    worker.includes("const answer = await workersAiChat(env, prompt, maxTokens);") &&
+    worker.includes("await workersAiTurns(env, workersCtx.system, workersCtx.turns, maxTokens)") &&
     worker.includes("if (answer) onChunk(answer);") &&
     worker.includes(
       "answer ?? (!env.GEMINI_API_KEY && !env.AI ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);",

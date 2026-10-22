@@ -352,7 +352,9 @@ private fun MyQrPane(user: JSONObject?, isMe: Boolean) {
         } else {
             Box(
                 Modifier
-                    .size(216.dp)
+                    // Round 121 (owner: "qr code ta huge boro"): 216 was a
+                    // billboard next to WhatsApp's pocket card — 184.dp.
+                    .size(184.dp)
                     .clip(RoundedCornerShape(18.dp))
                     .background(Color.White)
                     // Owner round 33: the frame used to be a 20%-alpha
@@ -409,7 +411,10 @@ private fun MyQrPane(user: JSONObject?, isMe: Boolean) {
                                 c.drawRoundRect(plateRect, corner, corner, paint)
                                 runCatching {
                                     BitmapFactory.decodeResource(ctx.resources, R.drawable.qr_badge)?.let { mark ->
-                                        val inset = plate * 0.08f
+                                        // Round 121 (owner: "gap fill hoini"): no inset
+                                        // at all — the glyph reaches the chip's own edge
+                                        // like WhatsApp's mark.
+                                        val inset = 0f
                                         c.drawBitmap(
                                             mark,
                                             null,

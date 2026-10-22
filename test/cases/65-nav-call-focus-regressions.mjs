@@ -146,13 +146,13 @@ check(
   "the glass card IS the whole pill — full 248x56 at scale 1, zero dip, nearly-halved Haze tints over the same 28dp blur (owner round 120: choto koro + ektu transparent koro)",
   nav.includes("val pillBase =") &&
     nav.includes("HazeTint(pillBase.copy(alpha = 0.16f))") &&
-    nav.includes("val navScale = 1f") &&
+    nav.includes("val navScale = 0.9f") &&
     nav.includes("val navIconSize = 27.dp") &&
     nav.includes("val navWindowWidth = 248.dp * navScale") &&
     nav.includes("val navWindowHeight = 56.dp * navScale") &&
     nav.includes("val backgroundCardWidth = navWindowWidth") &&
     nav.includes("val backgroundCardHeight = navWindowHeight") &&
-    nav.includes("val navContentYOffset = 3.dp") &&
+    nav.includes("val navContentYOffset = 0.dp") &&
     nav.includes("val backgroundCardYOffset = 0.dp") &&
     nav.includes(".offset(y = navContentYOffset)") &&
     nav.includes(".offset(y = backgroundCardYOffset)") &&

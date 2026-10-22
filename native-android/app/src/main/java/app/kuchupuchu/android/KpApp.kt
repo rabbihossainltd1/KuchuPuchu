@@ -540,6 +540,15 @@ fun KpApp() {
                             }
                         val id = data.optJSONObject("user")?.optString("id").orEmpty()
                         if (id.isBlank()) return@runCatching false
+                        // Round 121 (owner: "link open kore profile open korle...
+                        // toast massage ashe ami naki offline"): his own share
+                        // link reached the chat branch, and the worker refuses
+                        // a serious-chat-with-myself — so the open “failed” for
+                        // nobody's fault. Own handle opens the own PROFILE.
+                        if (id == Store.myId()) {
+                            nav.navigate("profile/$id") { launchSingleTop = true }
+                            return@runCatching true
+                        }
                         val cached = ScreenStore.convIdForUser[id]
                         val convId =
                             cached ?: kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {

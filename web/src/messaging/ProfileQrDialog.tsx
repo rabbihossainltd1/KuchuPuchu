@@ -71,7 +71,9 @@ function shareUrl(code: string, username: string): string {
 const QR_WIDTH = 512;
 const PLATE = Math.round(QR_WIDTH * 0.26);
 const PLATE_CORNER = PLATE * 0.3;
-const GLYPH_INSET = PLATE * 0.08;
+/* Round 121 (owner: "gap fill hoini"): no inset — the glyph reaches the
+ * chip's own edge like WhatsApp's mark. */
+const GLYPH_INSET = 0;
 
 function platePath(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   ctx.beginPath();

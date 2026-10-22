@@ -1314,12 +1314,16 @@ const WORKERS_AI_CHAT_MODELS = [
   "@cf/meta/llama-3.2-3b-instruct",
 ] as const;
 
-async function workersAiChat(env: Env, prompt: string, maxTokens: number): Promise<string | null> {
+async function workersAiRun(
+  env: Env,
+  messages: { role: string; content: string }[],
+  maxTokens: number,
+): Promise<string | null> {
   if (!env.AI) return null;
   for (const model of WORKERS_AI_CHAT_MODELS) {
     try {
       const data = (await env.AI.run(model, {
-        messages: [{ role: "user", content: prompt }],
+        messages,
         max_tokens: maxTokens,
         temperature: 0.7,
       })) as {
@@ -1343,6 +1347,36 @@ async function workersAiChat(env: Env, prompt: string, maxTokens: number): Promi
     }
   }
   return null;
+}
+
+/** Single-shot callers (the welcome line) — the whole prompt as one user turn. */
+async function workersAiChat(env: Env, prompt: string, maxTokens: number): Promise<string | null> {
+  return workersAiRun(env, [{ role: "user", content: prompt }], maxTokens);
+}
+
+/** Owner round 121 (2026-10-22: "ai answer dei but Bangla te ba ja bola hoi
+ *  tar answer kore na"): one giant 700-word blob as a single user message is
+ *  where instruct models drop rules — the Bengali clause and even the actual
+ *  question scrolled past. Chat shape instead: the rules ride the SYSTEM
+ *  turn (which these models are trained to obey first) and the conversation
+ *  arrives as real user/assistant turns, newest last. */
+async function workersAiTurns(
+  env: Env,
+  system: string,
+  turns: AiChatMessage[],
+  maxTokens: number,
+): Promise<string | null> {
+  const messages = [
+    { role: "system", content: system },
+    ...turns
+      .slice(-10)
+      .map((m) => ({
+        role: m.role === "assistant" ? "assistant" : "user",
+        content: typeof m.content === "string" ? m.content : "",
+      }))
+      .filter((m) => m.content.trim().length > 0),
+  ];
+  return workersAiRun(env, messages, maxTokens);
 }
 
 /** v167: the live reply frames are throttled — at most one per 140 ms — so a
@@ -1452,6 +1486,7 @@ async function aiBrainStream(
   messages: AiChatMessage[],
   maxTokens: number,
   onChunk: (text: string) => void,
+  workersCtx?: { system: string; turns: AiChatMessage[] },
 ): Promise<string | null> {
   const prompt = messages
     .map(
@@ -1464,7 +1499,11 @@ async function aiBrainStream(
   // answer with the account's own Workers AI instead. The fallback model
   // answers whole (its free tier has no stream), so the bubble paints in one
   // chunk instead of word-by-word; typing stays on while it thinks.
-  const answer = await workersAiChat(env, prompt, maxTokens);
+  // Round 121: chat turns + system (never one giant blob) when the caller
+  // has them, so the Bengali rule and the actual question survive context.
+  const answer = workersCtx
+    ? await workersAiTurns(env, workersCtx.system, workersCtx.turns, maxTokens)
+    : await workersAiChat(env, prompt, maxTokens);
   if (answer) onChunk(answer);
   return answer;
 }
@@ -2258,6 +2297,29 @@ async function sendAiReply(
         }),
       );
     };
+    // Round 121: structure for the Workers-AI path — the rules ride a SYSTEM
+    // turn (chat models obey it first), the thread arrives as real turns.
+    // For Gemini nothing changes: it still gets the single-shot blob below.
+    const workersCtx = (() => {
+      const marker = /Reply to the user's latest message in this conversation:\n\n/;
+      const mi = prompt.match(marker)?.index ?? -1;
+      const system =
+        mi >= 0
+          ? prompt.slice(0, mi) +
+            prompt.slice(mi + (prompt.match(marker)?.[0].length ?? 0) + transcript.length)
+          : prompt;
+      const turns: AiChatMessage[] = rows
+        .slice()
+        .reverse()
+        .map((r) => ({
+          role: r.sender_id === AI_BOT_ID ? "assistant" : "user",
+          content: rowText(r),
+        }));
+      // Voice-note transcripts and photo context belong in the reply too —
+      // the Gemini blob gets them at the call sites; the Workers turns get
+      // them here, inside the system turn.
+      return { system: system + voicePrompt + photoPrompt, turns };
+    })();
     let answer: string | null = null;
     if (hasPhotoRead && readPhoto) {
       const fullPrompt = prompt + voicePrompt + photoPrompt;
@@ -2265,19 +2327,35 @@ async function sendAiReply(
         ? await aiPhotoBytes(env, readPhoto.media, photoMime(readPhoto))
         : null;
       if (!src) {
-        answer = await aiBrainStream(env, [{ role: "user", content: fullPrompt }], 900, push);
+        answer = await aiBrainStream(
+          env,
+          [{ role: "user", content: fullPrompt }],
+          900,
+          push,
+          workersCtx,
+        );
       } else if (env.GEMINI_API_KEY) {
         const b64 = arrayBufferToBase64(src.bytes.buffer);
         answer =
           (await geminiStream(env, fullPrompt, [{ mime: src.mime, b64 }], 900, push, 20_000)) ??
           (await geminiParts(env, fullPrompt, [{ mime: src.mime, b64 }], 900, 20_000));
       }
+      // Round 121: a photo READ with no Gemini key (or a Gemini blip) used to
+      // fall straight to the canned line; offer Workers AI the same turn.
+      answer ??= await aiBrainStream(
+        env,
+        [{ role: "user", content: fullPrompt }],
+        900,
+        push,
+        workersCtx,
+      );
     } else {
       answer = await aiBrainStream(
         env,
         [{ role: "user", content: prompt + voicePrompt + photoPrompt }],
         900,
         push,
+        workersCtx,
       );
     }
     const answerBody =

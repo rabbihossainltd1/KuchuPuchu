@@ -63,13 +63,13 @@ check(
     nav.includes(
       "val indicatorY = capsulePadding + (itemH - indicatorSize) * 0.5f + navContentYOffset",
     ) &&
-    nav.includes("val navContentYOffset = 3.dp") &&
+    nav.includes("val navContentYOffset = 0.dp") &&
     nav.includes("animateDpAsState") &&
     nav.includes(".offset(x = indicatorX, y = indicatorY)"),
 );
 check(
-  "the pill stays at its original 248x56 at scale 1 (owner round 120 2026-10-21: update-torbar boro koro na); glyphs 27dp, content rides 3dp down",
-  nav.includes("val navScale = 1f") &&
+  'the pill goes a notch smaller (0.9 ≈ 223x50) with contents dead-centred — the 3dp dip was the "nicher dike extra" (owner round 121, 2026-10-22: card onekta boro + nicher dike extra)',
+  nav.includes("val navScale = 0.9f") &&
     nav.includes("val navWindowWidth = 248.dp * navScale") &&
     nav.includes("val navWindowHeight = 56.dp * navScale") &&
     nav.includes("val backgroundCardWidth = navWindowWidth") &&
@@ -77,7 +77,7 @@ check(
     nav.includes("val itemH = 44.dp * navScale") &&
     nav.includes("val indicatorSize = 40.dp * navScale") &&
     nav.includes("val navIconSize = 27.dp") &&
-    nav.includes("val navContentYOffset = 3.dp") &&
+    nav.includes("val navContentYOffset = 0.dp") &&
     nav.includes(".offset(y = navContentYOffset)") &&
     nav.includes("iconSize = navIconSize") &&
     nav.includes("sizeScale = navScale") &&
@@ -166,7 +166,7 @@ check(
     nav.includes("noiseFactor = 0.12f") &&
     nav.includes("fallbackTint = HazeTint(pillBase.copy(alpha = 0.40f))") &&
     !nav.includes(".background(pillFill)") &&
-    nav.includes("val navScale = 1f") &&
+    nav.includes("val navScale = 0.9f") &&
     nav.includes("val navIconSize = 27.dp") &&
     nav.includes(".clip(CircleShape)") &&
     nav.includes(".hazeEffect(state = hazeState)") &&

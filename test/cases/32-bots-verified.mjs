@@ -834,9 +834,9 @@ const convBetween = (db, a, b) =>
         "(await geminiStream(env, fullPrompt, [{ mime: src.mime, b64 }], 900, push, 20_000)) ??",
       ) &&
       src.includes(
-        'answer = await aiBrainStream(env, [{ role: "user", content: fullPrompt }], 900, push);',
+        'answer = await aiBrainStream(\n          env,\n          [{ role: "user", content: fullPrompt }],\n          900,\n          push,\n          workersCtx,\n        );',
       ) &&
-      src.includes("900,\n        push,\n      );"),
+      src.includes("900,\n        push,\n        workersCtx,\n      );"),
   );
   check(
     "callee in a call → 486 LINE_BUSY (pair-redial never blocked)",

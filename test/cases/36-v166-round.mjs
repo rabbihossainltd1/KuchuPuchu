@@ -90,8 +90,8 @@ const pkg = readFileSync(
 
 /* the round's own bookkeeping */
 check(
-  "r121: versionCode 295 / versionName 3.9.218 (owner round 2026-10-21 late feedback, round 3: nav pill back to 248x56 at navScale 1f with nearly-halved transparent tints over the same 28dp blur — never grow it again; QR payload IS the pretty https://kuchupuchu.web.app/@handle link on both platforms and the in-app scanner parses it back; the landing shows an invalid-link view for unknown handles, the verified tick, and a browser_fallback_url CTA; the AI bot finally answers through the account-owned free-tier Workers AI when no Gemini key exists; web OTP auto-verifies on the sixth digit without a button; /logo.png left the SW precache and the app pokes SW updates; r120 shipped: the QR chip glyph now FILLS the plate, the nav glass card is the full pill again with no 1.5dp dip, the web QR avatar is a dedicated img class, and the share landing drops the extra instructions text; r119 shipped: QR badges wear the glyph with its background removed on a centred white rounded-square chip like WhatsApp, the nav pill is translucent frosted glass again (no opaque slab), the /@handle landing card shows the user's photo, and the brand refresh busts stale SW caches; r118 shipped: the QR code wears the app icon on a white plate like WhatsApp on phone and web, the nav pill is real frosted glass via Haze, kuchupuchu.web.app on Firebase is the public web with auto-deploy CI, and the /@handle share link opens the app through verified App Links; the v274 debug signer is reused with explicit owner approval)",
-  /versionCode\s*=\s*295\b/.test(pkg) && /versionName\s*=\s*"3\.9.218"/.test(pkg),
+  "r122: versionCode 296 / versionName 3.9.219 (owner round 2026-10-22 feedback, round 4: chip glyph gap GONE — inset 0 on both platforms; the QR renders at a smaller 184dp/px display size with identical modules; the nav pill shrinks one notch (~223x50 via navScale 0.9f) with the 3dp content dip removed so icons sit dead-centre; opening your OWN share link inside the app routes to your profile instead of throwing the offline toast; and the Workers-AI lane now speaks as the system persona over real chat turns — the giant single user blob silently dropped the style rules mid-string; r121: versionCode 295 / versionName 3.9.218 (owner round 2026-10-21 late feedback, round 3: nav pill back to 248x56 at navScale 1f with nearly-halved transparent tints over the same 28dp blur — never grow it again; QR payload IS the pretty https://kuchupuchu.web.app/@handle link on both platforms and the in-app scanner parses it back; the landing shows an invalid-link view for unknown handles, the verified tick, and a browser_fallback_url CTA; the AI bot finally answers through the account-owned free-tier Workers AI when no Gemini key exists; web OTP auto-verifies on the sixth digit without a button; /logo.png left the SW precache and the app pokes SW updates; r120 shipped: the QR chip glyph now FILLS the plate, the nav glass card is the full pill again with no 1.5dp dip, the web QR avatar is a dedicated img class, and the share landing drops the extra instructions text; r119 shipped: QR badges wear the glyph with its background removed on a centred white rounded-square chip like WhatsApp, the nav pill is translucent frosted glass again (no opaque slab), the /@handle landing card shows the user's photo, and the brand refresh busts stale SW caches; r118 shipped: the QR code wears the app icon on a white plate like WhatsApp on phone and web, the nav pill is real frosted glass via Haze, kuchupuchu.web.app on Firebase is the public web with auto-deploy CI, and the /@handle share link opens the app through verified App Links; the v274 debug signer is reused with explicit owner approval)",
+  /versionCode\s*=\s*296\b/.test(pkg) && /versionName\s*=\s*"3\.9.219"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */
@@ -409,9 +409,12 @@ check(
     src.includes('type: "ai_delta",') &&
     src.includes("text: liveText,") &&
     src.includes(
-      'answer = await aiBrainStream(env, [{ role: "user", content: fullPrompt }], 900, push);',
+      'answer = await aiBrainStream(\n          env,\n          [{ role: "user", content: fullPrompt }],\n          900,\n          push,\n          workersCtx,\n        );',
     ) &&
-    src.includes("900,\n        push,\n      );") &&
+    src.includes("900,\n        push,\n        workersCtx,\n      );") &&
+    src.includes(
+      "await workersAiTurns(env, workersCtx.system, workersCtx.turns, maxTokens)", // round 121: real system+turns chat shape for the free brain
+    ) &&
     chat.includes('"ai_delta" ->') &&
     chat.includes('aiLiveBody = ev.optString("text")') &&
     chat.includes("if (aiTyping && aiLiveBody.isNotBlank()) {") &&
