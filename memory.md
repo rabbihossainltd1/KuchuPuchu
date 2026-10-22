@@ -1,5 +1,38 @@
 # Project Memory
 
+## 2026-10-22 (late night) — v299 / 3.9.222 (r125): one send sound, maximum-frost pill, resilient share-link opens, AI mystery solved
+
+Owner round 7 (six items; 1+5 from round 6 already confirmed live):
+
+1. **Message send UX** — exactly ONE sound (the tap tone) on every send kind;
+   the server-accept "sent" whoosh is removed from all nine send paths, and
+   the send tap carries no haptic. Adjacent sounds/haptics untouched (owner:
+   "anro kichu touch korar dorkar nai").
+2. **Nav pill** at FULL MAXIMUM frost: blur 96.dp, uniform 0.20/0.34 navy tint
+   pile, fallbackTint 0.96 so tint-only (no RenderEffect) devices still read
+   dense frosted navy, never read-through. Geometry frozen (owner r42).
+3. **Friend share link** — a tapped link never dead-ends in a silent toast:
+   chat-create retries once behind a breath, then opens the friend's PROFILE
+   with a reason-tagged toast; every failure stage is tagged ("lookup" vs
+   "chat create") so the next report names its own cause.
+4. **AI "bar bar same message" SOLVED (diagnosis)** — the AI bot replies are
+   written by the Vintox-account `vintoxbd-comm-core` (FEDERATED_CORE_ORIGIN
+   authority, owns sessions/messages). Live probes prove it runs a STALE,
+   pre-Workers-AI build with NO `ai` binding and no Gemini key: its
+   /api/ai/diag is an old 401 wall and sw BUILD_ID differs from main. Every
+   text turn there falls to the static greeting — exactly his line. Fix is
+   one-time and dashboard-only: redeploy current main on the Vintox project +
+   add the *AI binding* (name `AI`), optional GEMINI_API_KEY secret, and keep
+   SELF_ORIGIN/LARAVEL/CF_ACCOUNT/KP_SELF vars. Runbook:
+   docs/ai-core-brain-2026-10-22.md. My scripts (edge + PWA) now carry
+   /api/ai/diag (pre-auth) + fingerprinted dead lines, so after his redeploy
+   one curl or one screenshot reports the lane state instantly.
+
+Gates: 105/105 / 4076 assertions; web messaging e2e 159/159; release v299 →
+GitHub tag + APK kuchupuchu-3.9.222-r124.apk (28,653,756 B) live, and the
+in-app Update endpoint serves the same bytes. Edge worker deployed
+(5464596b); the PWA worker + Firebase web redeployed from main.
+
 ## 2026-10-20 — Firebase public web, pretty share links + App Links, QR badge, frosted nav
 
 Four owner jobs:
