@@ -28,7 +28,7 @@ test("activation deletes every retired legacy shell cache and leaves one current
   await page.goto("/");
 
   // The prod build registers /sw.js; first visit has no controlling worker,
-  // so install+activate run straight through (no skipWaiting needed).
+  // so install+activate run straight through (the only skipWaiting is owner-tapped, round 122).
   await page.waitForFunction(
     () => navigator.serviceWorker.controller?.scriptURL.endsWith("/sw.js") ?? false,
     undefined,

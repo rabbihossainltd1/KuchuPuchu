@@ -1119,20 +1119,22 @@ internal fun HomeBottomNavigation(
                             .size(backgroundCardWidth, backgroundCardHeight)
                             .clip(CircleShape)
                             .hazeEffect(state = hazeState) {
-                                // Owner round 120 ("opacity onek beshi, tai blur
-                                // bujha jacche na. ektu transparent koro, blur
-                                // lagbe"): the tints used to stack 0.20 + 0.32 of
-                                // the theme surface on top of the blur — at that
-                                // pile the glass reads as plain translucency.
-                                // Nearly halved both; the blur (28.dp) and the
-                                // noise stay, so the frost is visible but the
-                                // colours behind it bleed through. The fallback
-                                // (no RenderEffect devices) drops the same way.
-                                backgroundColor = pillBase.copy(alpha = 0.10f)
-                                tints = listOf(HazeTint(pillBase.copy(alpha = 0.16f)))
-                                blurRadius = 28.dp
+                                // Owner round 122 (2026-10-22, photo P1:
+                                // "background full blur hoini transparent o na —
+                                // size thik ache ebar"): at 0.10+0.16 the tint
+                                // pile was so thin that the row behind (avatar,
+                                // "13 Oct") stayed crisp through the glass.
+                                // The glass gets FROST again without growing the
+                                // pill: blur 28→40dp with a firmer 0.14+0.24 tint
+                                // (still well under the v294 slab), and devices
+                                // without RenderEffect fall back to a near-solid
+                                // frosted navy (0.88) so their pill still looks
+                                // intentional instead of read-through.
+                                backgroundColor = pillBase.copy(alpha = 0.14f)
+                                tints = listOf(HazeTint(pillBase.copy(alpha = 0.24f)))
+                                blurRadius = 40.dp
                                 noiseFactor = 0.12f
-                                fallbackTint = HazeTint(pillBase.copy(alpha = 0.40f))
+                                fallbackTint = HazeTint(pillBase.copy(alpha = 0.88f))
                             },
                     )
                     val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4

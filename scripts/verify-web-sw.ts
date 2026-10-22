@@ -111,7 +111,13 @@ assert.ok(
 );
 assert.ok(worker.includes('credentials: "omit"'));
 assert.ok(worker.includes("key.startsWith(CACHE_PREFIX)"));
-assert.ok(!worker.includes("skipWaiting"), "updates must wait for existing clients to close");
+assert.ok(
+  worker.includes('addEventListener("message"') &&
+    worker.includes('"KP_SKIP_WAITING"') &&
+    worker.includes("self.skipWaiting()") &&
+    worker.indexOf("self.skipWaiting()") > worker.indexOf('addEventListener("message"'),
+  "skipWaiting is allowed only behind the user-tapped KP_SKIP_WAITING message gate",
+);
 
 // Execute the generated worker with small CacheStorage/Fetch fakes so privacy,
 // activation, cache-miss, and offline-navigation paths are tested, not just grepped.

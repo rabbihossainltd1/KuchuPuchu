@@ -13,6 +13,17 @@ const API_OR_WS_PATH = /^\/(?:api|ws|download)(?:\/|$)/;
 // legacy worker symmetrically deletes ours).
 const LEGACY_CACHE_PREFIXES = ["kp-shell-"];
 
+/* Owner round 122 (2026-10-22): the strict "wait for tab close" policy made a
+ * stale shell PERMANENT inside an always-open tab — round-121's QR/pill fixes
+ * never reached the owner's pinned Brave window, so every one of them came
+ * back as "not fixed". The app now shows an update banner when a newer worker
+ * is waiting, and an explicit tap on its Refresh button sends this message.
+ * Activating on our own stays forbidden — this gate opens only on a real
+ * user gesture, never by itself. */
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "KP_SKIP_WAITING") self.skipWaiting();
+});
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) =>

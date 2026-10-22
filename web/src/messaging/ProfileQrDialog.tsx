@@ -74,6 +74,10 @@ const PLATE_CORNER = PLATE * 0.3;
 /* Round 121 (owner: "gap fill hoini"): no inset — the glyph reaches the
  * chip's own edge like WhatsApp's mark. */
 const GLYPH_INSET = 0;
+/* Round 121 display size — also set inline on the canvas (see the card body),
+ * because a stale cached stylesheet must never grow the dialog again.
+ * The .profile-qr__canvas rule mirrors this exact number. */
+const QR_DISPLAY_PX = 184;
 
 function platePath(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   ctx.beginPath();
@@ -304,6 +308,12 @@ export function ProfileQrDialog({ api, user, self, onClose }: Props) {
               className="profile-qr__canvas"
               width={QR_WIDTH}
               height={QR_WIDTH}
+              /* Owner round 122 (2026-10-22): the round-121 CSS rule reached
+               * him never — a pinned browser tab served a STALE stylesheet
+               * for days, so the canvas snapped back to its 512px intrinsic
+               * size and the card exploded ("ekhono not fixed"). The 184px
+               * display size lives INLINE now — immune to any cached CSS. */
+              style={{ width: QR_DISPLAY_PX, height: QR_DISPLAY_PX }}
               aria-hidden="true"
             />
             {!drawn ? <span className="profile-qr__loading">Drawing the code…</span> : null}

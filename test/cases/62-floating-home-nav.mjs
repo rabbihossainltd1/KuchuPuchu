@@ -161,10 +161,10 @@ check(
     nav.includes("AnimatedVisibility(") &&
     nav.includes("visible = dialogAttached") &&
     nav.includes("val pillBase =") &&
-    nav.includes("HazeTint(pillBase.copy(alpha = 0.16f))") && // round 120
-    nav.includes("blurRadius = 28.dp") &&
+    nav.includes("HazeTint(pillBase.copy(alpha = 0.24f))") && // round 122: real frost again
+    nav.includes("blurRadius = 40.dp") &&
     nav.includes("noiseFactor = 0.12f") &&
-    nav.includes("fallbackTint = HazeTint(pillBase.copy(alpha = 0.40f))") &&
+    nav.includes("fallbackTint = HazeTint(pillBase.copy(alpha = 0.88f))") && // no-RenderEffect devices get solid frost
     !nav.includes(".background(pillFill)") &&
     nav.includes("val navScale = 0.9f") &&
     nav.includes("val navIconSize = 27.dp") &&

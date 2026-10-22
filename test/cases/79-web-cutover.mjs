@@ -144,8 +144,12 @@ check(
     swTemplate.includes("LEGACY_CACHE_PREFIXES.some((prefix) => key.startsWith(prefix))"),
 );
 check(
-  "the no-skipWaiting update policy is kept (updates wait for clients)",
-  !swTemplate.includes("skipWaiting"),
+  "the update policy is refined, not broken: activation still waits for a user-tapped Refresh, and the ONLY skipWaiting lives behind the KP_SKIP_WAITING message gate (round 122 — pinned tabs never saw shipped fixes)",
+  swTemplate.includes('addEventListener("message"') &&
+    swTemplate.includes('"KP_SKIP_WAITING"') &&
+    swTemplate.includes("self.skipWaiting()") &&
+    swTemplate.split("skipWaiting()").length - 1 === 1 &&
+    swTemplate.indexOf("self.skipWaiting()") > swTemplate.indexOf('addEventListener("message"'),
 );
 check(
   "icon, logo, and manifest join the precache and rotate the build id",
@@ -155,9 +159,10 @@ check(
     verifySw.includes('precache.includes("/manifest.webmanifest")'),
 );
 check(
-  "verify-web-sw enforces the legacy sweep and the no-skipWaiting policy",
+  "verify-web-sw enforces the legacy sweep and the gesture-gated skipWaiting policy",
   verifySw.includes('!cacheStores.has("kp-shell-v1")') &&
-    verifySw.includes('!worker.includes("skipWaiting")'),
+    verifySw.includes('"KP_SKIP_WAITING"') &&
+    verifySw.includes("user-tapped KP_SKIP_WAITING message gate"),
 );
 check(
   "the legacy worker still deletes foreign caches, so a revert self-heals",

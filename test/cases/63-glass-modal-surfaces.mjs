@@ -179,7 +179,7 @@ check(
     !nav.includes("slideProgress") &&
     nav.includes("AnimatedVisibility(") &&
     nav.includes("visible = dialogAttached") &&
-    nav.includes("HazeTint(pillBase.copy(alpha = 0.16f))") && // round 120: "ektur transparent koro, blur lagbe"
+    nav.includes("HazeTint(pillBase.copy(alpha = 0.24f))") && // round 122: frost back, geometry untouched
     !nav.includes("Dialog(") &&
     !nav.includes("WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE") &&
     !chatList.includes("setBackgroundBlurRadius(") &&

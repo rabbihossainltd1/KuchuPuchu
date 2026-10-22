@@ -524,9 +524,18 @@ fun KpApp() {
             // screen's developer chip does: user lookup, then open (creating
             // it on demand) the 1:1 conversation.
             val userHandle by MainActivity.pendingUserHandle.collectAsState()
-            LaunchedEffect(userHandle, authed) {
+            // Owner round 122 (photo P2: opening his OWN share link still
+            // toasted "Couldn't open that profile"): a cold start can hand us
+            // the handle BEFORE Store.me lands. The self-check then compared
+            // the resolved id against a BLANK myId, fell through to the chat
+            // branch and the worker's "Bad user." self-refusal became the
+            // offline toast. The handle is consumed only once our own id is
+            // known, and a 400 "Bad user." on POST /api/conversations (blank
+            // or self — we never send blank) is treated as the self-route too.
+            val meReady = Store.myId().isNotBlank()
+            LaunchedEffect(userHandle, authed, meReady) {
                 val handle = userHandle
-                if (handle.isNullOrBlank() || !authed) return@LaunchedEffect
+                if (handle.isNullOrBlank() || !authed || !meReady) return@LaunchedEffect
                 MainActivity.pendingUserHandle.value = null
                 // Owner round 120 ("open click kortesi, kintu chat ta open
                 // hocche na"): a silent runCatching meant a PRIVATE profile
@@ -551,9 +560,26 @@ fun KpApp() {
                         }
                         val cached = ScreenStore.convIdForUser[id]
                         val convId =
-                            cached ?: kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                Api.post("/api/conversations", org.json.JSONObject().put("userId", id))
-                            }.optJSONObject("conversation")?.optString("id").orEmpty()
+                            cached ?: run {
+                                val created =
+                                    try {
+                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                            Api.post("/api/conversations", org.json.JSONObject().put("userId", id))
+                                        }
+                                    } catch (selfCursor: ApiException) {
+                                        // Worker contract: this endpoint fails 400
+                                        // "Bad user." for exactly two inputs — a blank
+                                        // userId (never sent here) and ONE'S OWN id.
+                                        // Whether Store.me raced us or not, this IS the
+                                        // owner opening his own link: profile, no toast.
+                                        if (selfCursor.status == 400) null else throw selfCursor
+                                    }
+                                if (created == null) {
+                                    nav.navigate("profile/$id") { launchSingleTop = true }
+                                    return@runCatching true
+                                }
+                                created.optJSONObject("conversation")?.optString("id").orEmpty()
+                            }
                         if (convId.isNotBlank()) {
                             ScreenStore.convIdForUser[id] = convId
                             nav.navigate("chat/$convId") { launchSingleTop = true }

@@ -68,10 +68,10 @@ check(
   chatList.includes("val navScale = 0.9f") &&
     !chatList.includes("val navScale = 1.2f") &&
     chatList.includes("val navContentYOffset = 0.dp") && // round 121 follow-up: centred, smaller
-    chatList.includes("backgroundColor = pillBase.copy(alpha = 0.10f)") &&
-    chatList.includes("tints = listOf(HazeTint(pillBase.copy(alpha = 0.16f)))") &&
-    chatList.includes("blurRadius = 28.dp") &&
-    chatList.includes("fallbackTint = HazeTint(pillBase.copy(alpha = 0.40f))"),
+    chatList.includes("backgroundColor = pillBase.copy(alpha = 0.14f)") &&
+    chatList.includes("tints = listOf(HazeTint(pillBase.copy(alpha = 0.24f)))") &&
+    chatList.includes("blurRadius = 40.dp") &&
+    chatList.includes("fallbackTint = HazeTint(pillBase.copy(alpha = 0.88f))"),
 );
 
 /* 2 — QR payload IS the share link, both platforms ------------------------ */
@@ -106,6 +106,26 @@ check(
     scanTest.includes("https://kuchupuchu.web.app.evil.tld/@alice") &&
     scanTest.includes("https://kuchupuchu.web.app/settings/@alice") &&
     scanTest.includes("https://kuchupuchu.web.app/@rabbi?utm=print"),
+);
+
+/* 2b — own share link INSIDE the app: races removed, self-refusal rerouted (round 122) */
+check(
+  "the in-app resolver waits for Store.me before consuming the handle, so a cold start can never mistake the owner for a stranger",
+  kpApp.includes("val meReady = Store.myId().isNotBlank()") &&
+    kpApp.includes("LaunchedEffect(userHandle, authed, meReady)") &&
+    kpApp.includes("if (handle.isNullOrBlank() || !authed || !meReady) return@LaunchedEffect"),
+);
+check(
+  "own handle opens the own PROFILE — from the id comparison AND from the worker's 400 self-refusal (belt and braces, no offline toast)",
+  kpApp.includes("if (id == Store.myId()) {") &&
+    kpApp.includes('nav.navigate("profile/$id") { launchSingleTop = true }') &&
+    kpApp.includes("catch (selfCursor: ApiException) {") &&
+    kpApp.includes("if (selfCursor.status == 400) null else throw selfCursor") &&
+    worker.includes('if (!other || other === uid) fail(400, "Bad user.");'),
+);
+check(
+  "an honest toast remains for REAL failures only",
+  kpApp.includes("Couldn't open that profile. Try again when you're online."),
 );
 
 /* 3 — landing card: invalid state, tick, CTA fallback --------------------- */
@@ -187,11 +207,16 @@ check(
   viteConfig.includes("PRECACHE_IDENTITY") && verifySw.includes('!precache.includes("/logo.png")'),
 );
 check(
-  "the app asks the service worker to update: on open, every 15 minutes, and on foregrounding — skipWaiting still stays out",
+  "the app asks the service worker to update: on open, every 15 minutes, and on foregrounding — plus a refresh chip when one is waiting (round 122: pinned tabs never saw fixes)",
   mainTsx.includes("registration.update().catch(() => {})") &&
     mainTsx.includes("window.setInterval(poke, 15 * 60_000)") &&
     mainTsx.includes('document.visibilityState === "visible"') &&
-    !mainTsx.includes("skipWaiting"),
+    mainTsx.includes("showRefreshChip(registration.waiting)") &&
+    mainTsx.includes('{ type: "KP_SKIP_WAITING" }') &&
+    mainTsx.includes("navigator.serviceWorker.controller") &&
+    // the chip's whole look is INLINE — a stale tab by definition also serves stale CSS
+    mainTsx.includes("background:#0f6fdc") &&
+    mainTsx.includes('textContent = "A newer KuchuPuchu Web is ready."'),
 );
 
 for (const line of lines) console.log(line);
