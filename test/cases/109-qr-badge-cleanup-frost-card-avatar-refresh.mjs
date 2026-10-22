@@ -97,12 +97,19 @@ check(
 /* 3 — the pill must stay glass (top-level echo of the 62/65 chain) ------ */
 check(
   "nav pill: pill base lives inside the Haze style as tints over a 40dp blur with a solid frost fallback for no-blur devices (round 122: 'background full blur hoini transparent o na')",
-  chatList.includes("backgroundColor = pillBase.copy(alpha = 0.14f)") &&
-    chatList.includes("tints = listOf(HazeTint(pillBase.copy(alpha = 0.24f)))") &&
+  chatList.includes("backgroundColor = pillBase.copy(alpha = 0.16f)") &&
+    chatList.includes("tints = listOf(HazeTint(pillBase.copy(alpha = 0.30f)))") &&
     chatList.includes("blurRadius = 40.dp") &&
-    chatList.includes("fallbackTint = HazeTint(pillBase.copy(alpha = 0.88f))") && // no-RenderEffect pill: frosted navy, never read-through
+    chatList.includes("fallbackTint = HazeTint(pillBase.copy(alpha = 0.92f))") && // no-RenderEffect pill: frosted navy, never read-through
     !chatList.includes(".background(pillFill)") &&
     chatList.includes("import dev.chrisbanes.haze.HazeTint"),
+);
+check(
+  "round 123 item 5: a friend's QR screen carries the same Copy link / Share row (ungated from isMe), and the share text names the friend",
+  qrScreen.includes("if (loadError == null && qrCode.isNotBlank()) {") &&
+    qrScreen.includes('"QR link copied."') &&
+    qrScreen.includes("Add ${username.ifBlank {") &&
+    qrScreen.includes('"Share the code"'),
 );
 
 /* 4 — the share-card landing: user's photo, public-safe route ----------- */

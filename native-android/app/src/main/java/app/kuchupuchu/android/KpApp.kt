@@ -543,6 +543,15 @@ fun KpApp() {
                 // looked like "the button does nothing". Failed opens say so.
                 val opened =
                     runCatching {
+                        // Round 123 (owner: own link STILL toasted on v297): no
+                        // network at all for one's OWN handle — usernames are
+                        // unique, and once we know who we are a handle equal to
+                        // ours IS the own profile, no round trip to race.
+                        val myHandle = Store.me?.optString("username", "").trim().lowercase()
+                        if (myHandle.isNotBlank() && handle.equals(myHandle, ignoreCase = true)) {
+                            nav.navigate("profile/${Store.myId()}") { launchSingleTop = true }
+                            return@runCatching true
+                        }
                         val data =
                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                                 Api.get("/api/users/username/" + java.net.URLEncoder.encode(handle, "UTF-8"), true)

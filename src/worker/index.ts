@@ -1494,7 +1494,16 @@ async function aiBrainStream(
         `${m.role === "assistant" ? "Assistant" : "User"}: ${typeof m.content === "string" ? m.content : ""}`,
     )
     .join("\n");
-  if (env.GEMINI_API_KEY) return geminiStream(env, prompt, [], maxTokens, onChunk, 12_000);
+  if (env.GEMINI_API_KEY) {
+    const geminiAnswer = await geminiStream(env, prompt, [], maxTokens, onChunk, 12_000);
+    /* Round 123 (owner 2026-10-22: "ai just ektai reply dei"): the free
+     * gemini-flash-latest tier 503s under demand spikes — with a key present
+     * the lane used to short-circuit BEFORE the Workers-AI rescue, so a
+     * saturated Gemini meant the dead "taking longer" line hour after hour.
+     * The account's own free brain always gets a turn when Gemini comes back
+     * empty; only a double miss reaches the down-line. */
+    if (geminiAnswer && geminiAnswer.trim()) return geminiAnswer;
+  }
   // Owner round 120 (2026-10-21): no Gemini key ≠ canned greeting forever —
   // answer with the account's own Workers AI instead. The fallback model
   // answers whole (its free tier has no stream), so the bubble paints in one

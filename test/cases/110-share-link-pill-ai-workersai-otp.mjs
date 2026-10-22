@@ -68,10 +68,10 @@ check(
   chatList.includes("val navScale = 0.9f") &&
     !chatList.includes("val navScale = 1.2f") &&
     chatList.includes("val navContentYOffset = 0.dp") && // round 121 follow-up: centred, smaller
-    chatList.includes("backgroundColor = pillBase.copy(alpha = 0.14f)") &&
-    chatList.includes("tints = listOf(HazeTint(pillBase.copy(alpha = 0.24f)))") &&
+    chatList.includes("backgroundColor = pillBase.copy(alpha = 0.16f)") &&
+    chatList.includes("tints = listOf(HazeTint(pillBase.copy(alpha = 0.30f)))") &&
     chatList.includes("blurRadius = 40.dp") &&
-    chatList.includes("fallbackTint = HazeTint(pillBase.copy(alpha = 0.88f))"),
+    chatList.includes("fallbackTint = HazeTint(pillBase.copy(alpha = 0.92f))"),
 );
 
 /* 2 — QR payload IS the share link, both platforms ------------------------ */
@@ -117,7 +117,9 @@ check(
 );
 check(
   "own handle opens the own PROFILE — from the id comparison AND from the worker's 400 self-refusal (belt and braces, no offline toast)",
-  kpApp.includes("if (id == Store.myId()) {") &&
+  kpApp.includes('val myHandle = Store.me?.optString("username", "")') && // round 123: own handle routes on the stored username with NO network at all
+    kpApp.includes('nav.navigate("profile/${Store.myId()}") { launchSingleTop = true }') &&
+    kpApp.includes("if (id == Store.myId()) {") &&
     kpApp.includes('nav.navigate("profile/$id") { launchSingleTop = true }') &&
     kpApp.includes("catch (selfCursor: ApiException) {") &&
     kpApp.includes("if (selfCursor.status == 400) null else throw selfCursor") &&
@@ -175,10 +177,12 @@ check(
 );
 check(
   "aiBrainStream falls back to Workers AI when no Gemini key, and the reply fallback distinguishes no-brain from brain-down",
-  worker.includes(
-    "if (env.GEMINI_API_KEY) return geminiStream(env, prompt, [], maxTokens, onChunk, 12_000);",
-  ) &&
+  worker.includes("if (env.GEMINI_API_KEY) {") && // key present: try Gemini FIRST…
     worker.includes("await workersAiTurns(env, workersCtx.system, workersCtx.turns, maxTokens)") &&
+    worker.includes(
+      "const geminiAnswer = await geminiStream(env, prompt, [], maxTokens, onChunk, 12_000);",
+    ) &&
+    worker.includes("if (geminiAnswer && geminiAnswer.trim()) return geminiAnswer;") && // round 123: Gemini-empty is not a dead line — the free brain always gets a turn
     worker.includes("if (answer) onChunk(answer);") &&
     worker.includes(
       "answer ?? (!env.GEMINI_API_KEY && !env.AI ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);",

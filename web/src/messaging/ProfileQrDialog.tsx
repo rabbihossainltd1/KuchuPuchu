@@ -95,6 +95,14 @@ async function drawQrWithBadge(canvas: HTMLCanvasElement, payload: string): Prom
     width: QR_WIDTH,
     color: { dark: "#0b1324", light: "#ffffff" },
   });
+  /* Round 122, pin discovered the hard way: qrcode's canvas renderer stamps
+   * `canvas.style.width = "512px"` OVER whatever React set inline — so the QR
+   * dialog always snapped to the intrinsic size and the card exploded no
+   * matter the inline style or the CSS rule (owner 2026-10-22: "ekhono not
+   * fixed same ager motoi"). Re-assert the display size after the draw; the
+   * messaging e2e now measures the box in a real browser to hold this. */
+  canvas.style.width = `${QR_DISPLAY_PX}px`;
+  canvas.style.height = `${QR_DISPLAY_PX}px`;
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   const glyph = new Image();

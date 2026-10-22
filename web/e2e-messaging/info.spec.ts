@@ -147,6 +147,17 @@ test("the phone's QR button on every profile: the card shows the code with link 
   await expect(card).toContainText("@rahi");
   // A drawn QR means the peer's share code rendered — no dead box.
   await expect(card.locator(".profile-qr__code canvas")).toBeVisible();
+  // Round 122 (owner 2026-10-22): the QR card must never explode past its
+  // preferred size even under a cached stale stylesheet — the display size is
+  // INLINE on the canvas, so this is measured in the real browser, not
+  // trusting the stylesheet at all.
+  {
+    const box = await card.locator(".profile-qr__code canvas").boundingBox();
+    expect(box?.width).toBeGreaterThanOrEqual(178);
+    expect(box?.width).toBeLessThanOrEqual(190);
+    expect(box?.height).toBeGreaterThanOrEqual(178);
+    expect(box?.height).toBeLessThanOrEqual(190);
+  }
   await expect(card.getByRole("button", { name: "Copy link" })).toBeEnabled();
   await expect(card.getByRole("button", { name: "Share" })).toBeEnabled();
 

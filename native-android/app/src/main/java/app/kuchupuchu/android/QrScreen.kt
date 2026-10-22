@@ -452,7 +452,11 @@ private fun MyQrPane(user: JSONObject?, isMe: Boolean) {
         // is gone; in its place the code's link gets Copy / Share actions (the
         // same row the web's own QR card shows), because captions never shared
         // anything but a link does.
-        if (isMe && loadError == null && qrCode.isNotBlank()) {
+        // Round 123 (owner 2026-10-22 item 5: "new friend profile a qr screen
+        // a share copy link nai eitaw add kore daw"): the actions used to be
+        // own-account only — a friend's code link must copy/share the same
+        // way (their QR still opens THEIR share card on any scanner).
+        if (loadError == null && qrCode.isNotBlank()) {
             Spacer(Modifier.height(14.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -492,8 +496,17 @@ private fun MyQrPane(user: JSONObject?, isMe: Boolean) {
                                 val share =
                                     android.content.Intent(android.content.Intent.ACTION_SEND)
                                         .setType("text/plain")
-                                        .putExtra(android.content.Intent.EXTRA_TEXT, "Add me on KuchuPuchu: ${kpShareLink(username, qrCode)}")
-                                runCatching { ctx.startActivity(android.content.Intent.createChooser(share, "Share your code")) }
+                                        .putExtra(
+                                            android.content.Intent.EXTRA_TEXT,
+                                            // Round 123: a friend's link names the friend, not the viewer.
+                                            if (isMe) "Add me on KuchuPuchu: ${kpShareLink(username, qrCode)}"
+                                            else "Add ${username.ifBlank { "this account" }} on KuchuPuchu: ${kpShareLink(username, qrCode)}",
+                                        )
+                                runCatching {
+                                    ctx.startActivity(
+                                        android.content.Intent.createChooser(share, if (isMe) "Share your code" else "Share the code"),
+                                    )
+                                }
                                     .onFailure { Toast.makeText(ctx, "No app can take the share.", Toast.LENGTH_SHORT).show() }
                             },
                         contentAlignment = Alignment.Center,

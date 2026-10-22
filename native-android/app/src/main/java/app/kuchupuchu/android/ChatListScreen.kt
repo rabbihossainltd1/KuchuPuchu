@@ -1130,11 +1130,18 @@ internal fun HomeBottomNavigation(
                                 // without RenderEffect fall back to a near-solid
                                 // frosted navy (0.88) so their pill still looks
                                 // intentional instead of read-through.
-                                backgroundColor = pillBase.copy(alpha = 0.14f)
-                                tints = listOf(HazeTint(pillBase.copy(alpha = 0.24f)))
+                                // Round 123 (owner 2026-10-22 item 3: "upore garo
+                                // niche halka — full pill er background same na"):
+                                // thin tints let the row behind (a bright avatar
+                                // at the pill's top, dark shell at its bottom)
+                                // vary the glass density. 0.16/0.30 + 40dp blur +
+                                // 0.92 fallback = one UNIFORM frost top to bottom,
+                                // size still untouched.
+                                backgroundColor = pillBase.copy(alpha = 0.16f)
+                                tints = listOf(HazeTint(pillBase.copy(alpha = 0.30f)))
                                 blurRadius = 40.dp
                                 noiseFactor = 0.12f
-                                fallbackTint = HazeTint(pillBase.copy(alpha = 0.88f))
+                                fallbackTint = HazeTint(pillBase.copy(alpha = 0.92f))
                             },
                     )
                     val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4
