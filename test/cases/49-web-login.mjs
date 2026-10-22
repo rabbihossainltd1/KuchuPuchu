@@ -112,29 +112,29 @@ check(
     app.includes("input.value.replace(/\\D/g"),
 );
 check(
-  "Web approval card keeps the code in-app and exposes authenticated approve/decline actions",
+  "round 126: Web security card keeps the code in-app only — no approve/decline buttons, no handler, no /api/auth/login/${action} post",
   app.includes("function loginApprovalHtml(m)") &&
-    app.includes('data-login-action="approve"') &&
-    app.includes("/api/auth/login/${action}") &&
-    app.includes("delete meta.otp"),
+    !app.includes('data-login-action="approve"') &&
+    !app.includes("/api/auth/login/${action}") &&
+    !app.includes("actOnLoginApproval(messageId"),
 );
 check(
   "Web auth always declares its platform and does not claim SIM evidence",
   app.includes('platform: "WEB"') && app.includes('sim: "UNAVAILABLE"'),
 );
 check(
-  "Android accepts OTP while keeping approval polling active",
+  "Android accepts OTP and keeps polling (for expiry now — approval is gone)",
   androidLogin.includes("/api/auth/login/otp") &&
     androidLogin.includes('otpAvailable = data.optBoolean("otpAvailable")') &&
     androidLogin.includes("LaunchedEffect(stage, requestId)") &&
     androidLogin.includes("KeyboardType.Number"),
 );
 check(
-  "Android approval card displays only a valid pending code and expires it locally",
+  "Android security card displays only a valid pending code and expires it locally (no button state at all since round 126)",
   androidChat.includes('meta.optString("otp")') &&
     androidChat.includes('meta.optString("expiresAt")') &&
-    androidChat.includes('meta.remove("otp")') &&
-    androidChat.includes("val canApprove"),
+    !androidChat.includes("val canApprove") &&
+    androidChat.includes("Enter this code on the new device to finish signing in."),
 );
 check(
   "Android device settings label Web and Android sessions",

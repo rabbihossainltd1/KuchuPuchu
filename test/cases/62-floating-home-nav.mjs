@@ -85,10 +85,10 @@ check(
     nav.includes("StatusGlyphIcon(tint, navIconSize)"),
 );
 check(
-  "the background card sits 1.5dp below the icon/indicator baseline and carries the frosted-glass treatment itself (owner 2026-10-20)",
+  "the background card sits at the icon/indicator baseline and carries the frosted-glass treatment itself (owner 2026-10-20), painting a dense navy backing under the haze (round 126)",
   nav.includes("val backgroundCardYOffset = 0.dp") &&
     nav.includes(
-      ".align(Alignment.Center)\n                            .offset(y = backgroundCardYOffset)\n                            .size(backgroundCardWidth, backgroundCardHeight)\n                            .clip(CircleShape)\n                            .hazeEffect(state = hazeState) {",
+      ".align(Alignment.Center)\n                            .offset(y = backgroundCardYOffset)\n                            .size(backgroundCardWidth, backgroundCardHeight)\n                            .clip(CircleShape)\n                            .background(pillBase.copy(alpha = 0.80f))\n                            .hazeEffect(state = hazeState) {",
     ) &&
     nav.includes(".offset(y = navContentYOffset)"),
 );

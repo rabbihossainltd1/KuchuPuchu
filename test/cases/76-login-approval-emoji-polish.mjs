@@ -41,12 +41,12 @@ check(
     !loginCard.includes(".border("),
 );
 check(
-  "approval and decline actions remain available and use the blue security palette",
-  loginCard.includes("/api/auth/login/approve") &&
-    loginCard.includes("/api/auth/login/decline") &&
-    loginCard.includes('Text("Accept"') &&
-    loginCard.includes('Text("Decline"') &&
-    loginCard.includes("containerColor = securityBlue"),
+  "round 126: approval actions are GONE — the card is a code courier with Copy + a passive status line in the security palette",
+  !loginCard.includes("/api/auth/login/approve") &&
+    !loginCard.includes("/api/auth/login/decline") &&
+    !loginCard.includes('Text("Accept"') &&
+    loginCard.includes("Enter this code on the new device to finish signing in.") &&
+    loginCard.includes('contentDescription = "Copy sign-in code"'),
 );
 
 for (const line of lines) console.log(line);

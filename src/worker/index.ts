@@ -962,16 +962,15 @@ async function sendApprovalMessage(
         // so a login alert cannot be mistaken for a chat message, and the
         // body stays one short line.
         fromName: "KuchuPuchu · Security",
-        body: `🔐 New sign-in · ${label} — tap to review`,
+        body: `🔐 New sign-in · ${label} — the sign-in code is in this chat`,
         kp_chat: convId,
         muted: "0",
-        // Owner round 32 (item 27): the card carries a Decline action that
-        // posts /api/auth/login/decline with this id (Approve stays in-app).
-        kp_login_req: requestId,
+        // Round 126: no login-request id rides the push — there is no decline
+        // action any more; the alert is a courier for the code, never a gate.
       },
       {
         title: "KuchuPuchu · Security",
-        body: `🔐 New sign-in · ${label} — tap to review`,
+        body: `🔐 New sign-in · ${label} — the sign-in code is in this chat`,
         channel: "kp_messages_v2",
       },
     ),
@@ -9051,108 +9050,27 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   /* ---------- phone auth: current-device approval + phone change ---------- */
 
+  // Round 126 (owner 2026-10-23 r8 item 3: "new login alert er system a
+  // approval system remove kore daw — just otp system rakho"): the
+  // old-device Accept/Decline decision is GONE. A new-device sign-in now
+  // completes ONE way only — the six-digit code that shows up (and only
+  // ever shows up) inside the signed-in device's security card. These two
+  // routes stay mounted as explicit 403s instead of vanishing, so an older
+  // installed APK reads a clear reason instead of "route not found".
   if (path === "/api/auth/login/approve" && method === "POST") {
-    // Any signed-in client may approve. Approval records consent only; the
-    // requesting device performs the one-time, platform-scoped session claim
-    // when it next polls. Keeping transfer out of this route prevents a lost
-    // or stale approval from signing out the current client.
-    rateLimit(`la:${uid}`, 15, 10);
-    const requestId = String(body.id || body.requestId || "")
-      .trim()
-      .slice(0, 64);
-    if (!requestId) fail(400, "Missing request id.");
-    const row = await one<{
-      user_id: string;
-      new_device_id: string;
-      status: string;
-      expires_at: string;
-    }>(db, "SELECT * FROM login_requests WHERE id = ?", requestId);
-    if (!row || row.user_id !== uid) fail(404, "Login request not found.", "REQUEST_NOT_FOUND");
-    const approvedAt = nowIso();
-    const approvedRows = (await db.batch([
-      db
-        .prepare(
-          `UPDATE login_requests SET status = 'APPROVED', resolved_at = ?, otp_hash = NULL
-            WHERE id = ? AND user_id = ? AND status = 'PENDING' AND expires_at > ?`,
-        )
-        .bind(approvedAt, requestId, uid, approvedAt),
-      approvalCardStatusStmt(db, requestId, "APPROVED", "APPROVED"),
-    ])) as { meta: { changes: number } }[];
-    const approved = approvedRows[0]?.meta.changes ?? 0;
-    if (!approved) {
-      const latest = await one<{ status: string; expires_at: string }>(
-        db,
-        "SELECT status, expires_at FROM login_requests WHERE id = ?",
-        requestId,
-      );
-      if (latest?.status === "PENDING" && Date.parse(latest.expires_at) <= Date.now()) {
-        const at = nowIso();
-        const expiredRows = (await db.batch([
-          db
-            .prepare(
-              `UPDATE login_requests SET status = 'EXPIRED', resolved_at = ?, otp_hash = NULL
-                WHERE id = ? AND status = 'PENDING' AND expires_at <= ?`,
-            )
-            .bind(at, requestId, at),
-          approvalCardStatusStmt(db, requestId, "EXPIRED", "EXPIRED"),
-        ])) as { meta: { changes: number } }[];
-        const expired = expiredRows[0]?.meta.changes ?? 0;
-        if (expired) await resolveApprovalMessage(db, requestId, "EXPIRED", env, ctx);
-        fail(
-          410,
-          "The login request expired. Please try again from the other device.",
-          "REQUEST_EXPIRED",
-        );
-      }
-      if (latest?.status === "EXPIRED")
-        fail(
-          410,
-          "The login request expired. Please try again from the other device.",
-          "REQUEST_EXPIRED",
-        );
-      fail(409, "The login request was already handled.", "REQUEST_NOT_PENDING");
-    }
-    await resolveApprovalMessage(db, requestId, "APPROVED", env, ctx);
-    await audit(db, "LOGIN_APPROVED", uid, row.new_device_id, {});
-    return json({ ok: true });
+    fail(
+      403,
+      "Sign-in approval was removed. Enter the code from your signed-in device on the new device instead.",
+      "APPROVAL_REMOVED",
+    );
   }
 
   if (path === "/api/auth/login/decline" && method === "POST") {
-    rateLimit(`ld:${uid}`, 15, 10);
-    const requestId = String(body.id || body.requestId || "")
-      .trim()
-      .slice(0, 64);
-    if (!requestId) fail(400, "Missing request id.");
-    // Owner round 3 (2026-09-04): a request can only be acted on inside its
-    // 5-minute window — after that the answer is EXPIRED, whatever it is.
-    const declinedAt = nowIso();
-    const declinedRows = (await db.batch([
-      db
-        .prepare(
-          `UPDATE login_requests SET status = 'DECLINED', resolved_at = ?, otp_hash = NULL
-            WHERE id = ? AND user_id = ? AND status = 'PENDING' AND expires_at > ?`,
-        )
-        .bind(declinedAt, requestId, uid, declinedAt),
-      approvalCardStatusStmt(db, requestId, "DECLINED", "DECLINED"),
-    ])) as { meta: { changes: number } }[];
-    const declined = declinedRows[0]?.meta.changes ?? 0;
-    if (!declined) {
-      const stale = await one<{ status: string; expires_at: string }>(
-        db,
-        "SELECT status, expires_at FROM login_requests WHERE id = ?",
-        requestId,
-      );
-      if (stale?.status === "PENDING")
-        fail(
-          410,
-          "The login request expired. Please try again from the other device.",
-          "REQUEST_EXPIRED",
-        );
-      fail(409, "The login request was already handled.", "REQUEST_NOT_PENDING");
-    }
-    await resolveApprovalMessage(db, requestId, "DECLINED", env, ctx);
-    await audit(db, "LOGIN_DECLINED", uid, null, {});
-    return json({ ok: true });
+    fail(
+      403,
+      "Sign-in approval was removed. Enter the code from your signed-in device on the new device instead.",
+      "APPROVAL_REMOVED",
+    );
   }
 
   if (path === "/api/auth/phone/change" && method === "POST") {

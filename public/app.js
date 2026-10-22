@@ -1067,9 +1067,10 @@ import { buildE164, validOtp } from "./login-utils.mjs";
     let stateText = "";
     if (pending) {
       if (locked) {
-        stateText = "Five incorrect codes used. The code is cleared; approval is still available.";
+        stateText =
+          "Five incorrect codes used. The code is cleared — start the sign-in again for a new code.";
       } else if (!code) {
-        stateText = "No code is available. A signed-in device can still approve this request.";
+        stateText = "No code is available. Start the sign-in again to get one.";
       } else {
         stateText = "Enter this code on the device trying to sign in.";
       }
@@ -1084,14 +1085,10 @@ import { buildE164, validOtp } from "./login-utils.mjs";
     } else {
       stateText = "Login request expired.";
     }
-    const actionHtml =
-      pending && requestId
-        ? `<div class="approval-actions">
-          <button class="approval-accept" type="button" data-login-action="approve" ${busy ? "disabled" : ""}>${busy ? "Working…" : "Accept"}</button>
-          <button class="approval-decline" type="button" data-login-action="decline" ${busy ? "disabled" : ""}>${busy ? "Working…" : "Decline"}</button>
-        </div>
-        <div class="approval-footnote">Only approve if you recognize this sign-in.</div>`
-        : "";
+    // Round 126 (owner r8 item 3): device approval is REMOVED — the card is
+    // only a courier for the code now; the old approve/decline routes answer
+    // 403 on the worker. No buttons render, ever.
+    const actionHtml = "";
     return `<div class="approval-card">
       <div class="approval-title">KuchuPuchu · Security</div>
       <div class="approval-detail"><strong>New sign-in attempt</strong></div>
@@ -1152,46 +1149,10 @@ import { buildE164, validOtp } from "./login-utils.mjs";
     const securityClass = isApproval ? " security-row" : "";
     return `<div class="mrow ${mine ? "mine" : "their"}${securityClass}" data-mid="${esc(m.id)}">${sender}<div class="bubble">${inner}</div>${stamp}</div>`;
   }
-  async function actOnLoginApproval(messageId, action) {
-    const message = state.msgs.find((item) => item.id === messageId);
-    const meta = message && message.meta && typeof message.meta === "object" ? message.meta : null;
-    const requestId = meta && String(meta.requestId || "");
-    if (!message || message.kind !== "LOGIN_APPROVAL" || !meta || !requestId) return;
-    const status = String(meta.status || "PENDING").toUpperCase();
-    const expiresAt = Date.parse(meta.expiresAt || "");
-    const createdAt = Date.parse(message.createdAt || "");
-    const deadline = Number.isFinite(expiresAt)
-      ? expiresAt
-      : Number.isFinite(createdAt)
-        ? createdAt + 5 * 60 * 1000
-        : 0;
-    if ((status !== "PENDING" && status !== "OTP_LOCKED") || !deadline || deadline <= Date.now())
-      return;
-    if (action !== "approve" && action !== "decline") return;
-    if (state.approvalBusy.has(requestId)) return;
+  // Round 126: actOnLoginApproval is deleted with the approval system —
+  // nothing renders data-login-action any more, so no handler remains to
+  // call the 403 corridors.
 
-    state.approvalBusy.add(requestId);
-    state.approvalFeedback.delete(requestId);
-    renderMsgs(false);
-    try {
-      await api(`/api/auth/login/${action}`, {
-        method: "POST",
-        body: { id: requestId },
-      });
-      meta.status = action === "approve" ? "APPROVED" : "DECLINED";
-      delete meta.otp;
-      delete meta.otpLocked;
-      state.approvalFeedback.delete(requestId);
-    } catch (error) {
-      state.approvalFeedback.set(
-        requestId,
-        error.message || "Could not update this request. Try again.",
-      );
-    } finally {
-      state.approvalBusy.delete(requestId);
-      renderMsgs(false);
-    }
-  }
   function scheduleApprovalExpiry(message) {
     const existing = state.approvalExpiryTimers.get(message.id);
     const meta = message.meta && typeof message.meta === "object" ? message.meta : null;
@@ -1569,10 +1530,7 @@ import { buildE164, validOtp } from "./login-utils.mjs";
   $("otpCancel").addEventListener("click", cancelApproval);
   $("otpGoogle").addEventListener("click", recoverFromOtp);
   $("msgs").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-login-action]");
-    if (!button) return;
-    const row = button.closest("[data-mid]");
-    if (row) actOnLoginApproval(row.dataset.mid, button.dataset.loginAction);
+    // Round 126: no data-login-action buttons exist any more (approval removed).
   });
   $("loginBtn").addEventListener("click", login);
   $("phone").addEventListener("keydown", (e) => e.key === "Enter" && login());

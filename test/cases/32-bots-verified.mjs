@@ -1634,7 +1634,7 @@ const convBetween = (db, a, b) =>
       chat.includes("fun chatOtherFill") &&
       chat.includes("chatMineFill(theme)") &&
       chat.includes("chatOtherFill(theme)") &&
-      chat.includes("containerColor = securityBlue.copy(alpha = 0.12f)") &&
+      chat.includes("containerColor = securityBlue.copy(alpha = 0.24f)") && // r126: decline button gone; the security palette now lives on the code Copy chip
       !chat.includes('"default" to "Cream"') &&
       chat.includes("KpThemeMode.darkBlue) Color(0xFF0C1A15)"),
   );
@@ -5247,26 +5247,21 @@ const convBetween = (db, a, b) =>
     src.indexOf("async function resolveApprovalMessage("),
   );
   check(
-    // Owner (2026-10-13): the login alert is ONE compact Decline action now —
-    // "approve decline button taw onek boro" — so the read action only rides
-    // regular message cards (the else branch), never the security prompt.
-    "r32-27: login-alert card has a single compact Decline action (no Approve, no Mark-as-read): the push carries kp_login_req; KpNotify adds Decline instead of Like when it is present; the receiver posts /api/auth/login/decline with that id; manifest filter declares the action",
-    sam.includes("kp_login_req: requestId,") &&
-      notify.includes("loginRequestId: String? = null,") &&
-      notify.includes(".setAction(KpNotifActionReceiver.ACTION_DECLINE_LOGIN)") &&
-      notify.includes("if (declineAction != null) {") &&
-      notify.includes("addAction(declineAction)") &&
-      notify.includes("addAction(likeAction)") &&
-      notify.includes("addAction(readAction)") &&
-      notify.includes(
-        'Api.post("/api/auth/login/decline", org.json.JSONObject().put("requestId", req))',
-      ) &&
-      notify.includes(
-        'const val ACTION_DECLINE_LOGIN = "app.kuchupuchu.android.NOTIF_DECLINE_LOGIN"',
-      ) &&
+    // Round 126 (owner r8 item 3: "approval system remove kore daw — just otp
+    // system rakho"): the security alert is ONLY a courier for the code —
+    // worker sends no kp_login_req, KpNotify builds no Decline action, the
+    // receiver has no login branch, and the routes answer 403.
+    "r126: login alert has NO approve/decline anywhere — no kp_login_req in the push, no Decline action or receiver branch in KpNotify, no manifest filter; worker approve/decline routes are 403 corridors",
+    !sam.includes("kp_login_req") &&
+      !notify.includes("ACTION_DECLINE_LOGIN") &&
+      !notify.includes("declineAction") &&
+      !notify.includes("/api/auth/login/decline") &&
       !/"Approve"/.test(notify) &&
-      push.includes('loginRequestId = data["kp_login_req"],') &&
-      manifest.includes('<action android:name="app.kuchupuchu.android.NOTIF_DECLINE_LOGIN" />'),
+      !manifest.includes("NOTIF_DECLINE_LOGIN") &&
+      src.includes("/api/auth/login/approve") &&
+      src.includes("/api/auth/login/decline") &&
+      (src.match(/APPROVAL_REMOVED/g) || []).length >= 2 &&
+      src.includes("Sign-in approval was removed"),
   );
   // Item 48: multi-photo sent ONE photo. LazyListState.animateScrollToItem is
   // a scroll mutation: the next scroll cancels the coroutine that owns the

@@ -143,7 +143,7 @@ check(
     nav.includes("slideInVertically("),
 );
 check(
-  "the glass card IS the whole pill — 248x56 at navScale 0.9, zero dip, Haze frost tuned per rounds (r120…r124 MAXIMUM, values in case124)",
+  "the glass card IS the whole pill — 248x56 at navScale 0.9, zero dip, dense navy backing painted under the Haze frost (r120…r124 MAXIMUM, r126 unconditional, values in case124)",
   nav.includes("val pillBase =") &&
     /HazeTint\(pillBase\.copy\(alpha = 0\.\d+f\)\)/.test(nav) &&
     nav.includes("val navScale = 0.9f") &&
@@ -160,7 +160,9 @@ check(
     nav.includes(
       ".offset(y = backgroundCardYOffset)\n                            .size(backgroundCardWidth, backgroundCardHeight)",
     ) &&
-    nav.includes(".clip(CircleShape)\n                            .hazeEffect(state = hazeState)"),
+    nav.includes(
+      ".clip(CircleShape)\n                            .background(pillBase.copy(alpha = 0.80f))\n                            .hazeEffect(state = hazeState)",
+    ),
 );
 check(
   "default-network recovery evicts stale HTTP sockets, retries the outbox, and refreshes visible feeds",

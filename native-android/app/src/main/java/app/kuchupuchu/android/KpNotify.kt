@@ -469,23 +469,6 @@ object KpNotify {
             } else {
                 null
             }
-        val declineAction =
-            loginRequestId?.takeIf { it.isNotBlank() }?.let { req ->
-                NotificationCompat.Action.Builder(
-                    android.R.drawable.ic_menu_close_clear_cancel,
-                    "Decline",
-                    PendingIntent.getBroadcast(
-                        ctx,
-                        req.hashCode(),
-                        Intent(ctx, KpNotifActionReceiver::class.java)
-                            .setAction(KpNotifActionReceiver.ACTION_DECLINE_LOGIN)
-                            .putExtra("convoId", convoId)
-                            .putExtra("mid", mid ?: "")
-                            .putExtra("requestId", req),
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-                    ),
-                ).build()
-            }
         val notificationTitle = if (mentioned) "$from mentioned you" else from
         val n =
             NotificationCompat.Builder(ctx, if (muted) SILENT_CHANNEL else toneChannelFor(ctx))
@@ -558,18 +541,13 @@ object KpNotify {
                 // only bounce off the API's NO_REPLIES refusal.
                 .apply {
                     if (!convoId.contains("kp_official_bot")) addAction(replyAction)
-                    // Owner (2026-10-13): the login alert keeps ONE compact
-                    // action — Decline. The old Decline + Mark-as-read pair
-                    // rendered as two huge buttons across the shade (owner:
-                    // "approve decline button taw onek boro"); read-marking is
-                    // meaningless for a security prompt — the card clears
-                    // itself when the request resolves.
-                    if (declineAction != null) {
-                        addAction(declineAction)
-                    } else {
-                        addAction(likeAction)
-                        addAction(readAction)
-                    }
+                    // Round 126: the login alert's Decline action left with
+                    // the whole approval system (owner r8 item 3) — every
+                    // alert, security ones included, now shows the plain
+                    // Like / Mark-as-read pair and clears itself when the
+                    // code is used or expires.
+                    addAction(likeAction)
+                    addAction(readAction)
                 }
                 // Muted: no heads-up, no sound — channel is silent anyway,
                 // and PRIORITY_DEFAULT keeps it out of the full-intent path.
@@ -898,25 +876,9 @@ class KpNotifActionReceiver : android.content.BroadcastReceiver() {
                     pending.finish()
                 }.start()
             }
-            ACTION_DECLINE_LOGIN -> {
-                // Owner round 32 (item 27): one tap declines the sign-in
-                // attempt from the shade. The worker flips the request and
-                // re-labels the chat card; the notification is dismissed
-                // either way (an expired / already-handled request is a 4xx,
-                // which is the same outcome for the user).
-                val req = intent.getStringExtra("requestId") ?: return
-                cancelAllCards()
-                val pending = goAsync()
-                Thread {
-                    runCatching {
-                        Api.post("/api/auth/login/decline", org.json.JSONObject().put("requestId", req))
-                    }
-                    runCatching { Api.post("/api/conversations/$convoId/read") }
-                    runCatching { ScreenStore.markRead(convoId) }
-                    refreshUnreadBadge(ctx)
-                    pending.finish()
-                }.start()
-            }
+            // Round 126 (owner r8 item 3): login approval is removed — the
+            // sign-in alert only CARRIES the code now, so the shade Decline
+            // action and its worker decline post are gone for good.
             ACTION_MARK_READ -> {
                 // Just dismisses + marks read server-side — no reply sent,
                 // no app open, matches the messenger-style tick behaviour.
@@ -969,6 +931,5 @@ class KpNotifActionReceiver : android.content.BroadcastReceiver() {
         const val ACTION_REPLY = "app.kuchupuchu.android.NOTIF_REPLY"
         const val ACTION_LIKE = "app.kuchupuchu.android.NOTIF_LIKE"
         const val ACTION_MARK_READ = "app.kuchupuchu.android.NOTIF_MARK_READ"
-        const val ACTION_DECLINE_LOGIN = "app.kuchupuchu.android.NOTIF_DECLINE_LOGIN"
     }
 }

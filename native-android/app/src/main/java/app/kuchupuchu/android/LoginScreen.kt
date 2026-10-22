@@ -115,7 +115,6 @@ private enum class LoginStage {
 }
 
 /** How long to wait for the old device's answer before offering the way out. */
-private const val APPROVAL_WAIT_MS = 60_000L
 
 /** One KuchuPuchu-AI welcome check per process — the server no-ops (one cheap
  *  SELECT) for accounts that already have their welcome message. */
@@ -555,12 +554,12 @@ fun LoginScreen(onAuthed: () -> Unit) {
                     "OTP_LOCKED" -> {
                         otpCode = ""
                         otpLocked = true
-                        error = "Too many wrong codes — approval still works."
+                        error = "Too many wrong codes — start the sign-in again for a new code."
                     }
                     "OTP_UNAVAILABLE" -> {
                         otpCode = ""
                         otpAvailable = false
-                        error = "Code check unavailable — approval still works."
+                        error = "Code check unavailable right now — try again in a moment."
                     }
                     "APPROVED" -> {
                         otpCode = ""
@@ -593,25 +592,20 @@ fun LoginScreen(onAuthed: () -> Unit) {
                     }
                 }
             } catch (e: Exception) {
-                error = e.message ?: "Offline — approval can still sign you in."
+                error = e.message ?: "Offline — the code waits; try again when you are back online."
             } finally {
                 busy = false
             }
         }
     }
 
-    // Poll loop for the approval wait (§14). The OLD device answers from the
-    // official chat message; THIS device just polls the worker — and keeps
-    // polling past the 1-minute failure UI, because a LATE approval must
-    // still sign in (owner rule).
+    // Poll loop (round 126, owner r8 item 3): approval is GONE, so nothing
+    // on this screen ever "gets answered" — the loop only watches for the
+    // request itself expiring. The code-entry UI never degrades on a timer:
+    // fetching the code from the old device may take a minute.
     LaunchedEffect(stage, requestId) {
         if (stage != LoginStage.WAITING || requestId.isBlank()) return@LaunchedEffect
-        val started = System.currentTimeMillis()
         while (true) {
-            if (!waitFailed && System.currentTimeMillis() - started > APPROVAL_WAIT_MS) {
-                waitFailed = true
-                waitFailReason = "No response from your other device yet."
-            }
             try {
                 val data =
                     withContext(Dispatchers.IO) {
@@ -629,12 +623,12 @@ fun LoginScreen(onAuthed: () -> Unit) {
                     "DECLINED" -> {
                         waitFailed = true
                         showAnotherWay = true
-                        waitFailReason = "The login was declined on the active device."
+                        waitFailReason = "The sign-in was stopped from a signed-in device."
                     }
                     "EXPIRED", "UNKNOWN" -> {
                         waitFailed = true
                         showAnotherWay = true
-                        waitFailReason = "The login request expired."
+                        waitFailReason = "The sign-in code expired."
                     }
                 }
                 if (waitFailed && showAnotherWay && data.optString("status") != "PENDING") {
@@ -874,7 +868,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                     AuthHeader("Confirm this sign-in", null, compact = true)
                     Spacer(Modifier.height(20.dp))
                     Text(
-                        "Enter the six-digit code shown inside the KuchuPuchu approval card. A signed-in device can also approve you automatically.",
+                        "the code shown inside the KuchuPuchu security alert on your signed-in device. Type it here to finish signing in.",
                         fontSize = 12.sp,
                         color = Muted,
                         textAlign = TextAlign.Center,
@@ -898,9 +892,9 @@ fun LoginScreen(onAuthed: () -> Unit) {
                     } else {
                         Text(
                             if (otpLocked) {
-                                "Five incorrect attempts used. The code is cleared, but approval still works."
+                                "Five incorrect attempts used. The code is cleared — start the sign-in again for a new code."
                             } else {
-                                "No code is available right now. A signed-in device can still approve this request."
+                                "No code is available right now. Start the sign-in again to get one."
                             },
                             fontSize = 12.sp,
                             color = Muted,
@@ -925,7 +919,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                "Waiting for approval in the background…",
+                                "Code sent to your signed-in device — it expires in five minutes.",
                                 fontSize = 11.sp,
                                 color = Muted,
                                 maxLines = 2,

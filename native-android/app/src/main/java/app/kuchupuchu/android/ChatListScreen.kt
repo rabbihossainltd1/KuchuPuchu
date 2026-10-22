@@ -1112,12 +1112,20 @@ internal fun HomeBottomNavigation(
                         .then(if (windowInteractive) Modifier else Modifier.clearAndSetSemantics {})
                         .clip(CircleShape),
                 ) {
+                    // Round 126 (owner r8 item 2: "kono blur e nai THIK KORO"):
+                    // three rounds of tuning taught us his device never reaches
+                    // the blur pipeline at all (zero blur, zero fallback tint).
+                    // So the pill now DRAWS its frost unconditionally — a dense
+                    // 0.80 navy backing lives UNDER the haze: blur-capable
+                    // phones get true glass over it, every other phone gets a
+                    // dense frosted-navy pill that can NEVER read through.
                     Box(
                         Modifier
                             .align(Alignment.Center)
                             .offset(y = backgroundCardYOffset)
                             .size(backgroundCardWidth, backgroundCardHeight)
                             .clip(CircleShape)
+                            .background(pillBase.copy(alpha = 0.80f))
                             .hazeEffect(state = hazeState) {
                                 // Owner round 122 (2026-10-22, photo P1:
                                 // "background full blur hoini transparent o na —

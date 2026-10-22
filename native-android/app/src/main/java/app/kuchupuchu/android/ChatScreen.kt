@@ -7601,12 +7601,10 @@ private fun LoginApprovalMessage(m: JSONObject) {
             status = if (serverStatus == "PENDING" && expired) "EXPIRED" else serverStatus
         }
     }
-    var busy by remember(messageId) { mutableStateOf(false) }
     val otpLocked = meta.optInt("otpLocked", 0) >= 1 || status == "OTP_LOCKED"
     val otpCode = meta.optString("otp").takeIf {
         status == "PENDING" && !expired && !otpLocked && Regex("^[0-9]{6}$").matches(it)
     }
-    val canApprove = (status == "PENDING" || status == "OTP_LOCKED") && !expired
     val device = meta.optString("deviceName").takeIf { it.isNotBlank() } ?: "Another device"
     // Attempt time in Bangladesh Standard Time (owner rule) — the raw UTC
     // string it replaced read as gibberish to everyone.
@@ -7719,81 +7717,25 @@ private fun LoginApprovalMessage(m: JSONObject) {
                     }
                 }
                 otpLocked -> Text(
-                    "Five incorrect codes used. Approval is still available.",
+                    "Five incorrect codes used. Start the sign-in again for a new code.",
                     fontSize = 9.5.sp,
                     color = Muted,
                 )
                 else -> Text(
-                    "Approve or decline this sign-in below.",
+                    "Enter this code on the new device to finish signing in.",
                     fontSize = 9.5.sp,
                     color = Muted,
                 )
             }
         }
         Spacer(Modifier.height(6.dp))
-        if (canApprove) {
-            Row {
-                androidx.compose.material3.Button(
-                    onClick = {
-                        if (busy) return@Button
-                        busy = true
-                        Thread {
-                            val ok = runCatching {
-                                Api.post("/api/auth/login/approve", JSONObject().put("id", meta.optString("requestId")))
-                            }.isSuccess
-                            if (ok) {
-                                meta.remove("otp")
-                                meta.remove("otpLocked")
-                                ScreenStore.loginApprovals[requestId] = "APPROVED"
-                                status = "APPROVED"
-                            } else {
-                                busy = false
-                            }
-                        }.start()
-                    },
-                    enabled = !busy,
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                        containerColor = securityBlue,
-                        contentColor = Color.White,
-                    ),
-                    modifier = Modifier.weight(1f).height(30.dp),
-                ) {
-                    Text("Accept", maxLines = 1, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                }
-                Spacer(Modifier.width(6.dp))
-                androidx.compose.material3.Button(
-                    onClick = {
-                        if (busy) return@Button
-                        busy = true
-                        Thread {
-                            val ok = runCatching {
-                                Api.post("/api/auth/login/decline", JSONObject().put("id", meta.optString("requestId")))
-                            }.isSuccess
-                            if (ok) {
-                                meta.remove("otp")
-                                meta.remove("otpLocked")
-                                ScreenStore.loginApprovals[requestId] = "DECLINED"
-                                status = "DECLINED"
-                            } else {
-                                busy = false
-                            }
-                        }.start()
-                    },
-                    enabled = !busy,
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                        containerColor = securityBlue.copy(alpha = 0.12f),
-                        contentColor = securityBlueText,
-                    ),
-                    modifier = Modifier.weight(1f).height(30.dp),
-                ) {
-                    Text("Decline", maxLines = 1, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                }
-            }
-        } else {
+        // Round 126 (owner 2026-10-23 r8 item 3: "new login alert er system a
+        // approval system remove kore daw — just otp system rakho"): the
+        // Accept/Decline buttons and their worker routes are GONE. This card
+        // is now a courier for the six-digit code shown above (with Copy) —
+        // the new device finishes the sign-in by typing THAT code, nothing
+        // else. Past decisions on legacy cards still label themselves.
+        run {
             val (label, color) = when (status) {
                 "APPROVED" -> "Approved — new device can sign in" to Color(0xFF16A34A)
                 "CLAIMED" -> "New device signed in" to Color(0xFF16A34A)

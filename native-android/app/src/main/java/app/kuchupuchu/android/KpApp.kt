@@ -554,11 +554,25 @@ fun KpApp() {
                             nav.navigate("profile/${Store.myId()}") { launchSingleTop = true }
                             return@runCatching true
                         }
-                        val data =
-                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                Api.get("/api/users/username/" + java.net.URLEncoder.encode(handle, "UTF-8"), true)
-                            }
-                        val id = data.optJSONObject("user")?.optString("id").orEmpty()
+                        // Round 126 (owner r8 item 4: "friend er link open a
+                        // ekhono chat open hoi na"): the lookup rides the
+                        // federated edge→core hop — one blip used to end the
+                        // whole open. Same retry rule as the chat-create
+                        // below: breathe once, ask again.
+                        var data =
+                            runCatching {
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    Api.get("/api/users/username/" + java.net.URLEncoder.encode(handle, "UTF-8"), true)
+                                }
+                            }.getOrNull()
+                        if (data == null) {
+                            kotlinx.coroutines.delay(600)
+                            data =
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    Api.get("/api/users/username/" + java.net.URLEncoder.encode(handle, "UTF-8"), true)
+                                }
+                        }
+                        val id = data?.optJSONObject("user")?.optString("id").orEmpty()
                         if (id.isBlank()) return@runCatching false
                         // Round 121 (owner: "link open kore profile open korle...
                         // toast massage ashe ami naki offline"): his own share
@@ -628,7 +642,11 @@ fun KpApp() {
                             }
                         if (convId.isNotBlank()) {
                             ScreenStore.convIdForUser[id] = convId
-                            nav.navigate("chat/$convId") { launchSingleTop = true }
+                            // Round 126: ride the SAME nav shape the contacts
+                            // screen has opened chats with for months —
+                            // popUpTo("main") — instead of a bare push that a
+                            // backstack race can drop.
+                            nav.navigate("chat/$convId") { popUpTo("main"); launchSingleTop = true }
                             true
                         } else {
                             false

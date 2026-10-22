@@ -1,5 +1,33 @@
 # Project Memory
 
+## 2026-10-23 (round 8) — v300 / 3.9.223 (r126): approval REMOVED (OTP only), unconditional pill frost, friend-link hard-open, AI returned to owner
+
+- **(c) Sign-in approval IS GONE — the OTP is the one way in.** Worker
+  `/api/auth/login/approve|decline` answer `403 APPROVAL_REMOVED` ("Sign-in
+  approval was removed. Use the code sent to your trusted account.").
+  Corridors stay so an old APK's Accept tap reads a clear line instead of 404.
+  Worker alert copy: "the sign-in code is in this chat" and no `kp_login_req`
+  rides the push. The status string `APPROVAL_REQUIRED` UNCHANGED — old APKs
+  parse it for the OTP stage.
+- Android: security card = code + Copy (`contentDescription "Copy sign-in
+  code"`) + passive status; NO buttons/gates (`canApprove`, `sendGate`,
+  countdown gone). Shade: declineAction/ACTION_DECLINE_LOGIN/manifest filter
+  gone; like+read always added. Classic web `public/app.js`: buttons +
+  `actOnLoginApproval` gone. LoginScreen: code-only copy, no 60s give-up
+  timer, poll stops at 5 min only.
+- **(b) Pill frost is painted UNCONDITIONALLY:** dense
+  `pillBase.copy(alpha = 0.80f)` backing under `hazeEffect` — no capability
+  check; the 96dp etc stay on top. A device whose blur never samples still
+  cannot read through.
+- **(d) Friend share-link:** resolver null-safe `data?.optJSONObject`, ONE
+  600ms retry of `users/username/`, then
+  `nav.navigate("chat/\$convId") { popUpTo("main"); launchSingleTop = true }`.
+- **(a) AI: no code change** — r125 diag showed the comm core is still stale
+  on every lane; owner's Vintox redeploy (docs/ai-core-brain-2026-10-22.md)
+  is the only fix.
+- Cases: 31 rewritten 105/0 (`claimViaOtp`), 32 r126 (approval-free push),
+  49/53/76 pin flips, **126 new 13/13**, 36 rolled.
+
 ## 2026-10-22 (late night) — v299 / 3.9.222 (r125): one send sound, maximum-frost pill, resilient share-link opens, AI mystery solved
 
 Owner round 7 (six items; 1+5 from round 6 already confirmed live):

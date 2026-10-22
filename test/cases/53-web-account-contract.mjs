@@ -220,7 +220,7 @@ check(
   ),
 );
 check(
-  "session, approval, OTP and recovery wrappers map the existing Worker routes",
+  "session, OTP and recovery wrappers map the existing Worker routes (approval died in round 126)",
   [
     "/api/auth/verify-phone",
     "/api/auth/google/bind",
