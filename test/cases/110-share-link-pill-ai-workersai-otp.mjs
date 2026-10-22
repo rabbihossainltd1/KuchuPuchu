@@ -117,7 +117,7 @@ check(
 );
 check(
   "own handle opens the own PROFILE — from the id comparison AND from the worker's 400 self-refusal (belt and braces, no offline toast)",
-  kpApp.includes('val myHandle = Store.me?.optString("username", "")') && // round 123: own handle routes on the stored username with NO network at all
+  kpApp.includes('Store.me?.optString("username", "")?.trim()?.lowercase().orEmpty()') && // round 123: own handle routes on the stored username with NO network at all
     kpApp.includes('nav.navigate("profile/${Store.myId()}") { launchSingleTop = true }') &&
     kpApp.includes("if (id == Store.myId()) {") &&
     kpApp.includes('nav.navigate("profile/$id") { launchSingleTop = true }') &&
