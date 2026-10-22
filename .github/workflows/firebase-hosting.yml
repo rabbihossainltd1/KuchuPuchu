@@ -50,4 +50,7 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s' '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > "${GOOGLE_APPLICATION_CREDENTIALS}"
-          npm exec --yes firebase-tools -- deploy --only hosting --non-interactive
+          # 2026-10-22: firebase-tools unpinned drifted to a version whose
+          # preflight GETs serviceusage (403 on this project's SA); the key proven
+          # against the same project works with v14, so the CLI is pinned.
+          npm exec --yes firebase-tools@14 -- deploy --only hosting --non-interactive
