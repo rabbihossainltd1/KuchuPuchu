@@ -125,7 +125,9 @@ check(
 );
 check(
   "an honest toast remains for REAL failures only (round 124: stage-tagged)",
-  kpApp.includes('\"Couldn\'t open that profile (\" + linkFailReason + \"). Try again when you\'re online.\"'),
+  kpApp.includes(
+    '\"Couldn\'t open that profile (\" + linkFailReason + \"). Try again when you\'re online.\"',
+  ),
 );
 
 /* 3 — landing card: invalid state, tick, CTA fallback --------------------- */
@@ -151,8 +153,7 @@ check(
 );
 check(
   "a failed app-side profile open says something (was: silent nothing)",
-  /Couldn\'t open that profile \(/.test(kpApp) &&
-    kpApp.includes("}.getOrDefault(false)"),
+  /Couldn\'t open that profile \(/.test(kpApp) && kpApp.includes("}.getOrDefault(false)"),
 );
 
 /* 4 — the AI bot gets a real fallback brain (Workers AI) ------------------ */
