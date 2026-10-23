@@ -37,9 +37,22 @@ confirm nothing has changed since.
 2. In *vintoxbdinstitute → Workers & Pages → `vintoxbd-comm-core` → Settings →
    Variables and Secrets*:
    - add an **AI binding**: type *AI*, variable name `AI` (the free Workers-AI
-     lane; enough for text answers — this is what serves every text question),
-   - *optional*: add secret **`GEMINI_API_KEY`** (voice-note/photo/picture
-     turns; the free lane has been 503 for a day, so this is nice-to-have),
+     lane; fallback brain),
+   - add secret **`GEMINI_API_KEY`** — now REQUIRED, not optional (round 127,
+     owner 2026-10-23: the canned "I'm right here with you!" line was still
+     his only answer). Same value as the `GEMINI_API_KEY` in the release
+     `.env`; I already set it as a secret on the EDGE worker (diag shows
+     `gemini:true` since 2026-10-23) and curl-verified it against
+     generativelanguage.googleapis.com. CLI version of the same step:
+     `npx wrangler secret put GEMINI_API_KEY --name vintoxbd-comm-core`
+     followed by `npx wrangler deploy --name vintoxbd-comm-core` (or trigger
+     the connected Git project).
+
+**Verify AFTER both steps**: `curl https://vintoxbd-comm-core.vintoxbdinstitute.workers.dev/api/ai/diag`
+→ must show `{"self":"core","gemini":true,…}`. Until then every /api/ai/*
+call still lands on the stale core and the canned line keeps coming back — no
+amount of edge-side code changes can fix that, the route is proxied (see
+`federatedCoreProxy`: only ice/apk/calls/share-card stay on the edge).
    - make sure the plain vars the code reads survive the redeploy:
      `SELF_ORIGIN = https://vintoxbd-comm-core.vintoxbdinstitute.workers.dev`,
      `LARAVEL_CLASSROOM_ORIGIN = https://vintoxbd.online`,

@@ -536,7 +536,15 @@ fun KpApp() {
             LaunchedEffect(userHandle, authed, meReady) {
                 val handle = userHandle
                 if (handle.isNullOrBlank() || !authed || !meReady) return@LaunchedEffect
-                MainActivity.pendingUserHandle.value = null
+                // Round 127 (owner r9 item d, the REAL one this time): this
+                // effect keyed on `userHandle` used to null the pending flow
+                // RIGHT HERE — that write re-ran this very effect, cancelling
+                // the in-flight lookup mid-network, so the resolver died the
+                // instant it started. App opens, nothing happens: his exact
+                // report since round 120. The pending flow is cleared LAST,
+                // after the navigate/toast, where the restart lands on a null
+                // handle and simply exits.
+                val clearPendingHandle = { MainActivity.pendingUserHandle.value = null }
                 // Owner round 120 ("open click kortesi, kintu chat ta open
                 // hocche na"): a silent runCatching meant a PRIVATE profile
                 // (username hidden), an unknown handle or a dropped request all
@@ -552,6 +560,7 @@ fun KpApp() {
                             Store.me?.optString("username", "")?.trim()?.lowercase().orEmpty()
                         if (myHandle.isNotBlank() && handle.equals(myHandle, ignoreCase = true)) {
                             nav.navigate("profile/${Store.myId()}") { launchSingleTop = true }
+                            clearPendingHandle()
                             return@runCatching true
                         }
                         // Round 126 (owner r8 item 4: "friend er link open a
@@ -573,7 +582,7 @@ fun KpApp() {
                                 }
                         }
                         val id = data?.optJSONObject("user")?.optString("id").orEmpty()
-                        if (id.isBlank()) return@runCatching false
+                        if (id.isBlank()) return@runCatching false  // pending cleared below, with the toast
                         // Round 121 (owner: "link open kore profile open korle...
                         // toast massage ashe ami naki offline"): his own share
                         // link reached the chat branch, and the worker refuses
@@ -581,6 +590,7 @@ fun KpApp() {
                         // nobody's fault. Own handle opens the own PROFILE.
                         if (id == Store.myId()) {
                             nav.navigate("profile/$id") { launchSingleTop = true }
+                            clearPendingHandle()
                             return@runCatching true
                         }
                         val cached = ScreenStore.convIdForUser[id]
@@ -611,6 +621,7 @@ fun KpApp() {
                                     }
                                 if (created == null) {
                                     nav.navigate("profile/$id") { launchSingleTop = true }
+                                    clearPendingHandle()
                                     return@runCatching true
                                 }
                                 val convId =
@@ -635,6 +646,7 @@ fun KpApp() {
                                         android.widget.Toast
                                             .makeText(appCtx, "Chat didn't open (" + convReason + ") — his profile is open instead.", android.widget.Toast.LENGTH_LONG)
                                             .show()
+                                        clearPendingHandle()
                                         return@runCatching true
                                     }
                                     again
@@ -652,11 +664,14 @@ fun KpApp() {
                             false
                         }
                     }.getOrDefault(false)
+                // The pending handle is consumed EXACTLY once — here, at the
+                // very end, never inside the run (see the round-127 note).
                 if (!opened) {
                     android.widget.Toast
                         .makeText(appCtx, "Couldn't open that profile (" + linkFailReason + "). Try again when you're online.", android.widget.Toast.LENGTH_LONG)
                         .show()
                 }
+                clearPendingHandle()
             }
  
             share?.takeIf { authed }?.let { payload ->

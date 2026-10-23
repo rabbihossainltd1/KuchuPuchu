@@ -41,13 +41,13 @@ function maskPhone(phone: string): string {
 function approvalTerminalCopy(status: string): string {
   switch (status) {
     case "DECLINED":
-      return "The sign-in request was declined on another device.";
+      return "The sign-in request was declined. Start again with your phone number.";
     case "CANCELLED":
       return "The sign-in request was cancelled.";
     case "EXPIRED":
-      return "The approval request expired. Start again with your phone number.";
+      return "The code expired. Start again with your phone number.";
     default:
-      return "This approval request is no longer available. Start again.";
+      return "This sign-in request is no longer available. Start again.";
   }
 }
 
@@ -180,10 +180,13 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
               kind: "info",
               text:
                 result.status === "APPROVED"
-                  ? "Approved. Finishing sign-in securely…"
+                  ? "Finishing sign-in securely…"
                   : result.status === "OTP_LOCKED"
-                    ? "The code is locked; a signed-in device can still approve this request."
-                    : "Waiting for approval from a signed-in KuchuPuchu device…",
+                    ? "Too many wrong tries — the code was cleared. Start again for a new one."
+                    : // Round 127 (owner r9 item c): approval is GONE — the
+                      // code in the signed-in device's security chat is the only
+                      // way through; say that, nothing else.
+                      "Open KuchuPuchu on your signed-in phone — the code is in the security message there.",
             });
           }
           schedule();
@@ -423,30 +426,9 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
     setNotice({ kind: "error", text: copy });
   }
 
-  async function cancelApproval() {
-    if (flow.kind !== "approval" || busy) return;
-    const activeFlow = flow;
-    const controller = startAction();
-    setBusy(true);
-    try {
-      await authApi.cancelLogin(
-        api,
-        { requestId: activeFlow.requestId, deviceId },
-        controller.signal,
-      );
-      finishApprovalLocally("The sign-in request was cancelled.");
-    } catch (error) {
-      if (!controller.signal.aborted) {
-        setNotice({
-          kind: "error",
-          text: `${authErrorCopy(error)} You can still leave this screen.`,
-        });
-      }
-    } finally {
-      if (actionController.current === controller) actionController.current = null;
-      if (!controller.signal.aborted) setBusy(false);
-    }
-  }
+  // Round 127: cancelLogin is still called by the reset path below
+  // when a NEW request replaces an old one; the visible Cancel button (and
+  // this handler) left with the approval system.
 
   async function submitGoogleCredential(credential: string) {
     if (busy || flow.kind !== "google") return;
@@ -769,8 +751,7 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
             )}
             {!flow.otpAvailable && (
               <p className="auth-footnote">
-                Code sign-in is not available for this request. Use approval from a signed-in
-                device.
+                No code is available for this request. Start again to get one.
               </p>
             )}
             {flow.deviceGone && (
@@ -789,14 +770,10 @@ export function AuthScreen({ onBackToChats }: { onBackToChats: () => void }) {
                 Recover with linked Google account
               </button>
             )}
-            <button
-              className="text-button"
-              type="button"
-              onClick={() => void cancelApproval()}
-              disabled={busy}
-            >
-              Cancel sign-in request
-            </button>
+            {/* Round 127 (owner r9 item c): the visible Cancel button is gone
+                — requests die on their own 5-minute expiry now that approval
+                itself is removed; cancelLogin stays for the internal
+                reset-on-new-request path. */}
           </div>
         )}
 

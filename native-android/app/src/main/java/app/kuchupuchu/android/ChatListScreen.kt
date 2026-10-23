@@ -1112,20 +1112,21 @@ internal fun HomeBottomNavigation(
                         .then(if (windowInteractive) Modifier else Modifier.clearAndSetSemantics {})
                         .clip(CircleShape),
                 ) {
-                    // Round 126 (owner r8 item 2: "kono blur e nai THIK KORO"):
-                    // three rounds of tuning taught us his device never reaches
-                    // the blur pipeline at all (zero blur, zero fallback tint).
-                    // So the pill now DRAWS its frost unconditionally — a dense
-                    // 0.80 navy backing lives UNDER the haze: blur-capable
-                    // phones get true glass over it, every other phone gets a
-                    // dense frosted-navy pill that can NEVER read through.
+                    // Round 127 (owner r9 item b, caps: "kono blur add koro nai
+                    // just background opacity bariye diyecho"): the 0.80 opaque
+                    // backing from round 126 WAS the problem — it sat under the
+                    // glass and smothered the very blur he was asking to see.
+                    // Removed: the pill is translucent frosted glass again
+                    // (Haze blurs the real pixels behind the pill inside our
+                    // own window — no OS permission, works on any RenderEffect
+                    // device), and the non-RenderEffect fallback still paints a
+                    // frosted-navy slab instead of reading through.
                     Box(
                         Modifier
                             .align(Alignment.Center)
                             .offset(y = backgroundCardYOffset)
                             .size(backgroundCardWidth, backgroundCardHeight)
                             .clip(CircleShape)
-                            .background(pillBase.copy(alpha = 0.80f))
                             .hazeEffect(state = hazeState) {
                                 // Owner round 122 (2026-10-22, photo P1:
                                 // "background full blur hoini transparent o na —
@@ -1152,11 +1153,18 @@ internal fun HomeBottomNavigation(
                                 // devices. If the GPU blur fails on his phone the
                                 // pill still reads dense frosted navy. Geometry
                                 // untouched (owner r42: no size changes).
-                                backgroundColor = pillBase.copy(alpha = 0.20f)
-                                tints = listOf(HazeTint(pillBase.copy(alpha = 0.34f)))
-                                blurRadius = 96.dp
+                                // Round 127: visible BLUR first, tint second.
+                                // 96dp collapsed the 51dp pill into one flat
+                                // averaged shade (nothing left to read as
+                                // "blur"); 24dp keeps a real defocused texture.
+                                // Tints stay light enough for the smear to
+                                // show; fallback slab for no-RenderEffect
+                                // devices stays dense so it never reads through.
+                                backgroundColor = pillBase.copy(alpha = 0.14f)
+                                tints = listOf(HazeTint(pillBase.copy(alpha = 0.26f)))
+                                blurRadius = 24.dp
                                 noiseFactor = 0.12f
-                                fallbackTint = HazeTint(pillBase.copy(alpha = 0.96f))
+                                fallbackTint = HazeTint(pillBase.copy(alpha = 0.88f))
                             },
                     )
                     val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4

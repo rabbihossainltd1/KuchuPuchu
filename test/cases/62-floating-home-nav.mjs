@@ -85,10 +85,10 @@ check(
     nav.includes("StatusGlyphIcon(tint, navIconSize)"),
 );
 check(
-  "the background card sits at the icon/indicator baseline and carries the frosted-glass treatment itself (owner 2026-10-20), painting a dense navy backing under the haze (round 126)",
+  "the background card sits at the icon/indicator baseline and IS the frosted glass (owner 2026-10-20); no opaque backing smothers the blur (round 127)",
   nav.includes("val backgroundCardYOffset = 0.dp") &&
     nav.includes(
-      ".align(Alignment.Center)\n                            .offset(y = backgroundCardYOffset)\n                            .size(backgroundCardWidth, backgroundCardHeight)\n                            .clip(CircleShape)\n                            .background(pillBase.copy(alpha = 0.80f))\n                            .hazeEffect(state = hazeState) {",
+      ".align(Alignment.Center)\n                            .offset(y = backgroundCardYOffset)\n                            .size(backgroundCardWidth, backgroundCardHeight)\n                            .clip(CircleShape)\n                            .hazeEffect(state = hazeState) {",
     ) &&
     nav.includes(".offset(y = navContentYOffset)"),
 );
@@ -164,7 +164,7 @@ check(
     /HazeTint\(pillBase\.copy\(alpha = 0\.\d+f\)\)/.test(nav) && // r122 frost → r124 MAXIMUM (0.34 tint / 96dp / 0.96 fallback, pinned in case124)
     /blurRadius = \d+\.dp/.test(nav) &&
     nav.includes("noiseFactor = 0.12f") &&
-    /fallbackTint = HazeTint\(pillBase\.copy\(alpha = 0\.9\df\)\)/.test(nav) && // no-RenderEffect devices get solid frost
+    /fallbackTint = HazeTint\(pillBase\.copy\(alpha = 0\.8\df\)\)/.test(nav) && // no-RenderEffect devices get solid frost
     !nav.includes(".background(pillFill)") &&
     nav.includes("val navScale = 0.9f") &&
     nav.includes("val navIconSize = 27.dp") &&

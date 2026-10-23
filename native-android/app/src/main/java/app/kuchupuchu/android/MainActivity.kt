@@ -263,8 +263,11 @@ class MainActivity : ComponentActivity() {
             val data = intent.data
             val host = data?.host?.lowercase().orEmpty()
             if (host == "kuchupuchu.web.app" || host == "kuchupuchu.firebaseapp.com") {
+                // Round 127: lowercase FIRST — usernames are stored lowercase
+                // but a shared-and-reshared link can arrive as /@Rahim; the
+                // regex used to reject it silently and the tap looked dead.
                 val handle =
-                    data?.pathSegments?.firstOrNull().orEmpty().removePrefix("@")
+                    data?.pathSegments?.firstOrNull().orEmpty().removePrefix("@").lowercase()
                 if (handle.matches(Regex("^[a-z0-9_]{3,30}$"))) pendingUserHandle.value = handle
             }
         }

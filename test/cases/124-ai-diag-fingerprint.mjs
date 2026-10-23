@@ -73,14 +73,15 @@ check("send tap carries no haptic call", !!sendBlock && !/haptics\./.test(sendBl
 check("photo/sticker special sounds kept (owner r21 set)", /KpSounds\.photoSend\(ctx\)/.test(chat));
 
 // Item 3: maximum-frost pill (96dp blur, dense uniform tint, near-solid fallback).
-const pillBlock = pill.match(/hazeEffect\(state = hazeState\) \{[\s\S]{0,2600}?\},\n\s+\)/);
+const pillBlock = pill.match(/hazeEffect\(state = hazeState\) \{[\s\S]{0,4200}?\},\n\s+\)/);
 check(
-  "pill is at maximum frost: 96dp blur + 0.20/0.34 tint + 0.96 fallback",
+  "pill shows a REAL defocus (r127: 24dp blur so texture survives) + 0.14/0.26 tint + 0.88 fallback slab — no opaque backing smothering the glass",
   !!pillBlock &&
-    /blurRadius = 96\.dp/.test(pillBlock[0]) &&
-    /pillBase\.copy\(alpha = 0\.20f\)/.test(pillBlock[0]) &&
-    /pillBase\.copy\(alpha = 0\.34f\)/.test(pillBlock[0]) &&
-    /alpha = 0\.96f/.test(pillBlock[0]),
+    /blurRadius = 24\.dp/.test(pillBlock[0]) &&
+    /tints = listOf\(HazeTint\(pillBase\.copy\(alpha = 0\.26f\)\)\)/.test(pillBlock[0]) &&
+    /fallbackTint = HazeTint\(pillBase\.copy\(alpha = 0\.88f\)\)/.test(pillBlock[0]) &&
+    /backgroundColor = pillBase\.copy\(alpha = 0\.14f\)/.test(pillBlock[0]) &&
+    !pill.includes(".background(pillBase.copy(alpha = 0.80f))"),
 );
 
 // Item 4: friend share-link — retry + profile fallback + reason-tagged toasts.

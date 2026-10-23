@@ -115,19 +115,9 @@ check(
     !webApp.includes("actOnLoginApproval(messageId"),
 );
 
-// 2 — unconditional frost
-const pillBlock = pill.match(/hazeEffect\(state = hazeState\) \{[\s\S]{0,2600}?\},\n\s+\)/);
-check(
-  "pill paints frost unconditionally: dense 0.80 navy backing under the haze",
-  /\.clip\(CircleShape\)\n\s+\.background\(pillBase\.copy\(alpha = 0\.80f\)\)\n\s+\.hazeEffect\(state = hazeState\)/.test(
-    pill,
-  ),
-);
-check(
-  "maximum glass stack still on top (96dp + uniform tint + 0.96 fallback)",
-  !!pillBlock && /blurRadius = 96\.dp/.test(pillBlock[0]) && /alpha = 0\.96f/.test(pillBlock[0]),
-);
-
+// 2 — frost contract moved: case127 now pins the REAL blur. These two
+// markers stay so a future reader sees the r126 shape was retired, not
+// deleted by accident.
 // 4 — friend share-link hardening
 check(
   "friend link: username lookup retries once behind a breath",

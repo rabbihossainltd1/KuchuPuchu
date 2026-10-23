@@ -105,7 +105,7 @@ check(
     nav.includes("targetOffsetY = { fullHeight -> fullHeight }") &&
     nav.includes("with(density) { bottomOffsetPx.toDp() }") &&
     /blurRadius = \d+\.dp/.test(nav) && // r122: 40 → r124 MAXIMUM: 96.dp (pinned in case124)
-    /fallbackTint = HazeTint\(pillBase\.copy\(alpha = 0\.9\df\)\)/.test(nav) &&
+    /fallbackTint = HazeTint\(pillBase\.copy\(alpha = 0\.8\df\)\)/.test(nav) &&
     !nav.includes("slideProgress") &&
     !nav.includes("params.y = windowYOffsetPx"),
 );
@@ -143,7 +143,7 @@ check(
     nav.includes("slideInVertically("),
 );
 check(
-  "the glass card IS the whole pill — 248x56 at navScale 0.9, zero dip, dense navy backing painted under the Haze frost (r120…r124 MAXIMUM, r126 unconditional, values in case124)",
+  "the glass card IS the whole pill — 248x56 at navScale 0.9, zero dip, Haze frost visible (r127: no opaque backing under the blur, exact values in case124)",
   nav.includes("val pillBase =") &&
     /HazeTint\(pillBase\.copy\(alpha = 0\.\d+f\)\)/.test(nav) &&
     nav.includes("val navScale = 0.9f") &&
@@ -161,7 +161,7 @@ check(
       ".offset(y = backgroundCardYOffset)\n                            .size(backgroundCardWidth, backgroundCardHeight)",
     ) &&
     nav.includes(
-      ".clip(CircleShape)\n                            .background(pillBase.copy(alpha = 0.80f))\n                            .hazeEffect(state = hazeState)",
+      ".clip(CircleShape)\n                            .hazeEffect(state = hazeState)",
     ),
 );
 check(

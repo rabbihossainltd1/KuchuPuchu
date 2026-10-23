@@ -1,5 +1,32 @@
 # Project Memory
 
+## 2026-10-23 (round 9) — v301 / 3.9.224 (r127): the friend-link self-cancel bug, REAL pill blur, web approval copy wiped, Gemini on the edge
+
+- **(d) THE REAL friend-link bug (since r120!):** KpApp's resolver effect is
+  keyed on `userHandle` and used to write `MainActivity.pendingUserHandle.value
+  = null` FIRST — mutating its own key, the effect cancelled itself before the
+  username lookup existed. App opened; nothing ever ran after. The flow now
+  clears LAST (`clearPendingHandle()` after every navigate/toast), the r126
+  retry + `popUpTo("main")` shape stay, AND MainActivity lowercases the handle
+  before the gate regex (mixed-case links died silently at intake).
+- **(b) Pill blur finally BLURS:** the r126 0.80-opaque backing smothered the
+  glass → REMOVED. Haze: blurRadius 24dp (96 collapsed the 51dp pill into a
+  flat average), bg 0.14, tint 0.26, fallback 0.88 slab for no-RenderEffect.
+- **(c) web AuthScreen:** "Waiting for approval from a signed-in KuchuPuchu
+  device…” and the visible "Cancel sign-in request" button are GONE (code-only
+  copy; cancelLogin stays internal for the new-request reset). Android-side
+  contract from r126 untouched.
+- **(a) AI traced for real:** every `/api/ai/*` call proxies to the STALE
+  Vintox comm-core (`federatedCoreProxy` keeps only ice/apk/calls/share-card on
+  the edge) → his canned line. Owner's GEMINI key curl-verified and set on the
+  EDGE secret store (diag gemini:true since 2026-10-23). Two owner-side Vintox
+  steps remain (secret --name vintoxbd-comm-core + redeploy) — exact commands
+  in docs/ai-core-brain-2026-10-22.md; verify with that host's /api/ai/diag
+  showing `{"self":"core","gemini":true}`.
+- Cases: new **127** (8/8 pillar pins), 126 frost block retired (11/11), 62/65
+  chain asserts follow the backing removal, 124 exact values re-pinned, 36/67/75
+  rolled to v301.
+
 ## 2026-10-23 (round 8) — v300 / 3.9.223 (r126): approval REMOVED (OTP only), unconditional pill frost, friend-link hard-open, AI returned to owner
 
 - **(c) Sign-in approval IS GONE — the OTP is the one way in.** Worker

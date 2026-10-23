@@ -96,11 +96,11 @@ check(
 
 /* 3 — the pill must stay glass (top-level echo of the 62/65 chain) ------ */
 check(
-  "nav pill: frost values ride the owner rounds (r122 40dp → r124 MAXIMUM 96dp blur + dense 0.20/0.34 tint + 0.96 fallba ck, pinned exactly in case124)",
+  "nav pill: frost values ride the owner rounds (r127 REAL defocus: 24dp blur + light 0.14/0.26 tint + 0.88 fallback slab, pinned exactly in case124)",
   /backgroundColor = pillBase\.copy\(alpha = 0\.\d+f\)/.test(chatList) &&
     /tints = listOf\(HazeTint\(pillBase\.copy\(alpha = 0\.\d+f\)\)\)/.test(chatList) &&
-    /blurRadius = \d+\.dp/.test(chatList) && // r124: 96.dp max — exact values pinned in case124
-    /fallbackTint = HazeTint\(pillBase\.copy\(alpha = 0\.9\df\)\)/.test(chatList) && // no-RenderEffect pill: frosted navy, never read-through
+    /blurRadius = \d+\.dp/.test(chatList) && // r127: 24.dp defocus — exact values pinned in case124
+    /fallbackTint = HazeTint\(pillBase\.copy\(alpha = 0\.8\df\)\)/.test(chatList) && // no-RenderEffect pill: frosted navy, never read-through
     !chatList.includes(".background(pillFill)") &&
     chatList.includes("import dev.chrisbanes.haze.HazeTint"),
 );
