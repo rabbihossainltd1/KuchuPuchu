@@ -75,12 +75,12 @@ check("photo/sticker special sounds kept (owner r21 set)", /KpSounds\.photoSend\
 // Item 3: maximum-frost pill (96dp blur, dense uniform tint, near-solid fallback).
 const pillBlock = pill.match(/hazeEffect\(state = hazeState\) \{[\s\S]{0,4200}?\},\n\s+\)/);
 check(
-  "pill shows a REAL defocus (r127: 24dp blur so texture survives) + 0.14/0.26 tint + 0.88 fallback slab — no opaque backing smothering the glass",
+  "pill shows a REAL defocus through a LIGHT frost (r128: 24dp blur, pile loosened to ~0.20) + 0.14/0.26 tint + 0.88 fallback slab — no opaque backing smothering the glass",
   !!pillBlock &&
     /blurRadius = 24\.dp/.test(pillBlock[0]) &&
-    /tints = listOf\(HazeTint\(pillBase\.copy\(alpha = 0\.26f\)\)\)/.test(pillBlock[0]) &&
-    /fallbackTint = HazeTint\(pillBase\.copy\(alpha = 0\.88f\)\)/.test(pillBlock[0]) &&
-    /backgroundColor = pillBase\.copy\(alpha = 0\.14f\)/.test(pillBlock[0]) &&
+    /tints = listOf\(HazeTint\(pillBase\.copy\(alpha = 0\.13f\)\)\)/.test(pillBlock[0]) &&
+    /fallbackTint = HazeTint\(pillBase\.copy\(alpha = 0\.85f\)\)/.test(pillBlock[0]) &&
+    /backgroundColor = pillBase\.copy\(alpha = 0\.08f\)/.test(pillBlock[0]) &&
     !pill.includes(".background(pillBase.copy(alpha = 0.80f))"),
 );
 

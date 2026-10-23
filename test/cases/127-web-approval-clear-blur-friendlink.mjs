@@ -72,11 +72,11 @@ check(
 );
 const pillBlock = pill.match(/hazeEffect\(state = hazeState\) \{[\s\S]{0,4200}?\},\n\s+\)/);
 check(
-  "pill: real defocused blur (24.dp) + light 0.26 tint + 0.88 fallback slab",
+  "pill: real defocused blur (24.dp) + light 0.13 tint + 0.85 fallback slab (r128: frost loosened on the owner's feedback)",
   !!pillBlock &&
     /blurRadius = 24\.dp/.test(pillBlock[0]) &&
-    /tints = listOf\(HazeTint\(pillBase\.copy\(alpha = 0\.26f\)\)\)/.test(pillBlock[0]) &&
-    /fallbackTint = HazeTint\(pillBase\.copy\(alpha = 0\.88f\)\)/.test(pillBlock[0]),
+    /tints = listOf\(HazeTint\(pillBase\.copy\(alpha = 0\.13f\)\)\)/.test(pillBlock[0]) &&
+    /fallbackTint = HazeTint\(pillBase\.copy\(alpha = 0\.85f\)\)/.test(pillBlock[0]),
 );
 
 // d — the self-cancelling effect, fixed

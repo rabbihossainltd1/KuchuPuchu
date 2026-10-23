@@ -1153,18 +1153,24 @@ internal fun HomeBottomNavigation(
                                 // devices. If the GPU blur fails on his phone the
                                 // pill still reads dense frosted navy. Geometry
                                 // untouched (owner r42: no size changes).
-                                // Round 127: visible BLUR first, tint second.
-                                // 96dp collapsed the 51dp pill into one flat
-                                // averaged shade (nothing left to read as
-                                // "blur"); 24dp keeps a real defocused texture.
-                                // Tints stay light enough for the smear to
-                                // show; fallback slab for no-RenderEffect
-                                // devices stays dense so it never reads through.
-                                backgroundColor = pillBase.copy(alpha = 0.14f)
-                                tints = listOf(HazeTint(pillBase.copy(alpha = 0.26f)))
+                                // Round 128 (owner r10 item b: "blur thik ache
+                                // but ghono eto keno — blur beshi ghono, kom
+                                // hobe; uporer dike beshi ghono niche kom
+                                // keno?"): the frost LOOSENS — 0.26+0.14 piled
+                                // ~40% navy over the blur, dense enough to hide
+                                // the smear; the pile almost halves now
+                                // (0.08 + 0.13 ≈ 0.20), uniform top-to-bottom
+                                // like every round demands. What's left over:
+                                // the top/bottom tonal shift is the CONTENT the
+                                // glass blurs (bright avatar rows above, dark
+                                // shell gap below) — with the paint this thin
+                                // the blur itself is what you see, exactly his
+                                // ask. 24.dp defocus + 0.85 slab fallback stay.
+                                backgroundColor = pillBase.copy(alpha = 0.08f)
+                                tints = listOf(HazeTint(pillBase.copy(alpha = 0.13f)))
                                 blurRadius = 24.dp
                                 noiseFactor = 0.12f
-                                fallbackTint = HazeTint(pillBase.copy(alpha = 0.88f))
+                                fallbackTint = HazeTint(pillBase.copy(alpha = 0.85f))
                             },
                     )
                     val slotWidth = (maxWidth - capsulePadding * 2 - gap * 3) / 4

@@ -1,5 +1,17 @@
 # Project Memory
 
+## 2026-10-23 (round 10) — v302 / 3.9.225 (r128): frost LOOSENED, AI unchanged (owner steps open)
+
+- **(b) Frost pile almost halved on his feedback ("blur thik thake na, eto
+  ghono keno — kom hobe"**): 0.14 + 0.26 ≈ 0.40 navy → **0.08 + 0.13 ≈ 0.20**
+  over the 24dp defocus - uniform (top/bottom tonal shift that he asks about
+  is the CONTENT behind the glass). Fallback slab 0.85f.
+- **(a) AI:** not my code - live probes re-confirmed the stale Vintox core:
+  `/api/ai/diag` 401 (no such route), BUILD b9e6fe424cb76b27 unchanged → the
+  owner-side steps round-9 remain open. Commands + dashboard path in the
+  runbook; reply repeats until then.
+- Version bump, CI release gate v302, cases rolled.
+
 ## 2026-10-23 (round 9) — v301 / 3.9.224 (r127): the friend-link self-cancel bug, REAL pill blur, web approval copy wiped, Gemini on the edge
 
 - **(d) THE REAL friend-link bug (since r120!):** KpApp's resolver effect is
