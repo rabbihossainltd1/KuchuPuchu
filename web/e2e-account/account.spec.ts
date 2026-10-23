@@ -296,7 +296,7 @@ test.describe("opt-in Worker-backed account flows", () => {
     );
   });
 
-  test("protected deep link waits for a different-device approval and then stays data-gated", async ({
+  test("protected deep link shows the code-first notice (no approval UI) and then stays data-gated", async ({
     page,
   }) => {
     let pollCount = 0;
@@ -320,9 +320,11 @@ test.describe("opt-in Worker-backed account flows", () => {
     await page.goto("/chats/thread-private-42");
     await expect(page.getByRole("heading", { name: "Scan to sign in" })).toBeVisible();
     await enterPhone(page);
-    await expect(
-      page.getByText(/Waiting for approval from a signed-in KuchuPuchu device/),
-    ).toBeVisible();
+    // Round 127 (owner r9 item c): approval is REMOVED — the only waiting
+    // copy points at the code inside the signed-in device's security chat.
+    await expect(page.getByText(/the code is in the security message there/)).toBeVisible();
+    await expect(page.getByText(/Waiting for approval from a signed-in/)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Cancel sign-in request" })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Conversation route recognized." })).toBeVisible(
       { timeout: 12_000 },
     );
@@ -451,7 +453,7 @@ test.describe("opt-in Worker-backed account flows", () => {
     await expect(page.getByText("Amina Test", { exact: true })).toHaveCount(0);
   });
 
-  test("cancel approval clears the waiting UI and sends the Worker cancel mutation", async ({
+  test("leaving mid-request sends the Worker cancel mutation (no visible Cancel button since round 127)", async ({
     page,
   }) => {
     const { calls } = await mockWorker(page, {
@@ -469,11 +471,12 @@ test.describe("opt-in Worker-backed account flows", () => {
     });
     await page.goto("/account");
     await enterPhone(page);
-    await page.getByRole("button", { name: "Cancel sign-in request" }).click();
-    await expect(page.getByRole("heading", { name: "Sign in or create an account" })).toBeVisible();
-    await expect(
-      page.getByRole("alert").filter({ hasText: "request was cancelled" }),
-    ).toBeVisible();
+    // The visible "Cancel sign-in request" button left with the approval
+    // system (owner 2026-10-23): leaving the screen via the footer link is
+    // the only way out, and IT must still fire the cancel mutation so the
+    // request does not linger on the trusted device until expiry.
+    await expect(page.getByRole("button", { name: "Cancel sign-in request" })).toHaveCount(0);
+    await page.getByRole("button", { name: /Back to Chats|Return to Chats/ }).click();
     expect(
       calls.some(
         (call) =>
