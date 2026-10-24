@@ -39,3 +39,13 @@ assert(native.includes("if (!isCrossRealmBadge(realm)) return"));
 console.log(
   "OK KP web and Android origin artwork is restricted to foreign VX accounts without changing realm identity",
 );
+
+const gradle = readFileSync("native-android/app/build.gradle.kts", "utf8");
+const release = readFileSync(".github/workflows/release.yml", "utf8");
+const code = gradle.match(/versionCode\s*=\s*(\d+)/)[1];
+const version = gradle.match(/versionName\s*=\s*"([^"]+)"/)[1];
+assert(release.includes(`test "$code" = "${code}"`));
+assert(release.includes(`test "$name" = "${version}"`));
+console.log(
+  "OK release shell version gates exactly match the Android package before an expensive APK build",
+);
