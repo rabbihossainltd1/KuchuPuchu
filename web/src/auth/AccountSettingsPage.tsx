@@ -1,3 +1,5 @@
+import { RealmBadge } from "../messaging/RealmBadge";
+import { originRealmOf } from "../messaging/realmBadge";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { ApiError } from "../api";
 import { isWebFeatureEnabled } from "../featureFlags";
@@ -386,7 +388,10 @@ export function AccountSettingsPage({
           </div>
           <div className="account-hero__identity">
             <p className="eyebrow">SIGNED-IN ACCOUNT</p>
-            <h2>{user.displayName || user.username}</h2>
+            <h2>
+              {user.displayName || user.username}
+              <RealmBadge realm={originRealmOf(user)} />
+            </h2>
             <p>@{user.username}</p>
           </div>
           <div className="account-hero__details">
@@ -758,6 +763,7 @@ export function AccountSettingsPage({
           api={api}
           user={{
             id: user.id,
+            originRealm: originRealmOf(user),
             displayName: user.displayName,
             username: user.username,
             qrCode: (user as { qrCode?: string | null }).qrCode ?? null,

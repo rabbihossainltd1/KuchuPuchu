@@ -124,7 +124,8 @@ export function CallStage({ engine, state }: Props) {
       >
         <Icon name={state.kind === "VIDEO" ? "videoCall" : "phone"} size={15} />
         <span>
-          {state.peer.name} · {statusLine(state)}
+          {state.peer.name}
+          <RealmBadge realm={state.peer.realm} /> · {statusLine(state)}
         </span>
       </button>
     );
@@ -400,7 +401,10 @@ export function CallStage({ engine, state }: Props) {
             label={`${state.peer.name}'s shared screen`}
           />
           <div className="call-share-full__bar">
-            <span className="call-share-full__name">{state.peer.name}</span>
+            <span className="call-share-full__name">
+              {state.peer.name}
+              <RealmBadge realm={state.peer.realm} />
+            </span>
             <span className="call-share-full__clock">{clockText(state.seconds)}</span>
           </div>
           <button

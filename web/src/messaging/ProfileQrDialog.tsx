@@ -22,6 +22,7 @@ import { useAvatar } from "./avatars";
 import { UserBadges } from "./Badges";
 
 export type QrProfileUser = {
+  readonly originRealm?: string | null;
   readonly id: string;
   readonly displayName: string;
   readonly username: string;

@@ -638,3 +638,26 @@ test("account settings saves KP2 key backups", async ({ page }) => {
   expect(savedBlob.startsWith("KP2.")).toBe(true);
   expect(calls.some((c) => c.path === "/api/e2ee/backup" && c.method === "PUT")).toBe(true);
 });
+
+for (const realm of ["kp", "vx"]) {
+  test(`own ${realm} origin artwork stays beside account and QR names`, async ({ page }) => {
+    const profile = {
+      ...baseProfile,
+      originRealm: realm,
+      qrCode: "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+      verified: true,
+      badge: "none",
+    };
+    await mockWorker(page, { "/api/me": () => jsonResponse({ user: profile }) });
+    await page.addInitScript(() => localStorage.setItem("kp.token", "origin-badge-fixture"));
+    await page.goto("/account");
+    const badge = page.locator(".account-hero__identity .realm-badge");
+    await expect(badge).toHaveAttribute("alt", `${realm.toUpperCase()} account origin`);
+    await page.getByRole("button", { name: "QR code", exact: true }).click();
+    await expect(page.locator(".profile-qr__name .realm-badge")).toHaveAttribute(
+      "alt",
+      `${realm.toUpperCase()} account origin`,
+    );
+    await expect(page.locator(".profile-qr__name .badge-seal")).toHaveCount(0);
+  });
+}
