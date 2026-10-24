@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { createMockWorker, signIn, PEER_NAME } from "./helpers";
 
 for (const realm of ["kp", "vx", "unknown"]) {
-  test(`original ${realm} origin artwork beside names, independent of verification choice`, async ({
+  test(`cross-only ${realm} origin artwork beside names, independent of verification choice`, async ({
     page,
   }) => {
     const worker = await createMockWorker({
@@ -16,7 +16,7 @@ for (const realm of ["kp", "vx", "unknown"]) {
     const row = page.getByRole("link", { name: new RegExp(PEER_NAME) }).first();
     await expect(row).toBeVisible();
     const badge = row.locator(".realm-badge");
-    if (realm === "unknown") {
+    if (realm !== "vx") {
       await expect(badge).toHaveCount(0);
     } else {
       await expect(badge).toHaveAttribute("alt", `${realm.toUpperCase()} account origin`);
@@ -34,6 +34,6 @@ for (const realm of ["kp", "vx", "unknown"]) {
     await row.click();
     const heading = page.locator("#conversation-heading");
     await expect(heading).toContainText(PEER_NAME);
-    await expect(heading.locator(".realm-badge")).toHaveCount(realm === "unknown" ? 0 : 1);
+    await expect(heading.locator(".realm-badge")).toHaveCount(realm === "vx" ? 1 : 0);
   });
 }

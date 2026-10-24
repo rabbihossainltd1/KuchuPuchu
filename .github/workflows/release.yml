@@ -59,7 +59,7 @@ jobs:
           ./gradlew :app:testDebugUnitTest :app:lintDebug --no-daemon --continue \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
 
-      - name: Build v303 APK with the v274-compatible debug keystore
+      - name: Build v304 APK with the v274-compatible debug keystore
         working-directory: native-android
         env:
           KP_KEYSTORE_B64: ""

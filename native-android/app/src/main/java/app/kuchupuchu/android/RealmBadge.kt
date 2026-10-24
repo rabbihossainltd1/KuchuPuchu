@@ -19,17 +19,16 @@ fun realmOf(value: JSONObject?): String? = originRealmOf(
     value?.optString("originRealm")?.ifBlank { value.optString("origin_realm") },
 )
 
+fun isCrossRealmBadge(realm: String?): Boolean = realm == "vx"
+
 /** Original owner-supplied artwork rasterized without changing its design. */
 @Composable
 fun RealmBadge(realm: String?, height: Dp = 16.dp) {
-    val resource = when (realm) {
-        "kp" -> R.drawable.realm_badge_kp
-        "vx" -> R.drawable.realm_badge_vx
-        else -> return
-    }
+    if (!isCrossRealmBadge(realm)) return
+    val resource = R.drawable.realm_badge_vx
     Image(
         painter = painterResource(resource),
-        contentDescription = "${realm.uppercase()} account origin",
+        contentDescription = "VX account origin",
         modifier = Modifier.size(height),
     )
 }

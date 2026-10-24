@@ -640,7 +640,7 @@ test("account settings saves KP2 key backups", async ({ page }) => {
 });
 
 for (const realm of ["kp", "vx"]) {
-  test(`own ${realm} origin artwork stays beside account and QR names`, async ({ page }) => {
+  test(`own ${realm} account and QR names use cross-only origin artwork`, async ({ page }) => {
     const profile = {
       ...baseProfile,
       originRealm: realm,
@@ -652,12 +652,12 @@ for (const realm of ["kp", "vx"]) {
     await page.addInitScript(() => localStorage.setItem("kp.token", "origin-badge-fixture"));
     await page.goto("/account");
     const badge = page.locator(".account-hero__identity .realm-badge");
-    await expect(badge).toHaveAttribute("alt", `${realm.toUpperCase()} account origin`);
+    if (realm === "vx") await expect(badge).toHaveAttribute("alt", "VX account origin");
+    else await expect(badge).toHaveCount(0);
     await page.getByRole("button", { name: "QR code", exact: true }).click();
-    await expect(page.locator(".profile-qr__name .realm-badge")).toHaveAttribute(
-      "alt",
-      `${realm.toUpperCase()} account origin`,
-    );
+    const qrBadge = page.locator(".profile-qr__name .realm-badge");
+    if (realm === "vx") await expect(qrBadge).toHaveAttribute("alt", "VX account origin");
+    else await expect(qrBadge).toHaveCount(0);
     await expect(page.locator(".profile-qr__name .badge-seal")).toHaveCount(0);
   });
 }

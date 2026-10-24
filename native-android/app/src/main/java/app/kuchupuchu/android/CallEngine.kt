@@ -304,6 +304,9 @@ class CallEngine(private val app: Application) {
     private var factory: PeerConnectionFactory? = null
     private var audioModule: JavaAudioDeviceModule? = null
     private var pc: PeerConnection? = null
+    // Initial addTrack/setDirection also fire negotiationneeded. They are part
+    // of the first offer/answer, NEVER a mid-call reoffer competing with it.
+    private var initialSdpReady = false
     private var audioSource: AudioSource? = null
     private var audioTrack: AudioTrack? = null
     private var videoSource: VideoSource? = null
@@ -806,7 +809,7 @@ class CallEngine(private val app: Application) {
         val data =
             withTimeoutOrNull(4_500) {
                 withContext(Dispatchers.IO) {
-                    runCatching { Api.get("/api/calls/active", true) }.getOrNull()
+                    runCatching { Api.get("/api/calls/active", true, allowCachedFallback = false) }.getOrNull()
                 }
             } ?: run {
                 netFailStreak += 1
@@ -1073,6 +1076,7 @@ class CallEngine(private val app: Application) {
             if (answer.isNotBlank() && pc?.remoteDescription == null && pc != null) {
                 runCatching {
                     pc?.setRemoteDescriptionAwait(SessionDescription(SessionDescription.Type.ANSWER, answer))
+                    initialSdpReady = pc?.remoteDescription != null
                 }
             }
         }
@@ -1606,10 +1610,8 @@ class CallEngine(private val app: Application) {
         if (rec.group) {
             scope.launch {
                 if (!ensureDedicatedTurn()) {
-                    withContext(Dispatchers.IO) { runCatching { Api.post("/api/calls/${rec.id}/decline") } }
                     notify("Calling is unavailable until the dedicated relay is configured.")
-                    answering.set(false)
-                    hangupLocal()
+                    abortCallSetup(rec.id)
                     return@launch
                 }
                 withContext(Dispatchers.IO) { runCatching { capture(rec.kind == "VIDEO") } }
@@ -1621,10 +1623,8 @@ class CallEngine(private val app: Application) {
         scope.launch {
             try {
                 if (!ensureDedicatedTurn()) {
-                    withContext(Dispatchers.IO) { runCatching { Api.post("/api/calls/${rec.id}/decline") } }
                     notify("Calling is unavailable until the dedicated relay is configured.")
-                    answering.set(false)
-                    hangupLocal()
+                    abortCallSetup(rec.id)
                     return@launch
                 }
                 // `repeat(24) { ... return@repeat }` here NEVER left the loop —
@@ -1644,7 +1644,7 @@ class CallEngine(private val app: Application) {
                     if (offer.isNotBlank() || left.get()) break
                     offer =
                         withContext(Dispatchers.IO) {
-                            Api.get("/api/calls/active", true).arr("items").objects()
+                            Api.get("/api/calls/active", true, allowCachedFallback = false).arr("items").objects()
                                 .find { it.optString("id") == rec.id }
                                 ?.optIso("offerSdp")
                                 .orEmpty()
@@ -1658,11 +1658,11 @@ class CallEngine(private val app: Application) {
                 }
                 if (offer.isBlank() || left.get()) {
                     capturing.await()
-                    answering.set(false)
-                    hangupLocal()
+                    abortCallSetup(rec.id)
                     return@launch
                 }
                 capturing.await()
+                if (active?.id != rec.id) { abortCallSetup(rec.id); return@launch }
                 iceCallId = rec.id
                 val peer = newPc(preaddVideo = false)
                 peer.setRemoteDescriptionAwait(SessionDescription(SessionDescription.Type.OFFER, offer))
@@ -1693,15 +1693,25 @@ class CallEngine(private val app: Application) {
                     }
                 pullIce(rec.id)
                 posting.await().getOrThrow()
+                if (active?.id == rec.id && pc === peer) initialSdpReady = true
             } catch (e: Exception) {
                 answering.set(false)
                 if (!hasValidatedInternet() || hasTransportFailure(e)) {
                     endCallForNetworkFailure()
                 } else {
                     notify(callFailureMessage(e))
-                    hangupLocal()
+                    abortCallSetup(rec.id)
                 }
             }
+        }
+    }
+
+    /** A failed Accept must terminate the server row, not re-adopt its ring. */
+    private fun abortCallSetup(callId: String) {
+        ignoredCalls.add(callId)
+        if (active?.id == callId) hangupLocal()
+        scope.launch(Dispatchers.IO) {
+            runCatching { Api.post("/api/calls/$callId/end", JSONObject().put("seconds", 0)) }
         }
     }
 
@@ -2134,6 +2144,7 @@ class CallEngine(private val app: Application) {
         remoteVideo = null
         localView = null
         remoteView = null
+        initialSdpReady = false
         pc?.close()
         pc = null
         // Owner round 32 (item 5b): every mesh leg goes with the call.
@@ -2623,6 +2634,7 @@ class CallEngine(private val app: Application) {
      */
     private suspend fun renegotiateNow(): Boolean {
         val peer = pc ?: return false
+        if (!canRenegotiateCall(initialSdpReady, peer.localDescription != null, peer.remoteDescription != null)) return false
         val id = active?.id
         if (id.isNullOrBlank() || id.startsWith("pending")) return false
         if (awaitingReanswer || peer.signalingState() != PeerConnection.SignalingState.STABLE) {
@@ -2646,6 +2658,7 @@ class CallEngine(private val app: Application) {
         }
 
     private fun newPc(preaddVideo: Boolean = true): PeerConnection {
+        initialSdpReady = false
         val rtc =
             PeerConnection.RTCConfiguration(iceServers()).apply {
                 sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
