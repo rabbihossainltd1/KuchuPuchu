@@ -1,3 +1,5 @@
+import { RealmBadge } from "./RealmBadge";
+import { originRealmOf } from "./realmBadge";
 /**
  * Open-chat pane: transcript, composer, message actions and the honest E2EE
  * state bar.
@@ -1004,6 +1006,7 @@ export function ChatPane({
                 {conversationTitle(conversation)}
                 {!conversation.isGroup && conversation.other ? (
                   <UserBadges
+                    user={conversation.other}
                     verified={conversation.other.verified}
                     moderator={conversation.other.moderator}
                     badge={conversation.other.badge}
@@ -1325,7 +1328,10 @@ export function ChatPane({
                       )}`}
                     >
                       {!own && conversation.isGroup && (
-                        <p className="bubble__sender">{senderLabel(message, conversation, meId)}</p>
+                        <p className="bubble__sender">
+                          {senderLabel(message, conversation, meId)}
+                          <RealmBadge realm={originRealmOf({ originRealm: message.senderRealm })} />
+                        </p>
                       )}
 
                       {/* A reply to a status quotes the status first, exactly
@@ -1923,7 +1929,10 @@ export function ChatPane({
                       }}
                     >
                       <strong>@{candidate.username}</strong>
-                      <span>{candidate.displayName}</span>
+                      <span>
+                        {candidate.displayName}
+                        <RealmBadge realm={originRealmOf(candidate)} />
+                      </span>
                     </button>
                   ))
                 ) : (

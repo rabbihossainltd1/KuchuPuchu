@@ -234,14 +234,18 @@ internal fun CallRow(call: JSONObject, onOpenChat: () -> Unit) {
         KpAvatar(name, avatar, 40.dp, ring = false, avatarRef = avatarRef) // Owner round 25: choto
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(
-                name,
-                fontSize = 15.5.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = if (missed) Red else Ink,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    name,
+                    modifier = Modifier.weight(1f, fill = false),
+                    fontSize = 15.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (missed) Red else Ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (!group) UserBadges(other)
+            }
             Spacer(Modifier.height(2.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(

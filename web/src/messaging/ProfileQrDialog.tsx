@@ -301,6 +301,7 @@ export function ProfileQrDialog({ api, user, self, onClose }: Props) {
         <p className="profile-qr__name">
           {title}
           <UserBadges
+            user={user}
             verified={user.verified ?? false}
             moderator={user.moderator ?? false}
             badge={user.badge ?? null}

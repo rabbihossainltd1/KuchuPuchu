@@ -1,3 +1,5 @@
+import { RealmBadge } from "../messaging/RealmBadge";
+import { originRealmOf } from "../messaging/realmBadge";
 import { useEffect } from "react";
 import { Icon } from "../icons";
 import { STATUS_COPY, listStamp } from "./statusModel";
@@ -87,7 +89,10 @@ export function ViewersSheet({
                     )}
                   </span>
                   <span className="status-sheet__who">
-                    <strong>{row.author.displayName || row.author.username || "Somebody"}</strong>
+                    <strong>
+                      {row.author.displayName || row.author.username || "Somebody"}
+                      <RealmBadge realm={originRealmOf(row.author)} />
+                    </strong>
                     <span>{listStamp(row.viewedAt)}</span>
                   </span>
                   {row.reaction ? (

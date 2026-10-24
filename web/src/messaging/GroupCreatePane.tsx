@@ -1,3 +1,5 @@
+import { RealmBadge } from "./RealmBadge";
+import { originRealmOf } from "./realmBadge";
 /**
  * Group creation — the phone's CreateGroupScreen as a sheet over the chat
  * list: a "Group name" field, picked-member chips, the known 1:1 peers up
@@ -50,7 +52,10 @@ function MemberRow({
           )}
         </span>
         <span className="conversation-row__body">
-          <span className="conversation-row__name">{peer.displayName}</span>
+          <span className="conversation-row__name">
+            {peer.displayName}
+            <RealmBadge realm={originRealmOf(peer)} />
+          </span>
           {peer.username ? (
             <span className="conversation-row__preview">@{peer.username}</span>
           ) : null}
@@ -220,6 +225,7 @@ export function GroupCreatePane({
           {picked.map((peer) => (
             <span key={peer.id} className="group-create__chip">
               {peer.displayName}
+              <RealmBadge realm={originRealmOf(peer)} />
               <button
                 type="button"
                 className="group-create__chip-x"

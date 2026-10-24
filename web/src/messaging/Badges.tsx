@@ -1,3 +1,6 @@
+import { RealmBadge } from "./RealmBadge";
+import { originRealmOf } from "./realmBadge";
+
 /**
  * Account badges, phone parity (`Ui.kt` UserBadges): the blue verified seal
  * (12-scallop starburst + white check, drawn from the same polar geometry as
@@ -88,18 +91,22 @@ export function UserBadges({
   moderator,
   badge,
   size = 15,
+  user,
 }: {
   verified: boolean;
   moderator?: boolean;
   badge?: string | null;
   size?: number;
+  user?: unknown;
 }) {
-  if (badge === "none") return null;
-  const showVerified = verified && (badge == null || badge === "verified");
-  const showModerator = Boolean(moderator) && (badge == null || badge === "moderator");
-  if (!showVerified && !showModerator) return null;
+  const realm = originRealmOf(user);
+  const showVerified = badge !== "none" && verified && (badge == null || badge === "verified");
+  const showModerator =
+    badge !== "none" && Boolean(moderator) && (badge == null || badge === "moderator");
+  if (!realm && !showVerified && !showModerator) return null;
   return (
     <span className="user-badges">
+      <RealmBadge realm={realm} />
       {showVerified ? <VerifiedSeal size={size} /> : null}
       {showModerator ? <ModeratorBadge size={size} /> : null}
     </span>

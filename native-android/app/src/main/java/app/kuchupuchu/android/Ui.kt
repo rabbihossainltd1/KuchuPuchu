@@ -1597,6 +1597,10 @@ fun ModeratorBadge(size: Dp = 16.dp) {
 @Composable
 fun UserBadges(user: JSONObject?, size: Dp = 16.dp, gap: Dp = 5.dp) {
     if (user == null) return
+    realmOf(user)?.let { realm ->
+        Spacer(Modifier.width(gap))
+        RealmBadge(realm, size)
+    }
     val choice = user.optIso("badge")
     if (choice == "none") return
     val verified = user.optBoolean("verified") && (choice == null || choice == "verified")

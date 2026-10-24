@@ -320,6 +320,7 @@ const MINIMAL_PDF = [
 ].join("\n");
 
 export type MockWorkerOptions = {
+  peerRealm?: string;
   /** Add a FILE row to the direct chat, so received media can be asserted. */
   withAttachment?: boolean;
   /** Add view-once rows (photo, clip, text) and a two-photo album. */
@@ -403,6 +404,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
       },
       other: {
         id: PEER_ID,
+        originRealm: options.peerRealm,
         displayName: PEER_NAME,
         username: "rahi",
         nickname: "",

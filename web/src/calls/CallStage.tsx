@@ -1,3 +1,4 @@
+import { RealmBadge } from "../messaging/RealmBadge";
 /**
  * The call surface: the ring, the outgoing wait, the in-call screens and the
  * E2EE verify sheet — one overlay, the way the phone stacks call screens over
@@ -169,7 +170,10 @@ export function CallStage({ engine, state }: Props) {
               state.peer.name.trim().charAt(0).toUpperCase() || "?"
             )}
           </span>
-          <h2>{state.peer.name}</h2>
+          <h2>
+            {state.peer.name}
+            <RealmBadge realm={state.peer.realm} />
+          </h2>
           <p className="call-stage__status" role="status" aria-live="polite">
             {ringing ? incomingCallLine(state.kind) : statusLine(state)}
           </p>

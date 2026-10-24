@@ -496,6 +496,7 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
                             {conversationTitle(row)}
                             {!row.isGroup && row.other ? (
                               <UserBadges
+                                user={row.other}
                                 verified={row.other.verified}
                                 moderator={row.other.moderator}
                                 badge={row.other.badge}
@@ -550,6 +551,7 @@ export function ConversationList({ controller, selectedId, navigate, isOnline, a
                           {conversationTitle(row)}
                           {!row.isGroup && row.other ? (
                             <UserBadges
+                              user={row.other}
                               verified={row.other.verified}
                               moderator={row.other.moderator}
                               badge={row.other.badge}

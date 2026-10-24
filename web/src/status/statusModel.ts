@@ -1,3 +1,4 @@
+import { originRealmOf } from "../messaging/realmBadge";
 /**
  * Status (24 h stories) — the model, DOM-free.
  *
@@ -120,6 +121,7 @@ const ID_MAX = 64;
 /* ------------------------------------------------------------- the shapes */
 
 export type StatusAuthor = {
+  readonly originRealm?: string;
   readonly id: string;
   readonly displayName: string;
   readonly username: string;
@@ -194,6 +196,7 @@ export function parseStatusAuthor(value: unknown): StatusAuthor | null {
   const avatar = text(value.avatarUrl, 2_000_000);
   return {
     id,
+    originRealm: originRealmOf(value) ?? undefined,
     displayName: text(value.displayName, 120),
     username: text(value.username, 64),
     avatarUrl: SAFE_AVATAR.test(avatar) ? avatar : "",

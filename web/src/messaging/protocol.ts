@@ -169,6 +169,7 @@ export type ConversationRow = {
 };
 
 export type MessageRow = {
+  readonly senderRealm?: string;
   readonly id: string;
   readonly clientId: string;
   readonly senderId: string;
@@ -313,6 +314,7 @@ export function parseMessageRow(value: unknown): MessageRow | null {
     clientId: text(value.clientId, 64),
     senderId: text(value.senderId, 64),
     senderName: text(value.senderName, 120),
+    senderRealm: text(value.senderRealm, 8),
     kind,
     // A DELETED tombstone arrives with a null body; never coerce it to text.
     body: kind === "DELETED" ? "" : text(value.body, 8000),

@@ -9143,7 +9143,13 @@ private fun MessageRow(
                         }
                     }
                     if (!mine && isGroup && senderName.isNotBlank()) {
-                        Text(senderName, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = GoldDeep)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(senderName, modifier = Modifier.weight(1f, fill = false), fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = GoldDeep)
+                            originRealmOf(m.optIso("senderRealm"))?.let { realm ->
+                                Spacer(Modifier.width(4.dp))
+                                RealmBadge(realm, 14.dp)
+                            }
+                        }
                     }
                     // Owner round 34 (item 19): long bodies collapse to ten
                     // lines with a See more / See less toggle under the bubble.

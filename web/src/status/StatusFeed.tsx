@@ -1,3 +1,5 @@
+import { RealmBadge } from "../messaging/RealmBadge";
+import { originRealmOf } from "../messaging/realmBadge";
 import { useCallback } from "react";
 import { Icon } from "../icons";
 import { StatusRing } from "./StatusRing";
@@ -110,6 +112,7 @@ export function StatusFeed({
                       <span className="status-row__copy">
                         <span className="status-row__name">
                           {group.author.displayName || group.author.username || "Status"}
+                          <RealmBadge realm={originRealmOf(group.author)} />
                           {group.author.verified ? (
                             <em className="status-row__badge" title="Verified account">
                               ✓

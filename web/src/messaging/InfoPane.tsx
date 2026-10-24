@@ -61,6 +61,12 @@ function MemberRow({
       <span className="conversation-row__body">
         <span className="conversation-row__name">
           {member.user.nickname || member.user.displayName}
+          <UserBadges
+            user={member.user}
+            verified={member.user.verified}
+            moderator={member.user.moderator}
+            badge={member.user.badge}
+          />
           {self ? " (you)" : ""}
         </span>
         <span className="conversation-row__preview">
@@ -324,6 +330,7 @@ export function InfoPane({
               {title}
               {!group && person ? (
                 <UserBadges
+                  user={person}
                   verified={person.verified}
                   moderator={person.moderator}
                   badge={person.badge}
@@ -445,7 +452,15 @@ export function InfoPane({
                     {addResults.map((user) => (
                       <li key={user.id} className="info-pane__member">
                         <span className="conversation-row__body">
-                          <span className="conversation-row__name">{user.displayName}</span>
+                          <span className="conversation-row__name">
+                            {user.displayName}
+                            <UserBadges
+                              user={user}
+                              verified={user.verified}
+                              moderator={user.moderator}
+                              badge={user.badge}
+                            />
+                          </span>
                           <span className="conversation-row__preview">@{user.username}</span>
                         </span>
                         <button

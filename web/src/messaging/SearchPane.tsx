@@ -104,7 +104,12 @@ function PersonRow({
         <span className="conversation-row__body">
           <span className="conversation-row__name">
             {peer.displayName}
-            <UserBadges verified={peer.verified} moderator={peer.moderator} badge={peer.badge} />
+            <UserBadges
+              user={peer}
+              verified={peer.verified}
+              moderator={peer.moderator}
+              badge={peer.badge}
+            />
           </span>
           <span className="conversation-row__preview">@{peer.username}</span>
         </span>

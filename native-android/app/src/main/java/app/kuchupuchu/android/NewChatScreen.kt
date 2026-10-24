@@ -174,13 +174,17 @@ private fun UserRow(user: JSONObject, onClick: () -> Unit) {
     ) {
         KpAvatar(user.optText("displayName"), user.optIso("avatarUrl"), 46.dp, avatarRef = user.optIso("avatarRef"))
         Spacer(Modifier.width(12.dp))
-        Column {
-            Text(
-                user.optText("displayName"),
-                fontSize = 15.5.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Ink,
-            )
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    user.optText("displayName"),
+                    modifier = Modifier.weight(1f, fill = false),
+                    fontSize = 15.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Ink,
+                )
+                UserBadges(user)
+            }
             val uname = user.optString("username")
             Text(
                 if (uname.isNotBlank()) "@$uname" else "Tap to chat",

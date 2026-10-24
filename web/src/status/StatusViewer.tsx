@@ -1,3 +1,5 @@
+import { RealmBadge } from "../messaging/RealmBadge";
+import { originRealmOf } from "../messaging/realmBadge";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../icons";
 import type { ApiClient } from "../auth/authApi";
@@ -460,7 +462,10 @@ export function StatusViewer({
             )}
           </span>
           <span className="status-viewer__who">
-            <strong>{viewerAuthorName(group, myName)}</strong>
+            <strong>
+              {viewerAuthorName(group, myName)}
+              <RealmBadge realm={originRealmOf(group.author)} />
+            </strong>
             <span>{statusStamp(current.createdAt)}</span>
           </span>
           <button

@@ -260,6 +260,7 @@ fun AllContactsScreen(nav: NavController) {
                     val u = e.user!!
                     ContactRow(
                         name = e.name,
+                        user = u,
                         sub = u.optString("username").takeIf { it.isNotBlank() }?.let { "@$it" } ?: e.phone,
                         avatarUrl = u.optIso("avatarUrl"),
                         avatarRef = u.optIso("avatarRef"),
@@ -417,6 +418,7 @@ fun NewContactScreen(nav: NavController, initialName: String = "", initialPhone:
                 if (m != null) {
                     ContactRow(
                         name = m.optText("displayName").ifBlank { name.ifBlank { checkedPhone } },
+                        user = m,
                         sub = m.optString("username").takeIf { it.isNotBlank() }?.let { "@$it · on KuchuPuchu" } ?: "on KuchuPuchu",
                         avatarUrl = m.optIso("avatarUrl"),
                         avatarRef = m.optIso("avatarRef"),
@@ -449,6 +451,7 @@ private fun ContactsSection(label: String) {
 private fun ContactRow(
     name: String,
     sub: String,
+    user: JSONObject? = null,
     avatarUrl: String?,
     avatarRef: String?,
     onOpen: (() -> Unit)?,
@@ -466,7 +469,10 @@ private fun ContactRow(
         KpAvatar(name, avatarUrl, 44.dp, ring = false, avatarRef = avatarRef)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(name, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(name, modifier = Modifier.weight(1f, fill = false), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                UserBadges(user)
+            }
             Text(sub, fontSize = 12.5.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.width(8.dp))
