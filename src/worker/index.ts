@@ -82,6 +82,8 @@ export type Env = {
    * message history. Unset on the authoritative core and during rehearsal.
    */
   FEDERATED_CORE_ORIGIN?: string;
+  /** Opt-in shared call authority; leaves KP relay and other routing unchanged. */
+  FEDERATED_CALLS?: string;
   /**
    * Final-cutover write fence. Set only for the short snapshot/import window;
    * reads remain available while every mutating HTTP request and cron write is
@@ -7492,7 +7494,9 @@ export default {
     //     end), so while the core cannot open one the edge keeps the whole
     //     call protocol here, in the edge's own database. Dropping the
     //     /api/calls clause from this list hands the call protocol back to
-    //     the core.
+    //     the core. FEDERATED_CALLS=1 now opts the KP edge into that shared
+    //     authority, once the core has its own relay; no user/DB copies are
+    //     made and the edge's existing relay stays local.
     //  4. /api/users/card/<handle> - the PUBLIC share-card identity behind
     //     https://kuchupuchu.web.app/@handle (owner 2026-10-21). The core
     //     only answers for sessions, and a share link lands with strangers
@@ -7501,7 +7505,7 @@ export default {
     //     core's 401 wall and the landing could never show the photo/name.
     const edgeRelayRoute = edgePath === "/api/config/ice";
     const edgeOwnsApk = edgePath === "/download/apk";
-    const edgeOwnsCalls = edgePath.startsWith("/api/calls");
+    const edgeOwnsCalls = edgePath.startsWith("/api/calls") && env.FEDERATED_CALLS !== "1";
     const edgeOwnsShareCard = /^\/api\/users\/card\/[a-z0-9_]{3,30}$/.test(edgePath);
     const federated =
       edgeRelayRoute || edgeOwnsApk || edgeOwnsCalls || edgeOwnsShareCard
@@ -14667,6 +14671,23 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         })),
       });
     }
+  }
+
+  // Only a live, authenticated CALLEE signal socket confirms receipt. A
+  // caller's own socket, online presence or push acceptance does not count.
+  const reachedMatch = path.match(/^\/api\/calls\/([^/]+)\/reachability$/);
+  if (reachedMatch && method === "GET") {
+    const row = await one<CallRow>(db, "SELECT * FROM calls WHERE id = ?", reachedMatch[1]!);
+    if (!row) fail(404, "Call not found.");
+    if (!(await callParticipant(db, row, uid))) fail(403, "Not your call.", "FORBIDDEN");
+    if (!env.CALL_SIGNAL || !row.callee_id || row.status !== "RINGING")
+      return json({ received: false });
+    const stub = env.CALL_SIGNAL.get(env.CALL_SIGNAL.idFromName(row.id));
+    const live = await stub.fetch(
+      new Request(`https://call-signal/live?user=${encodeURIComponent(row.callee_id)}`),
+    );
+    const presence = (await live.json()) as { live?: number };
+    return json({ received: Number(presence.live || 0) > 0 });
   }
 
   if (path === "/api/calls/active" && method === "GET") {

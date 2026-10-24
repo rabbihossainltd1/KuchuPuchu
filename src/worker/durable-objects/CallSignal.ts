@@ -69,7 +69,9 @@ export class CallSignal {
     if (url.pathname === "/live") {
       const now = Date.now();
       let live = 0;
-      for (const ws of this.ctx.getWebSockets()) {
+      const user = url.searchParams.get("user");
+      const sockets = user ? this.ctx.getWebSockets(`user:${user}`) : this.ctx.getWebSockets();
+      for (const ws of sockets) {
         if (isLive(ws, now)) live++;
       }
       return Response.json({ live });
