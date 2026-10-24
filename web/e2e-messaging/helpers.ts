@@ -1199,7 +1199,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
         if (row?.isGroup) {
           const member = row.members?.find((item) => item.user.id === userId);
           if (member) member.user.nickname = nickname;
-        } else if (row?.other?.id === userId) {
+        } else if (row?.other?.id === userId && "nickname" in row.other) {
           row.other.nickname = nickname;
         }
         worker.nicknames.push({ conversationId, userId, nickname });
