@@ -404,7 +404,7 @@ export async function createMockWorker(options: MockWorkerOptions = {}): Promise
       },
       other: {
         id: PEER_ID,
-        originRealm: options.peerRealm,
+        ...(options.peerRealm ? { originRealm: options.peerRealm } : {}),
         displayName: PEER_NAME,
         username: "rahi",
         nickname: "",
