@@ -3494,6 +3494,7 @@ type BridgeClaims = {
   sub?: string;
   handle?: string;
   displayName?: string;
+  avatarUrl?: string | null;
   aud?: string;
   exp?: number;
   iat?: number;
@@ -3538,6 +3539,14 @@ async function verifyBridgeAssertion(
   // §13.14: the optional identity claims are shape-checked here; whether they
   // MATCH an account is decided where the account is known (the exchange).
   if (claims.originRealm !== undefined && !isRealm(claims.originRealm)) return null;
+  if (
+    claims.avatarUrl !== undefined &&
+    claims.avatarUrl !== null &&
+    (typeof claims.avatarUrl !== "string" ||
+      claims.avatarUrl.length > 80_000 ||
+      !isSafeDataUrl(claims.avatarUrl))
+  )
+    return null;
   if (claims.communicationId !== undefined && typeof claims.communicationId !== "string")
     return null;
   return claims as Required<Pick<BridgeClaims, "sub">> & BridgeClaims;
@@ -5973,10 +5982,22 @@ async function relayPushToKpEdge(
       parsed.pathname !== "/"
     )
       return null;
+    // Registrations are owned by THIS authority after cutover, not the frozen edge DB.
+    const devices = await all<{ token: string }>(
+      env.DB,
+      "SELECT token FROM devices WHERE user_id = ?",
+      userId,
+    );
+    if (!devices.length) return false;
     const response = await fetch(`${origin}/api/internal/federation/push`, {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-      body: JSON.stringify({ userId, data, note: note ?? null }),
+      body: JSON.stringify({
+        userId,
+        data,
+        note: note ?? null,
+        deviceTokens: devices.map((device) => device.token),
+      }),
       signal: AbortSignal.timeout(8_000),
     });
     if (!response.ok) return false;
@@ -5993,6 +6014,7 @@ async function pushToUser(
   userId: string,
   data: Record<string, string>,
   note?: { title: string; body: string; channel: string; tag?: string },
+  deviceTokens?: string[],
 ): Promise<boolean> {
   try {
     const auth = await fcmAccessToken(env);
@@ -6008,11 +6030,10 @@ async function pushToUser(
       );
       return false;
     }
-    const rows = await all<{ token: string }>(
-      db,
-      "SELECT token FROM devices WHERE user_id = ?",
-      userId,
-    );
+    const rows =
+      deviceTokens === undefined
+        ? await all<{ token: string }>(db, "SELECT token FROM devices WHERE user_id = ?", userId)
+        : deviceTokens.map((token) => ({ token }));
     const badgeCount = Number(data.unreadTotal ?? 0);
     const notificationCount =
       Number.isSafeInteger(badgeCount) && badgeCount > 0 ? badgeCount : null;
@@ -7416,6 +7437,7 @@ export default {
         userId?: unknown;
         data?: unknown;
         note?: unknown;
+        deviceTokens?: unknown;
       } | null;
       const userId = typeof payload?.userId === "string" ? payload.userId : "";
       if (
@@ -7457,7 +7479,28 @@ export default {
           ...(typeof candidate.tag === "string" ? { tag: candidate.tag } : {}),
         };
       }
-      const accepted = await pushToUser(env, env.DB, userId, data, note);
+      // Only this server-authenticated route can supply device tokens. Empty means
+      // no authority devices: NEVER fall back to stale edge-owned registrations.
+      let deviceTokens: string[] | undefined;
+      if (payload.deviceTokens !== undefined) {
+        if (
+          !Array.isArray(payload.deviceTokens) ||
+          payload.deviceTokens.length > 100 ||
+          payload.deviceTokens.some(
+            (token) =>
+              typeof token !== "string" ||
+              token.length < 10 ||
+              token.length > 4096 ||
+              /\s/.test(token),
+          )
+        )
+          return json(
+            { error: { code: "BAD_PUSH_RELAY", message: "Invalid relay payload." } },
+            400,
+          );
+        deviceTokens = [...new Set(payload.deviceTokens as string[])];
+      }
+      const accepted = await pushToUser(env, env.DB, userId, data, note, deviceTokens);
       return json({ accepted });
     }
     const migrationReadOnly = String(env.MIGRATION_READ_ONLY ?? "").trim() === "1";
@@ -8016,6 +8059,17 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       }
     }
     if (!row) fail(500, "The website account could not be provisioned.", "BRIDGE_FAILED");
+    // The authenticated website remains the photo source for its own VX account.
+    // Optional keeps older bridge clients compatible; absent never erases a photo.
+    if (claims.avatarUrl !== undefined && (row!.avatar_url || null) !== claims.avatarUrl) {
+      await run(
+        db,
+        "UPDATE users SET avatar_url = ?, avatar_version = avatar_version + 1 WHERE id = ?",
+        claims.avatarUrl,
+        row!.id,
+      );
+      row = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row!.id);
+    }
     const deviceId =
       String(body.deviceId ?? "")
         .slice(0, 64)
