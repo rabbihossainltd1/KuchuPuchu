@@ -20,6 +20,14 @@ assert(publicCache.includes('put("applicationId"') && publicCache.includes('put(
 assert(!publicCache.includes('put("token"') && !publicCache.includes("private_key"));
 assert(push.includes("if (enabled || restoreFirebase(ctx)) return true"));
 assert(push.includes("wakeLock.acquire(10_000L)") && push.includes("Api.loadToken(this)"));
+const settings = read("java/app/kuchupuchu/android/SettingsScreen.kt");
+const permissions = settings.slice(
+  settings.indexOf("fun PermissionsSettingsScreen"),
+  settings.indexOf("fun AppSettingsScreen"),
+);
+assert(permissions.includes("var showBackgroundDelivery by remember"));
+assert(permissions.includes("BackgroundDeliveryDialog { showBackgroundDelivery = false }"));
+assert(permissions.includes('"Background delivery", "Permissions & battery"'));
 console.log(
   "OK cold FCM bootstrap: manifest Application, offline public-options restore, channels, no cached secrets, existing bounded handler intact",
 );
