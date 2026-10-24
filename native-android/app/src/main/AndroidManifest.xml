@@ -69,6 +69,7 @@
     </queries>
 
     <application
+        android:name=".KpApplication"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="KuchuPuchu"

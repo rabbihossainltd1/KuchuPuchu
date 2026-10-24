@@ -220,6 +220,8 @@ private fun privacyLabel(level: String): String = PRIVACY_LEVELS.firstOrNull { i
  */
 @Composable
 fun SettingsScreen(nav: NavController) {
+    var showBackgroundDelivery by remember { mutableStateOf(false) }
+    if (showBackgroundDelivery) BackgroundDeliveryDialog { showBackgroundDelivery = false }
     val haptics = rememberHaptics()
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -970,6 +972,7 @@ fun AppearanceSettingsScreen(nav: NavController) {
             // Owner round 25: just the section name — the tone names were
             // stacking into a wall of text on the row.
             SettingRow(Icons.Filled.NotificationsActive, "Sounds", "Calls & Notification") { showSoundType = true }
+            SettingRow(Icons.Filled.NotificationsActive, "Background delivery", "Permissions & battery") { showBackgroundDelivery = true }
             // Owner round 16: the theme has its own FULLSCREEN picker now
             // (same pattern as the ringtone picker) — this row opens it.
             SettingRow(Icons.Filled.Palette, "Themes", if (KpThemeMode.darkBlue) "Dark Blue" else "Light Cream") {

@@ -24,42 +24,58 @@ object KpPush {
     @Volatile
     var enabled: Boolean = false
 
-    /** Fetches the public Firebase config from the worker and inits Firebase. */
-    fun tryInit(ctx: Context): Boolean {
-        if (enabled) return true
-        val cfg =
-            runCatching { Api.get("/api/config/firebase", force = true).optJSONObject("firebase") }.getOrNull()
-        if (cfg == null || cfg.optString("applicationId").isBlank()) {
+    private const val CONFIG_KEY = "firebase_public_config_v1"
 
-            // Do NOT latch `enabled = false` any more. This route is public, so
-            // the only ways it fails are transient (offline cold start, DNS/TLS
-            // hiccup, worker 5xx) — and the build ships NO google-services.json
-            // (build.gradle: "config comes from the worker"), which means
-            // "tryInit never succeeded" == FirebaseApp is never created == no FCM
-            // token == ZERO message notifications for the whole app run. The old
-            // one-shot latch turned one bad fetch at startup into "notifications
-            // are broken" until the user force-restarted the app, and neither
-            // side logged anything. Callers now retry (see boot()).
-            return false
+    /** Restore the default Firebase app before a cold-start FCM service runs. */
+    fun restoreFirebase(ctx: Context): Boolean {
+        if (enabled) return true
+        val stored = ctx.applicationContext.getSharedPreferences("kp_push", Context.MODE_PRIVATE)
+            .getString(CONFIG_KEY, null) ?: return false
+        return runCatching { initializeFirebase(ctx, org.json.JSONObject(stored)) }.getOrDefault(false)
+    }
+
+    fun hasCachedConfig(ctx: Context): Boolean =
+        ctx.applicationContext.getSharedPreferences("kp_push", Context.MODE_PRIVATE).contains(CONFIG_KEY)
+
+    private fun initializeFirebase(ctx: Context, cfg: org.json.JSONObject): Boolean {
+        val config = FirebaseBootstrapConfig(
+            cfg.optString("applicationId"), cfg.optString("apiKey"),
+            cfg.optString("projectId"), cfg.optString("senderId"),
+        )
+        if (!config.isComplete()) return false
+        val ok = runCatching {
+            if (FirebaseApp.getApps(ctx).isEmpty()) {
+                FirebaseApp.initializeApp(
+                    ctx.applicationContext,
+                    FirebaseOptions.Builder()
+                        .setApplicationId(config.applicationId)
+                        .setApiKey(config.apiKey)
+                        .setProjectId(config.projectId)
+                        .setGcmSenderId(config.senderId)
+                        .build(),
+                )
+            }
+            true
+        }.getOrDefault(false)
+        if (ok) {
+            val publicOnly = org.json.JSONObject()
+                .put("applicationId", config.applicationId).put("apiKey", config.apiKey)
+                .put("projectId", config.projectId).put("senderId", config.senderId)
+            ctx.applicationContext.getSharedPreferences("kp_push", Context.MODE_PRIVATE)
+                .edit().putString(CONFIG_KEY, publicOnly.toString()).apply()
         }
-        val ok =
-            runCatching {
-                if (FirebaseApp.getApps(ctx).isEmpty()) {
-                    FirebaseApp.initializeApp(
-                        ctx,
-                        FirebaseOptions.Builder()
-                            .setApplicationId(cfg.optString("applicationId"))
-                            .setApiKey(cfg.optString("apiKey"))
-                            .setProjectId(cfg.optString("projectId"))
-                            .setGcmSenderId(cfg.optString("senderId"))
-                            .build(),
-                    )
-                }
-                true
-            }.getOrDefault(false)
         enabled = ok
         decided = true
         return ok
+    }
+
+    /** Network is only a foreground/registration fallback, never Application startup. */
+    fun tryInit(ctx: Context): Boolean {
+        if (enabled || restoreFirebase(ctx)) return true
+        val cfg = runCatching {
+            Api.get("/api/config/firebase", force = true).optJSONObject("firebase")
+        }.getOrNull() ?: return false
+        return initializeFirebase(ctx, cfg)
     }
 
     @Volatile
