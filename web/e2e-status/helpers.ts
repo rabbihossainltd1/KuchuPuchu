@@ -71,6 +71,8 @@ export type MockStatusWorker = {
 };
 
 export type MockStatusOptions = {
+  /** Optional fixed fixture instant for date-sensitive stamp assertions. */
+  now?: number;
   /** Drop the "already viewed" contact, to test a feed without a gray ring. */
   withoutSeen?: boolean;
   /** Drop my own statuses, to test the empty-feed invitation. */
@@ -89,7 +91,7 @@ export async function createMockStatusWorker(
   const seen = await generateTestIdentity();
   const hidden = await generateTestIdentity();
 
-  const now = Date.now();
+  const now = options.now ?? Date.now();
   const iso = (agoMs: number) => new Date(now - agoMs).toISOString();
   const expires = (agoMs: number) => new Date(now - agoMs + 86_400_000).toISOString();
 

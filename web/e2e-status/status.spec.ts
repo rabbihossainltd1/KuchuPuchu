@@ -132,6 +132,13 @@ test.describe("Web statuses", () => {
   test("opening a viewer paints the card, the stamp and one segment per status", async ({
     page,
   }) => {
+    // A recent status may be yesterday during the first nine minutes after
+    // midnight. Anchor both fixture timestamps and the browser's Date clock,
+    // keeping the exact Today assertion rather than accepting a wrong label.
+    const now = new Date("2026-01-15T12:00:00Z");
+    await page.clock.setFixedTime(now);
+    worker = await createMockStatusWorker({ now: now.getTime() });
+    await worker.install(page);
     await openFeed(page);
     await openPaused(page, new RegExp(PEER_NAME));
 
