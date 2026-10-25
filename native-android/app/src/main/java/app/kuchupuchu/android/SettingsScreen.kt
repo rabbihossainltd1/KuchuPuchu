@@ -20,7 +20,6 @@ import androidx.compose.material.icons.filled.PermMedia
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.School
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VisibilityOff
