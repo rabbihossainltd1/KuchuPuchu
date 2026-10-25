@@ -40,7 +40,7 @@ assert(screen.includes("if (effSwap) engine.sharing else engine.peerScreen"));
 assert(screen.includes("SCREEN_ORIENTATION_SENSOR_LANDSCAPE"));
 assert(screen.includes("SCREEN_ORIENTATION_PORTRAIT"));
 assert(screen.includes("ShareChip("));
-assert(screen.includes('var sideways by remember { mutableStateOf(true) }'));
+assert(screen.includes("var sideways by remember { mutableStateOf(true) }"));
 const web = read("web/src/calls/CallStage.tsx");
 assert(web.includes("element.videoWidth / element.videoHeight"));
 assert(web.includes("onResize={syncSourceAspect}"));
