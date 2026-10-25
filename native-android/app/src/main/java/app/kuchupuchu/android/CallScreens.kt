@@ -686,10 +686,8 @@ private fun ShareFullscreen(call: CallUi) {
         }
     }
     var cropped by remember { mutableStateOf(false) }
-    BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
-        Box(Modifier.fillMaxSize()) {
-            VideoRenderer(engine, remote = true, fit = !cropped)
-        }
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        VideoRenderer(engine, remote = true, fit = !cropped)
         Row(
             Modifier
                 .align(Alignment.TopCenter)
