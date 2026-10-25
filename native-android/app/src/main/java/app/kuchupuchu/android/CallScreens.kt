@@ -60,6 +60,7 @@ import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -660,8 +661,35 @@ private fun ShareFullscreen(call: CallUi) {
     val engine = CallEngine.instance ?: return
     val secs = rememberTick(call.id, call.startedAt, call.connecting || call.reconnecting || engine.onHold)
     androidx.activity.compose.BackHandler { engine.exitShareFullscreen() }
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
-        VideoRenderer(engine, remote = true, fit = true)
+    // Owner 2026-10-25 (item 4): a desktop is landscape and this app is locked
+    // to portrait, so a fitted 16:9 share was a postage stamp in a black field.
+    // Watching a shared screen now turns the WHOLE screen sideways for as long
+    // as this view is open — the shared desktop then fills the display the way
+    // it does on a monitor — and the chip still lets him switch to Fill (crop)
+    // or keep it upright.
+    val ctx = LocalContext.current
+    val activity = remember(ctx) {
+        var c: android.content.Context? = ctx
+        while (c is android.content.ContextWrapper && c !is android.app.Activity) c = c.baseContext
+        c as? android.app.Activity
+    }
+    var sideways by remember { mutableStateOf(true) }
+    DisposableEffect(activity, sideways) {
+        val previous = activity?.requestedOrientation
+        runCatching {
+            activity?.requestedOrientation =
+                if (sideways) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+        onDispose {
+            runCatching { activity?.requestedOrientation = previous ?: android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
+        }
+    }
+    var cropped by remember { mutableStateOf(false) }
+    BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
+        Box(Modifier.fillMaxSize()) {
+            VideoRenderer(engine, remote = true, fit = !cropped)
+        }
         Row(
             Modifier
                 .align(Alignment.TopCenter)
@@ -693,6 +721,34 @@ private fun ShareFullscreen(call: CallUi) {
         ) {
             Icon(Icons.Filled.FullscreenExit, "Exit fullscreen", tint = Color.White, modifier = Modifier.size(24.dp))
         }
+        // Two chips, bottom-centre: how the shared screen is fitted, and which
+        // way up it is. Nothing else in the call UI moves.
+        Row(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            ShareChip(if (cropped) "Fit" else "Fill", active = cropped) { cropped = !cropped }
+            ShareChip(if (sideways) "Upright" else "Sideways", active = sideways) { sideways = !sideways }
+        }
+    }
+}
+
+/** A small glass chip for the two share-view toggles. */
+@Composable
+private fun ShareChip(label: String, active: Boolean, onClick: () -> Unit) {
+    val haptics = rememberHaptics()
+    Box(
+        Modifier
+            .clip(CircleShape)
+            .background(if (active) Color(0xF21C9A78) else Color(0x66000000))
+            .border(1.dp, Color(0x33FFFFFF), CircleShape)
+            .clickable { haptics.tap(); onClick() }
+            .padding(horizontal = 16.dp, vertical = 9.dp),
+    ) {
+        Text(label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
