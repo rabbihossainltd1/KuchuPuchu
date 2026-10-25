@@ -2410,7 +2410,7 @@ check(
   webLayer.includes("<audio") &&
     webLayer.includes('className="call-remote-audio"') &&
     (webStage.match(/<video/g) || []).length >= 1 &&
-    webStage.includes("autoPlay playsInline muted"),
+    /<video\b[^>]*\bautoPlay\s+playsInline\s+muted\b/.test(webStage),
 );
 check(
   "a paused autoplay is disclosed rather than left silent",

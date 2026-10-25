@@ -7,6 +7,9 @@ import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
+import android.os.Build
+import android.view.WindowManager
+import android.util.DisplayMetrics
 import android.os.Handler
 import android.os.Looper
 import android.view.Surface
@@ -28,8 +31,45 @@ class KpScreenCapturer(
     private var width = 720
     private var height = 1280
     private val main = Handler(Looper.getMainLooper())
+    private val displayManager = app.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(id: Int) {}
+        override fun onDisplayRemoved(id: Int) {}
+        override fun onDisplayChanged(id: Int) {
+            if (Build.VERSION.SDK_INT < 34 && projection != null) {
+                val size = screenSize()
+                resizeTo(size.first, size.second)
+            }
+        }
+    }
+    private fun screenSize(): Pair<Int, Int> {
+        val wm = app.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        return if (Build.VERSION.SDK_INT >= 30) {
+            val b = wm.maximumWindowMetrics.bounds
+            b.width() to b.height()
+        } else {
+            val metrics = DisplayMetrics()
+            @Suppress("DEPRECATION")
+            wm.defaultDisplay.getRealMetrics(metrics)
+            metrics.widthPixels to metrics.heightPixels
+        }
+    }
+    private fun resizeTo(sourceWidth: Int, sourceHeight: Int) {
+        if (sourceWidth <= 0 || sourceHeight <= 0) return
+        val scale = minOf(1.0, 1280.0 / maxOf(sourceWidth, sourceHeight))
+        val w = maxOf(2, (sourceWidth * scale).toInt() / 2 * 2)
+        val h = maxOf(2, (sourceHeight * scale).toInt() / 2 * 2)
+        if (w == width && h == height) return
+        width = w
+        height = h
+        helper?.setTextureSize(w, h)
+        display?.resize(w, h, app.resources.displayMetrics.densityDpi)
+    }
     private val callback =
         object : MediaProjection.Callback() {
+            override fun onCapturedContentResize(width: Int, height: Int) {
+                main.post { if (projection != null) resizeTo(width, height) }
+            }
             override fun onStop() {
                 main.post { onStopped() }
             }
@@ -41,8 +81,8 @@ class KpScreenCapturer(
     }
 
     override fun startCapture(width: Int, height: Int, framerate: Int) {
-        this.width = width
-        this.height = height
+        val actual = screenSize()
+        resizeTo(actual.first, actual.second)
         val helper = helper ?: return
         val mgr = app.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         // Owner round 33 (item 21): a projection that will not open is a failure
@@ -55,22 +95,24 @@ class KpScreenCapturer(
         // phone's playback rides along (mixed into the mic track).
         SystemAudioTap.start(app, mp)
         observer?.onCapturerStarted(true)
-        helper.setTextureSize(width, height)
+        helper.setTextureSize(this.width, this.height)
         helper.startListening(this)
         display =
             mp.createVirtualDisplay(
                 "kp-share",
-                width,
-                height,
-                400,
+                this.width,
+                this.height,
+                app.resources.displayMetrics.densityDpi,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 Surface(helper.surfaceTexture),
                 null,
                 null,
             )
+        displayManager.registerDisplayListener(displayListener, main)
     }
 
     override fun stopCapture() {
+        displayManager.unregisterDisplayListener(displayListener)
         SystemAudioTap.stop()
         helper?.stopListening()
         runCatching { display?.release() }
@@ -82,10 +124,7 @@ class KpScreenCapturer(
     }
 
     override fun changeCaptureFormat(width: Int, height: Int, framerate: Int) {
-        this.width = width
-        this.height = height
-        display?.resize(width, height, 400)
-        helper?.setTextureSize(width, height)
+        resizeTo(width, height)
     }
 
     override fun dispose() {

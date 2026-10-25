@@ -570,7 +570,9 @@ fun VintoxBdAccountScreen(nav: NavController) {
                             }
                             Spacer(Modifier.width(10.dp))
                             GoldBtn("Open website", Modifier.weight(1f), true) {
-                                val url = waiting.optString("deepLink").ifBlank { CoreApi.base }
+                                val url = "https://vintoxbd.online/user/account-link?approvalId=" +
+                                    Uri.encode(waiting.optString("id")) + "&signature=" +
+                                    Uri.encode(waiting.optString("signature"))
                                 runCatching {
                                     ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                                 }

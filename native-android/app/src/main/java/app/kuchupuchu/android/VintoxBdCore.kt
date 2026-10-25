@@ -55,6 +55,7 @@ object CoreApi {
 
     private const val TOKEN_KEY = "kp_core_token"
     private const val SESSION_KEY = "kp_core_session"
+    private const val ORIGIN_KEY = "kp_core_origin"
 
     @Volatile
     var token: String? = null
@@ -82,6 +83,12 @@ object CoreApi {
 
     fun load(ctx: Context) {
         val prefs = ctx.getSharedPreferences("kp", 0)
+        if (prefs.getString(ORIGIN_KEY, null) != base) {
+            token = null
+            me = null
+            prefs.edit().remove(TOKEN_KEY).remove(SESSION_KEY).remove(ORIGIN_KEY).apply()
+            return
+        }
         token = prefs.getString(TOKEN_KEY, null)
         me = prefs.getString(SESSION_KEY, null)?.let { runCatching { JSONObject(it) }.getOrNull() }
     }
@@ -97,6 +104,7 @@ object CoreApi {
         me = user
         ctx.getSharedPreferences("kp", 0)
             .edit()
+            .putString(ORIGIN_KEY, base)
             .putString(TOKEN_KEY, value)
             .putString(SESSION_KEY, user?.toString())
             .apply()
@@ -127,10 +135,19 @@ object CoreApi {
         return minted
     }
 
-    fun get(ctx: Context, path: String): JSONObject = send(path, "GET", null, session(ctx))
+    private fun authorized(ctx: Context, path: String, method: String, body: JSONObject?): JSONObject =
+        try {
+            send(path, method, body, session(ctx))
+        } catch (e: CoreError) {
+            if (e.status != 401) throw e
+            forget(ctx)
+            send(path, method, body, session(ctx, force = true))
+        }
+
+    fun get(ctx: Context, path: String): JSONObject = authorized(ctx, path, "GET", null)
 
     fun post(ctx: Context, path: String, body: JSONObject = JSONObject()): JSONObject =
-        send(path, "POST", body, session(ctx))
+        authorized(ctx, path, "POST", body)
 
     private fun send(path: String, method: String, body: JSONObject?, bearer: String?): JSONObject {
         val builder = Request.Builder().url(base + path).header("Accept", "application/json")

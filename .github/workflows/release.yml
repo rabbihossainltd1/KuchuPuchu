@@ -71,6 +71,7 @@ jobs:
         run: |
           set -euo pipefail
           ./gradlew assembleRelease --no-daemon --stacktrace \
+            -PkpCoreBase=https://vintoxbd-comm-core.vintoxbdinstitute.workers.dev \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
           apk="app/build/outputs/apk/release/app-release.apk"
           test -s "$apk"

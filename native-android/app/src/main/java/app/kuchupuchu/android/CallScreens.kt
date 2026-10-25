@@ -875,7 +875,7 @@ fun InCallVideoScreen(call: CallUi) {
         /* Either feed can be promoted full-screen by tapping the PiP — but an
          * off camera is never promotable, or the whole screen goes black and
          * the opponent is left in the tile. */
-        VideoRenderer(engine, remote = !effSwap)
+        VideoRenderer(engine, remote = !effSwap, fit = if (effSwap) engine.sharing else engine.peerScreen)
 
         if (!remoteUp) {
             // Their camera is off (or nothing has arrived yet): blurred photo
@@ -1479,7 +1479,7 @@ private fun StripAction(
  */
 @Composable
 fun VideoRenderer(engine: CallEngine, remote: Boolean, fit: Boolean = false, pip: Boolean = false) {
-    key(remote, pip) {
+    key(remote, pip, fit) {
     AndroidView(
         factory = { c ->
             SurfaceViewRenderer(c).apply {
@@ -1494,7 +1494,7 @@ fun VideoRenderer(engine: CallEngine, remote: Boolean, fit: Boolean = false, pip
                     }
                 }
                 setEnableHardwareScaler(true)
-                setMirror(!remote)
+                setMirror(!remote && !engine.sharing)
                 setScalingType(
                     if (fit) RendererCommon.ScalingType.SCALE_ASPECT_FIT
                     else RendererCommon.ScalingType.SCALE_ASPECT_FILL,

@@ -157,7 +157,11 @@ export function CallStage({ engine, state }: Props) {
       {video && connected ? (
         <VideoSurface
           stream={state.remoteStream}
-          className="call-stage__remote"
+          className={
+            state.peerScreen
+              ? "call-stage__remote call-stage__remote--screen"
+              : "call-stage__remote"
+          }
           label={`${state.peer.name}'s video`}
         />
       ) : null}
@@ -624,12 +628,28 @@ function VideoSurface({
     element.play().catch(() => undefined);
   }, [stream]);
 
+  const syncSourceAspect = () => {
+    const element = ref.current;
+    if (!element || !element.videoWidth || !element.videoHeight) return;
+    const preview = element.closest<HTMLElement>(".call-stage__share-preview");
+    if (preview) preview.style.aspectRatio = String(element.videoWidth / element.videoHeight);
+    element.dataset.sourceAspect = String(element.videoWidth / element.videoHeight);
+  };
+
   return (
     <div className={className}>
       {/* A live call video has no caption track and cannot carry one; the
           suppression is labelled rather than silent. */}
       {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-      <video ref={ref} autoPlay playsInline muted aria-label={label} />
+      <video
+        ref={ref}
+        autoPlay
+        playsInline
+        muted
+        aria-label={label}
+        onResize={syncSourceAspect}
+        onLoadedMetadata={syncSourceAspect}
+      />
     </div>
   );
 }

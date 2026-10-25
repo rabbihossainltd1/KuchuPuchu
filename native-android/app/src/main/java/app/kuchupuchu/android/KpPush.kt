@@ -96,7 +96,10 @@ object KpPush {
      * (b) had exactly one attempt at the Firebase config fetch.
      */
     fun boot(ctx: Context) {
-        if (enabled && registered) return
+        val prefs = ctx.applicationContext.getSharedPreferences("kp_push", Context.MODE_PRIVATE)
+        if (enabled && registered && prefs.getString("registeredVersion", null) == appVersion(ctx) &&
+            System.currentTimeMillis() - prefs.getLong("registeredAt", 0L) in 0L until 86_400_000L
+        ) return
         val app = ctx.applicationContext
         if (booting) return
         booting = true
@@ -177,7 +180,13 @@ object KpPush {
             try {
                 Api.loadToken(app)
                 val prefs = app.getSharedPreferences("kp_push", Context.MODE_PRIVATE)
-                if (prefs.getString("registered", null) == token) return@Thread
+                if (prefs.getString("registered", null) == token &&
+                    prefs.getString("registeredVersion", null) == appVersion(app) &&
+                    System.currentTimeMillis() - prefs.getLong("registeredAt", 0L) in 0L until 86_400_000L
+                ) {
+                    registered = true
+                    return@Thread
+                }
                 for (wait in longArrayOf(0, 2_000, 6_000, 20_000, 60_000, 180_000, 420_000)) {
                     if (wait > 0) Thread.sleep(wait)
                     val ok = runCatching {
@@ -192,7 +201,9 @@ object KpPush {
                         true
                     }.getOrDefault(false)
                     if (ok) {
-                        prefs.edit().putString("registered", token).apply()
+                        prefs.edit().putString("registered", token)
+                            .putString("registeredVersion", appVersion(app))
+                            .putLong("registeredAt", System.currentTimeMillis()).apply()
                         registered = true
                         break
                     }

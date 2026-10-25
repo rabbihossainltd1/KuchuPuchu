@@ -20,7 +20,7 @@ val kpComposeBomVersion = "2026.06.00"
 // so a release build can pin production with -PkpCoreBase=… and nothing has to
 // be edited in Kotlin. Path/URL only, never a secret.
 val kpCoreBase = (project.findProperty("kpCoreBase") as? String)?.trim()?.takeIf { it.isNotBlank() }
-    ?: "https://vintoxbd-comm-core-preview.vintoxbdinstitute.workers.dev"
+    ?: "https://vintoxbd-comm-core.vintoxbdinstitute.workers.dev"
 
 // §51 / Play policy: `release` must not be signed with the repository's debug key —
 // that key is in git, so anyone with read access could publish an update that every

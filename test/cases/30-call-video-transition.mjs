@@ -117,7 +117,7 @@ const screenFlat = flat(screen);
       // Kotlin compiler in this suite, so source order is the local proxy for
       // that error, checked against both consumers.
       screen.indexOf("val effSwap = swapped && localFeedUp") <
-        screen.indexOf("VideoRenderer(engine, remote = !effSwap)") &&
+        screen.indexOf("VideoRenderer(engine, remote = !effSwap, fit =") &&
       screen.indexOf("val localFeedUp = !engine.cameraOff") <
         screen.indexOf("VideoRenderer(engine, remote = effSwap, fit = true, pip = true)") &&
       screen.indexOf("val localFeedUp = !engine.cameraOff") < screen.indexOf("if (localFeedUp) {"),
@@ -129,7 +129,9 @@ const screenFlat = flat(screen);
   check(
     "an off camera can never be promoted full-screen (swap goes through effSwap)",
     /val effSwap = swapped && localFeedUp/.test(screen) &&
-      /VideoRenderer\(engine, remote = !effSwap\)/.test(screen) &&
+      /VideoRenderer\(engine, remote = !effSwap, fit = if \(effSwap\) engine\.sharing else engine\.peerScreen\)/.test(
+        screen,
+      ) &&
       /VideoRenderer\(engine, remote = effSwap, fit = true, pip = true\)/.test(screen),
   );
   check("no renderer reads the raw swapped flag any more", !/remote = swapped[,)]/.test(screen));

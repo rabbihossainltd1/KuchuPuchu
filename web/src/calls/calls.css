@@ -985,3 +985,13 @@
     height: 108px;
   }
 }
+
+.call-stage__remote--screen video {
+  object-fit: contain;
+}
+.call-share-full__video video {
+  max-width: none;
+  max-height: none;
+  aspect-ratio: auto;
+  object-fit: contain;
+}
