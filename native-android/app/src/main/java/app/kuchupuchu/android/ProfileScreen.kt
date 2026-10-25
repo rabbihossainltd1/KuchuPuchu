@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.QrCode
@@ -196,6 +197,14 @@ fun ProfileScreen(
             if (user != null) {
                 IconButton(onClick = { haptics.tap(); nav.navigate("qr/$userId") }) {
                     Icon(Icons.Filled.QrCode, "QR code", tint = Ink)
+                }
+            }
+            // Owner 2026-10-25 (item 8): the nav pill's Profile tab is where
+            // the account lives, so the gear belongs in THIS header — the same
+            // 48dp icon slot as QR, no new bar, no oversized button.
+            if (isMe) {
+                IconButton(onClick = { haptics.tap(); nav.navigate("settings") }) {
+                    Icon(Icons.Filled.Settings, "Settings", tint = Ink)
                 }
             }
             if (!isMe && !isKpBot(userId) && user != null) {

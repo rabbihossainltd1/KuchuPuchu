@@ -15,6 +15,15 @@ const settings = read("native-android/app/src/main/java/app/kuchupuchu/android/S
 // r132: the app opens the signed consent link, not the code page.
 assert(settings.includes('"https://vintoxbd.online/link/"'));
 assert(settings.includes("consentUrl(approval)"));
+// Owner 2026-10-25 (item 1): the waiting screen never prints a code again —
+// the fallback is the same signed link, copied.
+assert(!settings.includes("No browser on this device?"));
+assert(!settings.includes("code.chunked(4)"));
+assert(settings.includes('ActionBtn("Copy link"'));
+// Owner 2026-10-25 (item 8): the Profile tab header carries the settings gear.
+const profile = read("native-android/app/src/main/java/app/kuchupuchu/android/ProfileScreen.kt");
+assert(profile.includes('nav.navigate("settings")'));
+assert(profile.includes("Icons.Filled.Settings"));
 const capture = read("native-android/app/src/main/java/app/kuchupuchu/android/KpScreenCapturer.kt");
 assert(capture.includes("wm.maximumWindowMetrics.bounds"));
 assert(capture.includes("onCapturedContentResize"));
@@ -30,5 +39,5 @@ assert(web.includes("element.videoWidth / element.videoHeight"));
 assert(web.includes("onResize={syncSourceAspect}"));
 assert(web.includes("call-stage__remote--screen"));
 console.log(
-  "OK production-bound linking sessions, explicit VX approval URL, real capture dimensions/rotation, contained shared-screen renderers",
+  "OK production-bound linking sessions, explicit VX approval URL, code-free waiting screen, profile settings gear, real capture dimensions/rotation, contained shared-screen renderers",
 );

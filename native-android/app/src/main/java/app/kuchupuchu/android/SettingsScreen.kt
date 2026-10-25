@@ -18,7 +18,6 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PermMedia
 import androidx.compose.material.icons.filled.PhoneAndroid
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Videocam
@@ -85,7 +84,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -537,7 +535,10 @@ fun VintoxBdAccountScreen(nav: NavController) {
 
             waiting != null -> {
                 // ---- waiting for the website's consent screen ----------------
-                val code = waiting.optString("code")
+                // Owner 2026-10-25 (item 1: "kp app a vx binding a ekhono code
+                // dekhai ashe"): the one-time code is gone from this screen.
+                // The browser is the consent screen now, so the only fallback a
+                // student ever needs is the same link, copied.
                 SectionCard {
                     Column(Modifier.padding(16.dp)) {
                         Text("Approve this link in VintoxBd", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Ink)
@@ -559,58 +560,23 @@ fun VintoxBdAccountScreen(nav: NavController) {
                             openApproval(consentUrl(waiting))
                         }
                         Spacer(Modifier.height(10.dp))
-                        Text("Waiting for VintoxBd…", fontSize = 12.5.sp, color = Muted)
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
-                SectionCard {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("No browser on this device?", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Ink)
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "Sign in on the VintoxBd website, open Profile → Link an app, and type this one-time code.",
-                            fontSize = 12.5.sp,
-                            color = Muted,
-                        )
-                        Spacer(Modifier.height(10.dp))
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Cream)
-                                .padding(vertical = 12.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                code.chunked(4).joinToString(" "),
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Ink,
-                            )
-                        }
-                        Spacer(Modifier.height(10.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.ContentCopy, null, tint = ActionBlueDeep, modifier = Modifier.size(15.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                "Keep it private — it works once, and whoever has it can approve.",
-                                fontSize = 12.sp,
-                                color = Muted,
-                            )
-                        }
-                        Spacer(Modifier.height(12.dp))
-                        Row {
-                            ActionBtn("Copy code", Modifier.weight(1f), true) {
-                                CoreApi.copyCode(ctx, "VintoxBd link code", code)
-                                notice = "Code copied."
+                            ActionBtn("Copy link", Modifier.weight(1f), !busy) {
+                                CoreApi.copyCode(ctx, "VintoxBd link", consentUrl(waiting))
+                                notice = "Link copied."
                             }
                             Spacer(Modifier.width(10.dp))
-                            ActionBtn("Discard", Modifier.weight(1f), !busy) {
+                            ActionBtn("Cancel", Modifier.weight(1f), !busy) {
                                 approval = null
-                                notice = "Code discarded. It stops working on its own in a few minutes."
+                                notice = "Request discarded. It stops working on its own in ten minutes."
                             }
                         }
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "No browser opened? Tap above again, or paste the copied link into a browser where this VintoxBd account is signed in.",
+                            fontSize = 11.5.sp,
+                            color = Muted,
+                        )
                     }
                 }
             }
