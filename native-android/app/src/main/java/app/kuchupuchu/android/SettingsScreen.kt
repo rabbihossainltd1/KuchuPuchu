@@ -349,6 +349,26 @@ fun VintoxBdAccountScreen(nav: NavController) {
     var secondsLeft by remember { mutableIntStateOf(0) }
     var askUnlink by remember { mutableStateOf(false) }
 
+    // The one place that opens the approval screen on the website. A blank link
+    // leaves the student on this screen with the code, so nothing is a dead end.
+    fun openApproval(url: String) {
+        if (url.isBlank()) return
+        runCatching {
+            ctx.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }.onFailure { notice = "Could not open a browser. Copy the code below instead." }
+    }
+
+    // The signed consent URL for a request the app just started.
+    fun consentUrl(request: JSONObject?): String {
+        if (request == null) return ""
+        val preset = request.optString("deepLink")
+        if (preset.startsWith("http")) return preset
+        return "https://vintoxbd.online/link/" + Uri.encode(request.optString("id")) +
+            "?signature=" + Uri.encode(request.optString("signature"))
+    }
+
     fun readLinks(announceRevocation: Boolean) {
         scope.launch {
             try {
@@ -517,41 +537,59 @@ fun VintoxBdAccountScreen(nav: NavController) {
             }
 
             waiting != null -> {
-                // ---- waiting for the website --------------------------------
+                // ---- waiting for the website's consent screen ----------------
                 val code = waiting.optString("code")
                 SectionCard {
                     Column(Modifier.padding(16.dp)) {
-                        Text("Enter this code on the VintoxBd website", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                        Text("Approve this link in VintoxBd", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Ink)
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "Sign in there, open the linked-accounts step and type the code. The website shows both accounts and what the link grants before you approve.",
+                            "Your browser is open on the VintoxBd account you're signed in to. It shows both accounts and exactly what this link grants — check them and tap Continue.",
                             fontSize = 12.5.sp,
                             color = Muted,
                         )
                         Spacer(Modifier.height(12.dp))
+                        Text(
+                            if (secondsLeft > 0) "This request expires in ${secondsLeft / 60}:%02d".format(secondsLeft % 60)
+                            else "Checking the request…",
+                            fontSize = 12.5.sp,
+                            color = Muted,
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        GoldBtn("Open VintoxBd to approve", Modifier.fillMaxWidth(), true) {
+                            openApproval(consentUrl(waiting))
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Text("Waiting for VintoxBd…", fontSize = 12.5.sp, color = Muted)
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                SectionCard {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("No browser on this device?", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Sign in on the VintoxBd website, open Profile → Link an app, and type this one-time code.",
+                            fontSize = 12.5.sp,
+                            color = Muted,
+                        )
+                        Spacer(Modifier.height(10.dp))
                         Box(
                             Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(Cream)
-                                .padding(vertical = 14.dp),
+                                .padding(vertical = 12.dp),
                             contentAlignment = Alignment.Center,
                         ) {
                             Text(
                                 code.chunked(4).joinToString(" "),
                                 fontFamily = FontFamily.Monospace,
-                                fontSize = 26.sp,
+                                fontSize = 20.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Ink,
                             )
                         }
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            if (secondsLeft > 0) "Expires in ${secondsLeft / 60}:%02d".format(secondsLeft % 60)
-                            else "Checking the code…",
-                            fontSize = 12.5.sp,
-                            color = Muted,
-                        )
                         Spacer(Modifier.height(10.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Filled.ContentCopy, null, tint = ActionBlueDeep, modifier = Modifier.size(15.dp))
@@ -562,28 +600,17 @@ fun VintoxBdAccountScreen(nav: NavController) {
                                 color = Muted,
                             )
                         }
-                        Spacer(Modifier.height(14.dp))
+                        Spacer(Modifier.height(12.dp))
                         Row {
                             ActionBtn("Copy code", Modifier.weight(1f), true) {
                                 CoreApi.copyCode(ctx, "VintoxBd link code", code)
                                 notice = "Code copied."
                             }
                             Spacer(Modifier.width(10.dp))
-                            GoldBtn("Open website", Modifier.weight(1f), true) {
-                                val url = "https://vintoxbd.online/user/account-link?approvalId=" +
-                                    Uri.encode(waiting.optString("id")) + "&signature=" +
-                                    Uri.encode(waiting.optString("signature"))
-                                runCatching {
-                                    ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                                }
+                            ActionBtn("Discard", Modifier.weight(1f), !busy) {
+                                approval = null
+                                notice = "Code discarded. It stops working on its own in a few minutes."
                             }
-                        }
-                        Spacer(Modifier.height(12.dp))
-                        Text("Waiting for the website…", fontSize = 12.5.sp, color = Muted)
-                        Spacer(Modifier.height(8.dp))
-                        SettingRow(Icons.Filled.Close, "Discard this code", "", clickable = !busy) {
-                            approval = null
-                            notice = "Code discarded. It stops working on its own in a few minutes."
                         }
                     }
                 }
@@ -624,6 +651,11 @@ fun VintoxBdAccountScreen(nav: NavController) {
                             )
                             approval = answer.optJSONObject("approval")
                             secondsLeft = secondsFromDhaka(approval?.optString("expiresAt").orEmpty())
+                            // Google-account-binding shape: the browser opens on the
+                            // signed-in VintoxBd account, which names both accounts
+                            // and the access being granted, then one Continue. The
+                            // code stays on this screen only as the fallback.
+                            openApproval(consentUrl(approval))
                             notice = ""
                         } catch (e: CoreApi.CoreError) {
                             when (e.code) {

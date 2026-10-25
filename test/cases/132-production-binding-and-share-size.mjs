@@ -12,7 +12,9 @@ assert(core.includes("prefs.getString(ORIGIN_KEY, null) != base"));
 assert(core.includes("if (e.status != 401) throw e"));
 assert(core.includes("session(ctx, force = true)"));
 const settings = read("native-android/app/src/main/java/app/kuchupuchu/android/SettingsScreen.kt");
-assert(settings.includes("https://vintoxbd.online/user/account-link?approvalId="));
+// r132: the app opens the signed consent link, not the code page.
+assert(settings.includes('"https://vintoxbd.online/link/"'));
+assert(settings.includes("consentUrl(approval)"));
 const capture = read("native-android/app/src/main/java/app/kuchupuchu/android/KpScreenCapturer.kt");
 assert(capture.includes("wm.maximumWindowMetrics.bounds"));
 assert(capture.includes("onCapturedContentResize"));

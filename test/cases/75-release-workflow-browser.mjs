@@ -24,12 +24,12 @@ check(
     workflow.includes("inputs.confirm == 'RELEASE-DEBUG-KEY-V279'"),
 );
 check(
-  "signing continuity is checked against the published v274 APK before publishing v306",
+  "signing continuity is checked against the published v274 APK before publishing v307",
   workflow.includes("gh release download v274") &&
     workflow.includes("kuchupuchu-3.9.197-r104.apk") &&
     workflow.includes("Verify signing continuity with v274") &&
-    workflow.includes('test "$code" = "306"') &&
-    workflow.includes('test "$name" = "3.9.229"'),
+    workflow.includes('test "$code" = "307"') &&
+    workflow.includes('test "$name" = "3.9.230"'),
 );
 
 // The R2 upload used to be skipped on every release: its own `env:` is applied
