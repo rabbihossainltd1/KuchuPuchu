@@ -547,9 +547,14 @@ fun VintoxBdAccountScreen(nav: NavController) {
                             textAlign = TextAlign.Center,
                         )
                         Spacer(Modifier.height(18.dp))
-                        GoldBtn("Open KuchuPuchu", Modifier.fillMaxWidth(), true) {
+                        // Owner 2026-10-26 (item 1): the app is ALREADY open, so
+                        // a button that "opens KuchuPuchu" from inside KuchuPuchu
+                        // was the funny part. The same gold button now takes the
+                        // student to the thing the link bought them: the class.
+                        GoldBtn("Open class", Modifier.fillMaxWidth(), true) {
                             haptics.tap()
                             justLinked = false
+                            nav.navigate("classroom")
                         }
                     }
                 }

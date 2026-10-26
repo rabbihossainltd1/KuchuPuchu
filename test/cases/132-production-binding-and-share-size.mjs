@@ -32,7 +32,16 @@ assert(!settings.includes("Finish the approval in your browser"));
 assert(!settings.includes("Browser didn't open? Tap to open VintoxBd again"));
 // ...and a finished link gets its own success screen plus a way back in.
 assert(settings.includes("Binding successful"));
-assert(settings.includes('GoldBtn("Open KuchuPuchu"'));
+// Owner 2026-10-26 (item 1): the success button no longer "opens KuchuPuchu"
+// from inside KuchuPuchu — it takes the student to the class the link bought.
+assert(!settings.includes('GoldBtn("Open KuchuPuchu"'));
+assert(settings.includes('GoldBtn("Open class"'));
+// ...and the shared desktop is fitted, because the scaling choice is applied
+// AFTER the renderer is attached (attachRemote re-runs init, which reset it).
+const calls = read("native-android/app/src/main/java/app/kuchupuchu/android/CallScreens.kt");
+const attachAt = calls.indexOf("if (remote) engine.attachRemote(this)");
+const scalingAt = calls.indexOf("setScalingType(", attachAt);
+assert(attachAt > -1 && scalingAt > attachAt);
 const manifest = read("native-android/app/src/main/AndroidManifest.xml");
 assert(manifest.includes('android:scheme="kuchupuchu" android:host="linked"'));
 // Owner 2026-10-25 (item 8): the Profile tab header carries the settings gear.

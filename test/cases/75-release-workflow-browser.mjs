@@ -28,8 +28,8 @@ check(
   workflow.includes("gh release download v274") &&
     workflow.includes("kuchupuchu-3.9.197-r104.apk") &&
     workflow.includes("Verify signing continuity with v274") &&
-    workflow.includes('test "$code" = "312"') &&
-    workflow.includes('test "$name" = "3.9.235"'),
+    workflow.includes('test "$code" = "313"') &&
+    workflow.includes('test "$name" = "3.9.236"'),
 );
 
 // The R2 upload used to be skipped on every release: its own `env:` is applied

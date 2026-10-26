@@ -1511,11 +1511,16 @@ fun VideoRenderer(engine: CallEngine, remote: Boolean, fit: Boolean = false, pip
                 }
                 setEnableHardwareScaler(true)
                 setMirror(!remote && !engine.sharing)
+                if (remote) engine.attachRemote(this) else engine.attachLocal(this)
+                // Owner 2026-10-26 (item 2): attachRemote() re-runs init() on the
+                // fresh surface, and that reset the layout to the default FILL —
+                // which is exactly the "desktop fills the phone, so most of it is
+                // cropped away" complaint. The scaling choice now comes LAST, so
+                // a shared desktop is always the whole frame with black bars.
                 setScalingType(
                     if (fit) RendererCommon.ScalingType.SCALE_ASPECT_FIT
                     else RendererCommon.ScalingType.SCALE_ASPECT_FILL,
                 )
-                if (remote) engine.attachRemote(this) else engine.attachLocal(this)
             }
         },
         onRelease = { view ->
