@@ -544,7 +544,7 @@ fun VoiceCallScreen(call: CallUi) {
                     call.status == "ACTIVE" && (call.connecting || call.startedAt <= 0L) -> "Connecting…"
                     connected -> clockText(secs)
                     call.incoming -> "Ringing…"
-                    call.otherOnline -> "Ringing…"
+                    call.status == "RINGING" && call.otherOnline -> "Ringing…"
                     else -> "Calling…"
                 },
                 color = Color(0xB3FFFFFF),
@@ -771,6 +771,8 @@ private fun CallAction(
 @Composable
 fun OutgoingVideoScreen(call: CallUi) {
     val engine = CallEngine.instance ?: return
+    // The status line under the name runs the clock once the other side answers.
+    val secs = rememberTick(call.id, call.startedAt, call.connecting || call.reconnecting || engine.onHold)
     Box(Modifier.fillMaxSize().background(Dark)) {
         /* local preview fills the screen while ringing */
         VideoRenderer(engine, remote = false)
@@ -791,7 +793,13 @@ fun OutgoingVideoScreen(call: CallUi) {
             Text(
                 when {
                     call.status == "BUSY" -> "Line busy — on another call"
-                    call.connecting -> "Connecting…"
+                    // Owner 2026-10-26 (item 4): a row that is already ACTIVE
+                    // was showing "Ringing…" here for as long as the media took
+                    // to come up, because this branch only looked at the other
+                    // phone being online. Answer → "Connecting…", media →
+                    // the clock; "Ringing…" may only outlive a RINGING row.
+                    call.status == "ACTIVE" && (call.connecting || call.startedAt <= 0L) -> "Connecting…"
+                    call.status == "ACTIVE" -> clockText(secs)
                     call.otherOnline -> "Ringing…"
                     else -> "Calling…"
                 },
@@ -1576,6 +1584,7 @@ fun ReturnToCallBanner() {
         Text(
             when {
                 call.reconnecting -> "Reconnecting…"
+                call.status == "ACTIVE" && (call.connecting || call.startedAt <= 0L) -> "Connecting…"
                 !connected -> if (call.incoming && !call.group) "Ringing" else "Calling…"
                 call.connecting || call.startedAt <= 0L -> "Connecting…"
                 engine.onHold -> "On hold"

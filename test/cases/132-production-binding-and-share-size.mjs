@@ -38,6 +38,13 @@ assert(!settings.includes('GoldBtn("Open KuchuPuchu"'));
 assert(settings.includes('GoldBtn("Open class"'));
 // ...and the shared desktop is fitted, because the scaling choice is applied
 // AFTER the renderer is attached (attachRemote re-runs init, which reset it).
+// Owner 2026-10-26 (item 4): an ACTIVE row never reads "Ringing…" again.
+const screens = read("native-android/app/src/main/java/app/kuchupuchu/android/CallScreens.kt");
+assert(
+  screens.includes(
+    'call.status == "ACTIVE" && (call.connecting || call.startedAt <= 0L) -> "Connecting…"',
+  ),
+);
 const calls = read("native-android/app/src/main/java/app/kuchupuchu/android/CallScreens.kt");
 const attachAt = calls.indexOf("if (remote) engine.attachRemote(this)");
 const scalingAt = calls.indexOf("setScalingType(", attachAt);
