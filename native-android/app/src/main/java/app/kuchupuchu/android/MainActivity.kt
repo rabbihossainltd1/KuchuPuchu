@@ -261,6 +261,12 @@ class MainActivity : ComponentActivity() {
         // so only a clean handle lands in the resolver.
         if (intent.action == Intent.ACTION_VIEW) {
             val data = intent.data
+            // kuchupuchu://linked — the VintoxBd consent page handing the phone
+            // back. Nothing is read from the URL: the account screen keeps its
+            // own poll, so all this does is bring the app to the front.
+            if (data?.scheme == "kuchupuchu" && data.host == "linked") {
+                pendingLinkReturn.value = System.currentTimeMillis()
+            }
             val host = data?.host?.lowercase().orEmpty()
             if (host == "kuchupuchu.web.app" || host == "kuchupuchu.firebaseapp.com") {
                 // Round 127: lowercase FIRST — usernames are stored lowercase
@@ -430,6 +436,11 @@ class MainActivity : ComponentActivity() {
          *  (verified App Link, or the camera-scan intent) arrives here; KpApp
          *  resolves the handle to a chat once the account is in. */
         internal val pendingUserHandle = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
+        /** Owner 2026-10-25 (item 8): kuchupuchu://linked came back from the
+         *  browser — a timestamp, so two returns in a row both fire. The account
+         *  screen reads the link state itself; this only wakes the UI. */
+        internal val pendingLinkReturn = kotlinx.coroutines.flow.MutableStateFlow<Long?>(null)
     }
 }
 

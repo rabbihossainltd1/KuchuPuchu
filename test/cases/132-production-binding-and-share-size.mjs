@@ -19,7 +19,16 @@ assert(settings.includes("consentUrl(approval)"));
 // the fallback is the same signed link, copied.
 assert(!settings.includes("No browser on this device?"));
 assert(!settings.includes("code.chunked(4)"));
-assert(settings.includes('ActionBtn("Copy link"'));
+// Owner 2026-10-25 (item 8): the waiting card is button-free now — the browser
+// opens by itself, so no Copy link / Cancel / Open VintoxBd row is left.
+assert(!settings.includes('ActionBtn("Copy link"'));
+assert(!settings.includes("Open VintoxBd to approve"));
+assert(settings.includes("Finish the approval in your browser"));
+// ...and a finished link gets its own success screen plus a way back in.
+assert(settings.includes("Binding successful"));
+assert(settings.includes('GoldBtn("Open KuchuPuchu"'));
+const manifest = read("native-android/app/src/main/AndroidManifest.xml");
+assert(manifest.includes('android:scheme="kuchupuchu" android:host="linked"'));
 // Owner 2026-10-25 (item 8): the Profile tab header carries the settings gear.
 const profile = read("native-android/app/src/main/java/app/kuchupuchu/android/ProfileScreen.kt");
 assert(profile.includes('nav.navigate("settings")'));

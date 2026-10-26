@@ -71,6 +71,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -85,6 +86,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -345,6 +348,12 @@ fun VintoxBdAccountScreen(nav: NavController) {
     var approval by remember { mutableStateOf<JSONObject?>(null) }
     var secondsLeft by remember { mutableIntStateOf(0) }
     var askUnlink by remember { mutableStateOf(false) }
+    // Owner 2026-10-25 (item 8): a link that lands while this screen is open
+    // gets its own success screen — a tick, one sentence, and the way back in.
+    var justLinked by remember { mutableStateOf(false) }
+    // The browser normally takes over within a second. If this screen is still
+    // on top after eight, one quiet line offers to try again — no buttons.
+    var browserLate by remember { mutableStateOf(false) }
 
     // The one place that opens the approval screen on the website. A blank link
     // leaves the student on this screen with the code, so nothing is a dead end.
@@ -354,7 +363,10 @@ fun VintoxBdAccountScreen(nav: NavController) {
             ctx.startActivity(
                 Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )
-        }.onFailure { notice = "Could not open a browser. Copy the code below instead." }
+        }.onFailure {
+            // No browser at all: say where to approve instead of printing a code.
+            notice = "No browser found on this phone. Open vintoxbd.online on any device and approve there."
+        }
     }
 
     // The signed consent URL for a request the app just started.
@@ -392,8 +404,32 @@ fun VintoxBdAccountScreen(nav: NavController) {
 
     LaunchedEffect(Unit) { readLinks(announceRevocation = true) }
 
+    // kuchupuchu://linked came back from the browser: read the outcome at once
+    // instead of waiting for the next poll tick.
+    val linkReturn by MainActivity.pendingLinkReturn.collectAsState()
+    LaunchedEffect(linkReturn) {
+        if (linkReturn == null) return@LaunchedEffect
+        MainActivity.pendingLinkReturn.value = null
+        runCatching { CoreApi.getAsync(ctx, "/api/links") }
+            .getOrNull()?.optJSONArray("links")?.optJSONObject(0)?.let { fresh ->
+                link = fresh
+                approval = null
+                justLinked = true
+                LinkMemory.markSeen(ctx, true)
+                haptics.tap()
+            }
+    }
+
     // A code is only good for a few minutes: the countdown is the screen's, and
     // the outcome is polled — a denial or an approval both end the wait.
+    LaunchedEffect(approval?.optString("id")) {
+        browserLate = false
+        if (approval != null) {
+            kotlinx.coroutines.delay(8_000)
+            if (approval != null) browserLate = true
+        }
+    }
+
     LaunchedEffect(approval?.optString("id")) {
         val id = approval?.optString("id").orEmpty()
         if (id.isBlank()) return@LaunchedEffect
@@ -408,7 +444,8 @@ fun VintoxBdAccountScreen(nav: NavController) {
                             .getOrNull()?.optJSONArray("links")?.optJSONObject(0)
                     link = fresh
                     approval = null
-                    notice = "Linked. Your courses, batches and live classes now appear here."
+                    notice = ""
+                    justLinked = true
                     LinkMemory.markSeen(ctx, true)
                     haptics.tap()
                 }
@@ -471,6 +508,53 @@ fun VintoxBdAccountScreen(nav: NavController) {
         val current = link
         val waiting = approval
         when {
+            justLinked -> {
+                // ---- just linked -------------------------------------------
+                // Owner 2026-10-25 (item 8): a finished bind says so plainly —
+                // green tick, the outcome in one line, one way back into the app.
+                SectionCard {
+                    Column(
+                        Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Box(
+                            Modifier
+                                .size(66.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF16A34A)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Filled.Done,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(34.dp),
+                            )
+                        }
+                        Spacer(Modifier.height(14.dp))
+                        Text(
+                            "Binding successful",
+                            fontSize = 19.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Ink,
+                        )
+                        Spacer(Modifier.height(7.dp))
+                        Text(
+                            "KuchuPuchu and your VintoxBd account are linked. Courses, batches and " +
+                                "live classes now appear in this app.",
+                            fontSize = 13.sp,
+                            color = Muted,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(Modifier.height(18.dp))
+                        GoldBtn("Open KuchuPuchu", Modifier.fillMaxWidth(), true) {
+                            haptics.tap()
+                            justLinked = false
+                        }
+                    }
+                }
+            }
+
             current != null -> {
                 // ---- linked -------------------------------------------------
                 SectionCard {
@@ -535,48 +619,69 @@ fun VintoxBdAccountScreen(nav: NavController) {
 
             waiting != null -> {
                 // ---- waiting for the website's consent screen ----------------
-                // Owner 2026-10-25 (item 1: "kp app a vx binding a ekhono code
-                // dekhai ashe"): the one-time code is gone from this screen.
-                // The browser is the consent screen now, so the only fallback a
-                // student ever needs is the same link, copied.
+                // Owner 2026-10-25 (item 8): the link opens by itself the
+                // moment "Link VintoxBd account" is tapped, so this screen has
+                // no buttons at all — no copy, no cancel, no second "open".
+                // It just says what the phone is doing and how long is left.
                 SectionCard {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("Approve this link in VintoxBd", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Ink)
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "Your browser is open on the VintoxBd account you're signed in to. It shows both accounts and exactly what this link grants — check them and tap Continue.",
-                            fontSize = 12.5.sp,
-                            color = Muted,
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        Text(
-                            if (secondsLeft > 0) "This request expires in ${secondsLeft / 60}:%02d".format(secondsLeft % 60)
-                            else "Checking the request…",
-                            fontSize = 12.5.sp,
-                            color = Muted,
+                    Column(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 22.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(30.dp),
+                            color = ActionBlueDeep,
+                            strokeWidth = 2.6.dp,
                         )
                         Spacer(Modifier.height(14.dp))
-                        GoldBtn("Open VintoxBd to approve", Modifier.fillMaxWidth(), true) {
-                            openApproval(consentUrl(waiting))
-                        }
-                        Spacer(Modifier.height(10.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            ActionBtn("Copy link", Modifier.weight(1f), !busy) {
-                                CoreApi.copyCode(ctx, "VintoxBd link", consentUrl(waiting))
-                                notice = "Link copied."
-                            }
-                            Spacer(Modifier.width(10.dp))
-                            ActionBtn("Cancel", Modifier.weight(1f), !busy) {
-                                approval = null
-                                notice = "Request discarded. It stops working on its own in ten minutes."
-                            }
-                        }
-                        Spacer(Modifier.height(8.dp))
                         Text(
-                            "No browser opened? Tap above again, or paste the copied link into a browser where this VintoxBd account is signed in.",
-                            fontSize = 11.5.sp,
-                            color = Muted,
+                            "Finish the approval in your browser",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Ink,
+                            textAlign = TextAlign.Center,
                         )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "VintoxBd is open with both accounts and what this link grants. " +
+                                "Tick the box and tap Continue — this screen finishes by itself.",
+                            fontSize = 12.5.sp,
+                            color = Muted,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        Row(
+                            Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(ActionBlueDeep.copy(alpha = 0.10f))
+                                .padding(horizontal = 14.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Filled.Schedule, null, tint = ActionBlueDeep, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(7.dp))
+                            Text(
+                                if (secondsLeft > 0) "Waiting · expires in ${secondsLeft / 60}:%02d".format(secondsLeft % 60)
+                                else "Waiting for VintoxBd…",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = ActionBlueDeep,
+                            )
+                        }
+                        if (browserLate) {
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                "Browser didn't open? Tap to open VintoxBd again",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = ActionBlueDeep,
+                                textAlign = TextAlign.Center,
+                                textDecoration = TextDecoration.Underline,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { openApproval(consentUrl(waiting)) }
+                                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                            )
+                        }
                     }
                 }
             }

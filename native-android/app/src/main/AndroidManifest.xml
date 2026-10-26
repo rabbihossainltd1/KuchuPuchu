@@ -103,6 +103,16 @@
                 <data android:scheme="https" android:host="kuchupuchu.web.app" android:pathPrefix="/@" />
                 <data android:scheme="https" android:host="kuchupuchu.firebaseapp.com" android:pathPrefix="/@" />
             </intent-filter>
+            <!-- Owner 2026-10-25 (item 8): the VintoxBd consent page finishes by
+                 handing the phone back here — kuchupuchu://linked. It only brings
+                 the app (already running) to the front; the link state is read
+                 from the core, never from the URL. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="kuchupuchu" android:host="linked" />
+            </intent-filter>
             <meta-data
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
