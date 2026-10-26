@@ -267,6 +267,13 @@ class MainActivity : ComponentActivity() {
             if (data?.scheme == "kuchupuchu" && data.host == "linked") {
                 pendingLinkReturn.value = System.currentTimeMillis()
             }
+            // kuchupuchu://vx/<handle> — a VintoxBd public profile's
+            // "Open in KuchuPuchu" button (owner 2026-10-26, item 1).
+            if (data?.scheme == "kuchupuchu" && data.host == "vx") {
+                val handle =
+                    data.pathSegments.firstOrNull().orEmpty().removePrefix("@").lowercase()
+                if (handle.matches(Regex("^[a-z0-9_]{3,30}$"))) pendingVxHandle.value = handle
+            }
             val host = data?.host?.lowercase().orEmpty()
             if (host == "kuchupuchu.web.app" || host == "kuchupuchu.firebaseapp.com") {
                 // Round 127: lowercase FIRST — usernames are stored lowercase
@@ -441,6 +448,11 @@ class MainActivity : ComponentActivity() {
          *  browser — a timestamp, so two returns in a row both fire. The account
          *  screen reads the link state itself; this only wakes the UI. */
         internal val pendingLinkReturn = kotlinx.coroutines.flow.MutableStateFlow<Long?>(null)
+
+        /** Owner 2026-10-26 (item 1): a vintoxbd.online/@handle profile sent
+         *  the phone here through kuchupuchu://vx/<handle>; KpApp resolves it
+         *  to that person's profile in this app. */
+        internal val pendingVxHandle = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     }
 }
 

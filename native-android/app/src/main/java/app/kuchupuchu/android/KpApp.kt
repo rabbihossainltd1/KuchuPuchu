@@ -524,6 +524,43 @@ fun KpApp() {
             // screen's developer chip does: user lookup, then open (creating
             // it on demand) the 1:1 conversation.
             val userHandle by MainActivity.pendingUserHandle.collectAsState()
+
+            // Owner 2026-10-26 (item 1): kuchupuchu://vx/<handle> from a
+            // VintoxBd public profile — resolve the VX account (handle lookup,
+            // then an exact-username search) and open its profile HERE.
+            val vxHandle by MainActivity.pendingVxHandle.collectAsState()
+            LaunchedEffect(vxHandle, authed) {
+                val handle = vxHandle
+                if (handle.isNullOrBlank() || !authed) return@LaunchedEffect
+                MainActivity.pendingVxHandle.value = null
+                val id =
+                    runCatching {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            val direct =
+                                runCatching { Api.get("/api/users/username/$handle", force = true) }
+                                    .getOrNull()
+                                    ?.optJSONObject("user")
+                            if (direct != null) {
+                                direct.optString("id")
+                            } else {
+                                val found = Api.get("/api/search?q=${Api.q(handle)}", true)
+                                val rows = found.arr("users").objects()
+                                rows.firstOrNull {
+                                    it.optString("username").equals(handle, ignoreCase = true)
+                                }?.optString("id").orEmpty()
+                            }
+                        }
+                    }.getOrDefault("")
+                if (id.isNotBlank()) {
+                    nav.navigate("profile/$id") { launchSingleTop = true }
+                } else {
+                    android.widget.Toast.makeText(
+                        appCtx,
+                        "Could not open that VintoxBd profile.",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
             // Owner round 122 (photo P2: opening his OWN share link still
             // toasted "Couldn't open that profile"): a cold start can hand us
             // the handle BEFORE Store.me lands. The self-check then compared

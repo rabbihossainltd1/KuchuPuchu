@@ -58,6 +58,13 @@ const calls = read("native-android/app/src/main/java/app/kuchupuchu/android/Call
 assert(engine.includes("override fun onFrameResolutionChanged"));
 assert(engine.includes("remoteFrameAspect"));
 assert(calls.includes(".aspectRatio(engine.remoteFrameAspect)"));
+// Owner 2026-10-26 (item 1): kuchupuchu://vx/<handle> from a VX public
+// profile resolves and opens that profile in this app.
+const main = read("native-android/app/src/main/java/app/kuchupuchu/android/MainActivity.kt");
+assert(main.includes('data.host == "vx"'));
+assert(main.includes("pendingVxHandle.value = handle"));
+const app = read("native-android/app/src/main/java/app/kuchupuchu/android/KpApp.kt");
+assert(app.includes('nav.navigate("profile/$id")'));
 const attachAt = calls.indexOf("if (remote) engine.attachRemote(this, fit)");
 const scalingAt = calls.indexOf("setScalingType(", attachAt);
 assert(attachAt > -1 && scalingAt > attachAt);
