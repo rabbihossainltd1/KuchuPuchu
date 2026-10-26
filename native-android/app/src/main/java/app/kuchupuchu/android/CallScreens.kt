@@ -90,7 +90,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import org.webrtc.RendererCommon
 import org.webrtc.SurfaceViewRenderer
-import org.webrtc.TextureViewRenderer
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -664,10 +663,13 @@ private fun ShareFullscreen(call: CallUi) {
     androidx.activity.compose.BackHandler { engine.exitShareFullscreen() }
     // Owner 2026-10-26 (item 3): the phone stays upright and the WHOLE shared
     // desktop is on screen — fitted, black above and below, never cropped and
-    // never turned. No extra chips: one button leaves fullscreen, and back does
-    // the same.
+    // never turned. No extra chips either: the corner button leaves fullscreen,
+    // and system back does the same.
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        VideoRenderer(engine, remote = true, fit = true)
+        // `overlay` is what actually makes the picture visible here: the
+        // SurfaceView must be told it is an overlay before it is created, or
+        // the black background paints over it and the screen looks empty.
+        VideoRenderer(engine, remote = true, fit = true, overlay = true)
         Row(
             Modifier
                 .align(Alignment.TopCenter)
@@ -1485,49 +1487,43 @@ private fun StripAction(
  * report). The small tile is now always the overlay, whoever is inside it.
  */
 @Composable
-fun VideoRenderer(engine: CallEngine, remote: Boolean, fit: Boolean = false, pip: Boolean = false) {
-    // Owner 2026-10-26 (item 3): a SurfaceView is its own window layer — it
-    // cannot be rounded, clipped OR laid over the call chrome, and a fullscreen
-    // one punched a hole straight through the page (the "fullscreen shows
-    // nothing" report). Every in-call video is now a TextureView, an ordinary
-    // view that scales, clips and sits in the layout like the rest of the UI.
-    val holder = remember { arrayOfNulls<KpVideoView>(1) }
-    key(remote, fit) {
-        AndroidView(
-            factory = { c ->
-                TextureViewRenderer(c).apply {
-                    runCatching { init(engine.egl.eglBaseContext, null) }
-                    setEnableHardwareScaler(true)
-                    setMirror(!remote && !engine.sharing)
-                    setScalingType(
-                        if (fit) RendererCommon.ScalingType.SCALE_ASPECT_FIT
-                        else RendererCommon.ScalingType.SCALE_ASPECT_FILL,
-                    )
+fun VideoRenderer(engine: CallEngine, remote: Boolean, fit: Boolean = false, pip: Boolean = false, overlay: Boolean = false) {
+    key(remote, pip, fit) {
+    AndroidView(
+        factory = { c ->
+            SurfaceViewRenderer(c).apply {
+                // A SurfaceView draws into a window layer of its own; anything
+                // painted after it (a Box, the status bar inset, a scrim) would
+                // otherwise cover the picture. The fullscreen share and the
+                // small preview therefore declare themselves as overlays BEFORE
+                // the surface is created — the order matters to the window
+                // manager, and getting it wrong is what "fullscreen shows
+                // nothing" looks like.
+                if (pip || overlay) setZOrderMediaOverlay(true)
+                init(engine.egl.eglBaseContext, null)
+                if (pip) {
                     clipToOutline = true
-                    outlineProvider =
-                        object : android.view.ViewOutlineProvider() {
-                            override fun getOutline(view: android.view.View, outline: android.graphics.Outline) {
-                                outline.setRoundRect(
-                                    0,
-                                    0,
-                                    view.width,
-                                    view.height,
-                                    (if (pip) 14f else 0f) * resources.displayMetrics.density,
-                                )
-                            }
+                    outlineProvider = object : android.view.ViewOutlineProvider() {
+                        override fun getOutline(view: android.view.View, outline: android.graphics.Outline) {
+                            outline.setRoundRect(0, 0, view.width, view.height, 14f * resources.displayMetrics.density)
                         }
-                    val sink = TextureVideoView(this)
-                    holder[0] = sink
-                    if (remote) engine.attachRemote(sink) else engine.attachLocal(sink)
+                    }
                 }
-            },
-            onRelease = { view ->
-                holder[0]?.let { sink -> if (remote) engine.detachRemote(sink) else engine.detachLocal(sink) }
-                holder[0] = null
-                runCatching { view.release() }
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
+                setEnableHardwareScaler(true)
+                setMirror(!remote && !engine.sharing)
+                setScalingType(
+                    if (fit) RendererCommon.ScalingType.SCALE_ASPECT_FIT
+                    else RendererCommon.ScalingType.SCALE_ASPECT_FILL,
+                )
+                if (remote) engine.attachRemote(this) else engine.attachLocal(this)
+            }
+        },
+        onRelease = { view ->
+            if (remote) engine.detachRemote(view) else engine.detachLocal(view)
+            runCatching { view.release() }
+        },
+        modifier = Modifier.fillMaxSize(),
+    )
     }
 }
 
