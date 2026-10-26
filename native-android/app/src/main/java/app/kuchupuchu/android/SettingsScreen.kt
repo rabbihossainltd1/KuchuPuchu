@@ -634,12 +634,16 @@ fun VintoxBdAccountScreen(nav: NavController) {
                             strokeWidth = 2.6.dp,
                         )
                         Spacer(Modifier.height(14.dp))
+                        // Owner 2026-10-26 (item 5): a waiting line stays ONE
+                        // line. Two-line headings in 16sp read as an alarm.
                         Text(
-                            "Finish the approval in your browser",
-                            fontSize = 16.sp,
+                            "Finish in the browser",
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Ink,
                             textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            softWrap = false,
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
@@ -669,17 +673,22 @@ fun VintoxBdAccountScreen(nav: NavController) {
                         }
                         if (browserLate) {
                             Spacer(Modifier.height(12.dp))
+                            // Owner 2026-10-26 (item 5): this hint wrapped to
+                            // two underlined lines and shouted. One short line,
+                            // small, still tappable.
                             Text(
-                                "Browser didn't open? Tap to open VintoxBd again",
-                                fontSize = 12.sp,
+                                "Browser didn't open? Open again",
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = ActionBlueDeep,
                                 textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                softWrap = false,
                                 textDecoration = TextDecoration.Underline,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
                                     .clickable { openApproval(consentUrl(waiting)) }
-                                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                                    .padding(horizontal = 6.dp, vertical = 3.dp),
                             )
                         }
                     }

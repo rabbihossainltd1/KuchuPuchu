@@ -23,7 +23,13 @@ assert(!settings.includes("code.chunked(4)"));
 // opens by itself, so no Copy link / Cancel / Open VintoxBd row is left.
 assert(!settings.includes('ActionBtn("Copy link"'));
 assert(!settings.includes("Open VintoxBd to approve"));
-assert(settings.includes("Finish the approval in your browser"));
+// Owner 2026-10-26 (item 5): the waiting card stopped shouting — one 15sp
+// single-line heading and an 11sp one-line browser hint, never a two-line
+// 16sp block.
+assert(settings.includes("Finish in the browser"));
+assert(settings.includes("maxLines = 1") && settings.includes("softWrap = false"));
+assert(!settings.includes("Finish the approval in your browser"));
+assert(!settings.includes("Browser didn't open? Tap to open VintoxBd again"));
 // ...and a finished link gets its own success screen plus a way back in.
 assert(settings.includes("Binding successful"));
 assert(settings.includes('GoldBtn("Open KuchuPuchu"'));
