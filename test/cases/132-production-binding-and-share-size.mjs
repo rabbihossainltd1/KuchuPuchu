@@ -55,6 +55,9 @@ const qrPolicy = read("native-android/app/src/main/java/app/kuchupuchu/android/Q
 assert(qrPolicy.includes("QrScanAction.VxUserHandle(handle)"));
 assert(qrPolicy.includes('VX_SHARE_HOST = "vintoxbd.online"'));
 const calls = read("native-android/app/src/main/java/app/kuchupuchu/android/CallScreens.kt");
+assert(engine.includes("override fun onFrameResolutionChanged"));
+assert(engine.includes("remoteFrameAspect"));
+assert(calls.includes(".aspectRatio(engine.remoteFrameAspect)"));
 const attachAt = calls.indexOf("if (remote) engine.attachRemote(this, fit)");
 const scalingAt = calls.indexOf("setScalingType(", attachAt);
 assert(attachAt > -1 && scalingAt > attachAt);
@@ -80,7 +83,7 @@ assert(screen.includes("if (effSwap) engine.sharing else engine.peerScreen"));
 // one must be told it is an overlay BEFORE the surface exists — that flag is
 // what makes the picture actually appear.
 assert(screen.includes("if (pip || overlay) setZOrderMediaOverlay(true)"));
-assert(screen.includes("VideoRenderer(engine, remote = true, fit = true, overlay = true)"));
+assert(screen.includes("remote = true,") && screen.includes("overlay = true,"));
 assert(!screen.includes("SCREEN_ORIENTATION_SENSOR_LANDSCAPE"));
 assert(!screen.includes("ShareChip("));
 assert(!screen.includes("graphicsLayer"));

@@ -154,6 +154,15 @@ class CallEngine(private val app: Application) {
 
     /** The preview card was tapped: the shared screen fills the display. */
     var shareFull by mutableStateOf(false)
+
+    /**
+     * Owner 2026-10-26 (item 4, third pass): the remote frame's own aspect,
+     * learned from the renderer the moment a frame lands. The fullscreen
+     * share sizes its VIEW by this instead of trusting the renderer's FIT
+     * letterbox, which two attempts (scaling order, hardware scaler) could
+     * not make the owner's phone honour.
+     */
+    var remoteFrameAspect by mutableStateOf(16f / 9f)
         private set
 
     fun openShareFullscreen() { if (peerScreen) shareFull = true }
@@ -2096,7 +2105,29 @@ class CallEngine(private val app: Application) {
     fun attachRemote(view: SurfaceViewRenderer, fit: Boolean = false) {
         if (remoteView !== view) {
             remoteView?.let { old -> remoteVideo?.let { runCatching { it.removeSink(old) } } }
-            runCatching { view.init(egl.eglBaseContext, null) }
+            runCatching {
+                view.init(
+                    egl.eglBaseContext,
+                    object : RendererCommon.RendererEvents {
+                        override fun onFirstFrameRendered() {}
+
+                        override fun onFrameResolutionChanged(
+                            videoWidth: Int,
+                            videoHeight: Int,
+                            rotation: Int,
+                        ) {
+                            if (videoWidth <= 0 || videoHeight <= 0) return
+                            val turned = rotation == 90 || rotation == 270
+                            val w = if (turned) videoHeight else videoWidth
+                            val h = if (turned) videoWidth else videoHeight
+                            val next = w.toFloat() / h.toFloat()
+                            if (kotlin.math.abs(next - remoteFrameAspect) > 0.01f) {
+                                Handler(Looper.getMainLooper()).post { remoteFrameAspect = next }
+                            }
+                        }
+                    },
+                )
+            }
             view.setMirror(false)
             // Owner 2026-10-26 (item 2): a FIT surface (the shared desktop)
             // must not use the hardware scaler — on the owner's phone that

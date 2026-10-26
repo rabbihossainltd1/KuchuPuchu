@@ -669,7 +669,21 @@ private fun ShareFullscreen(call: CallUi) {
         // `overlay` is what actually makes the picture visible here: the
         // SurfaceView must be told it is an overlay before it is created, or
         // the black background paints over it and the screen looks empty.
-        VideoRenderer(engine, remote = true, fit = true, overlay = true)
+        // Owner 2026-10-26 (item 4, third pass): the VIEW takes the desktop
+        // frame's own aspect (engine.remoteFrameAspect, from the renderer),
+        // centred — inside a view that already has the frame's shape there
+        // is nothing left to crop and nothing to stretch, whatever the
+        // renderer's own letterbox decides to do.
+        VideoRenderer(
+            engine,
+            remote = true,
+            fit = true,
+            overlay = true,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .fillMaxWidth()
+                .aspectRatio(engine.remoteFrameAspect),
+        )
         Row(
             Modifier
                 .align(Alignment.TopCenter)
@@ -1495,7 +1509,7 @@ private fun StripAction(
  * report). The small tile is now always the overlay, whoever is inside it.
  */
 @Composable
-fun VideoRenderer(engine: CallEngine, remote: Boolean, fit: Boolean = false, pip: Boolean = false, overlay: Boolean = false) {
+fun VideoRenderer(engine: CallEngine, remote: Boolean, fit: Boolean = false, pip: Boolean = false, overlay: Boolean = false, modifier: Modifier = Modifier.fillMaxSize()) {
     key(remote, pip, fit) {
     AndroidView(
         factory = { c ->
@@ -1538,7 +1552,7 @@ fun VideoRenderer(engine: CallEngine, remote: Boolean, fit: Boolean = false, pip
             if (remote) engine.detachRemote(view) else engine.detachLocal(view)
             runCatching { view.release() }
         },
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier,
     )
     }
 }
