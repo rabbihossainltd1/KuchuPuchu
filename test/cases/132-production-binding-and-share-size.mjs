@@ -45,8 +45,17 @@ assert(
     'call.status == "ACTIVE" && (call.connecting || call.startedAt <= 0L) -> "Connecting…"',
   ),
 );
+// Owner 2026-10-26 (items 2+6): the shared desktop fits because the hardware
+// scaler stays OFF on a FIT surface and attachRemote applies the scaling
+// after its own init(); and a scanned vintoxbd.online/@handle is a VX handle.
+const engine = read("native-android/app/src/main/java/app/kuchupuchu/android/CallEngine.kt");
+assert(engine.includes("fun attachRemote(view: SurfaceViewRenderer, fit: Boolean = false)"));
+assert(engine.includes("view.setEnableHardwareScaler(!fit)"));
+const qrPolicy = read("native-android/app/src/main/java/app/kuchupuchu/android/QrScanPolicy.kt");
+assert(qrPolicy.includes("QrScanAction.VxUserHandle(handle)"));
+assert(qrPolicy.includes('VX_SHARE_HOST = "vintoxbd.online"'));
 const calls = read("native-android/app/src/main/java/app/kuchupuchu/android/CallScreens.kt");
-const attachAt = calls.indexOf("if (remote) engine.attachRemote(this)");
+const attachAt = calls.indexOf("if (remote) engine.attachRemote(this, fit)");
 const scalingAt = calls.indexOf("setScalingType(", attachAt);
 assert(attachAt > -1 && scalingAt > attachAt);
 const manifest = read("native-android/app/src/main/AndroidManifest.xml");

@@ -50,6 +50,20 @@ class QrScanPolicyTest {
         }
     }
 
+    // Owner 2026-10-26 (item 6): the VX profile link scans to a VX handle,
+    // never to a KP one — the two resolve through different lookups.
+    @Test
+    fun `a vintoxbd profile link resolves to a vx handle`() {
+        assertEquals(
+            QrScanAction.VxUserHandle("rabbihossainltd"),
+            parseQrScan("https://vintoxbd.online/@rabbihossainltd"),
+        )
+        assertEquals(
+            QrScanAction.VxUserHandle("rabbihossainltd"),
+            parseQrScan("https://vintoxbd.online/@RabbiHossainLTD/?ref=qr"),
+        )
+    }
+
     // Owner round 120 (2026-10-21): the QR payload IS the public share link
     // (https://kuchupuchu.web.app/@handle) — the in-app scanner must read its
     // own new codes, and the variants a camera/user can realistically produce.

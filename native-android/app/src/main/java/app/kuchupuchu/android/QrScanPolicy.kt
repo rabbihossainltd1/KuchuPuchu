@@ -18,6 +18,14 @@ sealed class QrScanAction {
      */
     data class UserHandle(val handle: String) : QrScanAction()
 
+    /**
+     * Owner 2026-10-26 (item 6): a VintoxBd profile link —
+     * https://vintoxbd.online/@handle, the same address the VX QR encodes.
+     * Scanning it resolves the VX account and shows its profile preview in
+     * this app first; the chat opens from there.
+     */
+    data class VxUserHandle(val handle: String) : QrScanAction()
+
     /** `kuchupuchu://weblogin/<token>` — confirm with `POST /api/auth/qr/<token>/confirm`. */
     data class WebLogin(val token: String) : QrScanAction()
 
@@ -28,6 +36,7 @@ sealed class QrScanAction {
 private const val USER_PREFIX = "kuchupuchu://user/"
 private const val WEBLOGIN_PREFIX = "kuchupuchu://weblogin/"
 private val SHARE_HOSTS = setOf("kuchupuchu.web.app", "kuchupuchu.firebaseapp.com")
+private const val VX_SHARE_HOST = "vintoxbd.online"
 private val HANDLE_RE = Regex("^[a-z0-9_]{3,30}$")
 
 fun parseQrScan(raw: String?): QrScanAction {
@@ -52,12 +61,12 @@ private fun parseShareLink(contents: String): QrScanAction {
     val afterScheme = contents.substringAfter("://", missingDelimiterValue = "")
     if (afterScheme.isEmpty()) return QrScanAction.Invalid
     val host = afterScheme.substringBefore('/').substringBefore(':').lowercase()
-    if (host !in SHARE_HOSTS) return QrScanAction.Invalid
+    if (host !in SHARE_HOSTS && host != VX_SHARE_HOST) return QrScanAction.Invalid
     // Path only — a query string or fragment is not part of the handle.
     val path = afterScheme.substringAfter('/', "").substringBefore('?').substringBefore('#')
     val segments = path.split('/').filter { it.isNotEmpty() }
     if (segments.size != 1) return QrScanAction.Invalid
     val handle = segments[0].removePrefix("@").lowercase().trim()
     if (!handle.matches(HANDLE_RE)) return QrScanAction.Invalid
-    return QrScanAction.UserHandle(handle)
+    return if (host == VX_SHARE_HOST) QrScanAction.VxUserHandle(handle) else QrScanAction.UserHandle(handle)
 }

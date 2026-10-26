@@ -2092,12 +2092,20 @@ class CallEngine(private val app: Application) {
         videoTrack?.let { runCatching { it.addSink(view) } }
     }
 
-    fun attachRemote(view: SurfaceViewRenderer) {
+    fun attachRemote(view: SurfaceViewRenderer, fit: Boolean = false) {
         if (remoteView !== view) {
             remoteView?.let { old -> remoteVideo?.let { runCatching { it.removeSink(old) } } }
             runCatching { view.init(egl.eglBaseContext, null) }
             view.setMirror(false)
-            view.setEnableHardwareScaler(true)
+            // Owner 2026-10-26 (item 2): a FIT surface (the shared desktop)
+            // must not use the hardware scaler — on the owner's phone that
+            // path discarded the letterbox and cropped the desktop. The
+            // scaling is (re)applied here, after init() has had its reset.
+            view.setEnableHardwareScaler(!fit)
+            view.setScalingType(
+                if (fit) RendererCommon.ScalingType.SCALE_ASPECT_FIT
+                else RendererCommon.ScalingType.SCALE_ASPECT_FILL,
+            )
             remoteView = view
         }
         remoteVideo?.let { runCatching { it.addSink(view) } }

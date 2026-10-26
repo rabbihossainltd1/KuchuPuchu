@@ -619,6 +619,50 @@ private fun QrScannerPane(nav: NavController) {
                         }
                     }
                 }
+                // Owner 2026-10-26 (item 6): a scanned VintoxBd profile link
+                // (vintoxbd.online/@handle — what the VX QR now encodes) opens
+                // that person's profile preview HERE first; Message from the
+                // preview opens the chat. Resolution tries the handle lookup,
+                // then an exact-username search, so a VX-only account (no KP
+                // twin) still resolves.
+                is QrScanAction.VxUserHandle -> {
+                    loading = true
+                    scope.launch {
+                        runCatching {
+                            withContext(Dispatchers.IO) {
+                                val direct =
+                                    runCatching { Api.get("/api/users/username/${action.handle}", force = true) }
+                                        .getOrNull()
+                                        ?.optJSONObject("user")
+                                if (direct != null) {
+                                    direct
+                                } else {
+                                    val found = Api.get("/api/search?q=${Api.q(action.handle)}", true)
+                                    val rows = found.optJSONArray("users") ?: found.optJSONArray("results")
+                                    var match: JSONObject? = null
+                                    if (rows != null) {
+                                        for (i in 0 until rows.length()) {
+                                            val row = rows.optJSONObject(i) ?: continue
+                                            if (row.optString("username").equals(action.handle, ignoreCase = true)) {
+                                                match = row
+                                                break
+                                            }
+                                        }
+                                    }
+                                    match
+                                }
+                            }
+                        }.onSuccess { u ->
+                            loading = false
+                            if (u == null) error = "This QR code doesn't match a VintoxBd account."
+                            else if (u.optString("id") == Store.myId()) error = "That's your own code."
+                            else preview = u
+                        }.onFailure {
+                            loading = false
+                            error = it.message ?: "Could not look up that account."
+                        }
+                    }
+                }
                 is QrScanAction.WebLogin -> {
                     loading = true
                     scope.launch {
