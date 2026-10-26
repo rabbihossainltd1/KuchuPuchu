@@ -43,6 +43,7 @@ import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
 import org.webrtc.SurfaceTextureHelper
 import org.webrtc.SurfaceViewRenderer
+import org.webrtc.TextureViewRenderer
 import org.webrtc.VideoCapturer
 import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
@@ -96,6 +97,61 @@ data class CallUi(
  * Both sides of every call now land on the SAME screens: incoming
  * (ringing) → in-call (voice or video). No per-side variants.
  */
+/**
+ * The handful of renderer calls the engine makes, so the app can attach either
+ * a SurfaceView (the small group-call tiles) or a TextureView (every in-call
+ * video since the fullscreen fix — a SurfaceView is its own window layer and
+ * cannot be laid over the call chrome) through one door.
+ */
+interface KpVideoView : org.webrtc.VideoSink {
+    fun initRenderer(ctx: org.webrtc.EglBase.Context)
+    fun setRendererMirror(on: Boolean)
+    fun setHardwareScaler(on: Boolean)
+    fun releaseRenderer()
+}
+
+/** TextureView-backed renderer: an ordinary view, so it scales and clips. */
+class TextureVideoView(private val view: TextureViewRenderer) : KpVideoView {
+    override fun initRenderer(ctx: org.webrtc.EglBase.Context) {
+        runCatching { view.init(ctx, null) }
+    }
+
+    override fun setRendererMirror(on: Boolean) {
+        runCatching { view.setMirror(on) }
+    }
+
+    override fun setHardwareScaler(on: Boolean) {
+        runCatching { view.setEnableHardwareScaler(on) }
+    }
+
+    override fun releaseRenderer() {
+        runCatching { view.release() }
+    }
+
+    override fun onFrame(frame: org.webrtc.VideoFrame) = view.onFrame(frame)
+}
+
+/** SurfaceView-backed renderer, kept for the group grid. */
+class SurfaceVideoView(private val view: SurfaceViewRenderer) : KpVideoView {
+    override fun initRenderer(ctx: org.webrtc.EglBase.Context) {
+        runCatching { view.init(ctx, null) }
+    }
+
+    override fun setRendererMirror(on: Boolean) {
+        runCatching { view.setMirror(on) }
+    }
+
+    override fun setHardwareScaler(on: Boolean) {
+        runCatching { view.setEnableHardwareScaler(on) }
+    }
+
+    override fun releaseRenderer() {
+        runCatching { view.release() }
+    }
+
+    override fun onFrame(frame: org.webrtc.VideoFrame) = view.onFrame(frame)
+}
+
 class CallEngine(private val app: Application) {
     var onChange: ((CallUi?) -> Unit)? = null
 
@@ -314,8 +370,8 @@ class CallEngine(private val app: Application) {
     private var remoteVideo: VideoTrack? = null
     private var capturer: VideoCapturer? = null
     private var helper: SurfaceTextureHelper? = null
-    private var localView: SurfaceViewRenderer? = null
-    private var remoteView: SurfaceViewRenderer? = null
+    private var localView: KpVideoView? = null
+    private var remoteView: KpVideoView? = null
     private val seenIce = mutableSetOf<String>()
     private val icePulling = java.util.concurrent.atomic.AtomicBoolean(false)
     private val iceCursorLock = Any()
@@ -2023,7 +2079,7 @@ class CallEngine(private val app: Application) {
         capturer = screen
         sharing = true
         cameraOff = false
-        localView?.setMirror(false)
+        localView?.setRendererMirror(false)
         localView?.let { runCatching { track.addSink(it) } }
         // The call's KIND is not touched here (owner round 31 item 19): a
         // shared screen on a voice call keeps the voice UI on both phones —
@@ -2063,7 +2119,7 @@ class CallEngine(private val app: Application) {
         val track = videoTrack
         if (track != null) {
             if (sender != null) sender.setTrack(track, false) else pc?.addTrack(track)
-            localView?.setMirror(currentFacingFront)
+            localView?.setRendererMirror(currentFacingFront)
             localView?.let { runCatching { track.addSink(it) } }
         } else {
             runCatching { sender?.setTrack(null, false) }
@@ -2081,34 +2137,34 @@ class CallEngine(private val app: Application) {
         dropShareFgs()
     }
 
-    fun attachLocal(view: SurfaceViewRenderer) {
+    fun attachLocal(view: KpVideoView) {
         if (localView !== view) {
             localView?.let { old -> videoTrack?.let { runCatching { it.removeSink(old) } } }
-            runCatching { view.init(egl.eglBaseContext, null) }
-            view.setMirror(currentFacingFront && !sharing)
-            view.setEnableHardwareScaler(true)
+            view.initRenderer(egl.eglBaseContext)
+            view.setRendererMirror(currentFacingFront && !sharing)
+            view.setHardwareScaler(true)
             localView = view
         }
         videoTrack?.let { runCatching { it.addSink(view) } }
     }
 
-    fun attachRemote(view: SurfaceViewRenderer) {
+    fun attachRemote(view: KpVideoView) {
         if (remoteView !== view) {
             remoteView?.let { old -> remoteVideo?.let { runCatching { it.removeSink(old) } } }
-            runCatching { view.init(egl.eglBaseContext, null) }
-            view.setMirror(false)
-            view.setEnableHardwareScaler(true)
+            view.initRenderer(egl.eglBaseContext)
+            view.setRendererMirror(false)
+            view.setHardwareScaler(true)
             remoteView = view
         }
         remoteVideo?.let { runCatching { it.addSink(view) } }
     }
 
-    fun detachLocal(view: SurfaceViewRenderer) {
+    fun detachLocal(view: KpVideoView) {
         videoTrack?.let { runCatching { it.removeSink(view) } }
         if (localView === view) localView = null
     }
 
-    fun detachRemote(view: SurfaceViewRenderer) {
+    fun detachRemote(view: KpVideoView) {
         remoteVideo?.let { runCatching { it.removeSink(view) } }
         if (remoteView === view) remoteView = null
     }
@@ -2132,11 +2188,11 @@ class CallEngine(private val app: Application) {
         videoSource = null
         localView?.let { v ->
             videoTrack?.let { runCatching { it.removeSink(v) } }
-            runCatching { v.release() }
+            v.releaseRenderer()
         }
         remoteView?.let { v ->
             remoteVideo?.let { runCatching { it.removeSink(v) } }
-            runCatching { v.release() }
+            v.releaseRenderer()
         }
         audioTrack = null
         runCatching { videoTrack?.dispose() }

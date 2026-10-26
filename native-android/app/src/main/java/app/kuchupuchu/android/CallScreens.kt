@@ -90,6 +90,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import org.webrtc.RendererCommon
 import org.webrtc.SurfaceViewRenderer
+import org.webrtc.TextureViewRenderer
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -661,50 +662,30 @@ private fun ShareFullscreen(call: CallUi) {
     val engine = CallEngine.instance ?: return
     val secs = rememberTick(call.id, call.startedAt, call.connecting || call.reconnecting || engine.onHold)
     androidx.activity.compose.BackHandler { engine.exitShareFullscreen() }
-    // Owner 2026-10-25 (item 4): a desktop is landscape and this app is locked
-    // to portrait, so a fitted 16:9 share was a postage stamp in a black field.
-    // Watching a shared screen now turns the WHOLE screen sideways for as long
-    // as this view is open — the shared desktop then fills the display the way
-    // it does on a monitor — and the chip still lets him switch to Fill (crop)
-    // or keep it upright.
-    val ctx = LocalContext.current
-    val activity = remember(ctx) {
-        var c: android.content.Context? = ctx
-        while (c is android.content.ContextWrapper && c !is android.app.Activity) c = c.baseContext
-        c as? android.app.Activity
-    }
-    var sideways by remember { mutableStateOf(true) }
-    DisposableEffect(activity, sideways) {
-        val previous = activity?.requestedOrientation
-        runCatching {
-            activity?.requestedOrientation =
-                if (sideways) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-        }
-        onDispose {
-            runCatching { activity?.requestedOrientation = previous ?: android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
-        }
-    }
-    var cropped by remember { mutableStateOf(false) }
+    // Owner 2026-10-26 (item 3): the phone stays upright and the WHOLE shared
+    // desktop is on screen — fitted, black above and below, never cropped and
+    // never turned. No extra chips: one button leaves fullscreen, and back does
+    // the same.
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        VideoRenderer(engine, remote = true, fit = !cropped)
+        VideoRenderer(engine, remote = true, fit = true)
         Row(
             Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(horizontal = 60.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.Center,
+                .padding(start = 16.dp, end = 60.dp, top = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(call.otherName, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            UserBadges(call.otherUser, 13.dp, gap = 4.dp)
-            Spacer(Modifier.width(10.dp))
             Text(
-                if (call.reconnecting) "Reconnecting…" else clockText(secs),
-                color = Color(0xB3FFFFFF),
-                fontSize = 13.sp,
+                call.otherName + " · " + (if (call.reconnecting) "Reconnecting…" else clockText(secs)),
+                color = Color(0xCCFFFFFF),
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                modifier = Modifier.weight(1f, fill = false),
             )
+            Spacer(Modifier.width(6.dp))
+            UserBadges(call.otherUser, 12.dp, gap = 4.dp)
         }
         Box(
             Modifier
@@ -719,34 +700,6 @@ private fun ShareFullscreen(call: CallUi) {
         ) {
             Icon(Icons.Filled.FullscreenExit, "Exit fullscreen", tint = Color.White, modifier = Modifier.size(24.dp))
         }
-        // Two chips, bottom-centre: how the shared screen is fitted, and which
-        // way up it is. Nothing else in the call UI moves.
-        Row(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 18.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            ShareChip(if (cropped) "Fit" else "Fill", active = cropped) { cropped = !cropped }
-            ShareChip(if (sideways) "Upright" else "Sideways", active = sideways) { sideways = !sideways }
-        }
-    }
-}
-
-/** A small glass chip for the two share-view toggles. */
-@Composable
-private fun ShareChip(label: String, active: Boolean, onClick: () -> Unit) {
-    val haptics = rememberHaptics()
-    Box(
-        Modifier
-            .clip(CircleShape)
-            .background(if (active) Color(0xF21C9A78) else Color(0x66000000))
-            .border(1.dp, Color(0x33FFFFFF), CircleShape)
-            .clickable { haptics.tap(); onClick() }
-            .padding(horizontal = 16.dp, vertical = 9.dp),
-    ) {
-        Text(label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -1533,35 +1486,48 @@ private fun StripAction(
  */
 @Composable
 fun VideoRenderer(engine: CallEngine, remote: Boolean, fit: Boolean = false, pip: Boolean = false) {
-    key(remote, pip, fit) {
-    AndroidView(
-        factory = { c ->
-            SurfaceViewRenderer(c).apply {
-                init(engine.egl.eglBaseContext, null)
-                if (pip) {
-                    setZOrderMediaOverlay(true)
+    // Owner 2026-10-26 (item 3): a SurfaceView is its own window layer — it
+    // cannot be rounded, clipped OR laid over the call chrome, and a fullscreen
+    // one punched a hole straight through the page (the "fullscreen shows
+    // nothing" report). Every in-call video is now a TextureView, an ordinary
+    // view that scales, clips and sits in the layout like the rest of the UI.
+    val holder = remember { arrayOfNulls<KpVideoView>(1) }
+    key(remote, fit) {
+        AndroidView(
+            factory = { c ->
+                TextureViewRenderer(c).apply {
+                    runCatching { init(engine.egl.eglBaseContext, null) }
+                    setEnableHardwareScaler(true)
+                    setMirror(!remote && !engine.sharing)
+                    setScalingType(
+                        if (fit) RendererCommon.ScalingType.SCALE_ASPECT_FIT
+                        else RendererCommon.ScalingType.SCALE_ASPECT_FILL,
+                    )
                     clipToOutline = true
-                    outlineProvider = object : android.view.ViewOutlineProvider() {
-                        override fun getOutline(view: android.view.View, outline: android.graphics.Outline) {
-                            outline.setRoundRect(0, 0, view.width, view.height, 14f * resources.displayMetrics.density)
+                    outlineProvider =
+                        object : android.view.ViewOutlineProvider() {
+                            override fun getOutline(view: android.view.View, outline: android.graphics.Outline) {
+                                outline.setRoundRect(
+                                    0,
+                                    0,
+                                    view.width,
+                                    view.height,
+                                    (if (pip) 14f else 0f) * resources.displayMetrics.density,
+                                )
+                            }
                         }
-                    }
+                    val sink = TextureVideoView(this)
+                    holder[0] = sink
+                    if (remote) engine.attachRemote(sink) else engine.attachLocal(sink)
                 }
-                setEnableHardwareScaler(true)
-                setMirror(!remote && !engine.sharing)
-                setScalingType(
-                    if (fit) RendererCommon.ScalingType.SCALE_ASPECT_FIT
-                    else RendererCommon.ScalingType.SCALE_ASPECT_FILL,
-                )
-                if (remote) engine.attachRemote(this) else engine.attachLocal(this)
-            }
-        },
-        onRelease = { view ->
-            if (remote) engine.detachRemote(view) else engine.detachLocal(view)
-            runCatching { view.release() }
-        },
-        modifier = Modifier.fillMaxSize(),
-    )
+            },
+            onRelease = { view ->
+                holder[0]?.let { sink -> if (remote) engine.detachRemote(sink) else engine.detachLocal(sink) }
+                holder[0] = null
+                runCatching { view.release() }
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 

@@ -41,15 +41,17 @@ assert(capture.includes("displayManager.unregisterDisplayListener"));
 assert(capture.includes("resizeTo(actual.first, actual.second)"));
 assert(capture.includes("maxOf(sourceWidth, sourceHeight)"));
 const screen = read("native-android/app/src/main/java/app/kuchupuchu/android/CallScreens.kt");
-assert(screen.includes("key(remote, pip, fit)"));
+assert(screen.includes("key(remote, fit)"));
 assert(screen.includes("if (effSwap) engine.sharing else engine.peerScreen"));
-// Owner 2026-10-25 (item 4): watching a shared desktop turns the whole screen
-// sideways (the app is portrait-locked), so a 16:9 PC screen fills the display
-// instead of sitting in a letterbox, and Fill/Fit + Sideways chips let him pick.
-assert(screen.includes("SCREEN_ORIENTATION_SENSOR_LANDSCAPE"));
-assert(screen.includes("SCREEN_ORIENTATION_PORTRAIT"));
-assert(screen.includes("ShareChip("));
-assert(screen.includes("var sideways by remember { mutableStateOf(true) }"));
+// Owner 2026-10-26 (item 3): the phone stays upright. Fullscreen fits the WHOLE
+// shared desktop with black bars, never crops and never turns, and there are no
+// extra chips — the corner button leaves. A TextureView, not a SurfaceView, is
+// what makes a truly full-bleed shared screen possible.
+assert(screen.includes("TextureViewRenderer"));
+assert(!screen.includes("SCREEN_ORIENTATION_SENSOR_LANDSCAPE"));
+assert(!screen.includes("ShareChip("));
+assert(!screen.includes("graphicsLayer"));
+assert(screen.includes("VideoRenderer(engine, remote = true, fit = true)"));
 const web = read("web/src/calls/CallStage.tsx");
 assert(web.includes("element.videoWidth / element.videoHeight"));
 assert(web.includes("onResize={syncSourceAspect}"));
