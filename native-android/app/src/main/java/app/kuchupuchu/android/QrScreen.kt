@@ -36,6 +36,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -77,6 +80,7 @@ import com.journeyapps.barcodescanner.BarcodeEncoder
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -572,6 +576,11 @@ private fun QrScannerPane(nav: NavController) {
     var loading by remember { mutableStateOf(false) }
     var preview by remember { mutableStateOf<JSONObject?>(null) }
     var linkApproval by remember { mutableStateOf<QrScanAction.VxLinkApproval?>(null) }
+    // Owner 2026-10-29: a scan used to end in a bare toast. The link now gets
+    // its own result screen — null = nothing to show, true = linked,
+    // false = failed (linkError carries the words).
+    var linkOutcome by remember { mutableStateOf<Boolean?>(null) }
+    var linkError by remember { mutableStateOf("") }
     var permissionDenied by remember { mutableStateOf(false) }
 
     val scanner =
@@ -749,16 +758,100 @@ private fun QrScannerPane(nav: NavController) {
                             }
                         }.onSuccess {
                             loading = false
-                            Toast.makeText(ctx, "Accounts linked.", Toast.LENGTH_SHORT).show()
-                            nav.popBackStack()
+                            linkError = ""
+                            linkOutcome = true
                         }.onFailure {
                             loading = false
-                            error = it.message ?: "That link has expired. Ask for a fresh QR code."
+                            linkError = it.message ?: "That link has expired. Ask for a fresh QR code."
+                            linkOutcome = false
                         }
                     }
                 }
             },
         )
+    }
+
+    // Owner 2026-10-29: the link result is a SCREEN, not a toast — a popping
+    // check (or cross) with the words, and on success it takes you back by
+    // itself after a few seconds, mirroring the website's own success page.
+    if (linkOutcome != null) {
+        val ok = linkOutcome == true
+        val pop by animateFloatAsState(
+            targetValue = 1f,
+            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+            label = "linkResultPop",
+        )
+        LaunchedEffect(ok) {
+            if (ok) {
+                delay(4500)
+                if (linkOutcome == true) nav.popBackStack()
+            }
+        }
+        Box(
+            Modifier.fillMaxSize().background(Color(0xFFF4F8FB)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(32.dp),
+            ) {
+                Box(
+                    Modifier
+                        .size(92.dp)
+                        .graphicsLayer { scaleX = pop; scaleY = pop }
+                        .clip(CircleShape)
+                        .background(if (ok) Color(0xFF16A34A) else Color(0xFFDC2626)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (ok) {
+                        Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.size(48.dp))
+                    } else {
+                        Text("✕", color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Spacer(Modifier.height(20.dp))
+                Text(
+                    if (ok) "Accounts linked" else "Link didn't go through",
+                    color = Ink, fontSize = 21.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    if (ok) "Your KuchuPuchu and VintoxBd accounts are connected now."
+                    else linkError.ifBlank { "Something went wrong. Show a fresh QR on the website and scan again." },
+                    color = Muted, fontSize = 14.sp, textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(26.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(ActionBlue)
+                        .clickable {
+                            linkOutcome = null
+                            if (ok) nav.popBackStack() else launchScan()
+                        }
+                        .padding(vertical = 13.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(if (ok) "Done" else "Scan again", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                }
+                if (!ok) {
+                    Spacer(Modifier.height(10.dp))
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Line)
+                            .clickable { linkOutcome = null; nav.popBackStack() }
+                            .padding(vertical = 13.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("Close", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+        return
     }
 
     if (preview != null) {
