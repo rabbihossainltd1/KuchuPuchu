@@ -8839,7 +8839,9 @@ private fun MessageRow(
     }
     // Owner round 20: videos render as a tappable video bubble and play
     // IN-APP (the system player could never stream these auth-only files).
-    if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {
+    // Owner 2026-10-29: a VX voice note is a .webm FILE with meta.voice —
+    // it must win over the video branch or it renders as a video in KP.
+    if (kind == "FILE" && fileLooksVideo(m) && !fileLooksVoice(m) && !sentAsDocument(m)) {
         KpMessageFocusSlot(focusKey, rowMine = mine) { requestFocus ->
             Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine, sent = !mine || !pendingEcho, key = fxKey)) {
                 VideoMessageRow(
