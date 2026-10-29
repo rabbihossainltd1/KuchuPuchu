@@ -87,6 +87,27 @@ class QrScanPolicyTest {
         )
     }
 
+    // Owner 2026-10-29: the VX Link-KP QR (VX-initiated approval) resolves to
+    // the signed approval — and only with both halves present.
+    @Test
+    fun `a vintoxbd link approval qr resolves to its id and signature`() {
+        assertEquals(
+            QrScanAction.VxLinkApproval("abc123_-XYZ", "sig_0123456789abcdef"),
+            parseQrScan("https://vintoxbd.online/link/abc123_-XYZ?sig=sig_0123456789abcdef"),
+        )
+        assertEquals(
+            QrScanAction.VxLinkApproval("abc123", "sig_0123456789abcdef"),
+            parseQrScan("https://vintoxbd.online/link/abc123?signature=sig_0123456789abcdef"),
+        )
+    }
+
+    @Test
+    fun `a vintoxbd link qr without a real signature is invalid`() {
+        assertEquals(QrScanAction.Invalid, parseQrScan("https://vintoxbd.online/link/abc123"))
+        assertEquals(QrScanAction.Invalid, parseQrScan("https://vintoxbd.online/link/abc123?sig=short"))
+        assertEquals(QrScanAction.Invalid, parseQrScan("https://vintoxbd.online/link/?sig=sig_0123456789abcdef"))
+    }
+
     @Test
     fun `a malformed or off-host link is invalid, never a half-parsed handle`() {
         for (

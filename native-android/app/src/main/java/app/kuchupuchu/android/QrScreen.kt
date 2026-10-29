@@ -571,6 +571,7 @@ private fun QrScannerPane(nav: NavController) {
     var error by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var preview by remember { mutableStateOf<JSONObject?>(null) }
+    var linkApproval by remember { mutableStateOf<QrScanAction.VxLinkApproval?>(null) }
     var permissionDenied by remember { mutableStateOf(false) }
 
     val scanner =
@@ -663,6 +664,12 @@ private fun QrScannerPane(nav: NavController) {
                         }
                     }
                 }
+                // Owner 2026-10-29: a VintoxBd Link-KP QR — this app is the
+                // decider. Ask once (the confirm sheet), then approve in the
+                // core; the website page polls and shows the same success.
+                is QrScanAction.VxLinkApproval -> {
+                    linkApproval = action
+                }
                 is QrScanAction.WebLogin -> {
                     loading = true
                     scope.launch {
@@ -717,6 +724,42 @@ private fun QrScannerPane(nav: NavController) {
     }
 
     LaunchedEffect(Unit) { launchScan() }
+
+    if (linkApproval != null) {
+        KpConfirmSheet(
+            title = "Link VintoxBd account?",
+            text = "This links your KuchuPuchu account with the VintoxBd account that showed this QR code. They stay separate accounts — nothing is merged.",
+            confirmLabel = "Link accounts",
+            onDismiss = { linkApproval = null; launchScan() },
+            onConfirm = {
+                val approval = linkApproval
+                linkApproval = null
+                if (approval != null) {
+                    loading = true
+                    scope.launch {
+                        runCatching {
+                            withContext(Dispatchers.IO) {
+                                Api.post(
+                                    "/api/links/approvals/${approval.id}/approve",
+                                    JSONObject()
+                                        .put("id", approval.id)
+                                        .put("signature", approval.signature)
+                                        .put("confirm", true),
+                                )
+                            }
+                        }.onSuccess {
+                            loading = false
+                            Toast.makeText(ctx, "Accounts linked.", Toast.LENGTH_SHORT).show()
+                            nav.popBackStack()
+                        }.onFailure {
+                            loading = false
+                            error = it.message ?: "That link has expired. Ask for a fresh QR code."
+                        }
+                    }
+                }
+            },
+        )
+    }
 
     if (preview != null) {
         QrScanPreviewSheet(
