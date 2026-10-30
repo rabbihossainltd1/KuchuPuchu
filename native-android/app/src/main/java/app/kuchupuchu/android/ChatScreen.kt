@@ -7752,6 +7752,37 @@ private fun LoginApprovalMessage(m: JSONObject) {
 }
 
 /**
+ * One info row of the link-OTP card: the icon and the TITLE share a
+ * vertically-centred line (the subtitle hangs below the title), so the
+ * icon can never drift above or below its text.
+ */
+@Composable
+private fun LinkOtpInfoRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    iconTint: Color,
+    title: String,
+    titleColor: Color,
+    lines: List<String>,
+) {
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(17.dp))
+            Spacer(Modifier.width(9.dp))
+            Text(title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = titleColor, maxLines = 1)
+        }
+        lines.forEach { line ->
+            Text(
+                line,
+                fontSize = 10.5.sp,
+                color = Muted,
+                maxLines = 2,
+                modifier = Modifier.padding(start = 26.dp),
+            )
+        }
+    }
+}
+
+/**
  * Owner 2026-10-30 (mockup "Secure Platform OTP Chat Mockup"): the
  * website's "Try Another way" code arrives as this card — title, the
  * 4-digit code in a mint pill with a Copy button, then Device /
@@ -7813,21 +7844,21 @@ private fun LinkOtpMessage(m: JSONObject) {
     val teal = Color(0xFF0F766E)
     Column(
         Modifier
-            .widthIn(max = 268.dp)
+            .widthIn(max = 336.dp)
             .fillMaxWidth()
             .padding(vertical = 4.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(surface)
-            .padding(14.dp),
+            .padding(12.dp),
     ) {
-        Text("Your Login OTP", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Ink)
-        Spacer(Modifier.height(3.dp))
+        Text("Your Login OTP", fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = Ink)
+        Spacer(Modifier.height(2.dp))
         Text(
             "Use the following OTP to link $vxName's VintoxBd account with your KuchuPuchu account. This code is valid for 10 minutes only.",
-            fontSize = 11.5.sp,
+            fontSize = 11.sp,
             color = Muted,
         )
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
         if (code != null) {
             Row(
                 Modifier
@@ -7874,63 +7905,50 @@ private fun LinkOtpMessage(m: JSONObject) {
         } else {
             Text("⏰ This code has expired — ask the website for a new one.", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Muted)
         }
-        Spacer(Modifier.height(12.dp))
-        // Owner 2026-10-30: icon + text lines must sit on one clean grid —
-        // every icon lives in the same fixed 20dp lane, centred on the
-        // title line, so the rows line up exactly like the mockup.
-        Row(verticalAlignment = Alignment.Top) {
-            Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.VerifiedUser, contentDescription = null, tint = teal, modifier = Modifier.size(18.dp))
-            }
-            Spacer(Modifier.width(10.dp))
-            Column {
-                Text("Account Binding OTP", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = teal)
-                Text("This OTP is for binding your account with the VintoxBd website.", fontSize = 10.5.sp, color = Muted)
-            }
-        }
         Spacer(Modifier.height(10.dp))
+        // Owner 2026-10-30 (fix round): the title must sit ON the icon's
+        // centre line, not below it — so icon+title form one centred row
+        // and the subtitle hangs under the title only, same left edge.
+        LinkOtpInfoRow(
+            icon = Icons.Filled.VerifiedUser,
+            iconTint = teal,
+            title = "Account Binding OTP",
+            titleColor = teal,
+            lines = listOf("This OTP is for binding your account with the VintoxBd website."),
+        )
+        Spacer(Modifier.height(8.dp))
         Box(Modifier.fillMaxWidth().height(1.dp).background(if (KpThemeMode.darkBlue) Color(0x22FFFFFF) else Color(0xFFE8EEF0)))
         if (device != null) {
-            Spacer(Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.Top) {
-                Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Filled.Smartphone, contentDescription = null, tint = Muted, modifier = Modifier.size(18.dp))
-                }
-                Spacer(Modifier.width(10.dp))
-                Column {
-                    Text("Device", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Ink)
-                    Text(device, fontSize = 10.5.sp, color = Muted, maxLines = 2)
-                }
-            }
+            Spacer(Modifier.height(8.dp))
+            LinkOtpInfoRow(
+                icon = Icons.Filled.Smartphone,
+                iconTint = Muted,
+                title = "Device",
+                titleColor = Ink,
+                lines = listOf(device),
+            )
         }
         if (place != null || ip != null) {
-            Spacer(Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.Top) {
-                Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Filled.LocationOn, contentDescription = null, tint = Muted, modifier = Modifier.size(18.dp))
-                }
-                Spacer(Modifier.width(10.dp))
-                Column {
-                    Text("IP Location", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Ink)
-                    if (place != null) Text(place, fontSize = 10.5.sp, color = Muted)
-                    if (ip != null) Text(ip, fontSize = 10.5.sp, color = Muted)
-                }
-            }
+            Spacer(Modifier.height(8.dp))
+            LinkOtpInfoRow(
+                icon = Icons.Filled.LocationOn,
+                iconTint = Muted,
+                title = "IP Location",
+                titleColor = Ink,
+                lines = listOfNotNull(place, ip),
+            )
         }
         if (requestedAt.isNotBlank()) {
-            Spacer(Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.Top) {
-                Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Filled.Schedule, contentDescription = null, tint = Muted, modifier = Modifier.size(18.dp))
-                }
-                Spacer(Modifier.width(10.dp))
-                Column {
-                    Text("Requested At", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Ink)
-                    Text(requestedAt, fontSize = 10.5.sp, color = Muted)
-                }
-            }
+            Spacer(Modifier.height(8.dp))
+            LinkOtpInfoRow(
+                icon = Icons.Filled.Schedule,
+                iconTint = Muted,
+                title = "Requested At",
+                titleColor = Ink,
+                lines = listOf(requestedAt),
+            )
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
         Text(
             "If you didn't request this, please ignore this message or contact support. Never share the code with anyone.",
             fontSize = 10.5.sp,

@@ -77,8 +77,8 @@ jobs:
           test -s "$apk"
           code="$(sed -n 's/^[[:space:]]*versionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle.kts | head -n1)"
           name="$(sed -n 's/^[[:space:]]*versionName = \"\([^\"]*\)\".*/\1/p' app/build.gradle.kts | head -n1)"
-          test "$code" = "325"
-          test "$name" = "3.9.248"
+          test "$code" = "326"
+          test "$name" = "3.9.249"
           # rNNN = versionCode - 175 since v292 (r119 = 294, r120 = 295, ...);
           asset="$RUNNER_TEMP/kuchupuchu-${name}-r$(( code - 175 )).apk"
           cp "$apk" "$asset"
