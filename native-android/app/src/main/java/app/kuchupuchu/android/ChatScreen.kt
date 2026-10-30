@@ -7875,9 +7875,14 @@ private fun LinkOtpMessage(m: JSONObject) {
             Text("⏰ This code has expired — ask the website for a new one.", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Muted)
         }
         Spacer(Modifier.height(12.dp))
+        // Owner 2026-10-30: icon + text lines must sit on one clean grid —
+        // every icon lives in the same fixed 20dp lane, centred on the
+        // title line, so the rows line up exactly like the mockup.
         Row(verticalAlignment = Alignment.Top) {
-            Icon(Icons.Filled.VerifiedUser, contentDescription = null, tint = teal, modifier = Modifier.size(17.dp))
-            Spacer(Modifier.width(9.dp))
+            Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.VerifiedUser, contentDescription = null, tint = teal, modifier = Modifier.size(18.dp))
+            }
+            Spacer(Modifier.width(10.dp))
             Column {
                 Text("Account Binding OTP", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = teal)
                 Text("This OTP is for binding your account with the VintoxBd website.", fontSize = 10.5.sp, color = Muted)
@@ -7888,8 +7893,10 @@ private fun LinkOtpMessage(m: JSONObject) {
         if (device != null) {
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.Top) {
-                Icon(Icons.Filled.Smartphone, contentDescription = null, tint = Muted, modifier = Modifier.size(17.dp))
-                Spacer(Modifier.width(9.dp))
+                Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.Smartphone, contentDescription = null, tint = Muted, modifier = Modifier.size(18.dp))
+                }
+                Spacer(Modifier.width(10.dp))
                 Column {
                     Text("Device", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Ink)
                     Text(device, fontSize = 10.5.sp, color = Muted, maxLines = 2)
@@ -7899,8 +7906,10 @@ private fun LinkOtpMessage(m: JSONObject) {
         if (place != null || ip != null) {
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.Top) {
-                Icon(Icons.Filled.LocationOn, contentDescription = null, tint = Muted, modifier = Modifier.size(17.dp))
-                Spacer(Modifier.width(9.dp))
+                Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.LocationOn, contentDescription = null, tint = Muted, modifier = Modifier.size(18.dp))
+                }
+                Spacer(Modifier.width(10.dp))
                 Column {
                     Text("IP Location", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Ink)
                     if (place != null) Text(place, fontSize = 10.5.sp, color = Muted)
@@ -7911,8 +7920,10 @@ private fun LinkOtpMessage(m: JSONObject) {
         if (requestedAt.isNotBlank()) {
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.Top) {
-                Icon(Icons.Filled.Schedule, contentDescription = null, tint = Muted, modifier = Modifier.size(17.dp))
-                Spacer(Modifier.width(9.dp))
+                Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.Schedule, contentDescription = null, tint = Muted, modifier = Modifier.size(18.dp))
+                }
+                Spacer(Modifier.width(10.dp))
                 Column {
                     Text("Requested At", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Ink)
                     Text(requestedAt, fontSize = 10.5.sp, color = Muted)
