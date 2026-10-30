@@ -6,6 +6,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -36,6 +37,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -77,6 +82,7 @@ import com.journeyapps.barcodescanner.BarcodeEncoder
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -571,6 +577,19 @@ private fun QrScannerPane(nav: NavController) {
     var error by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var preview by remember { mutableStateOf<JSONObject?>(null) }
+    var linkApproval by remember { mutableStateOf<QrScanAction.VxLinkApproval?>(null) }
+    // Owner 2026-10-30: the link sheet must show WHO is being linked — the
+    // VintoxBd account's picture, name and username — not a bare question.
+    // The identity comes from the core's approval lookup; the photo bytes
+    // ride the ordinary per-user avatar endpoint.
+    var linkPartner by remember { mutableStateOf<JSONObject?>(null) }
+    var linkPartnerBusy by remember { mutableStateOf(false) }
+    var linkPartnerAvatar by remember { mutableStateOf<String?>(null) }
+    // Owner 2026-10-29: a scan used to end in a bare toast. The link now gets
+    // its own result screen — null = nothing to show, true = linked,
+    // false = failed (linkError carries the words).
+    var linkOutcome by remember { mutableStateOf<Boolean?>(null) }
+    var linkError by remember { mutableStateOf("") }
     var permissionDenied by remember { mutableStateOf(false) }
 
     val scanner =
@@ -663,6 +682,12 @@ private fun QrScannerPane(nav: NavController) {
                         }
                     }
                 }
+                // Owner 2026-10-29: a VintoxBd Link-KP QR — this app is the
+                // decider. Ask once (the confirm sheet), then approve in the
+                // core; the website page polls and shows the same success.
+                is QrScanAction.VxLinkApproval -> {
+                    linkApproval = action
+                }
                 is QrScanAction.WebLogin -> {
                     loading = true
                     scope.launch {
@@ -717,6 +742,178 @@ private fun QrScannerPane(nav: NavController) {
     }
 
     LaunchedEffect(Unit) { launchScan() }
+
+    // Who showed this QR? Ask the core before the sheet asks the user, so
+    // the confirm names (and pictures) the exact VintoxBd account. A decided
+    // approval ends here with the failure screen; any other lookup trouble
+    // just falls back to the unnamed sheet — linking must never dead-end.
+    LaunchedEffect(linkApproval?.id) {
+        val approval = linkApproval ?: return@LaunchedEffect
+        linkPartner = null
+        linkPartnerAvatar = null
+        linkPartnerBusy = true
+        runCatching {
+            withContext(Dispatchers.IO) {
+                CoreApi.post(
+                    ctx,
+                    "/api/links/approvals/lookup",
+                    JSONObject().put("id", approval.id).put("signature", approval.signature),
+                )
+            }
+        }.onSuccess { data ->
+            linkPartnerBusy = false
+            val initiator = data.optJSONObject("approval")?.optJSONObject("initiator")
+            linkPartner = initiator
+            val pid = initiator?.optString("id").orEmpty()
+            if (pid.isNotBlank()) {
+                scope.launch {
+                    linkPartnerAvatar = runCatching {
+                        withContext(Dispatchers.IO) { Api.get("/api/users/$pid/avatar", force = true) }
+                            .optString("avatarUrl")
+                            .takeIf { it.startsWith("data:") || it.startsWith("http") }
+                    }.getOrNull()
+                }
+            }
+        }.onFailure { e ->
+            linkPartnerBusy = false
+            if (e is CoreApi.CoreError && e.status == 409) {
+                linkApproval = null
+                linkError = e.message ?: "That link was already decided."
+                linkOutcome = false
+            }
+        }
+    }
+
+    if (linkApproval != null) {
+        VxLinkSheet(
+            partner = linkPartner,
+            avatarUrl = linkPartnerAvatar,
+            busy = linkPartnerBusy,
+            onDismiss = { linkApproval = null; linkPartner = null; launchScan() },
+            onConfirm = {
+                val approval = linkApproval
+                linkApproval = null
+                if (approval != null) {
+                    loading = true
+                    scope.launch {
+                        runCatching {
+                            withContext(Dispatchers.IO) {
+                                // The link routes live in the core, so this goes
+                                // through CoreApi (the exchanged core session) —
+                                // the same transport Settings › VintoxBd account
+                                // uses for every other /api/links call. The raw
+                                // app session (Api) is the KP edge's credential,
+                                // not the core's, and an approval decided with it
+                                // never landed on the core's own books.
+                                CoreApi.post(
+                                    ctx,
+                                    "/api/links/approvals/${approval.id}/approve",
+                                    JSONObject()
+                                        .put("id", approval.id)
+                                        .put("signature", approval.signature)
+                                        .put("confirm", true),
+                                )
+                            }
+                        }.onSuccess {
+                            loading = false
+                            linkError = ""
+                            linkOutcome = true
+                        }.onFailure {
+                            loading = false
+                            linkError = it.message ?: "That link has expired. Ask for a fresh QR code."
+                            linkOutcome = false
+                        }
+                    }
+                }
+            },
+        )
+    }
+
+    // Owner 2026-10-29: the link result is a SCREEN, not a toast — a popping
+    // check (or cross) with the words, and on success it takes you back by
+    // itself after a few seconds, mirroring the website's own success page.
+    if (linkOutcome != null) {
+        val ok = linkOutcome == true
+        // Start at 0 and spring up: animateFloatAsState(targetValue = 1f)
+        // begins AT 1 on the first frame, so the check never actually popped.
+        val popAnim = remember { Animatable(0f) }
+        LaunchedEffect(ok) {
+            popAnim.animateTo(
+                1f,
+                spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+            )
+            if (ok) {
+                delay(4500)
+                if (linkOutcome == true) nav.popBackStack()
+            }
+        }
+        val pop = popAnim.value
+        Box(
+            Modifier.fillMaxSize().background(Cream),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(32.dp),
+            ) {
+                Box(
+                    Modifier
+                        .size(92.dp)
+                        .graphicsLayer { scaleX = pop; scaleY = pop }
+                        .clip(CircleShape)
+                        .background(if (ok) Color(0xFF16A34A) else Color(0xFFDC2626)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (ok) {
+                        Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.size(48.dp))
+                    } else {
+                        Text("✕", color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Spacer(Modifier.height(20.dp))
+                Text(
+                    if (ok) "Accounts linked" else "Link didn't go through",
+                    color = Ink, fontSize = 21.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    if (ok) "Your KuchuPuchu and VintoxBd accounts are connected now."
+                    else linkError.ifBlank { "Something went wrong. Show a fresh QR on the website and scan again." },
+                    color = Muted, fontSize = 14.sp, textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(26.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(ActionBlue)
+                        .clickable {
+                            linkOutcome = null
+                            if (ok) nav.popBackStack() else launchScan()
+                        }
+                        .padding(vertical = 13.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(if (ok) "Done" else "Scan again", color = ActionBlueInk, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                }
+                if (!ok) {
+                    Spacer(Modifier.height(10.dp))
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Line)
+                            .clickable { linkOutcome = null; nav.popBackStack() }
+                            .padding(vertical = 13.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("Close", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+        return
+    }
 
     if (preview != null) {
         QrScanPreviewSheet(
@@ -794,6 +991,106 @@ private fun QrScannerPane(nav: NavController) {
                         modifier = Modifier.clickable { launchScan() },
                     )
             }
+        }
+    }
+}
+
+/**
+ * Owner 2026-10-30: the "Link VintoxBd account?" sheet used to be a bare
+ * question — no face, no name, nothing to recognise. It now leads with the
+ * VintoxBd account that showed the QR: photo, name, @username and its realm
+ * badge, then the same two buttons every confirm sheet in the app uses
+ * (equal weight, 14dp radius, 12dp vertical padding — not bigger, not
+ * smaller). While the identity is on its way a small spinner holds the
+ * photo's place; if it never arrives the sheet still works unnamed.
+ */
+@Composable
+private fun VxLinkSheet(
+    partner: JSONObject?,
+    avatarUrl: String?,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val haptics = rememberHaptics()
+    val name = partner?.optText("displayName")?.ifBlank { partner.optText("display_name") }.orEmpty()
+    val username = partner?.optText("username").orEmpty()
+    KpSheet(onDismiss = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Spacer(Modifier.height(6.dp))
+            if (busy && partner == null) {
+                Box(Modifier.size(78.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = ActionBlueDeep, modifier = Modifier.size(26.dp))
+                }
+            } else {
+                KpAvatar(name = name, url = avatarUrl, size = 78.dp)
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Link VintoxBd account?",
+                color = Ink,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+            )
+            if (partner != null) {
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        name.ifBlank { "VintoxBd account" },
+                        color = Ink,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    RealmBadge(realmOf(partner), 14.dp)
+                }
+                if (username.isNotBlank()) {
+                    Text("@$username", color = Muted, fontSize = 13.sp)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "This links your KuchuPuchu account with the VintoxBd account above. " +
+                    "They stay separate accounts — nothing is merged.",
+                color = Muted,
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(18.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Line)
+                        .clickable { haptics.tap(); onDismiss() }
+                        .padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text("Cancel", color = Ink, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(ActionBlue)
+                        .clickable(enabled = !busy) { haptics.confirm(); onConfirm() }
+                        .padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Link, null, tint = ActionBlueInk, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Link accounts", color = ActionBlueInk, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
         }
     }
 }

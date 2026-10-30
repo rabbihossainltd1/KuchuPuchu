@@ -29,6 +29,15 @@ sealed class QrScanAction {
     /** `kuchupuchu://weblogin/<token>` — confirm with `POST /api/auth/qr/<token>/confirm`. */
     data class WebLogin(val token: String) : QrScanAction()
 
+    /**
+     * Owner 2026-10-29: the VintoxBd "Link KP" page now INITIATES the link
+     * itself and shows https://vintoxbd.online/link/<id>?sig=<signature> as a
+     * QR code. Scanning it here (the KP side is the decider for a VX-initiated
+     * ceremony) offers the one-tap confirm, then
+     * `POST /api/links/approvals/<id>/approve` completes the binding.
+     */
+    data class VxLinkApproval(val id: String, val signature: String) : QrScanAction()
+
     /** Anything else: a stranger's QR code, a torn/partial scan, or empty content. */
     object Invalid : QrScanAction()
 }
@@ -65,6 +74,28 @@ private fun parseShareLink(contents: String): QrScanAction {
     // Path only — a query string or fragment is not part of the handle.
     val path = afterScheme.substringAfter('/', "").substringBefore('?').substringBefore('#')
     val segments = path.split('/').filter { it.isNotEmpty() }
+    // Owner 2026-10-29: the VX Link-KP QR — /link/<approvalId>?sig=<signature>.
+    // A /link/ path in any other shape is a torn scan, never a handle.
+    if (host == VX_SHARE_HOST && segments.firstOrNull() == "link" && segments.size != 2) {
+        return QrScanAction.Invalid
+    }
+    if (host == VX_SHARE_HOST && segments.size == 2 && segments[0] == "link") {
+        val approvalId = segments[1]
+        val query = contents.substringAfter('?', "").substringBefore('#')
+        val signature = query.split('&').firstNotNullOfOrNull { part ->
+            val kv = part.split('=', limit = 2)
+            if (kv.size == 2 && (kv[0] == "sig" || kv[0] == "signature")) {
+                runCatching { java.net.URLDecoder.decode(kv[1], "UTF-8") }.getOrNull()
+            } else {
+                null
+            }
+        } ?: ""
+        return if (approvalId.matches(Regex("^[A-Za-z0-9_-]{1,128}$")) && signature.length >= 16) {
+            QrScanAction.VxLinkApproval(approvalId, signature)
+        } else {
+            QrScanAction.Invalid
+        }
+    }
     if (segments.size != 1) return QrScanAction.Invalid
     val handle = segments[0].removePrefix("@").lowercase().trim()
     if (!handle.matches(HANDLE_RE)) return QrScanAction.Invalid
