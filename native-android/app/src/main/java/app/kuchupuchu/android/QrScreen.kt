@@ -788,7 +788,7 @@ private fun QrScannerPane(nav: NavController) {
             }
         }
         Box(
-            Modifier.fillMaxSize().background(Color(0xFFF4F8FB)),
+            Modifier.fillMaxSize().background(Cream),
             contentAlignment = Alignment.Center,
         ) {
             Column(
@@ -833,7 +833,7 @@ private fun QrScannerPane(nav: NavController) {
                         .padding(vertical = 13.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(if (ok) "Done" else "Scan again", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text(if (ok) "Done" else "Scan again", color = ActionBlueInk, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 }
                 if (!ok) {
                     Spacer(Modifier.height(10.dp))
