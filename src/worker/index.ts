@@ -2985,6 +2985,120 @@ function randomLinkCode(): string {
   return [...bytes].map((b) => LINK_CODE_ALPHABET[b % LINK_CODE_ALPHABET.length]).join("");
 }
 
+const LINK_OTP_TTL_MS = 10 * 60_000;
+
+/** "Try Another way": the 4-digit code the website asks for. Salted by the
+ * row id, so the stored hash is useless for testing other rows' codes. */
+function randomLinkOtp(): string {
+  return String((crypto.getRandomValues(new Uint32Array(1))[0] ?? 0) % 10_000).padStart(4, "0");
+}
+
+type LinkOtpRow = {
+  id: string;
+  initiator_id: string;
+  kp_user_id: string;
+  code_hash: string;
+  status: string;
+  attempts: number;
+  created_at: string;
+  expires_at: string;
+  verified_at: string | null;
+  used_at: string | null;
+};
+
+/**
+ * The OTP courier: a plain message from the official "KuchuPuchu" account
+ * plus the ordinary message push — the same pipeline (and the same
+ * lock-screen hygiene: the code never rides the push body) as the sign-in
+ * code. Failure here must not fail the request that minted the code.
+ */
+async function sendLinkOtpMessage(
+  env: Env,
+  db: D1Database,
+  ctx: ExecutionContext,
+  kpUserId: string,
+  vxName: string,
+  code: string,
+): Promise<void> {
+  try {
+    const botId = await ensureOfficialBot(db);
+    const convId = await officialBotConvId(db, botId, kpUserId);
+    const mid = id();
+    const created = nowIso();
+    const body =
+      `🔗 Your VintoxBd link code is ${code}\n\n` +
+      `${vxName} is linking their VintoxBd account to your KuchuPuchu account. ` +
+      `Enter this code on the website within 10 minutes to finish linking. ` +
+      `If that wasn't you, ignore this message — never share the code with anyone.`;
+    const compact = "🔗 VintoxBd link code";
+    await run(
+      db,
+      `INSERT INTO messages (id, conv_id, sender_id, kind, body, created_at)
+       VALUES (?, ?, ?, 'TEXT', ?, ?)`,
+      mid,
+      convId,
+      botId,
+      body,
+      created,
+    );
+    await run(
+      db,
+      "UPDATE conversations SET last_message_at = ?, last_message = ? WHERE id = ?",
+      created,
+      compact,
+      convId,
+    );
+    await run(
+      db,
+      "UPDATE members SET unread = unread + 1 WHERE conv_id = ? AND user_id = ?",
+      convId,
+      kpUserId,
+    );
+    const message = msgFrom({
+      id: mid,
+      conv_id: convId,
+      sender_id: botId,
+      kind: "TEXT",
+      body,
+      media: null,
+      meta_json: null,
+      created_at: created,
+      delivered_at: null,
+    } as MsgRow);
+    ctx.waitUntil(
+      broadcastRoomEvent(env, convId, { type: "message", conversationId: convId, message }),
+    );
+    ctx.waitUntil(
+      broadcastRoomEvent(env, `user:${kpUserId}`, { type: "conv", conversationId: convId, msg: 1 }),
+    );
+    ctx.waitUntil(
+      pushMessageUnlessHidden(
+        env,
+        db,
+        kpUserId,
+        convId,
+        {
+          type: "message",
+          convoId: convId,
+          mid,
+          kind: "SOLO",
+          fromName: "KuchuPuchu · Security",
+          body: "🔗 Your VintoxBd link code is in this chat",
+          kp_chat: convId,
+          muted: "0",
+        },
+        {
+          title: "KuchuPuchu · Security",
+          body: "🔗 Your VintoxBd link code is in this chat",
+          channel: "kp_messages_v2",
+        },
+      ),
+    );
+  } catch {
+    /* the code row already exists; the website can mint a fresh one */
+  }
+}
+
 /** Canonical pair key: sorted ids, so a pair has exactly one representation. */
 function linkPairKey(a: string, b: string): string {
   return a < b ? `${a}:${b}` : `${b}:${a}`;
@@ -4489,6 +4603,21 @@ async function ensureSchema(db: D1Database) {
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_link_approvals_code ON link_approvals(code_hash)`,
     `CREATE INDEX IF NOT EXISTS idx_link_approvals_open ON link_approvals(status, expires_at)`,
     `CREATE INDEX IF NOT EXISTS idx_link_approvals_initiator ON link_approvals(initiator_id, status)`,
+    // Owner 2026-10-30 ("Try Another way"): the website names a KuchuPuchu
+    // account by phone number or username, a 4-digit code lands in that
+    // account's app (official-bot chat + push), and typing the code on the
+    // website stands in for the app-side approval. One row per attempt;
+    // VERIFIED is the only state that may complete, and only once.
+    `CREATE TABLE IF NOT EXISTS link_otps (
+      id TEXT PRIMARY KEY,
+      initiator_id TEXT NOT NULL, kp_user_id TEXT NOT NULL,
+      code_hash TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL, expires_at TEXT NOT NULL,
+      verified_at TEXT, used_at TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_link_otps_initiator ON link_otps(initiator_id, status)`,
     // ---- R7: Laravel-authoritative classroom navigation projection ----
     // These rows make an enrolled class discoverable as a managed group in KP,
     // but are NEVER consulted to authorize detail or room-token requests.
@@ -10106,6 +10235,185 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         expiresAt,
         permissions: LINK_PERMISSIONS,
         deepLink: `${origin}/link/${approvalId}?sig=${encodeURIComponent(signature)}`,
+      },
+    });
+  }
+
+  // Owner 2026-10-30 ("Try Another way"): no QR handy? The website names
+  // the KuchuPuchu account (phone number or username), a 4-digit code is
+  // delivered into that account's app, and entering it on the website is
+  // the app-side approval. Only a VX-realm initiator may start one, and
+  // only for a KP-realm account that is not linked yet.
+  if (path === "/api/links/otp/start" && method === "POST") {
+    if (realmOf(me) !== "vx") fail(403, "Start this from the VintoxBd website.", "WRONG_REALM");
+    await rateLimitGlobal(db, `linkotp:${uid}`, 5);
+    if (await linkRowFor(db, uid)) fail(409, "This account is already linked.", "ALREADY_LINKED");
+    const byPhone = typeof body.phone === "string" && body.phone.trim() !== "";
+    const byName = typeof body.username === "string" && body.username.trim() !== "";
+    if (byPhone === byName) fail(400, "Give a phone number or a username.", "BAD_TARGET");
+    let target: UserRow | null = null;
+    if (byPhone) {
+      const phone = normalizePhone(body.phone);
+      target = await one<UserRow>(db, "SELECT * FROM users WHERE phone_e164 = ?", phone);
+    } else {
+      const handle = String(body.username).trim().replace(/^@/, "").toLowerCase();
+      if (!/^[a-z0-9_]{3,30}$/.test(handle))
+        fail(400, "That username doesn't look right.", "BAD_TARGET");
+      target = await one<UserRow>(db, "SELECT * FROM users WHERE username = ?", handle);
+    }
+    if (!target || realmOf(target!) !== "kp")
+      fail(404, "No KuchuPuchu account matches that. Check it and try again.", "NOT_FOUND");
+    if (target!.id === uid) fail(400, "That's your own website account.", "BAD_TARGET");
+    if (await linkRowFor(db, target!.id))
+      fail(409, "That KuchuPuchu account is already linked.", "ALREADY_LINKED");
+    // One live code per initiator: a fresh start retires the old ones.
+    await run(
+      db,
+      "UPDATE link_otps SET status = 'EXPIRED' WHERE initiator_id = ? AND status IN ('PENDING', 'VERIFIED')",
+      uid,
+    );
+    const otpId = id();
+    const code = randomLinkOtp();
+    const created = nowIso();
+    const expiresAt = new Date(Date.now() + LINK_OTP_TTL_MS).toISOString();
+    await run(
+      db,
+      `INSERT INTO link_otps (id, initiator_id, kp_user_id, code_hash, status, created_at, expires_at)
+       VALUES (?, ?, ?, ?, 'PENDING', ?, ?)`,
+      otpId,
+      uid,
+      target!.id,
+      await sha256Hex(`${otpId}:${code}`),
+      created,
+      expiresAt,
+    );
+    await run(
+      db,
+      `INSERT INTO realm_audit (id, at, realm, actor_id, subject_id, action, detail_json)
+       VALUES (?, ?, ?, ?, ?, 'link.otp.started', ?)`,
+      id(),
+      created,
+      "vx",
+      uid,
+      target!.id,
+      JSON.stringify({ otpId, by: byPhone ? "phone" : "username" }),
+    );
+    ctx.waitUntil(
+      sendLinkOtpMessage(env, db, ctx, target!.id, me.display_name || "A VintoxBd user", code),
+    );
+    return json({ otpId, expiresAt });
+  }
+
+  if (path === "/api/links/otp/verify" && method === "POST") {
+    if (realmOf(me) !== "vx") fail(403, "Finish this on the VintoxBd website.", "WRONG_REALM");
+    await rateLimitGlobal(db, `linkotpverify:${uid}`, 20);
+    const otpId = String(body.otpId ?? "");
+    const code = String(body.code ?? "").trim();
+    if (!otpId || !/^\d{4}$/.test(code)) fail(400, "Enter the 4-digit code.", "BAD_CODE");
+    const row = await one<LinkOtpRow>(db, "SELECT * FROM link_otps WHERE id = ?", otpId);
+    if (!row || row!.initiator_id !== uid) fail(404, "No such code request.", "NOT_FOUND");
+    if (row!.status === "USED") fail(409, "That code already finished a link.", "APPROVAL_DECIDED");
+    if (row!.status === "VERIFIED") {
+      const kpUser = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row!.kp_user_id);
+      return json({ verified: true, user: kpUser ? userFrom(kpUser, false, false) : null });
+    }
+    if (Date.parse(row!.expires_at) <= Date.now()) {
+      await run(db, "UPDATE link_otps SET status = 'EXPIRED' WHERE id = ?", otpId);
+      fail(410, "That code expired. Ask for a new one.", "EXPIRED");
+    }
+    if (row!.attempts >= 5) {
+      await run(db, "UPDATE link_otps SET status = 'EXPIRED' WHERE id = ?", otpId);
+      fail(429, "Too many wrong codes. Ask for a new one.", "OTP_LOCKED");
+    }
+    const match = await sha256Hex(`${otpId}:${code}`);
+    if (!constantTimeTextEqual(match, row!.code_hash)) {
+      await run(db, "UPDATE link_otps SET attempts = attempts + 1 WHERE id = ?", otpId);
+      fail(400, "That code doesn't match. Check the app and try again.", "BAD_CODE");
+    }
+    await run(
+      db,
+      "UPDATE link_otps SET status = 'VERIFIED', verified_at = ? WHERE id = ? AND status = 'PENDING'",
+      nowIso(),
+      otpId,
+    );
+    const kpUser = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row!.kp_user_id);
+    if (!kpUser) fail(404, "That KuchuPuchu account no longer exists.", "NOT_FOUND");
+    // The consent screen's cast: the KP account, pictured and named.
+    return json({ verified: true, user: userFrom(kpUser!, false, false) });
+  }
+
+  if (path === "/api/links/otp/complete" && method === "POST") {
+    if (realmOf(me) !== "vx") fail(403, "Finish this on the VintoxBd website.", "WRONG_REALM");
+    await rateLimitGlobal(db, `linkotp:${uid}`, 5);
+    const otpId = String(body.otpId ?? "");
+    if (!otpId) fail(400, "Missing code request.", "BAD_CODE");
+    const row = await one<LinkOtpRow>(db, "SELECT * FROM link_otps WHERE id = ?", otpId);
+    if (!row || row!.initiator_id !== uid) fail(404, "No such code request.", "NOT_FOUND");
+    if (row!.status === "USED") fail(409, "That code already finished a link.", "APPROVAL_DECIDED");
+    if (row!.status !== "VERIFIED") fail(409, "Enter the code from the app first.", "NOT_VERIFIED");
+    if (Date.parse(row!.expires_at) <= Date.now())
+      fail(410, "That code expired. Ask for a new one.", "EXPIRED");
+    // The code stands in for the app-side approval, so the pairing rules
+    // are the approval's own: neither side may already be linked.
+    if (await linkRowFor(db, uid)) fail(409, "This account is already linked.", "ALREADY_LINKED");
+    if (await linkRowFor(db, row!.kp_user_id))
+      fail(409, "That KuchuPuchu account is already linked.", "ALREADY_LINKED");
+    const kpUser = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row!.kp_user_id);
+    if (!kpUser) fail(404, "That KuchuPuchu account no longer exists.", "NOT_FOUND");
+    const decidedAt = nowIso();
+    const linkId = id();
+    const aFirst = uid < row!.kp_user_id;
+    await db.batch([
+      db
+        .prepare(
+          "UPDATE link_otps SET status = 'USED', used_at = ? WHERE id = ? AND status = 'VERIFIED'",
+        )
+        .bind(decidedAt, otpId),
+      db
+        .prepare(
+          `INSERT INTO identity_links
+             (id, pair_key, a_user_id, b_user_id, a_realm, b_realm, status, created_at)
+           SELECT ?, ?, ?, ?, ?, ?, 'ACTIVE', ?
+            WHERE EXISTS (SELECT 1 FROM link_otps WHERE id = ? AND status = 'USED' AND used_at = ?)`,
+        )
+        .bind(
+          linkId,
+          linkPairKey(uid, row!.kp_user_id),
+          ...(aFirst ? [uid, row!.kp_user_id, "vx", "kp"] : [row!.kp_user_id, uid, "kp", "vx"]),
+          decidedAt,
+          otpId,
+          decidedAt,
+        ),
+    ]);
+    const created = await one<IdentityLinkRow>(
+      db,
+      "SELECT * FROM identity_links WHERE pair_key = ?",
+      linkPairKey(uid, row!.kp_user_id),
+    );
+    if (!created) fail(409, "That code was already used.", "APPROVAL_DECIDED");
+    await run(
+      db,
+      "UPDATE users SET linked = 1 WHERE id IN (?, ?)",
+      created!.a_user_id,
+      created!.b_user_id,
+    );
+    await run(
+      db,
+      `INSERT INTO realm_audit (id, at, realm, actor_id, subject_id, action, detail_json)
+       VALUES (?, ?, ?, ?, ?, 'link.otp.completed', ?)`,
+      id(),
+      decidedAt,
+      "vx",
+      uid,
+      row!.kp_user_id,
+      JSON.stringify({ otpId, linkId }),
+    );
+    return json({
+      link: {
+        id: linkId,
+        createdAt: decidedAt,
+        counterpart: identityOf(kpUser!),
+        permissions: LINK_PERMISSIONS.map((p) => p.key),
       },
     });
   }
