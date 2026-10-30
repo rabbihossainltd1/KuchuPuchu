@@ -7784,7 +7784,11 @@ private fun LinkOtpMessage(m: JSONObject) {
     val device = meta.optString("device").takeIf { it.isNotBlank() }?.let { ua ->
         val inside = ua.substringAfter('(', "").substringBefore(')')
         val parts = inside.split(';').map { it.trim() }
-            .filter { it.isNotBlank() && !it.equals("Linux", true) && !it.startsWith("U;", true) }
+            .filter {
+                it.isNotBlank() && !it.equals("Linux", true) && !it.equals("X11", true) &&
+                    !it.startsWith("U;", true) && !it.startsWith("Windows NT", true) &&
+                    !it.equals("Macintosh", true) && !it.startsWith("Intel Mac OS X", true)
+            }
         val pretty = parts.joinToString(" · ")
         pretty.ifBlank { ua }.take(48)
     }
