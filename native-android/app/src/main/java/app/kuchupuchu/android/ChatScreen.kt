@@ -90,7 +90,10 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
@@ -7749,6 +7752,179 @@ private fun LoginApprovalMessage(m: JSONObject) {
 }
 
 /**
+ * Owner 2026-10-30 (mockup "Secure Platform OTP Chat Mockup"): the
+ * website's "Try Another way" code arrives as this card — title, the
+ * 4-digit code in a mint pill with a Copy button, then Device /
+ * IP Location / Requested At rows. The code hides itself at expiry,
+ * exactly like the sign-in card above.
+ */
+@Composable
+private fun LinkOtpMessage(m: JSONObject) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val meta = m.optJSONObject("meta") ?: JSONObject()
+    val messageId = m.optString("id")
+    val expiresAtMs =
+        runCatching {
+            val expiresAt = meta.optString("expiresAt")
+            if (expiresAt.isNotBlank()) java.time.Instant.parse(expiresAt).toEpochMilli()
+            else java.time.Instant.parse(m.optText("createdAt")).plusSeconds(600).toEpochMilli()
+        }.getOrDefault(0L)
+    var expired by remember(messageId) { mutableStateOf(expiresAtMs <= System.currentTimeMillis()) }
+    LaunchedEffect(messageId, expiresAtMs) {
+        val remaining = expiresAtMs - System.currentTimeMillis()
+        if (remaining > 0L) delay(remaining)
+        meta.remove("otp")
+        expired = true
+    }
+    val code = meta.optString("otp").takeIf { !expired && Regex("^[0-9]{4}$").matches(it) }
+    val vxName = meta.optString("vxName").takeIf { it.isNotBlank() } ?: "A VintoxBd user"
+    // The website sends the browser's user agent; show its device part
+    // ("Linux; Android 13; Pixel 7" -> "Android 13 · Pixel 7"), never the
+    // whole string.
+    val device = meta.optString("device").takeIf { it.isNotBlank() }?.let { ua ->
+        val inside = ua.substringAfter('(', "").substringBefore(')')
+        val parts = inside.split(';').map { it.trim() }
+            .filter { it.isNotBlank() && !it.equals("Linux", true) && !it.startsWith("U;", true) }
+        val pretty = parts.joinToString(" · ")
+        pretty.ifBlank { ua }.take(48)
+    }
+    val ip = meta.optString("ip").takeIf { it.isNotBlank() && it != "unknown" }
+    val place = meta.optString("place").takeIf { it.isNotBlank() }
+    val requestedAt = runCatching {
+        val z = atDhaka(java.time.Instant.parse(m.optText("createdAt")))
+        val months = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+        String.format(
+            "%s %d, %d • %d:%02d %s",
+            months[(z.monthValue - 1).coerceIn(0, 11)],
+            z.dayOfMonth,
+            z.year,
+            (z.hour % 12).let { if (it == 0) 12 else it },
+            z.minute,
+            if (z.hour >= 12) "PM" else "AM",
+        )
+    }.getOrDefault("")
+    val surface = if (KpThemeMode.darkBlue) Color(0xFF172A4A) else Color.White
+    val codeSurface = if (KpThemeMode.darkBlue) Color(0xFF14532D) else Color(0xFFDFF5E7)
+    val codeInk = if (KpThemeMode.darkBlue) Color(0xFFA7F3D0) else Color(0xFF0B6B4F)
+    val teal = Color(0xFF0F766E)
+    Column(
+        Modifier
+            .widthIn(max = 268.dp)
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(surface)
+            .padding(14.dp),
+    ) {
+        Text("Your Login OTP", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Ink)
+        Spacer(Modifier.height(3.dp))
+        Text(
+            "Use the following OTP to link $vxName's VintoxBd account with your KuchuPuchu account. This code is valid for 10 minutes only.",
+            fontSize = 11.5.sp,
+            color = Muted,
+        )
+        Spacer(Modifier.height(10.dp))
+        if (code != null) {
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(codeSurface)
+                    .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    code.split("").joinToString(" ").trim(),
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 3.sp,
+                    color = codeInk,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.width(10.dp))
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        runCatching {
+                            val clipboard =
+                                ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                    as android.content.ClipboardManager
+                            clipboard.setPrimaryClip(
+                                android.content.ClipData.newPlainText("VintoxBd link code", code),
+                            )
+                            android.widget.Toast.makeText(ctx, "Code copied", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.height(30.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                        containerColor = teal.copy(alpha = 0.16f),
+                        contentColor = codeInk,
+                    ),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                ) {
+                    Icon(Icons.Filled.ContentCopy, contentDescription = "Copy link code", tint = codeInk, modifier = Modifier.size(13.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Copy", color = codeInk, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        } else {
+            Text("⏰ This code has expired — ask the website for a new one.", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Muted)
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.Top) {
+            Icon(Icons.Filled.VerifiedUser, contentDescription = null, tint = teal, modifier = Modifier.size(17.dp))
+            Spacer(Modifier.width(9.dp))
+            Column {
+                Text("Account Binding OTP", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = teal)
+                Text("This OTP is for binding your account with the VintoxBd website.", fontSize = 10.5.sp, color = Muted)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(if (KpThemeMode.darkBlue) Color(0x22FFFFFF) else Color(0xFFE8EEF0)))
+        if (device != null) {
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.Top) {
+                Icon(Icons.Filled.Smartphone, contentDescription = null, tint = Muted, modifier = Modifier.size(17.dp))
+                Spacer(Modifier.width(9.dp))
+                Column {
+                    Text("Device", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                    Text(device, fontSize = 10.5.sp, color = Muted, maxLines = 2)
+                }
+            }
+        }
+        if (place != null || ip != null) {
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.Top) {
+                Icon(Icons.Filled.LocationOn, contentDescription = null, tint = Muted, modifier = Modifier.size(17.dp))
+                Spacer(Modifier.width(9.dp))
+                Column {
+                    Text("IP Location", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                    if (place != null) Text(place, fontSize = 10.5.sp, color = Muted)
+                    if (ip != null) Text(ip, fontSize = 10.5.sp, color = Muted)
+                }
+            }
+        }
+        if (requestedAt.isNotBlank()) {
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.Top) {
+                Icon(Icons.Filled.Schedule, contentDescription = null, tint = Muted, modifier = Modifier.size(17.dp))
+                Spacer(Modifier.width(9.dp))
+                Column {
+                    Text("Requested At", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                    Text(requestedAt, fontSize = 10.5.sp, color = Muted)
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "If you didn't request this, please ignore this message or contact support. Never share the code with anyone.",
+            fontSize = 10.5.sp,
+            color = Muted,
+        )
+    }
+}
+
+/**
  * Owner round 13e (2026-09-05): keyboard-open auto-jump extracted from the
  * ChatScreen body. The inline `@OptIn val` inside that huge function made the
  * device's ART verifier reject the whole class (VerifyError: copy-cat) — the
@@ -8685,6 +8861,10 @@ private fun MessageRow(
 
     if (kind == "LOGIN_APPROVAL") {
         LoginApprovalMessage(m)
+        return
+    }
+    if (kind == "LINK_OTP") {
+        LinkOtpMessage(m)
         return
     }
     // Owner round 34 (item 15): the one-per-block unblock plea. The blocker

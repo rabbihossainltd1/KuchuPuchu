@@ -3019,26 +3019,39 @@ async function sendLinkOtpMessage(
   kpUserId: string,
   vxName: string,
   code: string,
+  otpId: string,
+  expiresAt: string,
+  origin: { device: string | null; ip: string | null; place: string | null },
 ): Promise<void> {
   try {
     const botId = await ensureOfficialBot(db);
     const convId = await officialBotConvId(db, botId, kpUserId);
     const mid = id();
     const created = nowIso();
-    const body =
-      `🔗 Your VintoxBd link code is ${code}\n\n` +
-      `${vxName} is linking their VintoxBd account to your KuchuPuchu account. ` +
-      `Enter this code on the website within 10 minutes to finish linking. ` +
-      `If that wasn't you, ignore this message — never share the code with anyone.`;
-    const compact = "🔗 VintoxBd link code";
+    // Owner 2026-10-30: the OTP lands as a structured card (mockup:
+    // title, big code pill with a copy button, Device / IP Location /
+    // Requested At rows). The code rides the card meta only — the row
+    // body and the push stay code-free, same hygiene as the sign-in code.
+    const compact = "🔗 Your Login OTP · VintoxBd link code";
+    const meta = {
+      otp: code,
+      otpId,
+      vxName,
+      device: origin.device,
+      ip: origin.ip,
+      place: origin.place,
+      expiresAt,
+      time: created,
+    };
     await run(
       db,
-      `INSERT INTO messages (id, conv_id, sender_id, kind, body, created_at)
-       VALUES (?, ?, ?, 'TEXT', ?, ?)`,
+      `INSERT INTO messages (id, conv_id, sender_id, kind, body, meta_json, created_at)
+       VALUES (?, ?, ?, 'LINK_OTP', ?, ?, ?)`,
       mid,
       convId,
       botId,
-      body,
+      compact,
+      JSON.stringify(meta),
       created,
     );
     await run(
@@ -3058,10 +3071,10 @@ async function sendLinkOtpMessage(
       id: mid,
       conv_id: convId,
       sender_id: botId,
-      kind: "TEXT",
-      body,
+      kind: "LINK_OTP",
+      body: compact,
       media: null,
-      meta_json: null,
+      meta_json: JSON.stringify(meta),
       created_at: created,
       delivered_at: null,
     } as MsgRow);
@@ -10298,8 +10311,26 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       target!.id,
       JSON.stringify({ otpId, by: byPhone ? "phone" : "username" }),
     );
+    // Origin details for the OTP card come from the website (the real
+    // browser), not from this request — the BFF's own IP/device would be
+    // the server's. Strings are capped so a crafted value can't bloat meta.
+    const origin = {
+      device: typeof body.device === "string" ? body.device.slice(0, 120) || null : null,
+      ip: typeof body.ip === "string" ? body.ip.slice(0, 64) || null : null,
+      place: typeof body.place === "string" ? body.place.slice(0, 120) || null : null,
+    };
     ctx.waitUntil(
-      sendLinkOtpMessage(env, db, ctx, target!.id, me.display_name || "A VintoxBd user", code),
+      sendLinkOtpMessage(
+        env,
+        db,
+        ctx,
+        target!.id,
+        me.display_name || "A VintoxBd user",
+        code,
+        otpId,
+        expiresAt,
+        origin,
+      ),
     );
     return json({ otpId, expiresAt });
   }
