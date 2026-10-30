@@ -6,6 +6,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -748,7 +749,15 @@ private fun QrScannerPane(nav: NavController) {
                     scope.launch {
                         runCatching {
                             withContext(Dispatchers.IO) {
-                                Api.post(
+                                // The link routes live in the core, so this goes
+                                // through CoreApi (the exchanged core session) —
+                                // the same transport Settings › VintoxBd account
+                                // uses for every other /api/links call. The raw
+                                // app session (Api) is the KP edge's credential,
+                                // not the core's, and an approval decided with it
+                                // never landed on the core's own books.
+                                CoreApi.post(
+                                    ctx,
                                     "/api/links/approvals/${approval.id}/approve",
                                     JSONObject()
                                         .put("id", approval.id)
@@ -776,17 +785,20 @@ private fun QrScannerPane(nav: NavController) {
     // itself after a few seconds, mirroring the website's own success page.
     if (linkOutcome != null) {
         val ok = linkOutcome == true
-        val pop by animateFloatAsState(
-            targetValue = 1f,
-            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-            label = "linkResultPop",
-        )
+        // Start at 0 and spring up: animateFloatAsState(targetValue = 1f)
+        // begins AT 1 on the first frame, so the check never actually popped.
+        val popAnim = remember { Animatable(0f) }
         LaunchedEffect(ok) {
+            popAnim.animateTo(
+                1f,
+                spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+            )
             if (ok) {
                 delay(4500)
                 if (linkOutcome == true) nav.popBackStack()
             }
         }
+        val pop = popAnim.value
         Box(
             Modifier.fillMaxSize().background(Cream),
             contentAlignment = Alignment.Center,
